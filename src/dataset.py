@@ -4,9 +4,9 @@ from inspect_ai.dataset import Dataset, MemoryDataset, Sample
 from inspect_ai.model import ChatMessageAssistant
 from inspect_ai.log import read_eval_log
 
-from src.util import format_message, extract_score
+from util import format_message, extract_score
 
-USER_PROMPT = """Question (shared by both transcripts):
+USER_PROMPT = """Input question:
 ---
 {question}
 ---
@@ -21,14 +21,15 @@ Transcript B:
 {transcript_b}
 ---
 
-Reply with the reply format only."""
+Which of the two transcripts is from the more capable model? Please answer in the instructed format below.
+"""
 
 def responses_to_sample(
     sample_a: Sample,
     sample_b: Sample,
     target: str = 'A',
     format_str: str = USER_PROMPT,
-    max_len: int = 16000,
+    max_len: int = 24000,
 ) -> Sample:
     """
     Converts two model samples into a single formatted string representation.
@@ -64,7 +65,7 @@ def build_dataset(
     log_major_path: Path,
     log_minor_path: Path,
     format_str: str = USER_PROMPT,
-    max_len: int = 16000,
+    max_len: int = 24000,
 ):
     """
     Builds a dataset from two eval logs, comparing the responses of two models.
@@ -100,8 +101,8 @@ def build_dataset(
 
 if __name__ == "__main__":
     # Example usage
-    log_major_path = Path("data/gemma_2b/gpqa_diamond/k0/seed_100000000001/2026-06-28T11-22-17-00-00_gpqa-diamond_B8pfKA6zF3zZMGrumTGWaU.eval")
-    log_minor_path = Path("data/gemma_26b/gpqa_diamond/k0/seed_100000000001/2026-07-22T13-13-13-00-00_gpqa-diamond_ktJitVYtpBtDPz4bNpbZjp.eval")
+    log_major_path = Path("data/gemma_2b/gpqa_diamond/100000000001.eval")
+    log_minor_path = Path("data/gemma_26b/gpqa_diamond/100000000001.eval")
 
     
     dataset = build_dataset(log_major_path, log_minor_path)
