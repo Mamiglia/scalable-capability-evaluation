@@ -6,29 +6,29 @@ from inspect_ai.log import read_eval_log
 
 from src.util import format_message, extract_score
 
-JUDGE_PROMPT_FORMAT = """You are a judge tasked with comparing the responses of two AI models to the same input prompt.
-Input Prompt:
-{input_text}
-Model A Response:
-{model_a_response}
-Model B Response:
-{model_b_response}
-Please evaluate the responses and determine which model provided a better answer. Consider factors such as accuracy, relevance, clarity, and completeness. Provide a detailed explanation for your decision.
-Your evaluation should be structured as follows:
-1. Decision: Indicate which model's response is better (Model A or Model B).
-2. Explanation: Provide a detailed explanation of your reasoning behind the decision.
-Your response should be in the following format:
+USER_PROMPT = """Question (shared by both transcripts):
+---
+{question}
+---
 
-ANSWER: A|B
-EXPLANATION: <Your detailed explanation here>
-"""
+Transcript A:
+---
+{transcript_a}
+---
+
+Transcript B:
+---
+{transcript_b}
+---
+
+Reply with the reply format only."""
 
 def responses_to_sample(
     sample_a: Sample,
     sample_b: Sample,
     target: str = 'A',
-    format_str: str = JUDGE_PROMPT_FORMAT,
-    max_len: int = 2048,
+    format_str: str = USER_PROMPT,
+    max_len: int = 16000,
 ) -> Sample:
     """
     Converts two model samples into a single formatted string representation.
@@ -50,9 +50,9 @@ def responses_to_sample(
     output_b = format_message(sample_b.output.choices[0].message)[:max_len]
     
     text = format_str.format(
-        input_text=input_text,
-        model_a_response=output_a,
-        model_b_response=output_b,
+        question=input_text,
+        transcript_a=output_a,
+        transcript_b=output_b,
     )
     return Sample(
         id=f"{sample_a.id}_{target}",
@@ -63,8 +63,8 @@ def responses_to_sample(
 def build_dataset(
     log_major_path: Path,
     log_minor_path: Path,
-    format_str: str = JUDGE_PROMPT_FORMAT,
-    max_len: int = 2048,
+    format_str: str = USER_PROMPT,
+    max_len: int = 16000,
 ):
     """
     Builds a dataset from two eval logs, comparing the responses of two models.

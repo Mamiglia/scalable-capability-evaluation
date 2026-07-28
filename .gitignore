@@ -14,5 +14,4 @@ uv.lock
 
 # logs
 data/
-
-
+logs/
