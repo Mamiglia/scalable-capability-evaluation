@@ -55,7 +55,7 @@ def responses_to_sample(
         model_b_response=output_b,
     )
     return Sample(
-        id=sample_a.id,
+        id=f"{sample_a.id}_{target}",
         input=text,
         target=target
     )
