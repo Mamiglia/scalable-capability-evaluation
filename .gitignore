@@ -10,7 +10,7 @@ wheels/
 .venv
 .python-version
 uv.lock
-
+.env
 
 # logs
 data/
