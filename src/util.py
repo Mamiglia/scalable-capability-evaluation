@@ -5,7 +5,7 @@ def format_message(msg : ChatMessageAssistant) -> str:
     """
     Format the message object into a readable string.
     """
-    if not hasattr(msg, "content"):
+    if isinstance(msg.content, str):
         return msg.text
     
     texts = []
