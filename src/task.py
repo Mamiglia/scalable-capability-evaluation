@@ -3,6 +3,7 @@ from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
 from dataset import build_dataset
+from scorer import judge_scorer
 
 SYSTEM_PROMPT = """You are an AI model that judges the responses of two other AI models to the same input prompt.
 You will be given a question and the responses from two models, labeled Transcript A and Transcript B, both coming to the correct solution.
@@ -18,6 +19,7 @@ def judge_task(
     log_major_path: str,
     log_minor_path: str,
     system_prompt: str = SYSTEM_PROMPT,
+    max_length: int = 65536,
 ):
     log_major = read_eval_log(log_major_path)
     log_minor = read_eval_log(log_minor_path)
@@ -27,11 +29,12 @@ def judge_task(
     benchmark_name = log_major.eval.dataset.name
         
     return Task(
-        name=f'{benchmark_name}%{name_major}|{name_minor}',
+        name=f'{benchmark_name}={name_major}|{name_minor}',
         description="Judge the responses of two AI models to the same input prompt.",
         dataset=build_dataset(
             log_major_path=log_major_path,
             log_minor_path=log_minor_path,
+            max_len=max_length
         ),
         solver=[system_message(system_prompt), generate()],
         scorer=judge_scorer(),
