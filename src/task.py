@@ -1,3 +1,4 @@
+from pathlib import Path
 from inspect_ai import Task, task
 from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
@@ -14,6 +15,20 @@ ANSWER: <A or B, indicating which response is better.>
 CONFIDENCE: <An integer between 1 and 5 indicating your confidence in your answer.>
 """
 
+def resolve_eval_path(path_str: str) -> str:
+    """Resolves the given path string to an eval log file. If the path is a directory, it looks for the first .eval file in that directory. If the path is a file, it returns the absolute path. If the path is a glob pattern, it returns the first matching file. Raises FileNotFoundError if no valid file is found."""
+    p = Path(path_str)
+    if p.is_file():
+        return str(p.resolve())
+    if p.is_dir():
+        files = sorted(p.glob("*.eval"))
+        if files:
+            return str(files[0].resolve())
+    matches = sorted(Path().glob(path_str))
+    if matches:
+        return str(matches[0].resolve())
+    raise FileNotFoundError(f"Could not resolve eval log file for: {path_str}")
+
 @task
 def judge_task(
     log_major_path: str,
@@ -21,6 +36,9 @@ def judge_task(
     system_prompt: str = SYSTEM_PROMPT,
     max_length: int = 65536,
 ):
+    log_major_path = resolve_eval_path(log_major_path)
+    log_minor_path = resolve_eval_path(log_minor_path)
+
     log_major = read_eval_log(log_major_path)
     log_minor = read_eval_log(log_minor_path)
     
