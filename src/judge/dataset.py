@@ -1,9 +1,12 @@
+import json
 from pathlib import Path
+from zipfile import ZipFile
 
 from inspect_ai.dataset import MemoryDataset, Sample
-from inspect_ai.log import read_eval_log
+from inspect_ai.log import EvalLog
+import zipfile_zstd
 
-from util import extract_transcript, extract_score
+from judge.util import extract_transcript, extract_score
 
 USER_PROMPT = """Input question:
 ---
@@ -22,6 +25,18 @@ Transcript B:
 
 Which of the two transcripts is from the more capable model? Please answer in the instructed format below.
 """
+
+
+def read_eval_log(path: Path) -> EvalLog:
+    with ZipFile(path) as archive:
+        data = json.loads(archive.read("header.json"))
+        data["samples"] = [
+            json.loads(archive.read(name))
+            for name in archive.namelist()
+            if name.startswith("samples/")
+        ]
+    return EvalLog.model_validate(data)
+
 
 def responses_to_sample(
     sample_a: Sample,
@@ -65,6 +80,8 @@ def build_dataset(
     log_minor_path: Path,
     format_str: str = USER_PROMPT,
     max_len: int = 24000,
+    require_both_correct: bool = True,
+    include_reverse: bool = True,
 ):
     """
     Builds a dataset from two eval logs, comparing the responses of two models.
@@ -80,33 +97,27 @@ def build_dataset(
     log_major = read_eval_log(log_major_path)
     log_minor = read_eval_log(log_minor_path)
     
-    # Only include samples where both models provided correct responses
-    minor_samples = {s.id: s for s in log_minor.samples if hasattr(s, "id") and extract_score(s) == True}
-    major_samples = {s.id: s for s in log_major.samples if hasattr(s, "id") and extract_score(s) == True}
+    def eligible(sample: Sample) -> bool:
+        return hasattr(sample, "id") and (
+            not require_both_correct or extract_score(sample)
+        )
+
+    minor_samples = {s.id: s for s in log_minor.samples if eligible(s)}
+    major_samples = {s.id: s for s in log_major.samples if eligible(s)}
 
     samples = []
     
-    for sample_id in minor_samples.keys() & major_samples.keys():
+    for sample_id in sorted(minor_samples.keys() & major_samples.keys(), key=str):
         sample_a = major_samples[sample_id]
         sample_b = minor_samples[sample_id]
         
         samples.append(responses_to_sample(sample_a, sample_b, target='A', format_str=format_str, max_len=max_len))
-        samples.append(responses_to_sample(sample_b, sample_a, target='B', format_str=format_str, max_len=max_len))
+        
+        if include_reverse:
+            samples.append(responses_to_sample(sample_b, sample_a, target='B', format_str=format_str, max_len=max_len))
         
     name_major = log_major.eval.model
     name_minor = log_minor.eval.model
     benchmark_name = log_major.eval.dataset.name
     
     return MemoryDataset(samples=samples, name=f"Comparison of {name_major} and {name_minor} over the {benchmark_name} benchmark")
-
-
-if __name__ == "__main__":
-    # Example usage
-    log_major_path = Path("data/gemma_2b/gpqa_diamond/100000000001.eval")
-    log_minor_path = Path("data/gemma_26b/gpqa_diamond/100000000001.eval")
-
-    
-    dataset = build_dataset(log_major_path, log_minor_path)
-    print(f"Built dataset with {len(dataset.samples)} samples.")
-    
-    
