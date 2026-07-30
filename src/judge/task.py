@@ -1,10 +1,10 @@
 from pathlib import Path
 from inspect_ai import Task, task
-from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
 from dataset import build_dataset
 from scorer import judge_scorer
+from registry.query import resolve_eval_path
 
 SYSTEM_PROMPT = """You are an AI model that judges the responses of two other AI models to the same input prompt.
 You will be given a question and the responses from two models, labeled Transcript A and Transcript B, both coming to the correct solution.
@@ -15,39 +15,20 @@ ANSWER: <A or B, indicating which response is better.>
 CONFIDENCE: <An integer between 1 and 5 indicating your confidence in your answer.>
 """
 
-def resolve_eval_path(path_str: str) -> str:
-    """Resolves the given path string to an eval log file. If the path is a directory, it looks for the first .eval file in that directory. If the path is a file, it returns the absolute path. If the path is a glob pattern, it returns the first matching file. Raises FileNotFoundError if no valid file is found."""
-    p = Path(path_str)
-    if p.is_file():
-        return str(p.resolve())
-    if p.is_dir():
-        files = sorted(p.glob("*.eval"))
-        if files:
-            return str(files[0].resolve())
-    matches = sorted(Path().glob(path_str))
-    if matches:
-        return str(matches[0].resolve())
-    raise FileNotFoundError(f"Could not resolve eval log file for: {path_str}")
-
 @task
 def judge_task(
-    log_major_path: str,
-    log_minor_path: str,
+    major_model: str,
+    minor_model: str,
+    benchmark_name: str,
+    task_args: dict | None = None,
     system_prompt: str = SYSTEM_PROMPT,
     max_length: int = 65536,
 ):
-    log_major_path = resolve_eval_path(log_major_path)
-    log_minor_path = resolve_eval_path(log_minor_path)
-
-    log_major = read_eval_log(log_major_path)
-    log_minor = read_eval_log(log_minor_path)
-    
-    name_major = log_major.eval.model
-    name_minor = log_minor.eval.model
-    benchmark_name = log_major.eval.dataset.name
+    log_major_path = resolve_eval_path(major_model, benchmark_name, task_args)
+    log_minor_path = resolve_eval_path(minor_model, benchmark_name, task_args)
         
     return Task(
-        name=f'{benchmark_name}={name_major}|{name_minor}',
+        name=f'{benchmark_name}={major_model}|{minor_model}',
         description="Judge the responses of two AI models to the same input prompt.",
         dataset=build_dataset(
             log_major_path=log_major_path,
@@ -60,8 +41,8 @@ def judge_task(
             "log_major_path": log_major_path,
             "log_minor_path": log_minor_path,
             "system_prompt": system_prompt,
-            "name_major": name_major,
-            "name_minor": name_minor,
+            "name_major": major_model,
+            "name_minor": minor_model,
             "benchmark_name": benchmark_name,
         }
     )
