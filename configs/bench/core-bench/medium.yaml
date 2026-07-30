@@ -1,0 +1,7 @@
+name: core_bench-medium
+task: inspect_evals/core_bench
+task_args:
+  difficulty: medium
+  max_messages: 100
+
+log_dir: data/core_bench/medium
