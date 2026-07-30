@@ -11,7 +11,7 @@ One of the two models is more capable than the other, and your task is to identi
 
 EXPLANATION: <Your explanation of which response is better and why. 2-4 sentences.>
 ANSWER: <A or B, indicating which response is better.>
-CONFIDENCE: <A number between 0 and 1 indicating your confidence in your answer.>
+CONFIDENCE: <An integer between 1 and 5 indicating your confidence in your answer.>
 """
 
 @task

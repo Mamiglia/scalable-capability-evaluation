@@ -17,16 +17,14 @@ def parse_judge_output(output_text: str):
     answer_match = re.search(r'ANSWER:\s*(?:Model\s+)?\*?([AB])\*?', output_text, re.IGNORECASE)
     answer = answer_match.group(1).upper() if answer_match else None
 
-    # Parse CONFIDENCE (e.g., 'CONFIDENCE: 0.85', 'CONFIDENCE: 85%')
-    conf_match = re.search(r'CONFIDENCE:\s*\*?([0-9]+(?:\.[0-9]+)?%?)\*?', output_text, re.IGNORECASE)
+    # Parse CONFIDENCE on a 1-5 scale (e.g., 'CONFIDENCE: 4', '**CONFIDENCE:** 5')
+    conf_match = re.search(r'\*+_+CONFIDENCE:\*+_+\s*\*?([0-9]+(?:\.[0-9]+)?)\*?', output_text, re.IGNORECASE)
     confidence = None
     if conf_match:
-        val_str = conf_match.group(1).rstrip('%')
         try:
-            val = float(val_str)
-            if val > 1.0 and val <= 100.0:
-                val = val / 100.0
-            confidence = val
+            val = float(conf_match.group(1))
+            if 1.0 <= val <= 5.0:
+                confidence = int(val) if val.is_integer() else val
         except ValueError:
             pass
 
