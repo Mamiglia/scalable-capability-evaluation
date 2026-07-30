@@ -4,7 +4,7 @@ from inspect_ai.dataset import Dataset, MemoryDataset, Sample
 from inspect_ai.model import ChatMessageAssistant
 from inspect_ai.log import read_eval_log
 
-from util import format_message, extract_score
+from util import format_message, extract_transcript, extract_score
 
 USER_PROMPT = """Input question:
 ---
@@ -47,8 +47,8 @@ def responses_to_sample(
     assert sample_a.input == sample_b.input, "Sample inputs must match for comparison."
     input_text = sample_a.input
     
-    output_a = format_message(sample_a.output.choices[0].message)[:max_len]
-    output_b = format_message(sample_b.output.choices[0].message)[:max_len]
+    output_a = extract_transcript(sample_a)[:max_len]
+    output_b = extract_transcript(sample_b)[:max_len]
     
     text = format_str.format(
         question=input_text,
