@@ -81,14 +81,16 @@ def build_dataset(
     log_major = read_eval_log(log_major_path)
     log_minor = read_eval_log(log_minor_path)
     
-    assert len(log_major.samples) == len(log_minor.samples), "Eval logs must have the same number of samples."
-    
+    # Only include samples where both models provided correct responses
+    minor_samples = {s.id: s for s in log_minor.samples if hasattr(s, "id") and extract_score(s) == True}
+    major_samples = {s.id: s for s in log_major.samples if hasattr(s, "id") and extract_score(s) == True}
+
     samples = []
     
-    for sample_a, sample_b in zip(log_major.samples, log_minor.samples):
-        if not extract_score(sample_a) or not extract_score(sample_b):
-            # Only include samples where both models provided correct responses
-            continue
+    for sample_id in minor_samples.keys() & major_samples.keys():
+        sample_a = major_samples[sample_id]
+        sample_b = minor_samples[sample_id]
+        
         samples.append(responses_to_sample(sample_a, sample_b, target='A', format_str=format_str, max_len=max_len))
         samples.append(responses_to_sample(sample_b, sample_a, target='B', format_str=format_str, max_len=max_len))
         
