@@ -22,7 +22,7 @@ def format_content(content: Any) -> str:
             text_val = getattr(block, "text", "")
             texts.append(f"<THOUGHT_START>\n {text_val}\n<THOUGHT_END>")
         elif b_type == "image":
-            texts.append("[Image]")
+            texts.append("[Image]") # Right now we don't have a way to display media in the judge model, so we just indicate that an image was present. TODO
         elif b_type == "audio":
             texts.append("[Audio]")
         elif b_type == "video":

@@ -1,10 +1,9 @@
 from pathlib import Path
 
-from inspect_ai.dataset import Dataset, MemoryDataset, Sample
-from inspect_ai.model import ChatMessageAssistant
+from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.log import read_eval_log
 
-from util import format_message, extract_transcript, extract_score
+from util import extract_transcript, extract_score
 
 USER_PROMPT = """Input question:
 ---
