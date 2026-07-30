@@ -56,13 +56,14 @@ def main(cfg: CollectConfig):
     if cfg.bench.task_args is not None:
         kwargs["task_args"] = cfg.bench.task_args
 
-    return eval_set(
+    success, _ = eval_set(
         tasks=[cfg.bench.task],
         model=model,
         log_dir=cfg.bench.log_dir,
         model_args=model_args,
         **kwargs,
     )
+    return int(not success)
 
 
 if __name__ == "__main__":

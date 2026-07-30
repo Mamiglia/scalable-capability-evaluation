@@ -7,7 +7,7 @@ answer being correct.
 The repository has two deliberately separate workflows:
 
 ```text
-configs/bench/ ──> collect ──> data/ (raw, append-only heap)
+configs/collections/ ──> collect ──> data/ (raw, append-only heap)
                                          │
                                          v
                                   data/registry.csv
@@ -15,7 +15,7 @@ configs/bench/ ──> collect ──> data/ (raw, append-only heap)
 configs/experiments/ ──> judge ──────────┘
               │
               v
-artifacts/experiments/<name>/<fingerprint>/
+             logs/
 ```
 
 `data/` is source material, not an organizational scheme. Code discovers logs
@@ -23,19 +23,30 @@ from metadata inside the Inspect files through a regenerable registry.
 
 ## Collect benchmark transcripts
 
-Collection uses composable draccus YAML files. Shared settings live in
-`configs/base.yaml`; benchmark-specific settings live in
-`configs/bench/`.
+Collection manifests in `configs/collections/` compose shared settings from
+`configs/base.yaml`, benchmark settings from `configs/bench/`, and model
+settings from `configs/models/`.
 
 ```sh
 uv run collect \
-  bench=core-bench \
-  models=ling-2.6-flash \
-  bench.task_args.difficulty=hard limit=50
+  --config_path configs/collections/gpqa-ling-2.6-flash.yaml \
+  --bench.log_dir data/runs/gpqa-ling-2.6-flash \
+  --limit 2
 ```
 
-Model-specific overrides can be placed in `configs/models/`. Collection output
-goes under `data/`.
+Use a fresh `bench.log_dir` for each eval set; Inspect rejects a directory
+containing logs from a different eval set. Undeclared options such as
+`--limit 2` are parsed as kwargs and forwarded to Inspect. GPQA is configured
+with four epochs, so a limit of two runs two dataset samples per epoch.
+
+The equivalent collection manifest is:
+
+```yaml
+<<: !include ../base.yaml
+bench: !include ../bench/gpqa.yaml
+models:
+  - !include ../models/ling-2.6-flash.yaml
+```
 
 ## Explore the data heap
 
@@ -51,45 +62,40 @@ derived data and can be deleted and rebuilt at any time.
 
 ## Run judge experiments
 
-Judge experiments live in `configs/experiments/`:
+Judge experiments compare existing successful collection logs and rebuild the
+registry automatically by default. Experiment manifests live in
+`configs/experiments/`:
 
 ```yaml
 name: gemma-31b-v-2b-gpqa
-judge_model: openrouter/inclusionai/ling-2.6-flash
-major_model: gemma_31b
-minor_model: gemma_2b
-benchmark_name: gpqa_diamond
-
-require_both_correct: true
-include_reverse: true
-max_length: 65536
-limit: 100000
+judge: openrouter/inclusionai/ling-2.6-flash
+major: vllm/google/gemma-4-31B-it
+minor: vllm/google/gemma-4-26B-A4B-it
+benchmark: !include ../bench/gpqa.yaml
+task_args:
+  cot: true
+  epochs: 4
 ```
 
-Run the experiment:
+Run a two-sample experiment:
 
 ```sh
-uv run judge configs/experiments/gemma-gpqa.yaml
+uv run judge \
+  --config_path configs/experiments/gemma-gpqa.yaml \
+  --limit 2
 ```
 
-Command-line overrides are accepted after the config path:
+Declared fields and arbitrary Inspect kwargs can both be overridden:
 
 ```sh
-uv run judge configs/experiments/gemma-gpqa.yaml limit=20 include_reverse=false
+uv run judge \
+  --config_path configs/experiments/gemma-gpqa.yaml \
+  --include_reverse false \
+  --limit 20
 ```
 
-Every resolved configuration and pair of source logs receives a stable
-fingerprint. Results are stored in:
-
-```text
-artifacts/experiments/<name>/<fingerprint>/
-├── manifest.json
-└── logs/
-```
-
-This keeps raw collection logs separate from derived judge results and records
-the exact inputs and experimental controls for every run. `run.sh` remains as
-a compatibility shim for `uv run judge`.
+Judge results are written to `logs/`. The source paths and experiment controls
+are recorded in the Inspect task metadata.
 
 ## Code layout
 

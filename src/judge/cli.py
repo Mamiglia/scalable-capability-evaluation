@@ -9,6 +9,7 @@ from inspect_ai import eval as inspect_eval
 
 from judge.task import SYSTEM_PROMPT, judge_task
 from registry.build import build_registry
+from collect.cli import BenchConfig
 
 
 @dataclass
@@ -16,7 +17,7 @@ class ExperimentConfig:
     judge: str
     major: str
     minor: str
-    benchmark_name: str
+    benchmark: BenchConfig
     name: Optional[str] = None # name of experiment
     
     require_both_correct: bool = True
@@ -32,7 +33,7 @@ class ExperimentConfig:
 
     def __post_init__(self):
         if not self.name:
-            self.name = f"{self.judge}={self.major}-v-{self.minor}-{self.benchmark_name}"
+            self.name = f"{self.judge}={self.major}-v-{self.minor}-{self.benchmark.name}"
 
 
 @wrap
@@ -46,7 +47,7 @@ def main(cfg: ExperimentConfig) -> int:
     task = judge_task(
         major=cfg.major,
         minor=cfg.minor,
-        benchmark_name=cfg.benchmark_name,
+        benchmark_name=cfg.benchmark.name,
         task_args=cfg.task_args,
         system_prompt=cfg.system_prompt,
         max_length=cfg.max_length,
