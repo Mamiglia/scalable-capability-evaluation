@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import draccus
+from draccus_kwargs import wrap
 from inspect_ai import eval as inspect_eval
 
 from judge.task import SYSTEM_PROMPT, judge_task
@@ -35,7 +35,7 @@ class ExperimentConfig:
             self.name = f"{self.judge}={self.major}-v-{self.minor}-{self.benchmark_name}"
 
 
-@draccus.wrap()
+@wrap
 def main(cfg: ExperimentConfig) -> int:
     registry_path = Path(cfg.registry_path)
     if cfg.refresh_registry:
@@ -57,7 +57,7 @@ def main(cfg: ExperimentConfig) -> int:
     logs = inspect_eval(
         task,
         model=cfg.judge,
-        limit=cfg.limit,
+        limit=cfg.kwargs.pop("limit", None),
         **(cfg.kwargs or {}),
     )
     return int(any(log.status != "success" for log in logs))

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from inspect_ai.model import CachePolicy
-import draccus
+from draccus_kwargs import wrap
 from inspect_ai import eval_set
 
 
@@ -40,18 +40,15 @@ class CollectConfig:
     models: List[ModelConfig] = field(default_factory=list)
     cache: Any = field(default_factory=lambda: CachePolicy(expiry="1M"))
     max_tasks: int = 30
-    limit: Optional[int] = None
     kwargs: Dict[str, Any] = field(default_factory=dict)
 
 
-@draccus.wrap()
+@wrap
 def main(cfg: CollectConfig):
     model = [model.slug for model in cfg.models]
-    model_args = [model.model_args for model in cfg.models]
+    model_args = next((model.model_args for model in cfg.models if model.model_args), {})
 
-    kwargs = {}
-    if cfg.limit is not None:
-        kwargs["limit"] = cfg.limit
+    kwargs = dict(cfg.kwargs)
     if cfg.cache is not None:
         kwargs["cache"] = cfg.cache
     if cfg.max_tasks is not None:
