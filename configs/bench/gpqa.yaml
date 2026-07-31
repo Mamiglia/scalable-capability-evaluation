@@ -1,3 +1,3 @@
-name: gpqa
+name: gpqa_diamond
 task: inspect_evals/gpqa_diamond
-log_dir: data/gpqa
+log_dir: data/raw/gpqa_diamond

@@ -1,7 +1,8 @@
-name: core_bench-easy
+name: core_bench_easy
 task: inspect_evals/core_bench
 task_args:
   difficulty: easy
   max_messages: 100
+  limit: 45
   
-log_dir: data/core_bench/easy
+log_dir: data/raw/core_bench_easy

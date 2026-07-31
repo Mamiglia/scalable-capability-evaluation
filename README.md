@@ -7,10 +7,10 @@ answer being correct.
 The repository has two deliberately separate workflows:
 
 ```text
-configs/bench/ ────────> collect ──> data/ (raw, append-only heap)
+configs/bench/ ────────> collect ──> data/raw/ (append-only heap)
                                          │
                                          v
-                                  data/registry.csv
+                                   data/dataset/ (soft-link tree)
                                          │
 configs/experiments/ ──> judge ──────────┘
               │
@@ -18,8 +18,9 @@ configs/experiments/ ──> judge ──────────┘
              logs/
 ```
 
-`data/` is source material, not an organizational scheme. Code discovers logs
-from metadata inside the Inspect files through a regenerable registry.
+Raw logs live in `data/raw/`. Code organizes and resolves logs from metadata
+inside Inspect headers by soft-linking files into `data/dataset/` with the
+structure `benchmark/task_args/model/{idx}.eval`.
 
 ## Collect benchmark transcripts
 
@@ -30,7 +31,7 @@ on the command line.
 uv run collect \
   --bench configs/bench/gpqa.yaml \
   --model configs/models/ling-2.6-flash.yaml \
-  --log_dir data/runs/gpqa-ling-2.6-flash \
+  --log_dir data/raw/runs/gpqa-ling-2.6-flash \
   --limit 2
 ```
 
@@ -44,7 +45,7 @@ For example, the GPQA benchmark manifest is:
 ```yaml
 name: gpqa
 task: inspect_evals/gpqa_diamond
-log_dir: data/gpqa
+log_dir: data/raw/gpqa
 ```
 
 Models are supplied with a repeatable `--model` option. Each value may be a
@@ -59,20 +60,20 @@ uv run collect \
 
 ## Explore the data heap
 
-Build the registry from Inspect log headers:
+Build soft links under `data/dataset/` from Inspect log headers in `data/raw/`:
 
 ```sh
 uv run python src/registry/build.py
 ```
 
-The registry records the source path, eval ID, status, full model name,
-benchmark, dataset, task arguments, creation time, and sample count. It is
-derived data and can be deleted and rebuilt at any time.
+This constructs `data/dataset/benchmark/task_args/model/{idx}.eval`
+pointing directly to the corresponding raw log in `data/raw/` sorted chronologically.
+It is derived data and can be deleted and rebuilt at any time.
 
 ## Run judge experiments
 
-Judge experiments compare existing successful collection logs and rebuild the
-registry automatically by default. Experiment manifests live in
+Judge experiments compare existing successful collection logs and refresh the
+dataset soft links automatically by default. Experiment manifests live in
 `configs/experiments/`:
 
 ```yaml
@@ -94,7 +95,7 @@ uv run judge \
   --limit 2
 ```
 
-Declared fields and arbitrary Inspect kwargs can both be overridden:
+Declaring fields and arbitrary Inspect kwargs can both be overridden:
 
 ```sh
 uv run judge \
@@ -111,6 +112,6 @@ are recorded in the Inspect task metadata.
 ```text
 src/
 ├── collect/     # benchmark data collection
-├── registry/    # metadata index over data/
+├── registry/    # soft-link builder and path resolver over data/raw -> data/dataset
 └── judge/       # transcript pairing, judging, scoring, experiment CLI
 ```

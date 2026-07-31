@@ -1,0 +1,7 @@
+name: gsm8k
+task: inspect_evals/gsm8k
+log_dir: data/raw/gsm8k
+limit: 100
+
+task_args:
+  fewshot: 0
