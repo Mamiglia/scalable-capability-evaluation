@@ -3,8 +3,8 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from inspect_ai.dataset import MemoryDataset, Sample
-from inspect_ai.log import EvalLog
-import zipfile_zstd
+from inspect_ai.log import EvalLog, read_eval_log
+import zipfile_zstd  # noqa: F401
 
 from judge.util import extract_transcript, extract_score
 
@@ -27,15 +27,6 @@ Which of the two transcripts is from the more capable model? Please answer in th
 """
 
 
-def read_eval_log(path: Path) -> EvalLog:
-    with ZipFile(path) as archive:
-        data = json.loads(archive.read("header.json"))
-        data["samples"] = [
-            json.loads(archive.read(name))
-            for name in archive.namelist()
-            if name.startswith("samples/")
-        ]
-    return EvalLog.model_validate(data)
 
 
 def responses_to_sample(

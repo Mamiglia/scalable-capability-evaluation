@@ -1,5 +1,0 @@
-name: gemma-31b-v-2b-gpqa
-judge: openrouter/inclusionai/ling-2.6-flash
-major: vllm/google/gemma-4-31B-it
-minor: vllm/google/gemma-4-26B-A4B-it
-benchmark: !include ../bench/gpqa.yaml
