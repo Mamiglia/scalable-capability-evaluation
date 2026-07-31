@@ -16,3 +16,7 @@ uv.lock
 data/
 logs/
 artifacts/
+/docs/
+
+# external reference data: keep small CSVs, ignore bulky downloaded logs
+external_data/**/*.eval
