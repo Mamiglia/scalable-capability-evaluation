@@ -65,8 +65,7 @@ class ModelConfig:
         if self.model_args is None:
             self.model_args = {
                 'provider': {
-                    'quantizations': 'bf16',
-                    'allow_fallback': True,
+                    'quantizations': ['bf16', 'fp16'],
                 }
             }
             
