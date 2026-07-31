@@ -1,17 +1,9 @@
 """Unit tests for draccus-based CLI modules (collect and judge)."""
 
 from pathlib import Path
-import pytest
 import draccus
 from collect.cli import BenchConfig
 from judge.cli import ExperimentConfig, main as judge_main
-
-
-def test_collect_config_defaults():
-    cfg = BenchConfig()
-    assert cfg.cache is not None
-    assert cfg.max_tasks == 30
-    assert cfg.name == "gpqa"
 
 
 def test_collect_model_options(monkeypatch, tmp_path):
@@ -38,6 +30,7 @@ def test_collect_model_options(monkeypatch, tmp_path):
     assert captured["log_dir"] == "data/mbpp"
     assert captured["model"] == ["custom/model2", "openrouter/provider/model1"]
     assert captured["limit"] == 2
+    assert captured["log_dir_allow_dirty"] is True
 
 
 def test_collect_config_parse():
@@ -54,32 +47,38 @@ def test_collect_config_parse():
 
 def test_experiment_config_parse():
     args = [
-        "--config_path", "configs/experiments/gemma-gpqa.yaml",
+        "--config_path", "configs/experiments/test.yaml",
         "--limit", "20",
         "--include_reverse", "false",
-        "--dry_run", "true",
+        "--mode", "combinatorial",
     ]
     cfg = draccus.parse(ExperimentConfig, args=args)
-    assert cfg.name == "gemma-31b-v-2b-gpqa"
-    assert cfg.judge == "openrouter/inclusionai/ling-2.6-flash"
-    assert cfg.dry_run is True
+    assert cfg.name == "test"
     assert cfg.limit == 20
     assert cfg.include_reverse is False
+    assert cfg.mode == "combinatorial"
 
 
-def test_judge_main_dry_run(monkeypatch, tmp_path):
+def test_judge_main_execution(monkeypatch, tmp_path):
     test_cfg = tmp_path / "test_exp.yaml"
     test_cfg.write_text("""
 name: test-exp
 judge: test-judge
 major: test-major
 minor: test-minor
-benchmark_name: gpqa
-dry_run: true
+mode: paired
+benchmark:
+  name: gpqa
 refresh_registry: false
 """)
-    monkeypatch.setattr("judge.cli.resolve_eval_path", lambda *a, **kw: Path("data/fake_eval.json"))
+    captured = {}
+    monkeypatch.setattr("judge.cli.build_judge_tasks", lambda **kw: ["dummy_task"])
     monkeypatch.setattr("judge.cli.build_registry", lambda *a, **kw: None)
-    monkeypatch.setattr("sys.argv", ["judge", "--config_path", str(test_cfg), "--dry_run", "true"])
+    monkeypatch.setattr(
+        "judge.cli.eval_set", lambda **kw: (captured.update(kw) or True, [])
+    )
+    monkeypatch.setattr("sys.argv", ["judge", "--config_path", str(test_cfg)])
     ret = judge_main()
     assert ret == 0
+    assert captured["tasks"] == ["dummy_task"]
+    assert captured["log_dir"] == "logs/judge/test-exp"

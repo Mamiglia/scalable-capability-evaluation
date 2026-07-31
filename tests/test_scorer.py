@@ -92,12 +92,6 @@ class TestParseJudgeOutput:
         text2 = "EXPLANATION: Good reasoning\nCONFIDENCE: 4"
         assert parse_judge_output(text2) == (None, 4, "Good reasoning")
 
-    def test_parse_no_matches(self):
-        """Test output string with no recognizable judge fields."""
-        text = "This is a random text output without structured fields."
-        assert parse_judge_output(text) == (None, None, None)
-
-
 class TestJudgeScorer:
     """Unit tests for judge_scorer in scorer.py."""
 

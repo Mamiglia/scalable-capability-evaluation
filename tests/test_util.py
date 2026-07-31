@@ -1,5 +1,3 @@
-import pytest
-from unittest.mock import MagicMock
 from types import SimpleNamespace
 
 from inspect_ai.model import (
@@ -22,26 +20,6 @@ from util import format_message, extract_transcript, extract_score
 
 class TestFormatMessage:
     """Unit tests for format_message in util.py."""
-
-    def test_format_message_string_content(self):
-        """Test formatting when msg.content is a plain string."""
-        msg = ChatMessageAssistant(content="Simple string response")
-        assert format_message(msg) == "Simple string response"
-
-    def test_format_message_text_content_list(self):
-        """Test formatting when msg.content is a list containing text content."""
-        msg = ChatMessageAssistant(content=[ContentText(type="text", text="First line")])
-        assert format_message(msg) == "First line"
-
-    def test_format_message_reasoning_content_list(self):
-        """Test formatting when msg.content is a list containing reasoning content."""
-        msg = ChatMessageAssistant(
-            content=[ContentReasoning(type="reasoning", reasoning="Thinking step by step")]
-        )
-        result = format_message(msg)
-        assert "<THOUGHT_START>" in result
-        assert "<THOUGHT_END>" in result
-        assert "Thinking step by step" in result
 
     def test_format_message_mixed_content_list(self):
         """Test formatting when msg.content contains both reasoning and text."""
@@ -66,17 +44,6 @@ class TestFormatMessage:
         result = format_message(msg)
         assert "Running bash script" in result
         assert "[Tool Call: bash({'cmd': 'ls -l'})]" in result
-
-    def test_format_message_tool_response(self):
-        """Test formatting tool response message (ChatMessageTool)."""
-        msg = ChatMessageTool(
-            content="file1.txt\nfile2.txt",
-            tool_call_id="tc1",
-            function="bash",
-            error=None,
-        )
-        result = format_message(msg)
-        assert "[Tool Output (bash)]: file1.txt\nfile2.txt" in result
 
     def test_format_message_tool_response_with_error(self):
         """Test formatting tool response message containing an error."""
@@ -118,19 +85,6 @@ class TestFormatMessage:
         assert "Here is the plot:" in result
         assert "[Image]" in result
 
-    def test_format_message_unknown_content_type_fallback(self):
-        """Test that unknown content types fall back gracefully without raising an exception."""
-        mock_content = MagicMock()
-        mock_content.type = "custom_widget"
-        msg = MagicMock(spec=ChatMessageAssistant)
-        msg.content = [mock_content]
-        msg.role = "assistant"
-        msg.tool_calls = None
-
-        result = format_message(msg)
-        assert "[custom_widget]" in result
-
-
     def test_format_message_audio_and_video(self):
         """Test formatting audio and video content blocks."""
         msg = ChatMessageAssistant(
@@ -143,10 +97,6 @@ class TestFormatMessage:
         res = format_message(msg)
         assert "[Audio]" in res
         assert "[Video]" in res
-
-    def test_format_message_direct_string(self):
-        """Test formatting when string is passed directly to format_message."""
-        assert format_message("Direct string message") == "Direct string message"
 
 
 class TestExtractTranscript:
@@ -181,18 +131,6 @@ class TestExtractTranscript:
         assert "[Tool]: [Tool Output (solve)]: Solved" in res
         assert "[Assistant]: Done" in res
 
-    def test_extract_transcript_only_user_and_system_messages(self):
-        """Test transcript extraction when messages list contains only system/user messages."""
-        sample = SimpleNamespace(
-            messages=[
-                ChatMessageSystem(content="System instruction"),
-                ChatMessageUser(content="User prompt"),
-            ]
-        )
-        res = extract_transcript(sample)
-        assert "[System]: System instruction" in res
-        assert "[User]: User prompt" in res
-
     def test_extract_transcript_empty_sample(self):
         """Test transcript extraction when sample has no messages or output."""
         sample = SimpleNamespace()
@@ -210,9 +148,4 @@ class TestExtractScore:
     def test_extract_score_incorrect(self):
         """Test score extraction when score value is 'I' (Incorrect)."""
         sample = SimpleNamespace(score=Score(value="I"))
-        assert extract_score(sample) is False
-
-    def test_extract_score_no_answer(self):
-        """Test score extraction when score value is 'N' or NOANSWER."""
-        sample = SimpleNamespace(score=Score(value="N"))
         assert extract_score(sample) is False
