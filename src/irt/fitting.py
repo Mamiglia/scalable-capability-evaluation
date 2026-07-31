@@ -5,6 +5,8 @@ theta per model (capability), b per item (difficulty).
 1PL / 2PL / MIRT share one fit(); pick with fit(model=.
 """
 
+from pathlib import Path
+
 import jax
 import numpy as np
 import numpyro
@@ -12,7 +14,7 @@ import numpyro.distributions as dist
 import pandas as pd
 from numpyro.infer import MCMC, NUTS
 
-from irt.data import IRTData
+from irt.data import IRTData, encode, pick_epoch
 
 
 def one_pl(model_idx, item_idx, n_models, n_items, y=None):
@@ -101,3 +103,31 @@ def predict(model, post, model_idx, item_idx):
         b = np.asarray(post["b"])
         logit = theta[:, model_idx] - b[:, item_idx]
     return (1.0 / (1.0 + np.exp(-logit))).mean(0)
+
+
+def save_results(responses, models=("1pl", "2pl", "mirt"), out_dir="irt_results",
+                 name="gpqa", warmup=1000, samples=1000):
+    """Fit each model type; write one capabilities table and one difficulties table."""
+    data = encode(pick_epoch(responses))
+    caps = pd.DataFrame({"model": data.models})
+    diffs = pd.DataFrame(data.items, columns=["benchmark", "item"])
+    for m in models:
+        post = fit(data, model=m, warmup=warmup, samples=samples)
+        theta = np.asarray(post["theta"])
+        if theta.ndim == 3:  # MIRT: ability is a vector of skills
+            for d in range(theta.shape[2]):
+                caps[f"theta_{m}{d}"] = theta[:, :, d].mean(0)
+        else:
+            caps[f"theta_{m}"] = theta.mean(0)
+            caps[f"theta_{m}_lo"] = np.percentile(theta, 5, axis=0)
+            caps[f"theta_{m}_hi"] = np.percentile(theta, 95, axis=0)
+        b = np.asarray(post["d" if m == "mirt" else "b"])
+        col = "d" if m == "mirt" else "b"
+        diffs[f"{col}_{m}"] = b.mean(0)
+        diffs[f"{col}_{m}_lo"] = np.percentile(b, 5, axis=0)
+        diffs[f"{col}_{m}_hi"] = np.percentile(b, 95, axis=0)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    caps.to_csv(out / f"{name}_capabilities.csv", index=False)
+    diffs.to_csv(out / f"{name}_difficulties.csv", index=False)
+    return caps, diffs
