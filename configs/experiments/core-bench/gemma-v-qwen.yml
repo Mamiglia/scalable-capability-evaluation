@@ -1,6 +1,5 @@
-name: test
-judge: !include ../models/ling-2.6-flash.yaml
+judge: moonshotai/kimi-k2.6
 major: google/gemma-4-31B-it
-minor: google/gemma-4-26B-A4B-it
+minor: qwen/qwen3.5-9b
 benchmark: !include ../bench/core-bench/medium.yaml
 mode: paired

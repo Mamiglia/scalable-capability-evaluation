@@ -4,6 +4,7 @@ __pycache__/
 build/
 dist/
 wheels/
+.pytest_cache/
 *.egg-info
 
 # Virtual environments
@@ -11,6 +12,9 @@ wheels/
 .python-version
 uv.lock
 .env
+.agents
+.codex
+.claude
 
 # logs
 data/

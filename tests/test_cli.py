@@ -9,9 +9,9 @@ from judge.cli import ExperimentConfig, main as judge_main
 def test_collect_model_options(monkeypatch, tmp_path):
     from collect.cli import main
 
-    model_config = tmp_path / "model.yaml"
+    model_config = tmp_path / "model.yml"
     model_config.write_text("model_name: provider/model2\nslug: custom/model2\n")
-    bench_config = tmp_path / "bench.yaml"
+    bench_config = tmp_path / "bench.yml"
     bench_config.write_text("name: mbpp\ntask: inspect_evals/mbpp\nlog_dir: data/mbpp\n")
     captured = {}
     monkeypatch.setattr(
@@ -47,7 +47,7 @@ def test_collect_config_parse():
 
 def test_experiment_config_parse():
     args = [
-        "--config_path", "configs/experiments/test.yaml",
+        "--config_path", "configs/experiments/test.yml",
         "--limit", "20",
         "--include_reverse", "false",
         "--mode", "combinatorial",
@@ -60,7 +60,7 @@ def test_experiment_config_parse():
 
 
 def test_judge_main_execution(monkeypatch, tmp_path):
-    test_cfg = tmp_path / "test_exp.yaml"
+    test_cfg = tmp_path / "test_exp.yml"
     test_cfg.write_text("""
 name: test-exp
 judge: test-judge
