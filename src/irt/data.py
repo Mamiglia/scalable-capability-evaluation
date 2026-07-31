@@ -29,7 +29,7 @@ def question_number(sample) -> str:
 
 def read_log(path: Path) -> Iterator[dict]:
     """
-    One .eval to rows: benchmark, model, item, question, correct, answer, target, epoch."""
+    One .eval to rows: benchmark, model, item, question, correct, answer, target, epoch"""
     log = read_eval_log(str(path))
     benchmark = log.eval.task.split("/")[-1]
     model = path.stem
@@ -50,30 +50,36 @@ def read_log(path: Path) -> Iterator[dict]:
 
 
 def build_responses(logs_dir: Path) -> pd.DataFrame:
-    """All .eval logs in a dir to one response table."""
+    """All .eval logs in a dir to one response table"""
     rows = (row for path in sorted(logs_dir.glob("*.eval")) for row in read_log(path))
     return pd.DataFrame(rows)
 
 
 def items(responses: pd.DataFrame) -> pd.DataFrame:
-    """One row per question: benchmark, item, question snippet."""
+    """One row per question: benchmark, item, question snippet"""
     return responses[["benchmark", "item", "question"]].drop_duplicates(["benchmark", "item"])
 
 
 def for_items(responses: pd.DataFrame, item_ids, epoch=None) -> pd.DataFrame:
-    """Rows for the given item id(s), all models. Optional single epoch."""
+    """Rows for the given item id(s), all models. Optional single epoch"""
     out = responses[responses["item"].isin(np.atleast_1d(item_ids))]
     return out[out["epoch"] == epoch] if epoch is not None else out
 
 
 def for_models(responses: pd.DataFrame, model_names, epoch=None) -> pd.DataFrame:
-    """Rows for the given model(s), all items. Optional single epoch."""
+    """Rows for the given model(s), all items. Optional single epoch"""
     out = responses[responses["model"].isin(np.atleast_1d(model_names))]
     return out[out["epoch"] == epoch] if epoch is not None else out
 
 
 def pick_epoch(responses: pd.DataFrame, epoch: int = 1) -> pd.DataFrame:
-    """One row per (model, item): the given epoch, else the next available (wrapping)."""
+    """
+    One row per (model, item): the given epoch, else the next available.
+
+    A blank answer counts as missing, so a broken epoch falls through to the next
+    one that answered; a cell blank in every epoch drops out.
+    """
+    responses = responses[responses["answer"].fillna("").astype(str).str.strip() != ""]
     order = (responses["epoch"] - epoch) % responses["epoch"].max()
     return (
         responses.assign(_o=order)
