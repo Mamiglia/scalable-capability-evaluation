@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Literal, Optional
 from draccus_kwargs import wrap
 from inspect_ai import eval_set
 
-from judge.task import SYSTEM_PROMPT, build_judge_tasks, judge_task
+from judge.task import SYSTEM_PROMPT, build_judge_tasks
 from registry.build import build_registry
 from collect.cli import BenchConfig, ModelConfig
 
@@ -40,7 +40,7 @@ class ExperimentConfig:
     def __post_init__(self):
         judge_cfg = ModelConfig.from_cli(self.judge)
         if not self.name:
-            self.name = f"{self.benchmark.name}/{judge_cfg.slug.split('/')[-1]}={self.major.split('/')[-1]}-v-{self.minor.split('/')[-1]}"
+            self.name = f"{self.benchmark.name}/{judge_cfg.slug.split('/')[-1]}={self.major.split('/')[-1]}|{self.minor.split('/')[-1]}"
         if not self.log_dir:
             self.log_dir = f"logs/judge/{self.name}"
             

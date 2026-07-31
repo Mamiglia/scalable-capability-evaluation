@@ -1,5 +1,5 @@
 judge: moonshotai/kimi-k2.6
 major: google/gemma-4-31B-it
 minor: qwen/qwen3.5-9b
-benchmark: !include ../bench/core-bench/medium.yaml
+benchmark: !include ../../bench/core-bench/medium.yml
 mode: paired

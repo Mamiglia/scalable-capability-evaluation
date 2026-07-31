@@ -111,7 +111,7 @@ def judge_task(
             registry_path=Path(registry_path) if registry_path else None,
         )
     )
-    name = task_name or f"{benchmark_name}={major}|{minor}"
+    name = task_name or f"{benchmark_name}/{major.split('/')[-1]}|{minor.split('/')[-1]}"
 
     return Task(
         name=name,

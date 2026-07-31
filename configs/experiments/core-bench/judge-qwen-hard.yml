@@ -1,0 +1,5 @@
+judge: openrouter/qwen/qwen3.5-9b
+major: google/gemma-4-31B-it
+minor: moonshotai/kimi-k2.6
+benchmark: !include ../../bench/core-bench/hard.yml
+mode: paired
