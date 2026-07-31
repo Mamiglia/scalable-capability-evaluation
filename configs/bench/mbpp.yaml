@@ -1,0 +1,3 @@
+name: mbpp
+task: inspect_evals/mbpp
+log_dir: data/mbpp

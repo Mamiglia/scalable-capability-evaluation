@@ -3,26 +3,52 @@
 from pathlib import Path
 import pytest
 import draccus
-from collect.cli import CollectConfig
+from collect.cli import BenchConfig
 from judge.cli import ExperimentConfig, main as judge_main
 
 
 def test_collect_config_defaults():
-    cfg = CollectConfig()
+    cfg = BenchConfig()
     assert cfg.cache is not None
     assert cfg.max_tasks == 30
-    assert cfg.bench.name == "gpqa"
+    assert cfg.name == "gpqa"
+
+
+def test_collect_model_options(monkeypatch, tmp_path):
+    from collect.cli import main
+
+    model_config = tmp_path / "model.yaml"
+    model_config.write_text("model_name: provider/model2\nslug: custom/model2\n")
+    bench_config = tmp_path / "bench.yaml"
+    bench_config.write_text("name: mbpp\ntask: inspect_evals/mbpp\nlog_dir: data/mbpp\n")
+    captured = {}
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "collect", "--bench", str(bench_config),
+            "--model", str(model_config), "--model", "provider/model1",
+            "--limit", "2",
+        ],
+    )
+    monkeypatch.setattr(
+        "collect.cli.eval_set", lambda **kwargs: (captured.update(kwargs) or True, None)
+    )
+    assert main() == 0
+    assert captured["tasks"] == ["inspect_evals/mbpp"]
+    assert captured["log_dir"] == "data/mbpp"
+    assert captured["model"] == ["custom/model2", "openrouter/provider/model1"]
+    assert captured["limit"] == 2
 
 
 def test_collect_config_parse():
     args = [
-        "--bench.name", "core_bench",
-        "--bench.task", "inspect_evals/core_bench",
+        "--name", "core_bench",
+        "--task", "inspect_evals/core_bench",
         "--limit", "50",
     ]
-    cfg = draccus.parse(CollectConfig, args=args)
-    assert cfg.bench.name == "core_bench"
-    assert cfg.bench.task == "inspect_evals/core_bench"
+    cfg = draccus.parse(BenchConfig, args=args)
+    assert cfg.name == "core_bench"
+    assert cfg.task == "inspect_evals/core_bench"
     assert cfg.limit == 50
 
 

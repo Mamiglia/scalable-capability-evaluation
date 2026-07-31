@@ -1,4 +1,0 @@
-<<: !include ../base.yaml
-bench: !include ../bench/gpqa.yaml
-models:
-  - !include ../models/ling-2.6-flash.yaml

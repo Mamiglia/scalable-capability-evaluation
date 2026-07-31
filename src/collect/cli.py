@@ -1,8 +1,10 @@
 """CLI interface for collecting benchmark transcripts using draccus."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
+import draccus
 from inspect_ai.model import CachePolicy
 from draccus_kwargs import wrap
 from inspect_ai import eval_set
@@ -14,6 +16,9 @@ class BenchConfig:
     task: Optional[str] = None
     log_dir: Optional[str] = None
     task_args: Optional[Dict[str, Any]] = None
+    cache: Any = field(default_factory=lambda: CachePolicy(expiry="1M"))
+    max_tasks: int = 30
+    kwargs: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.log_dir:
@@ -33,33 +38,42 @@ class ModelConfig:
             clean_name = self.model_name.removeprefix("openrouter/")
             self.slug = f"openrouter/{clean_name}"
 
+        if self.model_args is None:
+            self.model_args = {
+                'provider': {
+                    'quantizations': 'bf16',
+                    'allow_fallback': True,
+                }
+            }
+            
+    @staticmethod
+    def from_cli(spec: str) -> "ModelConfig":
+        path = Path(spec)
+        if path.exists():
+            return draccus.parse(ModelConfig, config_path=path, args=[])
+        return ModelConfig(model_name=spec)
 
-@dataclass
-class CollectConfig:
-    bench: BenchConfig = field(default_factory=BenchConfig)
-    models: List[ModelConfig] = field(default_factory=list)
-    cache: Any = field(default_factory=lambda: CachePolicy(expiry="1M"))
-    max_tasks: int = 30
-    kwargs: Dict[str, Any] = field(default_factory=dict)
 
-
-@wrap
-def main(cfg: CollectConfig):
-    model = [model.slug for model in cfg.models]
-    model_args = next((model.model_args for model in cfg.models if model.model_args), {})
-
+@wrap(repeatable={"model"}, config_path_aliases={"bench"})
+def main(cfg: BenchConfig):
     kwargs = dict(cfg.kwargs)
+    model_specs = kwargs.pop("model", [])
+    if not model_specs:
+        raise ValueError("At least one --model must be specified")
+    models = [ModelConfig.from_cli(spec) for spec in model_specs]
+    model = [item.slug for item in models]
+    model_args = next((item.model_args for item in models if item.model_args), {})
     if cfg.cache is not None:
         kwargs["cache"] = cfg.cache
     if cfg.max_tasks is not None:
         kwargs["max_tasks"] = cfg.max_tasks
-    if cfg.bench.task_args is not None:
-        kwargs["task_args"] = cfg.bench.task_args
+    if cfg.task_args is not None:
+        kwargs["task_args"] = cfg.task_args
 
     success, _ = eval_set(
-        tasks=[cfg.bench.task],
+        tasks=[cfg.task],
         model=model,
-        log_dir=cfg.bench.log_dir,
+        log_dir=cfg.log_dir,
         model_args=model_args,
         **kwargs,
     )
