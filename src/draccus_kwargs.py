@@ -25,11 +25,34 @@ def wrap(fn=None, *, repeatable=(), config_path_aliases=()):
                     raise ValueError(f"{option} requires a config path")
                 argv[index] = "--config_path"
         cfg, extra = ArgumentParser(cls).parse_known_args(argv)
-        if len(extra) % 2 or any(not key.startswith("--") for key in extra[::2]): raise ValueError("Extra arguments must be --key value pairs")
         cfg.kwargs = cfg.kwargs or {}
-        for key, value in zip(extra[::2], extra[1::2]):
-            key = key[2:]
-            value = cfgparsing.parse_string(value)
+
+        idx = 0
+        while idx < len(extra):
+            item = extra[idx]
+            if not item.startswith("--"):
+                raise ValueError(f"Extra arguments must start with '--', got '{item}'")
+
+            if "=" in item:
+                key, value_str = item[2:].split("=", 1)
+                key = key.replace("-", "_")
+                value = cfgparsing.parse_string(value_str)
+                idx += 1
+            else:
+                raw_key = item[2:]
+                key = raw_key.replace("-", "_")
+                if idx + 1 < len(extra) and not extra[idx + 1].startswith("--"):
+                    value_str = extra[idx + 1]
+                    value = cfgparsing.parse_string(value_str)
+                    idx += 2
+                else:
+                    if key.startswith("no_"):
+                        key = key[3:]
+                        value = False
+                    else:
+                        value = True
+                    idx += 1
+
             if key in repeatable:
                 cfg.kwargs.setdefault(key, []).append(value)
             else:

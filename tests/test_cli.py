@@ -82,3 +82,32 @@ refresh_registry: false
     assert ret == 0
     assert captured["tasks"] == ["dummy_task"]
     assert captured["log_dir"] == "logs/judge/test-exp"
+
+
+def test_judge_extra_boolean_flags(monkeypatch, tmp_path):
+    test_cfg = tmp_path / "test_exp.yml"
+    test_cfg.write_text("""
+name: test-exp
+judge: test-judge
+major: test-major
+minor: test-minor
+mode: paired
+benchmark:
+  name: gpqa
+refresh_registry: false
+""")
+    captured = {}
+    monkeypatch.setattr("judge.cli.build_judge_tasks", lambda **kw: ["dummy_task"])
+    monkeypatch.setattr("judge.cli.build_registry", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "judge.cli.eval_set", lambda **kw: (captured.update(kw) or True, [])
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["judge", "--config_path", str(test_cfg), "--log-dir-allow-dirty", "--max_tasks=5"],
+    )
+    ret = judge_main()
+    assert ret == 0
+    assert captured["log_dir_allow_dirty"] is True
+    assert captured["max_tasks"] == 5
+
