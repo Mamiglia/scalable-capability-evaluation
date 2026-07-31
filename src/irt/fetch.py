@@ -14,8 +14,6 @@ Only logs missing from out_dir are downloaded, so re-runs are idempotent.
 out_dir lives under external_data/ to distinguish from logs/data collected by us.
 """
 
-from __future__ import annotations
-
 import os
 import shutil
 from dataclasses import dataclass

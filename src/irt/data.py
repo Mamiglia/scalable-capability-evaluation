@@ -5,9 +5,6 @@ Each .eval is one model over the benchmark items. We keep only what IRT needs:
 per (model, item, attempt) whether the answer was correct. No transcripts.
 Items are keyed by (benchmark, question id), so several evals can share a table.
 """
-
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
@@ -34,7 +31,7 @@ def read_log(path: Path) -> Iterator[dict]:
     """
     One .eval to rows: benchmark, model, item, question, correct, answer, target, epoch."""
     log = read_eval_log(str(path))
-    benchmark = log.eval.task
+    benchmark = log.eval.task.split("/")[-1]
     model = path.stem
     for sample in log.samples or []:
         score = next(iter((sample.scores or {}).values()), None)
