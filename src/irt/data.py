@@ -35,7 +35,7 @@ def read_log(path: Path) -> Iterator[dict]:
     One .eval to rows: benchmark, model, item, question, correct, answer, target, epoch."""
     log = read_eval_log(str(path))
     benchmark = log.eval.task
-    model = log.eval.model
+    model = path.stem
     for sample in log.samples or []:
         score = next(iter((sample.scores or {}).values()), None)
         if score is None:
