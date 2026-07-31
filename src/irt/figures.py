@@ -5,7 +5,8 @@ from pathlib import Path
 import pandas as pd
 
 from irt.data import pick_epoch
-from irt.plots import COLOR, LABEL, cat_scatter, scatter, strip, sweep_gap_plot, wright_map
+from irt.plots import (COLOR, LABEL, cat_scatter, curve_plot, heatmap, scatter,
+                       strip, sweep_gap_plot, wright_map)
 
 # categorical palette (dataviz default, light surface); "Other" stays muted grey
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
@@ -116,10 +117,24 @@ def comparison_figure(root: Path):
 
 def sweep_figure(root: Path):
     """Model-count sweep with the IRT-over-model gap panel."""
-    agg = pd.read_csv(root / "required_model_count.csv")
     raw = pd.read_csv(root / "required_model_count_raw.csv")
-    sweep_gap_plot(agg, raw, "n_models", "number of models",
+    sweep_gap_plot(raw, "n_models", "number of models",
                    str(root / "figures" / "required_model_count"))
+
+
+def item_sweep_figure(root: Path):
+    """Item-count sweep (all models kept)."""
+    raw = pd.read_csv(root / "required_item_count_raw.csv")
+    curve_plot(raw, "n_items", "number of items",
+               str(root / "figures" / "required_item_count"))
+
+
+def grid_figure(root: Path):
+    """Heatmap of IRT held-out accuracy over (n_models, n_items)."""
+    raw = pd.read_csv(root / "sweep_grid_raw.csv")
+    mat = raw.groupby(["n_models", "n_items"])["irt"].mean().unstack("n_items")
+    heatmap(mat, str(root / "figures" / "sweep_grid"),
+            "number of items", "number of models")
 
 
 def main(root="irt_results/epoch_gpqa", data="external_data/epoch-gpqa"):
@@ -135,6 +150,8 @@ def main(root="irt_results/epoch_gpqa", data="external_data/epoch-gpqa"):
     ladder_figure(root)
     comparison_figure(root)
     sweep_figure(root)
+    item_sweep_figure(root)
+    grid_figure(root)
 
 
 if __name__ == "__main__":

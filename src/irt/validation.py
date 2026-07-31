@@ -111,3 +111,56 @@ def estimate_required_model_count(responses, counts=(5, 10, 20, 50, 100, 182),
                 "overall_base": res["overall_base_acc"].mean(),
             })
     return pd.DataFrame(rows)
+
+
+def estimate_required_item_count(responses, counts=(10, 20, 50, 100, 198),
+                                 model="1pl", k=5, resamples=20, seed=0,
+                                 warmup=400, samples=400):
+    """
+    Held-out accuracy vs number of items (all models kept): how many items we need.
+    Draws resamples random item subsets per count; one row per (count, resample).
+    """
+    items = np.array(sorted(responses["item"].unique()))
+    rng = np.random.default_rng(seed)
+    rows = []
+    for n in counts:
+        if n > len(items):
+            continue
+        for r in range(resamples):
+            sub = responses[responses["item"].isin(rng.choice(items, n, replace=False))]
+            res = heldout(sub, model=model, k=k, seed=r, warmup=warmup, samples=samples)
+            rows.append({
+                "n_items": n, "resample": r,
+                "irt": res["irt_acc"].mean(),
+                "item_base": res["item_base_acc"].mean(),
+                "model_base": res["model_base_acc"].mean(),
+                "overall_base": res["overall_base_acc"].mean(),
+            })
+    return pd.DataFrame(rows)
+
+
+def estimate_grid(responses, model_counts=(5, 10, 20, 50, 100, 182),
+                  item_counts=(10, 25, 50, 100, 198), model="1pl", k=5,
+                  resamples=20, seed=0, warmup=400, samples=400):
+    """
+    IRT held-out accuracy over a grid of (n_models, n_items). One row per
+    (n_models, n_items, resample); the caller means over resamples for a heatmap.
+    """
+    models = np.array(sorted(responses["model"].unique()))
+    items = np.array(sorted(responses["item"].unique()))
+    rng = np.random.default_rng(seed)
+    rows = []
+    for nm in model_counts:
+        if nm > len(models):
+            continue
+        for ni in item_counts:
+            if ni > len(items):
+                continue
+            for r in range(resamples):
+                ms = rng.choice(models, nm, replace=False)
+                it = rng.choice(items, ni, replace=False)
+                sub = responses[responses["model"].isin(ms) & responses["item"].isin(it)]
+                res = heldout(sub, model=model, k=k, seed=r, warmup=warmup, samples=samples)
+                rows.append({"n_models": nm, "n_items": ni, "resample": r,
+                             "irt": res["irt_acc"].mean()})
+    return pd.DataFrame(rows)
