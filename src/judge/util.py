@@ -27,10 +27,8 @@ def format_content(content: Any) -> str:
             texts.append("[Audio]")
         elif b_type == "video":
             texts.append("[Video]")
-        elif hasattr(block, "text") and isinstance(getattr(block, "text"), str):
-            texts.append(block.text)
         else:
-            texts.append(f"[{b_type}]" if b_type else str(block))
+            raise TypeError(f"Unsupported content block type: {b_type!r}")
     return "\n".join(texts)
 
 
