@@ -86,3 +86,18 @@ def summary(labels, samples) -> pd.DataFrame:
     return pd.DataFrame(
         {"name": labels, "mean": samples.mean(0), "p5": lo, "p50": mid, "p95": hi}
     )
+
+
+def predict(model, post, model_idx, item_idx):
+    """Posterior-mean P(correct) for the given (model, item) cells."""
+    theta = np.asarray(post["theta"])
+    if model == "mirt":
+        a, d = np.asarray(post["a"]), np.asarray(post["d"])
+        logit = (a[:, item_idx, :] * theta[:, model_idx, :]).sum(-1) - d[:, item_idx]
+    elif model == "2pl":
+        a, b = np.asarray(post["a"]), np.asarray(post["b"])
+        logit = a[:, item_idx] * (theta[:, model_idx] - b[:, item_idx])
+    else:
+        b = np.asarray(post["b"])
+        logit = theta[:, model_idx] - b[:, item_idx]
+    return (1.0 / (1.0 + np.exp(-logit))).mean(0)
