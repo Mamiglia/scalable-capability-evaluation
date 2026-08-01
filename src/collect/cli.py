@@ -1,104 +1,77 @@
-"""CLI interface for collecting benchmark transcripts using draccus."""
+"""CLI interface for collecting benchmark transcripts for a single benchmark and model pair."""
 
-from dataclasses import dataclass, field
+import argparse
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
 
-import draccus
-from inspect_ai.model import CachePolicy
-from draccus_kwargs import wrap
-from inspect_ai import eval_set
+from inspect_ai import eval as eval_func
 
-
-@dataclass
-class BenchConfig:
-    name: str = "gpqa"
-    task: Optional[str] = None
-    log_dir: Optional[str] = None
-    log_dir_allow_dirty: bool = True
-    task_args: Optional[Dict[str, Any]] = None
-    cache: Any = field(default_factory=lambda: CachePolicy(expiry="1M"))
-    max_tasks: int = 30
-    limit: Optional[int] = None
-    epochs: Optional[int] = None
-    score: Optional[bool] = None
-    kwargs: Dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self):
-        if not self.log_dir:
-            self.log_dir = f"data/raw/{self.name}"
-        if not self.task:
-            self.task = f"inspect_evals/{self.name}"
-            
-    def eval_set_kwargs(self) -> Dict[str, Any]:
-        """Return a dictionary of keyword arguments for eval_set."""
-        kwargs = dict(self.kwargs)
-        kwargs.pop('model', None)  # Remove model if present
-        if self.cache is not None:
-            kwargs["cache"] = self.cache
-        if self.max_tasks is not None:
-            kwargs["max_tasks"] = self.max_tasks
-        if self.task_args is not None:
-            kwargs["task_args"] = self.task_args
-        if self.limit is not None:
-            kwargs["limit"] = self.limit
-        if self.epochs is not None:
-            kwargs["epochs"] = self.epochs
-        if self.score is not None:
-            kwargs["score"] = self.score
-        if self.log_dir_allow_dirty is not None:
-            kwargs["log_dir_allow_dirty"] = self.log_dir_allow_dirty
-        return kwargs
+from configs import BenchConfig, ModelConfig
+from path_utils import get_eval_path
 
 
-@dataclass
-class ModelConfig:
-    model_name: str
-    slug: Optional[str] = None
-    model_args: Optional[Dict[str, Any]] = None
-
-    def __post_init__(self):
-        if not self.slug:
-            clean_name = self.model_name.removeprefix("openrouter/")
-            self.slug = f"openrouter/{clean_name}"
-
-        if self.model_args is None:
-            self.model_args = {
-                'provider': {
-                    'quantizations': ['bf16', 'fp16'],
-                }
-            }
-            
-    @staticmethod
-    def from_cli(spec: Union[str, dict, "ModelConfig"]) -> "ModelConfig":
-        if isinstance(spec, ModelConfig):
-            return spec
-        if isinstance(spec, dict):
-            return draccus.decode(ModelConfig, spec)
-        path = Path(spec)
-        if path.exists():
-            return draccus.parse(ModelConfig, config_path=path, args=[])
-        return ModelConfig(model_name=spec)
-
-
-@wrap(repeatable={"model"}, config_path_aliases={"bench"})
-def main(cfg: BenchConfig):
-    kwargs = dict(cfg.kwargs)
-    model_specs = kwargs.pop("model", [])
-    if not model_specs:
-        raise ValueError("At least one --model must be specified")
-    models = [ModelConfig.from_cli(spec) for spec in model_specs]
-    model = [item.slug for item in models]
-    model_args = next((item.model_args for item in models if item.model_args), {})
-
-    success, _ = eval_set(
-        tasks=[cfg.task],
-        model=model,
-        log_dir=cfg.log_dir,
-        model_args=model_args,
-        **cfg.eval_set_kwargs(),
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run a single benchmark evaluation for a model."
     )
-    return int(not success)
+    parser.add_argument(
+        "--bench",
+        type=Path,
+        required=True,
+        help="Path to benchmark YAML configuration file.",
+    )
+    parser.add_argument(
+        "--model",
+        type=Path,
+        required=True,
+        help="Path to model YAML configuration file or a model slug.",
+    )
+    parser.add_argument(
+        "-n",
+        "--epochs",
+        type=int,
+        default=1,
+        help="Number of epochs to run (default: 1).",
+    )
+    parsed_args, extra = parser.parse_known_args()
+    bench = BenchConfig.from_cli(parsed_args.bench, args=extra)
+    model = ModelConfig.from_cli(parsed_args.model, args=extra)
+
+    for i in range(parsed_args.epochs):
+        print(f"Running epoch {i}/{parsed_args.epochs} for benchmark '{bench.name}' and model '{model.slug}'")
+        exit_code = _run_eval(bench_cfg=bench, model_cfg=model, repeat=i, **extra)
+        if exit_code != 0:
+            print(f"Epoch {i} failed with exit code {exit_code}. Stopping further epochs.")
+            return exit_code
+    return 0
+
+def _run_eval(
+    bench_cfg: BenchConfig,
+    model_cfg: ModelConfig,
+    repeat: int = 1,
+    **kwargs,
+) -> int:
+    """Execute a single evaluation run for a given benchmark and model config."""
+    target_path = get_eval_path(
+        benchmark=bench_cfg.name,
+        task_args=bench_cfg.task_args,
+        model=model_cfg.slug,
+        n=repeat,
+    )
+
+    if target_path.exists():
+        print(f"Skipping {target_path} (already exists)")
+        return 0
+
+    logs = eval_func(
+        tasks=bench_cfg.task,
+        model=model_cfg.slug,
+        model_args=model_cfg.model_args or {},
+        task_args=bench_cfg.task_args or {},
+        seed=repeat,
+        log_dir=target_path.parent,
+        **kwargs,
+    )
+    return 0 if logs[0].status == "success" else 1
 
 
 if __name__ == "__main__":
