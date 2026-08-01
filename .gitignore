@@ -21,3 +21,4 @@ artifacts/
 # external reference data: keep small CSVs for scores only, ignore downloaded logs
 external_data/**/*.eval
 /irt_results/
+/external_data/epoch-gpqa/item_domains.csv
