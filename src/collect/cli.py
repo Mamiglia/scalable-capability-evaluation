@@ -5,7 +5,7 @@ from pathlib import Path
 
 from inspect_ai import eval as eval_func
 
-from configs import BenchConfig, ModelConfig
+from configs import TaskConfig, ModelConfig
 from path_utils import get_eval_path
 
 
@@ -45,14 +45,16 @@ def main() -> int:
     # TODO: consider adding a way to run in parallel with detached processes, and show progress in a single terminal. This would be useful for running multiple benchmarks or models at once.
     # TODO: consider adding a way to resume from a previous run
     for bench_path in parsed_args.bench:
-        bench = BenchConfig.from_cli(bench_path, args=extra)
+        bench = TaskConfig.from_cli(bench_path, args=extra)
         for model_path in parsed_args.model:
             model = ModelConfig.from_cli(model_path, args=extra)
             for i in range(parsed_args.epochs):
                 print(
                     f"Running epoch {i}/{parsed_args.epochs} for benchmark '{bench.name}' and model '{model.slug}'"
                 )
-                exit_code = _run_eval(bench_cfg=bench, model_cfg=model, repeat=i)
+                target_path = get_eval_path(bench, model) / f"{i}.eval"
+                
+                exit_code = _run_eval(bench_cfg=bench, model_cfg=model, target_path=target_path)
                 if exit_code != 0:
                     print(
                         f"Epoch {i} failed with exit code {exit_code} for benchmark '{bench.name}' and model '{model.slug}'. Stopping further epochs."
@@ -61,19 +63,12 @@ def main() -> int:
     return 0
 
 def _run_eval(
-    bench_cfg: BenchConfig,
+    bench_cfg: TaskConfig,
     model_cfg: ModelConfig,
-    repeat: int = 1,
+    target_path: Path,
     **kwargs,
 ) -> int:
     """Execute a single evaluation run for a given benchmark and model config."""
-    target_path = get_eval_path(
-        benchmark=bench_cfg.name,
-        task_args=bench_cfg.task_args,
-        model=model_cfg.slug,
-        n=repeat,
-    )
-
     if target_path.exists():
         print(f"Skipping {target_path} (already exists)")
         return 0
