@@ -22,3 +22,4 @@ class ModelConfig(DraccusConfig):
                     "quantizations": ["bf16", "fp16"],
                 }
             }
+        self.model_args |= self._kwargs or {}

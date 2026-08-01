@@ -61,8 +61,8 @@ def responses_to_sample(
     )
     
 def build_dataset(
-    log_major_path: Path,
-    log_minor_path: Path,
+    major_path: Path,
+    minor_path: Path,
     format_str: str = USER_PROMPT,
     max_len: int = 24000,
     require_both_correct: bool = True,
@@ -72,15 +72,15 @@ def build_dataset(
     Builds a dataset from two eval logs, comparing the responses of two models.
 
     Args:
-        log_major_path (Path): Path to the eval log for the major model.
-        log_minor_path (Path): Path to the eval log for the minor model.
+        major_path (Path): Path to the eval log for the major model.
+        minor_path (Path): Path to the eval log for the minor model.
         format_str (str): The format string to use for the output.
         max_len (int): The maximum length of each model's response.
     Returns:
         Dataset: A dataset containing the formatted comparisons of model responses.
     """
-    log_major = read_eval_log(log_major_path)
-    log_minor = read_eval_log(log_minor_path)
+    log_major = read_eval_log(major_path)
+    log_minor = read_eval_log(minor_path)
     
     def eligible(sample: Sample) -> bool:
         return hasattr(sample, "id") and (

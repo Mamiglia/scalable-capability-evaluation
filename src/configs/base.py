@@ -12,6 +12,7 @@ T = TypeVar("T", bound="DraccusConfig")
 @dataclass(kw_only=True)
 class DraccusConfig:
     name: str
+    _kwargs: dict[str, Any] = draccus.field(default_factory=dict)
     
     @property
     def shortname(self) -> str:
@@ -19,12 +20,26 @@ class DraccusConfig:
         return self.name.split("/")[-1]
 
     @classmethod
-    def from_cli(cls: Type[T], spec: Union[str, dict, T], args: Any = None, **kwargs: Any) -> T:
+    def from_cli(cls: Type[T], spec: Union[str, dict, T], *args: Any, **kwargs: Any) -> T:
+        """Create a config instance from a CLI argument.
+        If spec is a dict, it is used to create the config instance.
+        If spec is a path to a config file, it is parsed and used to create the config instance.
+        If spec is a config instance, it is returned as is.
+        """
+        cli_args = kwargs.pop("args", None)
         if isinstance(spec, cls):
-            return spec
-        if isinstance(spec, dict):
-            return draccus.decode(cls, spec)
-        path = Path(spec)
-        if path.exists():
-            return draccus.parse(cls, config_path=path, args=[] if args is None else args, **kwargs)
-        return cls(name=str(spec))
+            cfg = spec
+        elif isinstance(spec, dict):
+            cfg = draccus.decode(cls, spec)
+        elif isinstance(spec, (str, Path)) and Path(spec).exists():
+            cfg = draccus.parse(cls, config_path=Path(spec), args=[] if cli_args is None else cli_args)
+        else:        
+            cfg = cls(name=str(spec))
+            
+        if kwargs:
+            for k, v in kwargs.items():
+                if hasattr(cfg, k):
+                    setattr(cfg, k, v)
+                else:
+                    cfg._kwargs[k] = v
+        return cfg

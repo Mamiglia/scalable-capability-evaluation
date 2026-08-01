@@ -36,7 +36,6 @@ class ExperimentConfig(DraccusConfig):
 
     log_dir: Optional[str] = None
     limit: Optional[int] = None
-    kwargs: Optional[Dict[str, Any]] = field(default_factory=dict)
     
     def model_evals(self, model: ModelConfig) -> List[Path]:
         """Return a list of all model evaluation paths for a given <model, task> tuple."""
@@ -82,7 +81,7 @@ class ExperimentConfig(DraccusConfig):
 
     def eval_kwargs(self) -> Dict[str, Any]:
         """Return keyword arguments for inspect_ai.eval."""
-        kwargs = dict(self.kwargs or {})
+        kwargs = self._kwargs or {}
         if self.limit is not None:
             kwargs["limit"] = self.limit
         return kwargs

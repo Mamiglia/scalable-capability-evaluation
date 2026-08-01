@@ -22,7 +22,7 @@ class TaskConfig(DraccusConfig):
 
     def eval_kwargs(self) -> Dict[str, Any]:
         """Return keyword arguments passed to inspect_ai.eval."""
-        kwargs: Dict[str, Any] = {}
+        kwargs = self._kwargs or {}
         if self.cache is not None:
             kwargs["cache"] = self.cache
         if self.limit is not None:
