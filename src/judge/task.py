@@ -4,18 +4,9 @@ from inspect_ai import Task, task
 from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
-from configs.experiment import ExperimentConfig
+from configs.experiment import ExperimentConfig, SYSTEM_PROMPT
 from judge.dataset import build_dataset
 from judge.scorer import judge_scorer
-
-SYSTEM_PROMPT = """You are an AI model that judges the responses of two other AI models to the same input prompt.
-You will be given a question and the responses from two models, labeled Transcript A and Transcript B, both coming to the correct solution.
-One of the two models is more capable than the other, and your task is to identify which is the smarter model (A or B). You MUST follow this reply format:
-
-EXPLANATION: <Your explanation of which response is better and why. 2-4 sentences.>
-ANSWER: <A or B, indicating which response is better.>
-CONFIDENCE: <An integer between 1 and 5 indicating your confidence in your answer.>
-"""
 
 
 @task

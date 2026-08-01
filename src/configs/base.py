@@ -9,9 +9,14 @@ import draccus
 T = TypeVar("T", bound="DraccusConfig")
 
 
-@dataclass
+@dataclass(kw_only=True)
 class DraccusConfig:
-    name: str = ""
+    name: str
+    
+    @property
+    def shortname(self) -> str:
+        """Return a short name for the config."""
+        return self.name.split("/")[-1]
 
     @classmethod
     def from_cli(cls: Type[T], spec: Union[str, dict, T], args: Any = None, **kwargs: Any) -> T:
@@ -21,5 +26,5 @@ class DraccusConfig:
             return draccus.decode(cls, spec)
         path = Path(spec)
         if path.exists():
-            return draccus.parse(cls, config_path=path, args=args, **kwargs)
+            return draccus.parse(cls, config_path=path, args=[] if args is None else args, **kwargs)
         return cls(name=str(spec))
