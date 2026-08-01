@@ -5,7 +5,7 @@ from pathlib import Path
 
 from inspect_ai import eval as eval_func
 
-from configs import TaskConfig, ModelConfig
+from configs import TaskConfig, ModelConfig, kv_pair, flag_parse
 from configs.utils import get_eval_path
 
 
@@ -39,21 +39,48 @@ def main() -> int:
         default=1,
         help="Number of epochs to run (default: 1).",
     )
-    parsed_args, extra = parser.parse_known_args()
-    # TODO: extra args should be passed to the eval to override eval args, but also task args and model args. Need to figure out how to do this cleanly.
-
+    parser.add_argument(
+        "-T",
+        "--task-arg",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Task argument in KEY=VALUE format (can be specified multiple times).",
+        type=kv_pair,
+    )
+    parser.add_argument(
+        "-M",
+        "--model-arg",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Model argument in KEY=VALUE format (can be specified multiple times).",
+        type=kv_pair,
+    )
+    args, extra = parser.parse_known_args()
+    eval_extra_args = flag_parse(extra) if extra else {}
+    
     # TODO: consider adding a way to run in parallel with detached processes, and show progress in a single terminal. This would be useful for running multiple benchmarks or models at once.
     # TODO: consider adding a way to resume from a previous run
-    for bench_path in parsed_args.bench:
-        bench = TaskConfig.from_cli(bench_path, args=extra)
-        for model_path in parsed_args.model:
-            model = ModelConfig.from_cli(model_path, args=extra)
-            for i in range(parsed_args.epochs):
+    for bench_path in args.bench:
+        bench = TaskConfig.from_cli(bench_path)
+        if args.task_arg:
+            bench.task_args.update({k: v for k, v in args.task_arg})
+
+        for model_path in args.model:
+            model = ModelConfig.from_cli(model_path)
+            if args.model_arg:
+                model.model_args.update({k: v for k, v in args.model_arg})
+
+            for i in range(args.epochs):
                 print(
-                    f"Running epoch {i}/{parsed_args.epochs} for benchmark '{bench.name}' and model '{model.slug}'"
+                    f"Running epoch {i}/{args.epochs} for benchmark '{bench.name}' and model '{model.slug}'"
                 )
                 
-                exit_code = _run_eval(bench_cfg=bench, model_cfg=model, repeat=i)
+                exit_code = _run_eval(
+                    bench_cfg=bench,
+                    model_cfg=model,
+                    repeat=i,
+                    **eval_extra_args,
+                )
                 if exit_code != 0:
                     print(
                         f"Epoch {i} failed with exit code {exit_code} for benchmark '{bench.name}' and model '{model.slug}'. Stopping further epochs."
@@ -82,9 +109,10 @@ def _run_eval(
         tasks=bench_cfg.task,
         model=model_cfg.slug,
         model_args=model_cfg.model_args or {},
+        task_args=bench_cfg.task_args or {},
         seed=repeat,
         log_dir=str(target_path.parent),
-        **kwargs | bench_cfg.eval_kwargs(),
+        **bench_cfg.eval_kwargs() | kwargs,
     )
     return 0 if logs[0].status == "success" else 1
 

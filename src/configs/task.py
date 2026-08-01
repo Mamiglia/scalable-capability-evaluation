@@ -25,8 +25,6 @@ class TaskConfig(DraccusConfig):
         kwargs: Dict[str, Any] = {}
         if self.cache is not None:
             kwargs["cache"] = self.cache
-        if self.task_args is not None:
-            kwargs["task_args"] = self.task_args
         if self.limit is not None:
             kwargs["limit"] = self.limit
         if self.epochs is not None:

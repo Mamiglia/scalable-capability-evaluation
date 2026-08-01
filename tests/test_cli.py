@@ -77,6 +77,43 @@ def test_collect_multiple_evals(monkeypatch, tmp_path):
     ]
 
 
+def test_collect_args_parsing(monkeypatch, tmp_path):
+    m1 = tmp_path / "m1.yml"
+    m1.write_text("name: custom/m1\nslug: custom/m1\n")
+    b1 = tmp_path / "b1.yml"
+    b1.write_text("name: inspect_evals/b1\n")
+
+    captured = {}
+    mock_log = MagicMock()
+    mock_log.status = "success"
+
+    def mock_eval(**kwargs):
+        captured.update(kwargs)
+        return [mock_log]
+
+    monkeypatch.setattr("collect.cli.eval_func", mock_eval)
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target.eval")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "collect",
+            "-b", str(b1),
+            "-m", str(m1),
+            "-T", "fewshot=5",
+            "-M", "temp=0.7",
+            "--limit", "10",
+            "--max-connections", "4",
+        ],
+    )
+
+    ret = collect_main()
+    assert ret == 0
+    assert captured["task_args"] == {"fewshot": 5}
+    assert captured["model_args"]["temp"] == 0.7
+    assert captured["limit"] == 10
+    assert captured["max_connections"] == 4
+
+
 def test_judge_main_execution(monkeypatch, tmp_path):
     exp_config = tmp_path / "exp.yml"
     exp_config.write_text("""name: test_exp

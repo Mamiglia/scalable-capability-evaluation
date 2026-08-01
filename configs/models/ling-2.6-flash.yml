@@ -1,3 +1,3 @@
-model_name: inclusionai/ling-2.6-flash
+name: inclusionai/ling-2.6-flash
 model_args:
   provider: {}
