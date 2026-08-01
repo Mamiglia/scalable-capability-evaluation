@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
-from configs.benchmark import TaskConfig
+from configs.task import TaskConfig
 from configs.model import ModelConfig
 from configs.base import DraccusConfig
 from configs.utils import get_eval_path
@@ -77,8 +77,6 @@ class ExperimentConfig(DraccusConfig):
             self.minor = ModelConfig.from_cli(self.minor)
         if isinstance(self.benchmark, (str, Path)):
             self.benchmark = TaskConfig.from_cli(self.benchmark)
-        if not self.name:
-            self.name = f"{self.benchmark.name}/{self.judge.shortname}:{self.major.shortname}|{self.minor.shortname}"
         if not self.log_dir:
             self.log_dir = f"logs/judge/{self.name}"
 

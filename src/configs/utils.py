@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from configs.benchmark import TaskConfig
+from configs.task import TaskConfig
 from configs.model import ModelConfig
 
 def hash_task_args(task_args: dict[str, Any] | None) -> str:

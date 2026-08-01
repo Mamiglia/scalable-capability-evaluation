@@ -82,10 +82,9 @@ def _run_eval(
         tasks=bench_cfg.task,
         model=model_cfg.slug,
         model_args=model_cfg.model_args or {},
-        task_args=bench_cfg.task_args or {},
         seed=repeat,
         log_dir=target_path.parent,
-        **kwargs,
+        **kwargs | bench_cfg.eval_kwargs(),
     )
     return 0 if logs[0].status == "success" else 1
 
