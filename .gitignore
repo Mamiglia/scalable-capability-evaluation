@@ -18,5 +18,6 @@ logs/
 artifacts/
 /docs/
 
-# external reference data: keep small CSVs, ignore bulky downloaded logs
+# external reference data: keep small CSVs for scores only, ignore downloaded logs
 external_data/**/*.eval
+/irt_results/
