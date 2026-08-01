@@ -6,21 +6,25 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 from configs.benchmark import TaskConfig
 from configs.model import ModelConfig
-from judge.task import SYSTEM_PROMPT
-
-
 from configs.base import DraccusConfig
 from configs.utils import get_eval_path
 
+SYSTEM_PROMPT = """You are an AI model that judges the responses of two other AI models to the same input prompt.
+You will be given a question and the responses from two models, labeled Transcript A and Transcript B, both coming to the correct solution.
+One of the two models is more capable than the other, and your task is to identify which is the smarter model (A or B). You MUST follow this reply format:
 
-@dataclass
+EXPLANATION: <Your explanation of which response is better and why. 2-4 sentences.>
+ANSWER: <A or B, indicating which response is better.>
+CONFIDENCE: <An integer between 1 and 5 indicating your confidence in your answer.>
+"""
+
+
+@dataclass(kw_only=True)
 class ExperimentConfig(DraccusConfig):
     judge: ModelConfig | str
     major: ModelConfig | str
     minor: ModelConfig | str
     benchmark: TaskConfig | str
-
-    name: Optional[str] = None  # name of experiment
 
     mode: Literal["paired", "combinatorial", "custom"] = "paired"
     pairs: Optional[List[Tuple[int, int]]] = None
@@ -65,13 +69,13 @@ class ExperimentConfig(DraccusConfig):
             return [(major_evals[i], minor_evals[j]) for i, j in self.pairs]
 
     def __post_init__(self):
-        if isinstance(self.judge, str):
+        if isinstance(self.judge, (str, Path)):
             self.judge = ModelConfig.from_cli(self.judge)
-        if isinstance(self.major, str):
+        if isinstance(self.major, (str, Path)):
             self.major = ModelConfig.from_cli(self.major)
-        if isinstance(self.minor, str): 
+        if isinstance(self.minor, (str, Path)): 
             self.minor = ModelConfig.from_cli(self.minor)
-        if isinstance(self.benchmark, str):
+        if isinstance(self.benchmark, (str, Path)):
             self.benchmark = TaskConfig.from_cli(self.benchmark)
         if not self.name:
             self.name = f"{self.benchmark.name}/{self.judge.shortname}:{self.major.shortname}|{self.minor.shortname}"
