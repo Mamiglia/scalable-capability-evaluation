@@ -1,8 +1,5 @@
-name: core_bench_hard
-task: inspect_evals/core_bench
+name: inspect_evals/core_bench
 task_args:
   difficulty: hard
   max_messages: 100
   limit: 45
-
-log_dir: data/raw/core_bench_hard

@@ -1,3 +1,1 @@
-name: mbpp
-task: inspect_evals/mbpp
-log_dir: data/raw/mbpp
+name: inspect_evals/mbpp

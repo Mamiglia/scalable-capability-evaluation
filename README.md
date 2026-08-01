@@ -1,117 +1,121 @@
-# Small Judge
+# Small-Judge
 
-Research code for testing whether benchmark transcripts contain signal about
-the capability of the model that produced them, even after conditioning on the
-answer being correct.
+`small-judge` is a lightweight Python framework built on top of [Inspect AI](https://inspect.ai-safety-institute.org.uk/) for running benchmark collection and pairwise LLM judge evaluations comparing candidate model pairs across benchmarks.
 
-The repository has two deliberately separate workflows:
+
+## 📁 Repository Structure
 
 ```text
-configs/bench/ ────────> collect ──> data/raw/ (append-only heap)
-                                         │
-                                         v
-                                   data/dataset/ (soft-link tree)
-                                         │
-configs/experiments/ ──> judge ──────────┘
-              │
-              v
-             logs/
+small-judge/
+├── configs/              # YAML configuration files
+│   ├── bench/            # Benchmark task configs (e.g., gsm8k, mbpp, core-bench)
+│   ├── models/           # Model configs (e.g., ling-2.6-flash)
+│   └── experiments/      # Experiment configs combining benchmark, judge, major, & minor models
+├── src/                  # Core library source code (DO NOT DIRECTLY EDIT FOR EXPERIMENTAL CHANGES)
+│   ├── collect/          # Collection CLI implementation
+│   │   └── cli.py
+│   ├── configs/          # Dataclass configuration schemas (base, benchmark, model, experiment, utils)
+│   │   ├── base.py
+│   │   ├── task.py
+│   │   ├── experiment.py
+│   │   ├── model.py
+│   │   └── utils.py
+│   └── judge/            # Judge task builder, dataset constructor, scorer, & CLI
+│       ├── cli.py
+│       ├── dataset.py
+│       ├── scorer.py
+│       ├── task.py
+│       └── util.py
+├── script/               # Helper scripts (e.g., leave-one-out experiments)
+│   └── run_corebench_leave_one_out.sh
+├── tests/                # Pytest unit test suite
+│   ├── conftest.py
+│   ├── test_cli.py
+│   ├── test_dataset.py
+│   ├── test_scorer.py
+│   ├── test_task.py
+│   └── test_util.py
+├── pyproject.toml        # Project dependencies and CLI entrypoints
+└── README.md
 ```
 
-Raw logs live in `data/raw/`. Code organizes and resolves logs from metadata
-inside Inspect headers by soft-linking files into `data/dataset/` with the
-structure `benchmark/task_args/model/{idx}.eval`.
+---
 
-## Collect benchmark transcripts
+## 🚀 Installation & Setup
 
-Benchmark settings live in `configs/bench/`. Models are selected independently
-on the command line.
+Ensure you have [`uv`](https://github.com/astral-sh/uv) installed.
 
-```sh
+1. Clone the repository and install dependencies in editable mode:
+```bash
+uv pip install -e .
+```
+
+2. (Optional) Set up required environment variables (e.g. `OPENROUTER_API_KEY` or model provider API keys) in a `.env` file or shell environment.
+
+---
+
+## 🛠️ Usage
+
+### 1. Benchmark Data Collection (`collect`)
+
+The `collect` CLI evaluates one or more models on specified benchmarks and saves the `.eval` log files into `data/`.
+
+```bash
+# Run collection for a single benchmark and model
+uv run collect -b configs/bench/gsm8k.yml -m configs/models/ling-2.6-flash.yml -n 1
+
+# Run collection across multiple benchmarks and models
 uv run collect \
-  --bench configs/bench/gpqa.yml \
-  --model configs/models/ling-2.6-flash.yml \
-  --log_dir data/raw/runs/gpqa-ling-2.6-flash \
-  --limit 2
+  -b configs/bench/gsm8k.yml -b configs/bench/mbpp.yml \
+  -m configs/models/ling-2.6-flash.yml \
+  -n 1
 ```
 
-Use a fresh `log_dir` for each eval set; Inspect rejects a directory
-containing logs from a different eval set. Undeclared options such as
-`--limit 2` are parsed as kwargs and forwarded to Inspect. GPQA is configured
-with four epochs, so a limit of two runs two dataset samples per epoch.
+### 2. Pairwise Judge Evaluation (`judge`)
 
-For example, the GPQA benchmark manifest is:
+The `judge` CLI evaluates pairs of model outputs (Major model vs. Minor model) using a designated Judge model.
 
+```bash
+# Run a judge experiment from an experiment YAML config
+uv run judge --config_path configs/experiments/core-bench/judge-gemma-easy.yml
+
+# Or specify parameters directly via CLI flags
+uv run judge \
+  -b configs/bench/core-bench/easy.yml \
+  --major google/gemma-4-31b-it \
+  --minor qwen/qwen3.5-9b \
+  -j openrouter/google/gemma-4-31b-it
+```
+
+---
+
+## ⚙️ Configuration Format
+
+### Benchmark Config (`TaskConfig`)
+Example `configs/bench/gsm8k.yml`:
 ```yaml
-name: gpqa
-task: inspect_evals/gpqa_diamond
-log_dir: data/raw/gpqa
-```
-
-Models are supplied with a repeatable `--model` option. Each value may be a
-model config path or a direct provider/model identifier:
-
-```sh
-uv run collect \
-  --bench configs/bench/mbpp.yml \
-  --model configs/models/model1.yml \
-  --model provider2/model2
-```
-
-## Explore the data heap
-
-Build soft links under `data/dataset/` from Inspect log headers in `data/raw/`:
-
-```sh
-uv run python src/registry/build.py
-```
-
-This constructs `data/dataset/benchmark/task_args/model/{idx}.eval`
-pointing directly to the corresponding raw log in `data/raw/` sorted chronologically.
-It is derived data and can be deleted and rebuilt at any time.
-
-## Run judge experiments
-
-Judge experiments compare existing successful collection logs and refresh the
-dataset soft links automatically by default. Experiment manifests live in
-`configs/experiments/`:
-
-```yaml
-name: gemma-31b-v-2b-gpqa
-judge: openrouter/inclusionai/ling-2.6-flash
-major: vllm/google/gemma-4-31B-it
-minor: vllm/google/gemma-4-26B-A4B-it
-benchmark: !include ../bench/gpqa.yml
+name: inspect_evals/gsm8k
+limit: 100
 task_args:
-  cot: true
-  epochs: 4
+  fewshot: 0
 ```
 
-Run a two-sample experiment:
-
-```sh
-uv run judge \
-  --config_path configs/experiments/gemma-gpqa.yml \
-  --limit 2
+### Model Config (`ModelConfig`)
+Example `configs/models/ling-2.6-flash.yml`:
+```yaml
+name: openrouter/inclusionai/ling-2.6-flash
+slug: openrouter/inclusionai/ling-2.6-flash
+model_args:
+  provider: {}
 ```
 
-Declaring fields and arbitrary Inspect kwargs can both be overridden:
-
-```sh
-uv run judge \
-  --config_path configs/experiments/gemma-gpqa.yml \
-  --include_reverse false \
-  --limit 20
-```
-
-Judge results are written to `logs/`. The source paths and experiment controls
-are recorded in the Inspect task metadata.
-
-## Code layout
-
-```text
-src/
-├── collect/     # benchmark data collection
-├── registry/    # soft-link builder and path resolver over data/raw -> data/dataset
-└── judge/       # transcript pairing, judging, scoring, experiment CLI
+### Experiment Config (`ExperimentConfig`)
+Example `configs/experiments/core-bench/judge-gemma-easy.yml`:
+```yaml
+name: judge-gemma-easy
+judge: openrouter/google/gemma-4-31b-it
+major: moonshotai/kimi-k2.6
+minor: qwen/qwen3.5-9b
+benchmark: !include ../../bench/core-bench/easy.yml
+mode: paired
 ```
