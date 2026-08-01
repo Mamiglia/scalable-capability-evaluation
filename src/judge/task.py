@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from inspect_ai import Task, task
+from inspect_ai import Task
 from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
@@ -9,7 +9,6 @@ from judge.dataset import build_dataset
 from judge.scorer import judge_scorer
 
 
-@task
 def judge_task(
     major_path: str | Path,
     minor_path: str | Path,
