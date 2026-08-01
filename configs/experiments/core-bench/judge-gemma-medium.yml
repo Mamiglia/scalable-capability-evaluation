@@ -1,5 +1,0 @@
-judge: openrouter/google/gemma-4-31b-it
-major: moonshotai/kimi-k2.6
-minor: qwen/qwen3.5-9b
-benchmark: !include ../../bench/core-bench/medium.yml
-mode: paired

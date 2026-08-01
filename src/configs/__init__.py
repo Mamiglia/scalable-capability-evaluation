@@ -1,5 +1,5 @@
 from configs.base import DraccusConfig
-from configs.benchmark import TaskConfig
+from configs.task import TaskConfig
 from configs.model import ModelConfig
 from configs.experiment import ExperimentConfig
 
