@@ -36,9 +36,33 @@ def pass_rate(idx, y, n):
     return rate
 
 
+def mae(rate, p):
+    """Mean absolute error of predicted P against the empirical rate."""
+    return float(np.mean(np.abs(np.asarray(p) - np.asarray(rate))))
+
+
+def _logit(p, eps=1e-6):
+    p = np.clip(np.asarray(p, float), eps, 1 - eps)
+    return np.log(p / (1 - p))
+
+
+def cell_rate(responses):
+    """Empirical %-correct per (model, benchmark, item) over all non-blank epochs."""
+    valid = responses[responses["answer"].fillna("").astype(str).str.strip() != ""]
+    return valid.groupby(["model", "benchmark", "item"])["correct"].mean().to_dict()
+
+
 def heldout(responses, model="1pl", k=10, seed=0, warmup=500, samples=500, **kwargs):
-    """Per-fold held-out accuracy and log-loss: IRT vs the item and model baselines."""
+    """
+    Per-fold held-out MAE: predicted P(correct) vs empirical %-correct over epochs.
+
+    Trains on one epoch per cell; scores held-out cells against their rate over all
+    epochs. The whole cell is held out, so no epoch of it leaks into training.
+    """
     data = encode(pick_epoch(responses))
+    rate = cell_rate(responses)
+    target = np.array([rate[(data.models[m], *data.items[i])]
+                       for m, i in zip(data.model_idx, data.item_idx)])
     folds = np.random.default_rng(seed).permutation(len(data.y)) % k
     rows = []
     for f in range(k):
@@ -51,37 +75,39 @@ def heldout(responses, model="1pl", k=10, seed=0, warmup=500, samples=500, **kwa
         p = predict(model, post, data.model_idx[test], data.item_idx[test])
         item_p = pass_rate(data.item_idx[train], data.y[train], len(data.items))[data.item_idx[test]]
         model_p = pass_rate(data.model_idx[train], data.y[train], len(data.models))[data.model_idx[test]]
-        yt = data.y[test]
-        overall_p = np.full(yt.shape, data.y[train].mean())
+        overall_p = np.full(int(test.sum()), data.y[train].mean())
+        both_add = np.clip(model_p + item_p - overall_p, 0, 1)
+        both_logit = 1 / (1 + np.exp(-(_logit(model_p) + _logit(item_p) - _logit(overall_p))))
+        t = target[test]
         rows.append({
             "fold": f,
-            "irt_acc": accuracy(yt, p), "irt_ll": logloss(yt, p),
-            "item_base_acc": accuracy(yt, item_p), "item_base_ll": logloss(yt, item_p),
-            "model_base_acc": accuracy(yt, model_p), "model_base_ll": logloss(yt, model_p),
-            "overall_base_acc": accuracy(yt, overall_p), "overall_base_ll": logloss(yt, overall_p),
+            "irt_mae": mae(t, p),
+            "item_base_mae": mae(t, item_p),
+            "model_base_mae": mae(t, model_p),
+            "overall_base_mae": mae(t, overall_p),
+            "both_add_mae": mae(t, both_add),
+            "both_logit_mae": mae(t, both_logit),
         })
     return pd.DataFrame(rows)
 
 
-def compare(responses, specs=None, k=5, resamples=20, seed=0, warmup=400, samples=400):
+def compare(responses, specs=None, k=10, seed=0, warmup=400, samples=400):
     """
-    Held-out accuracy per irt model (1pl / 2pl / mirt-K) vs all three baselines
-    (overall / model / item). Reseeds the CV `resamples` times; one row per
-    (spec, resample), so the caller takes the mean and error margin.
+    Held-out MAE per irt model (1pl / 2pl / mirt-K) vs the three baselines, from a
+    single k-fold CV (no subsampling on full data). One row per (spec, fold).
     """
     if specs is None:
         specs = [("1pl", "1pl", {}), ("2pl", "2pl", {})]
         specs += [(f"mirt-K{d}", "mirt", {"dim": d}) for d in range(1, 6)]
     rows = []
     for name, model, kw in specs:
-        for r in range(resamples):
-            res = heldout(responses, model=model, k=k, seed=r, warmup=warmup, samples=samples, **kw)
+        res = heldout(responses, model=model, k=k, seed=seed, warmup=warmup, samples=samples, **kw)
+        for _, r in res.iterrows():
             rows.append({
-                "spec": name, "resample": r,
-                "irt": res["irt_acc"].mean(),
-                "item_base": res["item_base_acc"].mean(),
-                "model_base": res["model_base_acc"].mean(),
-                "overall_base": res["overall_base_acc"].mean(),
+                "spec": name, "fold": int(r["fold"]),
+                "irt": r["irt_mae"], "item_base": r["item_base_mae"],
+                "model_base": r["model_base_mae"], "overall_base": r["overall_base_mae"],
+                "both_add": r["both_add_mae"], "both_logit": r["both_logit_mae"],
             })
     return pd.DataFrame(rows)
 
@@ -102,13 +128,16 @@ def estimate_required_model_count(responses, counts=(5, 10, 20, 50, 100, 182),
             continue
         for r in range(resamples):
             sub = responses[responses["model"].isin(rng.choice(models, n, replace=False))]
-            res = heldout(sub, model=model, k=k, seed=r, warmup=warmup, samples=samples)
+            res1 = heldout(sub, model="1pl", k=k, seed=r, warmup=warmup, samples=samples)
+            res2 = heldout(sub, model="2pl", k=k, seed=r, warmup=warmup, samples=samples)
             rows.append({
                 "n_models": n, "resample": r,
-                "irt": res["irt_acc"].mean(),
-                "item_base": res["item_base_acc"].mean(),
-                "model_base": res["model_base_acc"].mean(),
-                "overall_base": res["overall_base_acc"].mean(),
+                "irt_1pl": res1["irt_mae"].mean(), "irt_2pl": res2["irt_mae"].mean(),
+                "item_base": res2["item_base_mae"].mean(),
+                "model_base": res2["model_base_mae"].mean(),
+                "overall_base": res2["overall_base_mae"].mean(),
+                "both_add": res2["both_add_mae"].mean(),
+                "both_logit": res2["both_logit_mae"].mean(),
             })
     return pd.DataFrame(rows)
 
@@ -128,13 +157,16 @@ def estimate_required_item_count(responses, counts=(10, 20, 50, 100, 198),
             continue
         for r in range(resamples):
             sub = responses[responses["item"].isin(rng.choice(items, n, replace=False))]
-            res = heldout(sub, model=model, k=k, seed=r, warmup=warmup, samples=samples)
+            res1 = heldout(sub, model="1pl", k=k, seed=r, warmup=warmup, samples=samples)
+            res2 = heldout(sub, model="2pl", k=k, seed=r, warmup=warmup, samples=samples)
             rows.append({
                 "n_items": n, "resample": r,
-                "irt": res["irt_acc"].mean(),
-                "item_base": res["item_base_acc"].mean(),
-                "model_base": res["model_base_acc"].mean(),
-                "overall_base": res["overall_base_acc"].mean(),
+                "irt_1pl": res1["irt_mae"].mean(), "irt_2pl": res2["irt_mae"].mean(),
+                "item_base": res2["item_base_mae"].mean(),
+                "model_base": res2["model_base_mae"].mean(),
+                "overall_base": res2["overall_base_mae"].mean(),
+                "both_add": res2["both_add_mae"].mean(),
+                "both_logit": res2["both_logit_mae"].mean(),
             })
     return pd.DataFrame(rows)
 
@@ -162,5 +194,5 @@ def estimate_grid(responses, model_counts=(5, 10, 20, 50, 100, 182),
                 sub = responses[responses["model"].isin(ms) & responses["item"].isin(it)]
                 res = heldout(sub, model=model, k=k, seed=r, warmup=warmup, samples=samples)
                 rows.append({"n_models": nm, "n_items": ni, "resample": r,
-                             "irt": res["irt_acc"].mean()})
+                             "irt": res["irt_mae"].mean()})
     return pd.DataFrame(rows)
