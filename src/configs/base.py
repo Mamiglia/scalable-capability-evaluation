@@ -2,12 +2,9 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Type, TypeVar, Union
+from typing import Any
 
 import draccus
-
-T = TypeVar("T", bound="DraccusConfig")
-
 
 @dataclass(kw_only=True)
 class DraccusConfig:
@@ -20,7 +17,7 @@ class DraccusConfig:
         return self.name.split("/")[-1]
 
     @classmethod
-    def from_cli(cls: Type[T], spec: Union[str, dict, T], *args: Any, **kwargs: Any) -> T:
+    def from_cli(cls, spec, *args: Any, **kwargs: Any):
         """Create a config instance from a CLI argument.
         If spec is a dict, it is used to create the config instance.
         If spec is a path to a config file, it is parsed and used to create the config instance.
