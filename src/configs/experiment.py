@@ -4,21 +4,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
+from configs.benchmark import TaskConfig
 from configs.model import ModelConfig
 from judge.task import SYSTEM_PROMPT
 
 
+from configs.base import DraccusConfig
+from configs.utils import get_eval_path
+
+
 @dataclass
-class ExperimentConfig:
-    judge: Any
-    major_log: Optional[Union[str, List[str]]] = None
-    minor_log: Optional[Union[str, List[str]]] = None
-    major_log_path: Optional[Union[str, List[str]]] = None
-    minor_log_path: Optional[Union[str, List[str]]] = None
-    pairs: Optional[List[Any]] = None
+class ExperimentConfig(DraccusConfig):
+    judge: ModelConfig | str
+    major: ModelConfig | str
+    minor: ModelConfig | str
+    benchmark: TaskConfig | str
+
     name: Optional[str] = None  # name of experiment
 
     mode: Literal["paired", "combinatorial", "custom"] = "paired"
+    pairs: Optional[List[Tuple[int, int]]] = None
 
     require_both_correct: bool = True
     include_reverse: bool = True
@@ -28,31 +33,48 @@ class ExperimentConfig:
     log_dir: Optional[str] = None
     limit: Optional[int] = None
     kwargs: Optional[Dict[str, Any]] = field(default_factory=dict)
+    
+    def model_evals(self, model: ModelConfig) -> List[Path]:
+        """Return a list of all model evaluation paths for a given <model, task> tuple."""
+        eval_path = get_eval_path(
+            task=self.benchmark,
+            model=model,
+        )
+        eval_paths = sorted(eval_path.glob("*.eval"))
+        return eval_paths
+    
+    @property
+    def task_name(self) -> str:
+        """Return a name for the task based on the benchmark and model names."""
+        return f"{self.benchmark.name}/{self.major.shortname}|{self.minor.shortname}"
 
     def resolve_pairs(self) -> List[Tuple[Path, Path]]:
-        if self.pairs:
-            return [(Path(p[0]), Path(p[1])) for p in self.pairs]
-
-        major = self.major_log or self.major_log_path
-        minor = self.minor_log or self.minor_log_path
-
-        if not major or not minor:
-            raise ValueError("Either 'pairs' or both 'major_log' and 'minor_log' must be provided.")
-
-        major_list = [Path(p) for p in (major if isinstance(major, list) else [major])]
-        minor_list = [Path(p) for p in (minor if isinstance(minor, list) else [minor])]
-
+        major_evals = self.model_evals(self.major)
+        minor_evals = self.model_evals(self.minor)
         if self.mode == "paired":
-            return list(zip(major_list, minor_list))
+            if len(major_evals) != len(minor_evals):
+                raise ValueError(
+                    f"Number of major evals ({len(major_evals)}) does not match number of minor evals ({len(minor_evals)})"
+                )
+            return list(zip(major_evals, minor_evals))
         elif self.mode == "combinatorial":
-            return [(m, n) for m in major_list for n in minor_list]
-        else:
-            return list(zip(major_list, minor_list))
+            return [(m, n) for m in major_evals for n in minor_evals]
+        elif self.mode == "custom":
+            if not self.pairs:
+                raise ValueError("Custom mode requires 'pairs' to be specified as a list of (major_index, minor_index) tuples.")
+            return [(major_evals[i], minor_evals[j]) for i, j in self.pairs]
 
     def __post_init__(self):
-        judge_cfg = ModelConfig.from_cli(self.judge)
+        if isinstance(self.judge, str):
+            self.judge = ModelConfig.from_cli(self.judge)
+        if isinstance(self.major, str):
+            self.major = ModelConfig.from_cli(self.major)
+        if isinstance(self.minor, str): 
+            self.minor = ModelConfig.from_cli(self.minor)
+        if isinstance(self.benchmark, str):
+            self.benchmark = TaskConfig.from_cli(self.benchmark)
         if not self.name:
-            self.name = f"judge_{judge_cfg.slug.split('/')[-1]}"
+            self.name = f"{self.benchmark.name}/{self.judge.shortname}:{self.major.shortname}|{self.minor.shortname}"
         if not self.log_dir:
             self.log_dir = f"logs/judge/{self.name}"
 

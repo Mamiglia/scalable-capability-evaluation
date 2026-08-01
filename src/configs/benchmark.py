@@ -10,9 +10,9 @@ from configs.base import DraccusConfig
 
 
 @dataclass
-class BenchConfig(DraccusConfig):
-    name: str = "gpqa"
-    task: Optional[str] = None
+class TaskConfig(DraccusConfig):
+    task: str
+    name: Optional[str] = None
     task_args: Optional[Dict[str, Any]] = None
     cache: Any = field(default_factory=lambda: CachePolicy(expiry="1M"))
     limit: Optional[int] = None
@@ -21,8 +21,8 @@ class BenchConfig(DraccusConfig):
     eval_path: Optional[Path] = None
 
     def __post_init__(self):
-        if not self.task:
-            self.task = f"inspect_evals/{self.name}"
+        if not self.name:
+            self.name = self.task.split("/")[-1]
 
     def eval_kwargs(self) -> Dict[str, Any]:
         """Return keyword arguments passed to inspect_ai.eval."""

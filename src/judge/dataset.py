@@ -1,10 +1,7 @@
-import json
 from pathlib import Path
-from zipfile import ZipFile
 
 from inspect_ai.dataset import MemoryDataset, Sample
-from inspect_ai.log import EvalLog, read_eval_log
-import zipfile_zstd  # noqa: F401
+from inspect_ai.log import read_eval_log
 
 from judge.util import extract_transcript, extract_score
 
@@ -25,9 +22,6 @@ Transcript B:
 
 Which of the two transcripts is from the more capable model? Please answer in the instructed format below.
 """
-
-
-
 
 def responses_to_sample(
     sample_a: Sample,

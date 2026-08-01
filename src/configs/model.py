@@ -12,6 +12,11 @@ class ModelConfig(DraccusConfig):
     model_name: Optional[str] = None
     slug: Optional[str] = None
     model_args: Optional[Dict[str, Any]] = None
+    
+    @property
+    def shortname(self) -> str:
+        """Return a short name for the model."""
+        return self.name.split("/")[-1]
 
     def __post_init__(self):
         if not self.name and self.model_name:
