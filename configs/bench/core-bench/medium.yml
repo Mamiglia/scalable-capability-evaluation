@@ -1,5 +1,5 @@
-name: inspect_evals/core_bench
+name: core_bench_medium
+task: inspect_evals/core_bench
 task_args:
   difficulty: medium
   max_messages: 100
-  limit: 45
