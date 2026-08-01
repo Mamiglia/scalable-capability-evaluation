@@ -11,19 +11,26 @@ from path_utils import get_eval_path
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run a single benchmark evaluation for a model."
+        description="Run benchmark evaluations for model(s) and benchmark(s)."
     )
     parser.add_argument(
+        "-b",
         "--bench",
+        "--benchmark",
+        action="extend",
+        nargs="+",
         type=Path,
         required=True,
-        help="Path to benchmark YAML configuration file.",
+        help="Path(s) to benchmark YAML configuration file(s).",
     )
     parser.add_argument(
+        "-m",
         "--model",
+        action="extend",
+        nargs="+",
         type=Path,
         required=True,
-        help="Path to model YAML configuration file or a model slug.",
+        help="Path(s) to model YAML configuration file(s) or model slug(s).",
     )
     parser.add_argument(
         "-n",
@@ -33,15 +40,24 @@ def main() -> int:
         help="Number of epochs to run (default: 1).",
     )
     parsed_args, extra = parser.parse_known_args()
-    bench = BenchConfig.from_cli(parsed_args.bench, args=extra)
-    model = ModelConfig.from_cli(parsed_args.model, args=extra)
+    # TODO: extra args should be passed to the eval to override eval args, but also task args and model args. Need to figure out how to do this cleanly.
 
-    for i in range(parsed_args.epochs):
-        print(f"Running epoch {i}/{parsed_args.epochs} for benchmark '{bench.name}' and model '{model.slug}'")
-        exit_code = _run_eval(bench_cfg=bench, model_cfg=model, repeat=i, **extra)
-        if exit_code != 0:
-            print(f"Epoch {i} failed with exit code {exit_code}. Stopping further epochs.")
-            return exit_code
+    # TODO: consider adding a way to run in parallel with detached processes, and show progress in a single terminal. This would be useful for running multiple benchmarks or models at once.
+    # TODO: consider adding a way to resume from a previous run
+    for bench_path in parsed_args.bench:
+        bench = BenchConfig.from_cli(bench_path, args=extra)
+        for model_path in parsed_args.model:
+            model = ModelConfig.from_cli(model_path, args=extra)
+            for i in range(parsed_args.epochs):
+                print(
+                    f"Running epoch {i}/{parsed_args.epochs} for benchmark '{bench.name}' and model '{model.slug}'"
+                )
+                exit_code = _run_eval(bench_cfg=bench, model_cfg=model, repeat=i)
+                if exit_code != 0:
+                    print(
+                        f"Epoch {i} failed with exit code {exit_code} for benchmark '{bench.name}' and model '{model.slug}'. Stopping further epochs."
+                    )
+                    return exit_code
     return 0
 
 def _run_eval(
