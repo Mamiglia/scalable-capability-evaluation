@@ -1,113 +1,111 @@
-"""Unit tests for draccus-based CLI modules (collect and judge)."""
+"""Unit tests for CLI modules (collect and judge)."""
 
 from pathlib import Path
-import draccus
-from collect.cli import BenchConfig
-from judge.cli import ExperimentConfig, main as judge_main
+from unittest.mock import MagicMock
+from collect.cli import main as collect_main
+from judge.cli import main as judge_main
 
 
-def test_collect_model_options(monkeypatch, tmp_path):
-    from collect.cli import main
-
+def test_collect_single_eval(monkeypatch, tmp_path):
     model_config = tmp_path / "model.yml"
-    model_config.write_text("model_name: provider/model2\nslug: custom/model2\n")
+    model_config.write_text("name: custom/model2\nslug: custom/model2\n")
     bench_config = tmp_path / "bench.yml"
-    bench_config.write_text("name: mbpp\ntask: inspect_evals/mbpp\nlog_dir: data/mbpp\n")
+    bench_config.write_text("name: inspect_evals/mbpp\n")
+    
     captured = {}
+    mock_log = MagicMock()
+    mock_log.location = str(tmp_path / "output.eval")
+    mock_log.status = "success"
+    (tmp_path / "output.eval").write_text("fake_log")
+
+    def mock_eval(**kwargs):
+        captured.update(kwargs)
+        return [mock_log]
+
+    monkeypatch.setattr("collect.cli.eval_func", mock_eval)
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target.eval")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["collect", "--bench", str(bench_config), "--model", str(model_config), "-n", "1"],
+    )
+
+    ret = collect_main()
+    assert ret == 0
+    assert captured["tasks"] == "inspect_evals/mbpp"
+    assert captured["model"] == "custom/model2"
+    assert captured["seed"] == 0
+
+
+def test_collect_multiple_evals(monkeypatch, tmp_path):
+    m1 = tmp_path / "m1.yml"
+    m1.write_text("name: custom/m1\nslug: custom/m1\n")
+    m2 = tmp_path / "m2.yml"
+    m2.write_text("name: custom/m2\nslug: custom/m2\n")
+    b1 = tmp_path / "b1.yml"
+    b1.write_text("name: inspect_evals/b1\n")
+    b2 = tmp_path / "b2.yml"
+    b2.write_text("name: inspect_evals/b2\n")
+
+    runs = []
+    mock_log = MagicMock()
+    mock_log.status = "success"
+
+    def mock_eval(**kwargs):
+        runs.append((kwargs["tasks"], kwargs["model"]))
+        return [mock_log]
+
+    monkeypatch.setattr("collect.cli.eval_func", mock_eval)
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target.eval")
     monkeypatch.setattr(
         "sys.argv",
         [
-            "collect", "--bench", str(bench_config),
-            "--model", str(model_config), "--model", "provider/model1",
-            "--limit", "2",
+            "collect",
+            "-b", str(b1), "-b", str(b2),
+            "-m", str(m1), "-m", str(m2),
+            "-n", "1",
         ],
     )
-    monkeypatch.setattr(
-        "collect.cli.eval_set", lambda **kwargs: (captured.update(kwargs) or True, None)
-    )
-    assert main() == 0
-    assert captured["tasks"] == ["inspect_evals/mbpp"]
-    assert captured["log_dir"] == "data/mbpp"
-    assert captured["model"] == ["custom/model2", "openrouter/provider/model1"]
-    assert captured["limit"] == 2
-    assert captured["log_dir_allow_dirty"] is True
 
-
-def test_collect_config_parse():
-    args = [
-        "--name", "core_bench",
-        "--task", "inspect_evals/core_bench",
-        "--limit", "50",
+    ret = collect_main()
+    assert ret == 0
+    assert len(runs) == 4
+    assert runs == [
+        ("inspect_evals/b1", "custom/m1"),
+        ("inspect_evals/b1", "custom/m2"),
+        ("inspect_evals/b2", "custom/m1"),
+        ("inspect_evals/b2", "custom/m2"),
     ]
-    cfg = draccus.parse(BenchConfig, args=args)
-    assert cfg.name == "core_bench"
-    assert cfg.task == "inspect_evals/core_bench"
-    assert cfg.limit == 50
-
-
-def test_experiment_config_parse():
-    args = [
-        "--config_path", "configs/experiments/test.yml",
-        "--limit", "20",
-        "--include_reverse", "false",
-        "--mode", "combinatorial",
-    ]
-    cfg = draccus.parse(ExperimentConfig, args=args)
-    assert cfg.name == "test"
-    assert cfg.limit == 20
-    assert cfg.include_reverse is False
-    assert cfg.mode == "combinatorial"
 
 
 def test_judge_main_execution(monkeypatch, tmp_path):
-    test_cfg = tmp_path / "test_exp.yml"
-    test_cfg.write_text("""
-name: test-exp
-judge: test-judge
-major: test-major
-minor: test-minor
-mode: paired
+    exp_config = tmp_path / "exp.yml"
+    exp_config.write_text("""name: test_exp
 benchmark:
-  name: gpqa
-refresh_registry: false
+  name: inspect_evals/mbpp
+major:
+  name: p/maj
+  slug: p/maj
+minor:
+  name: p/min
+  slug: p/min
+judge:
+  name: p/jdg
+  slug: p/jdg
 """)
-    captured = {}
-    monkeypatch.setattr("judge.cli.build_judge_tasks", lambda **kw: ["dummy_task"])
-    monkeypatch.setattr("judge.cli.build_registry", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        "judge.cli.eval_set", lambda **kw: (captured.update(kw) or True, [])
-    )
-    monkeypatch.setattr("sys.argv", ["judge", "--config_path", str(test_cfg)])
-    ret = judge_main()
-    assert ret == 0
-    assert captured["tasks"] == ["dummy_task"]
-    assert captured["log_dir"] == "logs/judge/test-exp"
 
-
-def test_judge_extra_boolean_flags(monkeypatch, tmp_path):
-    test_cfg = tmp_path / "test_exp.yml"
-    test_cfg.write_text("""
-name: test-exp
-judge: test-judge
-major: test-major
-minor: test-minor
-mode: paired
-benchmark:
-  name: gpqa
-refresh_registry: false
-""")
     captured = {}
-    monkeypatch.setattr("judge.cli.build_judge_tasks", lambda **kw: ["dummy_task"])
-    monkeypatch.setattr("judge.cli.build_registry", lambda *a, **kw: None)
+    monkeypatch.setattr("judge.cli.build_judge_tasks", lambda *args, **kw: ["dummy_task"])
     monkeypatch.setattr(
-        "judge.cli.eval_set", lambda **kw: (captured.update(kw) or True, [])
+        "judge.cli.eval_set", lambda **kw: (captured.update(kw) or (True, [True]))
     )
     monkeypatch.setattr(
         "sys.argv",
-        ["judge", "--config_path", str(test_cfg), "--log-dir-allow-dirty", "--max_tasks=5"],
+        [
+            "judge",
+            "--config_path", str(exp_config),
+        ],
     )
     ret = judge_main()
     assert ret == 0
-    assert captured["log_dir_allow_dirty"] is True
-    assert captured["max_tasks"] == 5
-
+    assert captured["tasks"] == ["dummy_task"]
+    assert captured["model"] == "p/jdg"
