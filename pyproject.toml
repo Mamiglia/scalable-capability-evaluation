@@ -19,6 +19,7 @@ dependencies = [
     "pytest-asyncio>=1.4.0",
     "scipy>=1.18.0",
     "seaborn>=0.13.2",
+    "zipfile-zstd>=0.0.4",
 ]
 
 [project.scripts]
