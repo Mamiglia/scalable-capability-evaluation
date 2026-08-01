@@ -1,0 +1,7 @@
+name: gpqa-judge-ling-qwen3.6-vs-3.5
+judge: !include ../../models/ling-2.6-flash.yml
+major: qwen/qwen3.6-35b-a3b
+minor: qwen/qwen3.5-122b-a10b
+benchmark: !include ../../bench/gpqa.yml
+mode: paired
+limit: 5

@@ -1,2 +1,8 @@
 name: gpqa
 task: inspect_evals/gpqa_diamond
+task_args:
+  cot: true
+  epochs: 4
+  high_level_domain: null
+  subdomain: null
+
