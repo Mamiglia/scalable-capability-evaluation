@@ -20,7 +20,8 @@ Transcript B:
 {transcript_b}
 ---
 
-Which of the two transcripts is from the more capable model? Please answer in the instructed format below.
+Which of the two transcripts is from the more capable model? 
+Answer in the instructed format.
 """
 
 def responses_to_sample(
