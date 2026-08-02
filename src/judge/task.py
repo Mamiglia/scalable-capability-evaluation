@@ -17,6 +17,7 @@ def judge_task(
     require_both_correct: bool = True,
     include_reverse: bool = True,
     include_reasoning: bool = True,
+    truncate_frac: float | None = None,
     experiment_name: str | None = None,
     task_name: str | None = None,
 ) -> Task:
@@ -44,6 +45,7 @@ def judge_task(
             require_both_correct=require_both_correct,
             include_reverse=include_reverse,
             include_reasoning=include_reasoning,
+            truncate_frac=truncate_frac,
         ),
         solver=[system_message(system_prompt), generate()],
         scorer=judge_scorer(),
@@ -57,6 +59,7 @@ def judge_task(
             "require_both_correct": require_both_correct,
             "include_reverse": include_reverse,
             "include_reasoning": include_reasoning,
+            "truncate_frac": truncate_frac,
             "experiment_name": experiment_name,
         },
     )
