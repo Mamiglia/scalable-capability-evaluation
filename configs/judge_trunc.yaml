@@ -21,7 +21,7 @@ transcripts:
   gpt-5.2-medium: external_data/epoch-gpqa/gpt-5.2-2025-12-11_medium.eval
   qwen3.6-flash: external_data/epoch-gpqa/qwen3.6-flash.eval
 
-truncate_fracs: [0.1, 0.25, 0.5, 0.75, 1.0]
+truncate_fracs: [0.1, 0.5, 0.9]
 
 comparisons:
   - [openrouter/google/gemma-4-31b-it, gemini-3.1-flash-lite, gemma-4-26b-a4b-it]
