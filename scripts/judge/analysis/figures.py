@@ -99,9 +99,14 @@ def fig_run_overview(summary, out):
 # --- 2. gap curve, judges coloured by a scalar ---------------------------
 
 def gap_curve(summary, fits, out, name, jvalue, jtext, cmap):
-    """Score vs raw-accuracy gap; one colour ramp over judges, self-pairs open."""
-    lo, hi = min(jvalue.values()), max(jvalue.values())
-    col = {j: cmap(0.5 if hi == lo else (jvalue[j] - lo) / (hi - lo)) for j in JUDGES}
+    """Score vs raw-accuracy gap; one colour ramp over judges, self-pairs open.
+
+    Ramp steps are rank-spaced, not value-proportional: judge values cluster
+    (three fitted judges within .72-.85 accuracy, five judges all 2026), and
+    proportional shades made their lines indistinguishable.
+    """
+    order = sorted(JUDGES, key=lambda j: (jvalue[j], j))
+    col = {j: cmap(i / (len(order) - 1)) for i, j in enumerate(order)}
     fitted = {f.judge: f for _, f in fits.iterrows()}
 
     fig, ax = plt.subplots(figsize=(4.8, 3.2))
