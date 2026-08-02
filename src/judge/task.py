@@ -16,6 +16,7 @@ def judge_task(
     max_length: int = 65536,
     require_both_correct: bool = True,
     include_reverse: bool = True,
+    include_reasoning: bool = True,
     experiment_name: str | None = None,
     task_name: str | None = None,
 ) -> Task:
@@ -42,6 +43,7 @@ def judge_task(
             max_len=max_length,
             require_both_correct=require_both_correct,
             include_reverse=include_reverse,
+            include_reasoning=include_reasoning,
         ),
         solver=[system_message(system_prompt), generate()],
         scorer=judge_scorer(),
@@ -54,6 +56,7 @@ def judge_task(
             "benchmark_name": benchmark_name,
             "require_both_correct": require_both_correct,
             "include_reverse": include_reverse,
+            "include_reasoning": include_reasoning,
             "experiment_name": experiment_name,
         },
     )
@@ -74,6 +77,7 @@ def build_judge_tasks(
             max_length=experiment.max_length,
             require_both_correct=experiment.require_both_correct,
             include_reverse=experiment.include_reverse,
+            include_reasoning=experiment.include_reasoning,
             experiment_name=experiment.name,
             task_name=experiment.task_name,
         )

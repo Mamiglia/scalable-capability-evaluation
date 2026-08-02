@@ -29,6 +29,7 @@ def responses_to_sample(
     target: str = 'A',
     format_str: str = USER_PROMPT,
     max_len: int = 24000,
+    include_reasoning: bool = True,
 ) -> Sample:
     """
     Converts two model samples into a single formatted string representation.
@@ -38,6 +39,7 @@ def responses_to_sample(
         sample_b (Sample): The sample from Model B.
         format_str (str): The format string to use for the output.
         max_len (int): The maximum length of each model's response.
+        include_reasoning (bool): Whether to include CoT reasoning blocks.
 
     Returns:
         Sample: A formatted sample representing both model responses.
@@ -46,8 +48,8 @@ def responses_to_sample(
     assert sample_a.input == sample_b.input, "Sample inputs must match for comparison."
     input_text = sample_a.input
     
-    output_a = extract_transcript(sample_a)[:max_len]
-    output_b = extract_transcript(sample_b)[:max_len]
+    output_a = extract_transcript(sample_a, include_reasoning=include_reasoning)[:max_len]
+    output_b = extract_transcript(sample_b, include_reasoning=include_reasoning)[:max_len]
     
     text = format_str.format(
         question=input_text,
@@ -67,6 +69,7 @@ def build_dataset(
     max_len: int = 24000,
     require_both_correct: bool = True,
     include_reverse: bool = True,
+    include_reasoning: bool = True,
 ):
     """
     Builds a dataset from two eval logs, comparing the responses of two models.
@@ -76,6 +79,7 @@ def build_dataset(
         minor_path (Path): Path to the eval log for the minor model.
         format_str (str): The format string to use for the output.
         max_len (int): The maximum length of each model's response.
+        include_reasoning (bool): Whether to include CoT reasoning blocks.
     Returns:
         Dataset: A dataset containing the formatted comparisons of model responses.
     """
@@ -96,10 +100,10 @@ def build_dataset(
         sample_a = major_samples[sample_id]
         sample_b = minor_samples[sample_id]
         
-        samples.append(responses_to_sample(sample_a, sample_b, target='A', format_str=format_str, max_len=max_len))
+        samples.append(responses_to_sample(sample_a, sample_b, target='A', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning))
         
         if include_reverse:
-            samples.append(responses_to_sample(sample_b, sample_a, target='B', format_str=format_str, max_len=max_len))
+            samples.append(responses_to_sample(sample_b, sample_a, target='B', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning))
         
     name_major = log_major.eval.model
     name_minor = log_minor.eval.model

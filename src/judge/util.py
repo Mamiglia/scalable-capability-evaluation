@@ -3,7 +3,7 @@ from inspect_ai.model import ChatMessage
 from inspect_ai.dataset import Sample
 
 
-def format_content(content: Any) -> str:
+def format_content(content: Any, include_reasoning: bool = True) -> str:
     """
     Format content blocks (text, reasoning, image, audio, video, etc.) into readable string.
     """
@@ -19,8 +19,9 @@ def format_content(content: Any) -> str:
             text_val = getattr(block, "text", "")
             texts.append(str(text_val) if text_val is not None else "")
         elif b_type == "reasoning":
-            text_val = getattr(block, "text", "")
-            texts.append(f"<THOUGHT_START>\n {text_val}\n<THOUGHT_END>")
+            if include_reasoning:
+                text_val = getattr(block, "text", "")
+                texts.append(f"<THOUGHT_START>\n {text_val}\n<THOUGHT_END>")
         elif b_type == "image":
             texts.append("[Image]") # Right now we don't have a way to display media in the judge model, so we just indicate that an image was present. TODO
         elif b_type == "audio":
@@ -32,7 +33,7 @@ def format_content(content: Any) -> str:
     return "\n".join(texts)
 
 
-def format_single_message(msg: ChatMessage | str | Any) -> str:
+def format_single_message(msg: ChatMessage | str | Any, include_reasoning: bool = True) -> str:
     """
     Format a single message (assistant, user, system, or tool).
     """
@@ -40,7 +41,7 @@ def format_single_message(msg: ChatMessage | str | Any) -> str:
         return msg
 
     parts = []
-    content_str = format_content(getattr(msg, "content", ""))
+    content_str = format_content(getattr(msg, "content", ""), include_reasoning=include_reasoning)
 
     # Handle tool output role
     if getattr(msg, "role", None) == "tool":
@@ -66,23 +67,23 @@ def format_single_message(msg: ChatMessage | str | Any) -> str:
     return "\n".join(parts)
 
 
-def format_message(msg: ChatMessage | list[ChatMessage] | str | Any) -> str:
+def format_message(msg: ChatMessage | list[ChatMessage] | str | Any, include_reasoning: bool = True) -> str:
     """
     Format the message object or list of messages into a readable string.
     Supports single messages, message sequences (transcripts), tool calls, and tool outputs.
     """
     if not isinstance(msg, list):
-        return format_single_message(msg)
+        return format_single_message(msg, include_reasoning=include_reasoning)
     
     formatted_msgs = []
     for m in msg:
         role = getattr(m, "role", "message").capitalize()
-        fmt = format_single_message(m)
+        fmt = format_single_message(m, include_reasoning=include_reasoning)
         formatted_msgs.append(f"[{role}]: {fmt}")
     return "\n\n".join(formatted_msgs)
 
 
-def extract_transcript(sample: Sample) -> str:
+def extract_transcript(sample: Sample, include_reasoning: bool = True) -> str:
     """
     Extract the complete response transcript from a sample,
     supporting both single message outputs and multi-turn agent histories with tool calls.
@@ -92,12 +93,12 @@ def extract_transcript(sample: Sample) -> str:
         # Filter out system and initial user prompt
         turns = [m for m in messages if getattr(m, "role", None) not in ("system", "user")]
         if turns:
-            return format_message(turns)
-        return format_message(messages)
+            return format_message(turns, include_reasoning=include_reasoning)
+        return format_message(messages, include_reasoning=include_reasoning)
 
     # Fallback to output.choices[0].message
     if hasattr(sample, "output") and sample.output and getattr(sample.output, "choices", None):
-        return format_message(sample.output.choices[0].message)
+        return format_message(sample.output.choices[0].message, include_reasoning=include_reasoning)
 
     return ""
 
