@@ -79,7 +79,8 @@ JUDGE_ALIASES = {
     "gpt-4o-2024-08-06": "gpt-4o",
 }
 
-# release: "YYYY-MM", None = not yet verified (run-plan open item: check log headers).
+# release dates from Epoch's gpqa_diamond.csv where the model appears there;
+# month precision from the run plan otherwise. None = unknown.
 MODELS = {
     "gemma-4-31b-it": {"label": "Gemma-4-31B", "release": "2026-04"},
     "gemma-4-26b-a4b-it": {"label": "Gemma-4-26B", "release": "2026-04"},
@@ -88,12 +89,12 @@ MODELS = {
     "qwen3.6-35b-a3b": {"label": "Qwen3.6-35B", "release": None},
     "qwen3.5-122b-a10b": {"label": "Qwen3.5-122B", "release": None},
     "qwen3-32b": {"label": "Qwen3-32B", "release": "2025-04"},
-    "gemini-3.5-flash": {"label": "Gemini 3.5 Flash (high)", "release": None},
-    "gpt-4o": {"label": "GPT-4o", "release": "2024-08"},
-    "llama-3.1-70b": {"label": "Llama-3.1-70B", "release": "2024-07"},
-    "claude-3-5-sonnet-0620": {"label": "Claude 3.5 Sonnet (06/24)", "release": "2024-06"},
-    "gpt-4.1": {"label": "GPT-4.1", "release": "2025-04"},
-    "mistral-medium": {"label": "Mistral Medium 2505", "release": "2025-05"},
-    "gpt-5.5-low": {"label": "GPT-5.5 (low)", "release": None},
-    "qwen3.6-plus": {"label": "Qwen3.6-Plus", "release": None},
+    "gemini-3.5-flash": {"label": "Gemini 3.5 Flash (high)", "release": "2026-05-19"},
+    "gpt-4o": {"label": "GPT-4o", "release": "2024-08-06"},
+    "llama-3.1-70b": {"label": "Llama-3.1-70B", "release": "2024-07-23"},
+    "claude-3-5-sonnet-0620": {"label": "Claude 3.5 Sonnet (06/24)", "release": "2024-06-20"},
+    "gpt-4.1": {"label": "GPT-4.1", "release": "2025-04-14"},
+    "mistral-medium": {"label": "Mistral Medium 2505", "release": "2025-05-07"},
+    "gpt-5.5-low": {"label": "GPT-5.5 (low)", "release": "2026-04-23"},
+    "qwen3.6-plus": {"label": "Qwen3.6-Plus", "release": "2026-03-31"},
 }

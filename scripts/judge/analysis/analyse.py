@@ -51,6 +51,11 @@ def summarise_run(run_df: pd.DataFrame) -> dict:
     pair_scores = counterbalanced(both)
     disagree = float(np.isclose(pair_scores, 0.5).mean()) if len(pair_scores) else np.nan
 
+    # Score a pick-the-longer-transcript strategy would get on this run.
+    lens = run_df.dropna(subset=["len_major", "len_minor"]).groupby("item")[["len_major", "len_minor"]].first()
+    len_baseline = float(np.where(lens.len_major == lens.len_minor, 0.5,
+                                  lens.len_major > lens.len_minor).mean()) if len(lens) else np.nan
+
     return dict(
         n_items=len(scores), n_rows=len(run_df),
         score=m, score_lo=lo, score_hi=hi,
@@ -60,6 +65,7 @@ def summarise_run(run_df: pd.DataFrame) -> dict:
         disagree_rate=disagree,
         noanswer_rate=float(run_df["picked_major"].isna().mean()),
         mean_conf=float(run_df["confidence"].mean()),
+        len_baseline=len_baseline,
     )
 
 
@@ -89,20 +95,23 @@ def main():
     models = pd.read_csv(args.dir / "models.csv").set_index("model")
     groups = run_groups()
 
-    logit = models["logit"]
-    gaps = {(maj, mnr): (0.0 if maj == mnr else logit[maj] - logit[mnr])
+    # Gaps on both scales; raw accuracy is the headline axis, logit kept for
+    # gap-matching against the run plan.
+    acc, logit = models["accuracy"], models["logit"]
+    gaps = {(maj, mnr): (0.0 if maj == mnr else acc[maj] - acc[mnr])
             for maj, mnr in df.groupby(["major", "minor"]).groups}
 
     rows = []
     for (judge, maj, mnr), run in df.groupby(["judge", "major", "minor"]):
         entry = dict(judge=judge, major=maj, minor=mnr,
                      groups=",".join(groups.get((judge, maj, mnr), [])),
-                     d_logit=gaps[(maj, mnr)])
+                     d_acc=gaps[(maj, mnr)],
+                     d_logit=0.0 if maj == mnr else logit[maj] - logit[mnr])
         entry.update(summarise_run(run))
         is_self = (judge, maj, mnr) in set(map(tuple, COMPARISONS["self_pairs"]))
         entry["leak_ok"] = (entry["slot_a_lo"] <= 0.5 <= entry["slot_a_hi"]) if is_self else None
         rows.append(entry)
-    summary = pd.DataFrame(rows).sort_values(["judge", "d_logit"])
+    summary = pd.DataFrame(rows).sort_values(["judge", "d_acc"])
 
     fits = pd.DataFrame([f for j in summary["judge"].unique()
                          if (f := judge_fit(df, j, gaps)) is not None])
@@ -119,7 +128,7 @@ def main():
             tag = f" [{e.groups}]" if e.groups else ""
             print(f"  {e.major} vs {e.minor}{tag}")
             print(f"    score {e.score:.3f} [{e.score_lo:.3f}, {e.score_hi:.3f}] "
-                  f"(n={e.n_items}, dLogit {e.d_logit:+.2f}) {e.stars}")
+                  f"(n={e.n_items}, dAcc {e.d_acc:+.3f}) {e.stars}")
             leak = ""
             if e.leak_ok is not None:
                 leak = "  OK (CI covers 0.5)" if e.leak_ok else "  *** LEAK: CI excludes 0.5 ***"
