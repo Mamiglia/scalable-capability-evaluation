@@ -19,7 +19,7 @@ from matplotlib.lines import Line2D
 from comparisons import COMPARISONS, MODELS
 from plots import (COL, HEAT, INK, INK2, JRAMP, MUTED, PALETTE,
                    chance, dot_ci, legend, plt, save, style)
-from stats import counterbalanced, sem_ci, wilson
+from stats import counterbalanced, sem_ci, sigmoid_fit, wilson
 
 JUDGES = ["gemini-3.1-flash-lite", "qwen3.5-122b-a10b", "gemma-4-31b-it",
           "qwen3.6-35b-a3b", "qwen3-32b", "gemini-2.5-flash", "gpt-4o",
@@ -77,7 +77,7 @@ def pair_label(r):
 def fig_run_overview(summary, out):
     s = ordered(summary)
     ys = row_positions(s)
-    fig, ax = plt.subplots(figsize=(4.6, 0.15 * len(s) + 1.3))
+    fig, ax = plt.subplots(figsize=(7.0, 0.16 * len(s) + 1.3))
     for y, (_, r) in zip(ys, s.iterrows()):
         is_self = r.major == r.minor
         note = f"{r.score:.2f} (n={r.n_items}) {r.stars}"
@@ -122,7 +122,9 @@ def pair_jitter(summary, width=0.006):
     return off
 
 
-def gap_curve(summary, fits, out, name, jvalue):
+def gap_curve(summary, out, name, jvalue,
+              note="lines connect a judge's runs · self-pairs: 95% CI", fits=None,
+              jitter=0.003):
     """Score vs raw-accuracy gap; judges on the red-grey-blue ramp (weak/old ->
     strong/new), self-pairs open in their own broken-axis section.
 
@@ -131,7 +133,6 @@ def gap_curve(summary, fits, out, name, jvalue):
     """
     order = sorted(JUDGES, key=lambda j: (jvalue[j], j))
     col = {j: JRAMP(i / (len(order) - 1)) for i, j in enumerate(order)}
-    fitted = {f.judge: f for _, f in fits.iterrows()}
 
     fig, (axs, ax) = plt.subplots(1, 2, sharey=True, figsize=(6.2, 3.4),
                                   gridspec_kw={"width_ratios": [1, 11], "wspace": 0.05})
@@ -143,14 +144,22 @@ def gap_curve(summary, fits, out, name, jvalue):
                      fmt="o", ms=4.5, color=col[r.judge], ecolor=col[r.judge],
                      elinewidth=0.9, capsize=0, mfc="white", mew=1.1, zorder=3)
     cross = summary[summary.major != summary.minor]
-    jit = pair_jitter(cross)
-    for idx, r in cross.iterrows():
-        ax.plot(r.d_acc + jit[idx], r.score, "o", ms=4.5, color=col[r.judge],
+    jit = pair_jitter(cross, width=jitter)
+    connected = set()
+    for j, block in cross.groupby("judge"):
+        xy = sorted((r.d_acc + jit[idx], r.score) for idx, r in block.iterrows())
+        if fits is None and len(xy) > 1:
+            connected.add(j)
+            ax.plot([p[0] for p in xy], [p[1] for p in xy], "-", color=col[j],
+                    lw=1.2, alpha=0.75, zorder=2)
+        ax.plot([p[0] for p in xy], [p[1] for p in xy], "o", ms=4.5, color=col[j],
                 alpha=0.9, zorder=3)
-    x = np.linspace(0, xmax, 100)
-    for f in fitted.values():
-        ax.plot(x, 1 / (1 + np.exp(-(f.a + f.d * x))), color=col[f.judge],
-                lw=1.5, zorder=2)
+    if fits is not None:
+        x = np.linspace(0, xmax, 100)
+        for _, f in fits.iterrows():
+            connected.add(f.judge)
+            ax.plot(x, 1 / (1 + np.exp(-(f.a + f.d * x))), color=col[f.judge],
+                    lw=1.5, zorder=2)
     for a in (axs, ax):
         chance(a)
         a.set_ylim(0, 1)
@@ -161,28 +170,62 @@ def gap_curve(summary, fits, out, name, jvalue):
     axs.set_ylabel("judge accuracy")
     ax.set_xlim(0, xmax)
     ax.set_xlabel("capability gap (GPQA accuracy difference)")
+    # Rotated pair labels under the axis, dodged apart where gaps cluster.
+    min_sep = xmax * 0.045
+    lx = None
+    for x, m, n in sorted({(r.d_acc, r.major, r.minor) for _, r in cross.iterrows()}):
+        lx = x if lx is None or x - lx >= min_sep else lx + min_sep
+        ax.annotate(f"{MODELS[m]['label']}\n{MODELS[n]['label']}",
+                    xy=(lx, 0), xycoords=("data", "axes fraction"),
+                    xytext=(0, -30), textcoords="offset points", rotation=90,
+                    ha="center", va="top", color=MUTED, fontsize=5.5,
+                    annotation_clip=False)
     ax.spines["left"].set_visible(False)
     ax.tick_params(left=False)
     for a, x0 in ((axs, 1.0), (ax, 0.0)):
         a.plot([x0, x0], [-0.015, 0.015], transform=a.transAxes, color=MUTED,
                lw=0.9, clip_on=False, marker=[(-0.5, -1), (0.5, 1)], ms=5, mew=0.9)
-    jh = [Line2D([], [], marker="o", ls="-" if j in fitted else "", color=col[j],
+    present = set(summary.judge)
+    jh = [Line2D([], [], marker="o", ls="-" if j in connected else "", color=col[j],
                  ms=5, label=lab(j))
-          for j in reversed(order)]
+          for j in reversed(order) if j in present]
     leg = ax.legend(handles=jh, frameon=False, loc="center left",
                     bbox_to_anchor=(1.02, 0.5))
     for t in leg.get_texts():
         t.set_color(INK2)
-    ax.text(0.98, 0.04, "lines: sigmoid fits · self-pairs: 95% CI",
-            transform=ax.transAxes, ha="right", color=MUTED, fontsize=7)
+    ax.text(0.98, 0.04, note, transform=ax.transAxes, ha="right", color=MUTED, fontsize=7)
     save(fig, out / name)
 
 
 def fig_gap_curves(summary, fits, models, out):
-    gap_curve(summary, fits, out, "2a_gap_curve_by_capability",
-              {j: models.loc[j, "accuracy"] for j in JUDGES})
-    gap_curve(summary, fits, out, "2b_gap_curve_by_release",
-              {j: release_year(j) for j in JUDGES})
+    note = "lines: sigmoid fits · self-pairs: 95% CI"
+    gap_curve(summary, out, "2a_gap_curve_by_capability",
+              {j: models.loc[j, "accuracy"] for j in JUDGES}, note=note, fits=fits)
+    gap_curve(summary, out, "2b_gap_curve_by_release",
+              {j: release_year(j) for j in JUDGES}, note=note, fits=fits)
+
+
+def filtered_gap_curves(summary, models, out, keep, stem, note):
+    """Gap-curve pair (capability/release colouring) over a run subset."""
+    sub = summary[summary.apply(keep, axis=1)].copy()
+    gap_curve(sub, out, f"{stem}_by_capability",
+              {j: models.loc[j, "accuracy"] for j in JUDGES}, note=note, jitter=0.0006)
+    gap_curve(sub, out, f"{stem}_by_release",
+              {j: release_year(j) for j in JUDGES}, note=note, jitter=0.0006)
+
+
+def fig_gap_curves_filtered(summary, models, out):
+    acc = models["accuracy"]
+    filtered_gap_curves(
+        summary, models, out,
+        lambda r: acc[r.judge] < min(acc[r.major], acc[r.minor]),
+        "2d_gap_curve_weak_judge",
+        "both pair members stronger than the judge")
+    filtered_gap_curves(
+        summary, models, out,
+        lambda r: release_year(r.judge) < min(release_year(r.major), release_year(r.minor)),
+        "2e_gap_curve_old_judge",
+        "both pair members released after the judge")
 
 
 MATCHED_SETS = [
@@ -200,9 +243,8 @@ def fig_matched_judges(verdicts, models, out):
     """2c: judge sets that all judged identical pairs, so pair composition is
     controlled. x = release, colour = capability. Each panel is one such set."""
     norm = plt.Normalize(models["accuracy"].min(), models["accuracy"].max())
-    fig, axes = plt.subplots(1, len(MATCHED_SETS), sharey=True, sharex=True,
-                             figsize=(7.0, 2.7), layout="constrained")
-    for ax, (title, shared) in zip(axes, MATCHED_SETS):
+    panels = []
+    for title, shared in MATCHED_SETS:
         members = {m for p in shared for m in p}
         pts = []
         for j in JUDGES:
@@ -214,7 +256,11 @@ def fig_matched_judges(verdicts, models, out):
                 continue
             scores = np.concatenate([counterbalanced(r) for r in runs])
             pts.append((release_year(j), *sem_ci(scores), j))
-        pts.sort()
+        if pts:
+            panels.append((title, sorted(pts)))
+    fig, axes = plt.subplots(1, len(panels), sharey=True, sharex=True,
+                             figsize=(2.2 * len(panels) + 0.6, 2.7), layout="constrained")
+    for ax, (title, pts) in zip(np.atleast_1d(axes), panels):
         for i, (x, m, lo, hi, j) in enumerate(pts):
             c = JRAMP(norm(models.loc[j, "accuracy"]))
             ax.errorbar(x, m, yerr=[[m - lo], [hi - m]], fmt="o", ms=6,
@@ -226,11 +272,12 @@ def fig_matched_judges(verdicts, models, out):
         ax.set_title(title, color=INK2, fontsize=8)
         ax.set_xlabel("judge release year")
         style(ax)
-    axes[0].set_ylabel("judge accuracy (shared pairs)")
-    axes[0].set_ylim(0.25, 0.9)
-    axes[0].set_xlim(2024.4, 2026.6)
-    axes[0].set_xticks([2025, 2026])
-    axes[0].set_xticklabels(["2025", "2026"])
+    ax0 = np.atleast_1d(axes)[0]
+    ax0.set_ylabel("judge accuracy (shared pairs)")
+    ax0.set_ylim(0.25, 0.9)
+    ax0.set_xlim(2024.4, 2026.6)
+    ax0.set_xticks([2025, 2026])
+    ax0.set_xticklabels(["2025", "2026"])
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=JRAMP), ax=axes,
                       pad=0.015, shrink=0.9)
     cb.set_label("judge GPQA accuracy", color=INK2)
@@ -252,6 +299,8 @@ def fig_judge_strength(verdicts, models, out):
         run = verdicts[(verdicts.judge == j) & (verdicts.major == m) & (verdicts.minor == n)]
         if len(run):
             M[pairs.index((m, n)), judges.index(j)] = counterbalanced(run).mean()
+    keep = np.isfinite(M).any(axis=1)
+    M, pairs = M[keep], [p for p, k in zip(pairs, keep) if k]
 
     fig, ax = plt.subplots(figsize=(0.62 * len(judges) + 2.4, 0.30 * len(pairs) + 1.4))
     im = ax.imshow(M, cmap=HEAT, vmin=0, vmax=1, aspect="auto")
@@ -291,7 +340,7 @@ def fig_judge_strength_scatter(verdicts, models, out):
             rows.append(dict(judge=j, major=m, minor=n, d_acc=acc[m] - acc[n],
                              score=s, lo=lo, hi=hi))
     d = pd.DataFrame(rows)
-    jit = pair_jitter(d)
+    jit = pair_jitter(d, width=0.003)
     fig, ax = plt.subplots(figsize=(5.2, 3.2))
     for idx, r in d.iterrows():
         ax.errorbar(r.d_acc + jit[idx], r.score, yerr=[[r.score - r.lo], [r.hi - r.score]],
@@ -497,6 +546,24 @@ def fig_model_accuracy(models, out):
     save(fig, out / "0_model_accuracy")
 
 
+def render_all(verdicts, summary, fits, models, out):
+    out.mkdir(parents=True, exist_ok=True)
+    for stale in list(out.glob("*.png")) + list(out.glob("*.svg")):
+        stale.unlink()
+    fig_model_accuracy(models, out)
+    fig_run_overview(summary, out)
+    fig_gap_curves(summary, fits, models, out)
+    fig_gap_curves_filtered(summary, models, out)
+    fig_matched_judges(verdicts, models, out)
+    fig_judge_strength(verdicts, models, out)
+    fig_judge_strength_scatter(verdicts, models, out)
+    fig_length(verdicts, summary, out)
+    fig_item_difficulty(verdicts, out)
+    fig_temporal(verdicts, out)
+    fig_release_gap(summary, out)
+    print(f"{len(list(out.glob('*.png')))} figures -> {out}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dir", type=Path, default=Path("judge_results/judge-pilot"))
@@ -506,24 +573,9 @@ def main():
     models = pd.read_csv(args.dir / "models.csv").set_index("model")
     summary = pd.read_csv(args.dir / "summary.csv")
     fits = pd.read_csv(args.dir / "judge_fits.csv")
-    out = args.dir / "figures"
-    out.mkdir(parents=True, exist_ok=True)
-    for stale in list(out.glob("*.png")) + list(out.glob("*.svg")):
-        stale.unlink()
 
     init_labels(models)
-    fig_model_accuracy(models, out)
-    fig_run_overview(summary, out)
-    fig_gap_curves(summary, fits, models, out)
-    fig_matched_judges(verdicts, models, out)
-    fig_judge_strength(verdicts, models, out)
-    fig_judge_strength_scatter(verdicts, models, out)
-    fig_length(verdicts, summary, out)
-    fig_item_difficulty(verdicts, out)
-    fig_temporal(verdicts, out)
-    fig_release_gap(summary, out)
-    n = len(list(out.glob("*.png")))
-    print(f"{n} figures -> {out}")
+    render_all(verdicts, summary, fits, models, args.dir / "figures")
 
 
 if __name__ == "__main__":
