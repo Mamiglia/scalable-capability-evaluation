@@ -136,9 +136,9 @@ def mirt_rot(root: Path, data: Path):
     mi = pd.read_csv(root / "gpqa_mirt2_items.csv").merge(dom, on="item")
     Z = lda2(mi[["a1", "a2"]].to_numpy(), mi["domain"].to_numpy())
     mi["r1"], mi["r2"] = Z[:, 0], Z[:, 1]
-    if mi.loc[mi.domain == "Physics", "r1"].mean() < mi["r1"].mean():      # LD1: Physics high
+    if mi.loc[mi.domain == "Biology", "r1"].mean() < mi["r1"].mean():      # biology high, based on PC1
         mi["r1"] *= -1
-    if mi.loc[mi.domain == "Chemistry", "r2"].mean() < mi["r2"].mean():    # LD2: Chemistry high
+    if mi.loc[mi.domain == "Chemistry", "r2"].mean() < mi["r2"].mean():    # chemistry high, based on PC2
         mi["r2"] *= -1
     return mi
 
@@ -205,7 +205,7 @@ def comparison_figure(root: Path):
           str(root / "figures" / "model_comparison"), width=4.2, rot=30, connect=True)
 
 
-SWEEP_SERIES = ("both_add", "irt_1pl", "irt_2pl")
+SWEEP_SERIES = ("model_base", "item_base", "both_add", "irt_1pl", "irt_2pl")
 
 
 def sweep_figure(root: Path):
