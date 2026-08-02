@@ -68,8 +68,8 @@ def stars(p: float | None) -> str:
     return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
 
 
-def sigmoid_fit(gaps, scores) -> tuple[float, float] | None:
-    """Fit score = sigmoid(a + d * gap) by IRLS. Returns (a, d).
+def sigmoid_fit(gaps, scores) -> tuple[float, float, float, float] | None:
+    """Fit score = sigmoid(a + d * gap) by IRLS. Returns (a, d, se_a, se_d).
 
     sigmoid(a) is the extrapolated accuracy at zero capability gap, where no
     capability difference remains to read; anything above chance there is the
@@ -100,4 +100,11 @@ def sigmoid_fit(gaps, scores) -> tuple[float, float] | None:
         beta += np.clip(step, -2, 2)
         if np.max(np.abs(step)) < 1e-9:
             break
-    return float(beta[0]), float(beta[1])
+    p = 1 / (1 + np.exp(-(X @ beta)))
+    W = np.clip(p * (1 - p), 1e-6, None)
+    try:
+        cov = np.linalg.inv(X.T @ (W[:, None] * X))
+        se_a, se_d = np.sqrt(np.diag(cov))
+    except np.linalg.LinAlgError:
+        se_a = se_d = np.nan
+    return float(beta[0]), float(beta[1]), float(se_a), float(se_d)

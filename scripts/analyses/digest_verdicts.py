@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +18,7 @@ import pandas as pd
 import yaml
 from inspect_ai.log import read_eval_log
 
-from judge.dataset import USER_PROMPT
+from judge.dataset import USER_PROMPT, truncate_pair
 from judge.util import extract_score, extract_transcript
 
 from comparisons import JUDGE_ALIASES, MODELS
@@ -36,14 +37,17 @@ def load_log(path):
     return _logs[p]
 
 
-def pair_items(major_path, minor_path, include_reasoning, require_both_correct):
+def pair_items(major_path, minor_path, include_reasoning, require_both_correct,
+               truncate_frac=None):
     """item -> (question, major transcript, minor transcript) as judged.
 
     Mirrors build_dataset's epoch selection (first eligible epoch per item;
-    self-pairs take the first two). Digest verifies the rebuild per item
-    against the logged judge input, so drift from the builder is caught.
+    self-pairs take the first two) and its truncation. Digest verifies the
+    rebuild per item against the logged judge input, so drift from the
+    builder is caught.
     """
-    key = (str(major_path), str(minor_path), include_reasoning, require_both_correct)
+    key = (str(major_path), str(minor_path), include_reasoning,
+           require_both_correct, truncate_frac)
     if key in _pairs:
         return _pairs[key]
 
@@ -70,6 +74,8 @@ def pair_items(major_path, minor_path, include_reasoning, require_both_correct):
             a, b = major[sid][0], minor[sid][0]
         t_major = extract_transcript(a, include_reasoning=include_reasoning)[:MAX_LEN]
         t_minor = extract_transcript(b, include_reasoning=include_reasoning)[:MAX_LEN]
+        if truncate_frac is not None:
+            t_major, t_minor = truncate_pair(t_major, t_minor, truncate_frac)
         items[str(sid)] = (a.input, t_major, t_minor)
     _pairs[key] = items
     return items
@@ -106,10 +112,18 @@ def digest(log_root: Path, config: Path):
         if (judge, major, minor) not in configured:
             n_unlisted += 1
             continue
+        tf = meta.get("truncate_frac")
         items = pair_items(meta["major_path"], meta["minor_path"],
-                           meta["include_reasoning"], meta["require_both_correct"])
+                           meta["include_reasoning"], meta["require_both_correct"],
+                           truncate_frac=tf)
+        # Phase lives in the parent dir (phase-N) or, after log normalization,
+        # in a _pN filename token.
         phase = f.parent.name
-        phase = int(phase.split("-")[1]) if phase.startswith("phase-") else None
+        if phase.startswith("phase-"):
+            phase = int(phase.split("-")[1])
+        else:
+            m = re.search(r"_p(\d)_", f.name)
+            phase = int(m.group(1)) if m else None
 
         n_correct = 0
         for s in log.samples or []:
@@ -132,14 +146,14 @@ def digest(log_root: Path, config: Path):
                     n_len_mismatch += 1
 
             n_correct += picked == slot
-            key = (judge, major, minor, item, slot)
+            key = (judge, major, minor, item, slot, tf)
             if key in rows:
                 n_replaced += 1
             rows[key] = dict(
                 judge=judge, major=major, minor=minor, item=item,
                 slot_of_major=slot, picked=picked, picked_major=picked_major,
                 confidence=conf, len_major=len_major, len_minor=len_minor,
-                phase=phase, log_file=str(f),
+                truncate_frac=tf, phase=phase, log_file=str(f),
             )
 
         # The flattened rows must reproduce the log's own accuracy metric.
@@ -170,11 +184,14 @@ def model_table(config: Path):
         log = load_log(p)
         scores = [extract_score(s) for s in log.samples]
         acc = float(np.mean(scores))
+        n_items = len({s.id for s in log.samples})
         meta = MODELS.get(name, {})
         rows.append(dict(
             model=name,
             arm="B" if "external_data" in Path(p).parts else "A",
             n_samples=len(scores),
+            n_items=n_items,
+            n_epochs=len(scores) // n_items,
             accuracy=acc,
             logit=math.log(acc / (1 - acc)),
             theta_1pl=caps.get(Path(p).stem, np.nan),

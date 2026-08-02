@@ -11,14 +11,19 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
 INK, INK2, MUTED, GRID, SURFACE = "#0b0b0b", "#33322f", "#4a4844", "#d3d2c9", "#ffffff"
-PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
-SEQ_BLUE = LinearSegmentedColormap.from_list("seq_blue", ["#cfe0f7", "#2a78d6", "#0d2440"])
-SEQ_ORANGE = LinearSegmentedColormap.from_list("seq_orange", ["#f7d3bd", "#eb6834", "#571c07"])
+PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+# Judge-ordering ramp (weak/old = red, strong/new = blue) and score heatmap
+# scale (below chance = blue, above = red); hand-picked stops, not stock maps.
+JRAMP = LinearSegmentedColormap.from_list("jramp", ["#b23c33", "#b8b5ab", "#1f63b6"])
+HEAT = LinearSegmentedColormap.from_list("heat", ["#2a78d6", "#f6f4ee", "#e34948"])
+
+# Single-column / full-width figure widths; 8pt for all text.
+COL, WIDE = 3.5, 7.0
 
 plt.rcParams.update({
     "font.family": "sans-serif", "font.sans-serif": ["Arial"],
-    "font.size": 8, "axes.labelsize": 8.5, "legend.fontsize": 7,
-    "xtick.labelsize": 7.5, "ytick.labelsize": 7.5,
+    "font.size": 8, "axes.labelsize": 8, "legend.fontsize": 8,
+    "xtick.labelsize": 8, "ytick.labelsize": 8,
     "figure.facecolor": SURFACE, "axes.facecolor": SURFACE,
     "svg.fonttype": "none", "lines.linewidth": 1.6,
     "figure.dpi": 400, "savefig.dpi": 400,
@@ -36,10 +41,12 @@ def style(ax, grid_axis="y"):
 
 
 def save(fig, out_stub):
-    """Tight layout, write <out_stub>.png and .svg."""
-    fig.tight_layout()
+    """Tight layout, write <out_stub>.png and .svg (outside legends included)."""
+    if fig.get_layout_engine() is None:
+        fig.tight_layout()
     for ext in ("png", "svg"):
-        fig.savefig(f"{out_stub}.{ext}", facecolor=SURFACE)
+        fig.savefig(f"{out_stub}.{ext}", facecolor=SURFACE,
+                    bbox_inches="tight", pad_inches=0.03)
     plt.close(fig)
 
 

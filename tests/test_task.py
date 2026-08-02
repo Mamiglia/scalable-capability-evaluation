@@ -53,6 +53,7 @@ class TestJudgeTask:
             require_both_correct=True,
             include_reverse=True,
             include_reasoning=True,
+            truncate_frac=None,
         )
 
 

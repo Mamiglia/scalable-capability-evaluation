@@ -70,8 +70,12 @@ def summarise_run(run_df: pd.DataFrame) -> dict:
 
 
 def judge_fit(df: pd.DataFrame, judge: str, gaps: pd.Series) -> dict | None:
-    """Sigmoid fit over the judge's gap_ladder runs, one point per item."""
-    ladder = [t for t in COMPARISONS["gap_ladder"] if t[0] == judge]
+    """Sigmoid fit over the judge's neutral cross-model Arm A runs (ladder +
+    panel + weak-judge), one point per item. Temporal and wide-gap runs are
+    displayed on the curve but not fitted."""
+    panel = {t for k in ("gap_ladder", "judge_strength", "weak_judge")
+             for t in COMPARISONS[k]}
+    ladder = [t for t in panel if t[0] == judge]
     g, y = [], []
     for j, maj, mnr in ladder:
         run = df[(df.judge == j) & (df.major == maj) & (df.minor == mnr)]
@@ -81,9 +85,10 @@ def judge_fit(df: pd.DataFrame, judge: str, gaps: pd.Series) -> dict | None:
     fit = sigmoid_fit(g, y)
     if fit is None:
         return None
-    a, d = fit
+    a, d, se_a, se_d = fit
     return dict(judge=judge, n_runs=len(ladder), n_items=len(y),
-                a=a, d=d, acc_at_gap0=1 / (1 + np.exp(-a)))
+                a=a, d=d, se_a=se_a, se_d=se_d,
+                acc_at_gap0=1 / (1 + np.exp(-a)))
 
 
 def main():

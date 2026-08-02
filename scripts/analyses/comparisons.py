@@ -10,6 +10,13 @@ controls, calibration, length confound, item difficulty) use all of those.
 COMPARISONS = {
     # Arm A matrix across the dLogit range; feeds the sigmoid gap fit.
     "gap_ladder": [
+        ("qwen3.5-122b-a10b", "qwen3.6-35b-a3b", "gemma-4-31b-it"),
+        ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "gemma-4-31b-it"),
+        ("qwen3.5-122b-a10b", "gemma-4-31b-it", "qwen3-32b"),
+        ("gemini-3.1-flash-lite", "gemma-4-31b-it", "qwen3-32b"),
+        ("qwen3.5-122b-a10b", "qwen3.6-35b-a3b", "gemma-4-26b-a4b-it"),
+        ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "gemma-4-26b-a4b-it"),
+        ("gemini-3.1-flash-lite", "qwen3.5-122b-a10b", "qwen3-32b"),
         ("qwen3.5-122b-a10b", "gemini-3.1-flash-lite", "gemma-4-26b-a4b-it"),
         ("gemma-4-31b-it", "gemini-3.1-flash-lite", "gemma-4-26b-a4b-it"),
         ("qwen3.5-122b-a10b", "gemma-4-31b-it", "gemini-2.5-flash"),
@@ -24,32 +31,112 @@ COMPARISONS = {
         ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "qwen3-32b"),
         ("qwen3.6-35b-a3b", "qwen3.5-122b-a10b", "qwen3-32b"),
         ("gemma-4-31b-it", "qwen3.5-122b-a10b", "qwen3-32b"),
+        ("gemini-3.1-flash-lite", "qwen3.5-122b-a10b", "qwen3-32b"),
+        ("qwen3.5-122b-a10b", "qwen3.6-35b-a3b", "gemma-4-31b-it"),
+        ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "gemma-4-31b-it"),
+        ("qwen3.5-122b-a10b", "gemma-4-31b-it", "qwen3-32b"),
+        ("gemini-3.1-flash-lite", "gemma-4-31b-it", "qwen3-32b"),
+        ("qwen3.5-122b-a10b", "qwen3.6-35b-a3b", "gemma-4-26b-a4b-it"),
+        ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "gemma-4-26b-a4b-it"),
     ],
-    # Same model on both sides; judge accuracy must sit at chance.
+    # Same model on both sides, neutral judge; score must sit at chance.
     "self_pairs": [
         ("qwen3.5-122b-a10b", "gemma-4-26b-a4b-it", "gemma-4-26b-a4b-it"),
         ("gemini-3.1-flash-lite", "gemma-4-26b-a4b-it", "gemma-4-26b-a4b-it"),
         ("qwen3.5-122b-a10b", "gemini-2.5-flash", "gemini-2.5-flash"),
         ("gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash"),
+        ("gemini-3.1-flash-lite", "qwen3.5-122b-a10b", "qwen3.5-122b-a10b"),
+        ("gemma-4-31b-it", "qwen3.5-122b-a10b", "qwen3.5-122b-a10b"),
+        ("qwen3.5-122b-a10b", "qwen3-32b", "qwen3-32b"),
+        ("gemini-3.1-flash-lite", "qwen3-32b", "qwen3-32b"),
+        ("qwen3.5-122b-a10b", "gemma-4-31b-it", "gemma-4-31b-it"),
+        ("gemini-3.1-flash-lite", "gemma-4-31b-it", "gemma-4-31b-it"),
+        ("qwen3.5-122b-a10b", "qwen3.6-35b-a3b", "qwen3.6-35b-a3b"),
+        ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "qwen3.6-35b-a3b"),
+        ("qwen3.5-122b-a10b", "gemini-3.1-flash-lite", "gemini-3.1-flash-lite"),
+        ("gemma-4-31b-it", "gemini-3.1-flash-lite", "gemini-3.1-flash-lite"),
     ],
-    # Shared pairs judged by judges of spread ability.
+    # Shared pairs judged by neutral judges of spread ability (the panel).
     "judge_strength": [
-        # qwen3.5-122b vs qwen3.6-35b: judges .775 / .725 / .657
+        # qwen3.5-122b vs qwen3.6-35b
         ("gemma-4-31b-it", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
         ("gemini-3.1-flash-lite", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
         ("qwen3-32b", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
-        # gemma-31b vs gemma-26b: judges .852 / .725 / .657
+        ("gemini-2.5-flash", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
+        ("gemma-4-26b-a4b-it", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
+        # gemma-31b vs gemma-26b
         ("qwen3.5-122b-a10b", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
         ("gemini-3.1-flash-lite", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
         ("qwen3-32b", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
-        # qwen3.5-122b vs qwen3-32b: judges .824 / .775
+        ("qwen3.6-35b-a3b", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
+        ("gemini-2.5-flash", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
+        # qwen3.5-122b vs qwen3-32b
         ("qwen3.6-35b-a3b", "qwen3.5-122b-a10b", "qwen3-32b"),
         ("gemma-4-31b-it", "qwen3.5-122b-a10b", "qwen3-32b"),
+        ("gemini-2.5-flash", "qwen3.5-122b-a10b", "qwen3-32b"),
+        ("gemini-3.1-flash-lite", "qwen3.5-122b-a10b", "qwen3-32b"),
+        ("gemma-4-26b-a4b-it", "qwen3.5-122b-a10b", "qwen3-32b"),
+        # flash-lite vs gemma-26b
+        ("qwen3.5-122b-a10b", "gemini-3.1-flash-lite", "gemma-4-26b-a4b-it"),
+        ("gemma-4-31b-it", "gemini-3.1-flash-lite", "gemma-4-26b-a4b-it"),
+        ("qwen3.6-35b-a3b", "gemini-3.1-flash-lite", "gemma-4-26b-a4b-it"),
+        ("gemini-2.5-flash", "gemini-3.1-flash-lite", "gemma-4-26b-a4b-it"),
+        ("qwen3-32b", "gemini-3.1-flash-lite", "gemma-4-26b-a4b-it"),
+        # gemma-31b vs 2.5-flash
+        ("qwen3.5-122b-a10b", "gemma-4-31b-it", "gemini-2.5-flash"),
+        ("gemini-3.1-flash-lite", "gemma-4-31b-it", "gemini-2.5-flash"),
+        ("qwen3.6-35b-a3b", "gemma-4-31b-it", "gemini-2.5-flash"),
+        ("gemma-4-26b-a4b-it", "gemma-4-31b-it", "gemini-2.5-flash"),
+        ("qwen3-32b", "gemma-4-31b-it", "gemini-2.5-flash"),
+        # qwen3.6-35b vs flash-lite
+        ("qwen3.5-122b-a10b", "qwen3.6-35b-a3b", "gemini-3.1-flash-lite"),
+        ("gemma-4-31b-it", "qwen3.6-35b-a3b", "gemini-3.1-flash-lite"),
+        ("gemini-2.5-flash", "qwen3.6-35b-a3b", "gemini-3.1-flash-lite"),
+        ("gemma-4-26b-a4b-it", "qwen3.6-35b-a3b", "gemini-3.1-flash-lite"),
+        ("qwen3-32b", "qwen3.6-35b-a3b", "gemini-3.1-flash-lite"),
+        # qwen3.6-35b vs qwen3-32b
+        ("qwen3.5-122b-a10b", "qwen3.6-35b-a3b", "qwen3-32b"),
+        ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "qwen3-32b"),
+        ("gemma-4-31b-it", "qwen3.6-35b-a3b", "qwen3-32b"),
+        ("gemini-2.5-flash", "qwen3.6-35b-a3b", "qwen3-32b"),
+        ("gemma-4-26b-a4b-it", "qwen3.6-35b-a3b", "qwen3-32b"),
+        # qwen3.6-35b vs gemma-31b
+        ("qwen3.5-122b-a10b", "qwen3.6-35b-a3b", "gemma-4-31b-it"),
+        ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "gemma-4-31b-it"),
+        ("qwen3-32b", "qwen3.6-35b-a3b", "gemma-4-31b-it"),
+        # gemma-31b vs qwen3-32b
+        ("qwen3.5-122b-a10b", "gemma-4-31b-it", "qwen3-32b"),
+        ("gemini-3.1-flash-lite", "gemma-4-31b-it", "qwen3-32b"),
+        # qwen3.6-35b vs gemma-26b
+        ("qwen3.5-122b-a10b", "qwen3.6-35b-a3b", "gemma-4-26b-a4b-it"),
+        ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "gemma-4-26b-a4b-it"),
     ],
     # Judge weaker than both pair members.
     "weak_judge": [
         ("qwen3-32b", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
         ("qwen3-32b", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
+        ("qwen3-32b", "gemini-3.1-flash-lite", "gemma-4-26b-a4b-it"),
+        ("qwen3-32b", "gemma-4-31b-it", "gemini-2.5-flash"),
+        ("qwen3-32b", "qwen3.6-35b-a3b", "gemini-3.1-flash-lite"),
+        ("qwen3-32b", "qwen3.6-35b-a3b", "gemma-4-31b-it"),
+        ("gemma-4-26b-a4b-it", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
+        ("gemma-4-26b-a4b-it", "gemma-4-31b-it", "gemini-2.5-flash"),
+        ("gemma-4-26b-a4b-it", "qwen3.6-35b-a3b", "gemini-3.1-flash-lite"),
+    ],
+    # Judge is a pair member (self-preference); (j, j, j) rows are the judge
+    # judging its own self-pair.
+    "self_judging": [
+        ("qwen3.5-122b-a10b", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
+        ("qwen3.5-122b-a10b", "qwen3.5-122b-a10b", "qwen3-32b"),
+        ("gemini-3.1-flash-lite", "gemini-3.1-flash-lite", "gemma-4-26b-a4b-it"),
+        ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "gemini-3.1-flash-lite"),
+        ("gemma-4-31b-it", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
+        ("gemma-4-31b-it", "gemma-4-31b-it", "gemini-2.5-flash"),
+        ("gemini-2.5-flash", "gemma-4-31b-it", "gemini-2.5-flash"),
+        ("qwen3-32b", "qwen3.6-35b-a3b", "qwen3-32b"),
+        ("qwen3.5-122b-a10b", "qwen3.5-122b-a10b", "qwen3.5-122b-a10b"),
+        ("gemini-3.1-flash-lite", "gemini-3.1-flash-lite", "gemini-3.1-flash-lite"),
+        ("gemma-4-31b-it", "gemma-4-31b-it", "gemma-4-31b-it"),
     ],
     # Widest-gap pairs (dLogit ~2.5-2.9, beyond the ladder's top rung): positive
     # control -- judges must ace these -- and first Arm B transcripts under our judges.
@@ -64,12 +151,15 @@ COMPARISONS = {
         ("gpt-4o", "claude-3-5-sonnet-0620", "llama-3.1-70b"),
         ("gpt-4o", "gpt-4.1", "mistral-medium"),
         ("gpt-4o", "gpt-5.5-low", "qwen3.6-plus"),
+        ("gpt-4o", "gpt-5.2-medium", "qwen3.6-flash"),
         ("gemini-2.5-flash", "claude-3-5-sonnet-0620", "llama-3.1-70b"),
         ("gemini-2.5-flash", "gpt-4.1", "mistral-medium"),
         ("gemini-2.5-flash", "gpt-5.5-low", "qwen3.6-plus"),
+        ("gemini-2.5-flash", "gpt-5.2-medium", "qwen3.6-flash"),
         ("gemini-3.1-flash-lite", "claude-3-5-sonnet-0620", "llama-3.1-70b"),
         ("gemini-3.1-flash-lite", "gpt-4.1", "mistral-medium"),
         ("gemini-3.1-flash-lite", "gpt-5.5-low", "qwen3.6-plus"),
+        ("gemini-3.1-flash-lite", "gpt-5.2-medium", "qwen3.6-flash"),
     ],
 }
 
@@ -97,4 +187,6 @@ MODELS = {
     "mistral-medium": {"label": "Mistral Medium 2505", "release": "2025-05-07"},
     "gpt-5.5-low": {"label": "GPT-5.5 (low)", "release": "2026-04-23"},
     "qwen3.6-plus": {"label": "Qwen3.6-Plus", "release": "2026-03-31"},
+    "gpt-5.2-medium": {"label": "GPT-5.2 (medium)", "release": "2025-12-11"},
+    "qwen3.6-flash": {"label": "Qwen3.6-Flash", "release": "2026-04-27"},
 }
