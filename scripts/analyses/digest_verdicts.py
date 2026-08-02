@@ -5,7 +5,7 @@ transcript lengths as the judge saw them. models.csv has one row per transcript
 model: accuracy, logit, theta, release. Prints a coverage summary.
 
 Usage:
-  uv run python scripts/judge/analysis/digest_verdicts.py
+  uv run python scripts/analyses/digest_verdicts.py
 """
 
 import argparse

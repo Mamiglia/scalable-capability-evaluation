@@ -8,13 +8,13 @@ Reported per run:
   * score with mean +/- 1.96*SEM CI and a permutation p against chance
   * slot-A pick rate (Wilson CI) and order-disagreement rate
   * no-answer rate and mean confidence
-  * self-pair runs: leakage gate -- slot-A CI must cover 0.5
+  * self-pair runs: slot-A CI must cover 0.5 (no position bias)
 
 Per judge: score = sigmoid(a + d * gap) fitted over the gap_ladder runs;
 sigma(a) above 0.5 with clean self-pairs indicates fingerprinting.
 
 Usage:
-  uv run python scripts/judge/analysis/analyse.py
+  uv run python scripts/analyses/analyse.py
 """
 
 import argparse
@@ -109,7 +109,7 @@ def main():
                      d_logit=0.0 if maj == mnr else logit[maj] - logit[mnr])
         entry.update(summarise_run(run))
         is_self = (judge, maj, mnr) in set(map(tuple, COMPARISONS["self_pairs"]))
-        entry["leak_ok"] = (entry["slot_a_lo"] <= 0.5 <= entry["slot_a_hi"]) if is_self else None
+        entry["slot_ok"] = (entry["slot_a_lo"] <= 0.5 <= entry["slot_a_hi"]) if is_self else None
         rows.append(entry)
     summary = pd.DataFrame(rows).sort_values(["judge", "d_acc"])
 
@@ -129,12 +129,12 @@ def main():
             print(f"  {e.major} vs {e.minor}{tag}")
             print(f"    score {e.score:.3f} [{e.score_lo:.3f}, {e.score_hi:.3f}] "
                   f"(n={e.n_items}, dAcc {e.d_acc:+.3f}) {e.stars}")
-            leak = ""
-            if e.leak_ok is not None:
-                leak = "  OK (CI covers 0.5)" if e.leak_ok else "  *** LEAK: CI excludes 0.5 ***"
+            flag = ""
+            if e.slot_ok is not None:
+                flag = "  ok (CI covers 0.5)" if e.slot_ok else "  *** slot bias: CI excludes 0.5 ***"
             print(f"    slot-A {e.slot_a:.2f} [{e.slot_a_lo:.2f}, {e.slot_a_hi:.2f}]"
                   f" | disagree {e.disagree_rate:.2f} | no-answer {e.noanswer_rate:.2f}"
-                  f" | conf {e.mean_conf:.1f}{leak}")
+                  f" | conf {e.mean_conf:.1f}{flag}")
         f = fits[fits.judge == judge]
         if len(f):
             f = f.iloc[0]

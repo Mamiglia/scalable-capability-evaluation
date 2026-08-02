@@ -6,7 +6,7 @@ controls (chance line, length-only baseline, self-pair leakage) are marked on
 the figures they qualify, not plotted separately.
 
 Usage:
-  uv run python scripts/judge/analysis/figures.py
+  uv run python scripts/analyses/figures.py
 """
 
 import argparse
@@ -25,9 +25,24 @@ JUDGES = ["gemini-3.1-flash-lite", "qwen3.5-122b-a10b", "gemma-4-31b-it",
           "qwen3.6-35b-a3b", "qwen3-32b", "gemini-2.5-flash", "gpt-4o"]
 JCOLOR = dict(zip(JUDGES, PALETTE))
 
+LAB: dict = {}
+
+
+def init_labels(models):
+    """Model captions used everywhere: name (GPQA acc, release year)."""
+    for m, meta in MODELS.items():
+        acc = models.loc[m, "accuracy"] if m in models.index else np.nan
+        rel = meta.get("release")
+        LAB[m] = f"{meta['label']} ({acc:.2f}, '{rel[2:4]})" if rel else f"{meta['label']} ({acc:.2f})"
+
 
 def lab(model):
-    return MODELS.get(model, {}).get("label", model)
+    return LAB.get(model, model)
+
+
+def release_year(model):
+    d = pd.to_datetime(MODELS[model]["release"])
+    return d.year + d.dayofyear / 366
 
 
 def ordered(summary):
@@ -66,16 +81,14 @@ def fig_run_overview(summary, out):
         is_self = r.major == r.minor
         note = f"{r.score:.2f} (n={r.n_items}) {r.stars}"
         if is_self:
-            note = f"slot-A {r.slot_a:.2f}" + ("  LEAK" if r.leak_ok is False else "  ok")
+            note = f"slot-A {r.slot_a:.2f}" + ("  ok" if r.slot_ok else "  position bias")
         dot_ci(ax, y, r.score, r.score_lo, r.score_hi, JCOLOR[r.judge],
                note=note, open_marker=is_self)
-        if not is_self and np.isfinite(r.len_baseline):
-            ax.plot(r.len_baseline, y, "|", ms=7, color=INK, mew=1.3, zorder=5)
     for j in s.judge.unique():
         block = ys[(s.judge == j).to_numpy()]
-        ax.annotate(j, xy=(-0.02, block.min() - 0.9), xycoords=("axes fraction", "data"),
-                    ha="right", va="center", color=INK2, fontsize=7.5, fontweight="bold",
-                    annotation_clip=False)
+        ax.annotate(f"judge: {lab(j)}", xy=(-0.02, block.min() - 0.9),
+                    xycoords=("axes fraction", "data"), ha="right", va="center",
+                    color=INK2, fontsize=7.5, fontweight="bold", annotation_clip=False)
     ax.set_yticks(ys)
     ax.set_yticklabels([pair_label(r) for _, r in s.iterrows()], fontsize=6.5)
     ax.invert_yaxis()
@@ -84,10 +97,8 @@ def fig_run_overview(summary, out):
     ax.set_xlim(0, 1)
     style(ax, grid_axis="x")
     handles = [Line2D([], [], marker="o", ls="-", color=INK2, ms=5.5, label="judge score, 95% CI"),
-               Line2D([], [], marker="|", ls="", color=INK, ms=7, mew=1.3,
-                      label="pick-the-longer-transcript baseline"),
                Line2D([], [], marker="o", ls="", mfc="white", mec=INK2, ms=5.5,
-                      label="self-pair control (slot-A rate must cover 0.5)")]
+                      label="self-pair control (should sit at chance)")]
     leg = ax.legend(handles=handles, frameon=False, loc="lower left",
                     bbox_to_anchor=(-0.35, 1.005), fontsize=6.5, ncol=2,
                     handletextpad=0.4, columnspacing=1.2)
@@ -98,7 +109,7 @@ def fig_run_overview(summary, out):
 
 # --- 2. gap curve, judges coloured by a scalar ---------------------------
 
-def gap_curve(summary, fits, out, name, jvalue, jtext, cmap):
+def gap_curve(summary, fits, out, name, jvalue, cmap):
     """Score vs raw-accuracy gap; one colour ramp over judges, self-pairs open.
 
     Ramp steps are rank-spaced, not value-proportional: judge values cluster
@@ -108,45 +119,62 @@ def gap_curve(summary, fits, out, name, jvalue, jtext, cmap):
     order = sorted(JUDGES, key=lambda j: (jvalue[j], j))
     col = {j: cmap(i / (len(order) - 1)) for i, j in enumerate(order)}
     fitted = {f.judge: f for _, f in fits.iterrows()}
+    # Solid dark = strongest/newest fitted judge, dashes lighten down the
+    # ranking; each pattern repeats in its legend entry.
+    ls = {j: s for j, s in zip([j for j in reversed(order) if j in fitted],
+                               ["-", (0, (5, 2)), (0, (2, 1.5))])}
 
-    fig, ax = plt.subplots(figsize=(4.8, 3.2))
+    # Broken x axis: self-pairs live in their own section on the left.
+    fig, (axs, ax) = plt.subplots(1, 2, sharey=True, figsize=(5.0, 3.2),
+                                  gridspec_kw={"width_ratios": [1, 11], "wspace": 0.05})
     xmax = summary.d_acc.max() * 1.05
-    for _, r in summary.iterrows():
-        is_self = r.major == r.minor
+    selfs = summary[summary.major == summary.minor].reset_index()
+    for i, r in selfs.iterrows():
+        x = (i - (len(selfs) - 1) / 2) * 0.25
+        axs.errorbar(x, r.score, yerr=[[r.score - r.score_lo], [r.score_hi - r.score]],
+                     fmt="o", ms=4.5, color=col[r.judge], ecolor=col[r.judge],
+                     elinewidth=0.9, capsize=0, zorder=3)
+    for _, r in summary[summary.major != summary.minor].iterrows():
         c = col[r.judge]
         ax.errorbar(r.d_acc, r.score, yerr=[[r.score - r.score_lo], [r.score_hi - r.score]],
                     fmt="o", ms=4.5, color=c, ecolor=c, elinewidth=0.9, capsize=0,
-                    mfc="white" if is_self else c, mew=1.1, alpha=0.9, zorder=3)
+                    alpha=0.9, zorder=3)
     x = np.linspace(0, xmax, 100)
     for f in fitted.values():
-        ax.plot(x, 1 / (1 + np.exp(-(f.a + f.d * x))), color=col[f.judge], lw=1.4, zorder=2)
-    chance(ax)
+        ax.plot(x, 1 / (1 + np.exp(-(f.a + f.d * x))), color=col[f.judge],
+                ls=ls[f.judge], lw=1.5, zorder=2)
+    for a in (axs, ax):
+        chance(a)
+        a.set_ylim(0, 1)
+        style(a)
+    axs.set_xlim(-0.6, 0.6)
+    axs.set_xticks([0])
+    axs.set_xticklabels(["self\npairs"])
+    axs.set_ylabel("judge score")
+    ax.set_xlim(0, xmax)
     ax.set_xlabel("capability gap (GPQA accuracy difference)")
-    ax.set_ylabel("judge score")
-    ax.set_xlim(-0.01, xmax)
-    ax.set_ylim(0, 1)
-    style(ax)
-    jh = [Line2D([], [], marker="o", ls="-" if j in fitted else "", color=col[j], ms=5,
-                 label=f"{j} ({jtext[j]})")
-          for j in sorted(JUDGES, key=lambda j: jvalue[j])]
-    jh.append(Line2D([], [], marker="o", ls="", mfc="white", mec=INK2, ms=5,
-                     label="self-pair (control)"))
+    ax.spines["left"].set_visible(False)
+    ax.tick_params(left=False)
+    # break marks at the join
+    for a, x0 in ((axs, 1.0), (ax, 0.0)):
+        a.plot([x0, x0], [-0.015, 0.015], transform=a.transAxes, color=MUTED,
+               lw=0.9, clip_on=False, marker=[(-0.5, -1), (0.5, 1)], ms=5, mew=0.9)
+    jh = [Line2D([], [], marker="o", ls=ls.get(j, ""), color=col[j], ms=5,
+                 label=lab(j))
+          for j in order]
     leg = ax.legend(handles=jh, frameon=False, loc="lower right", fontsize=6)
     for t in leg.get_texts():
         t.set_color(INK2)
-    ax.text(0.02, 0.97, "lines: sigmoid fit on gap-ladder runs", transform=ax.transAxes,
-            va="top", color=MUTED, fontsize=6)
+    ax.text(0.98, 0.06, "lines: sigmoid fit on gap-ladder runs · error bars: 95% CI",
+            transform=ax.transAxes, ha="right", color=MUTED, fontsize=6)
     save(fig, out / name)
 
 
 def fig_gap_curves(summary, fits, models, out):
-    acc = {j: models.loc[j, "accuracy"] for j in JUDGES}
     gap_curve(summary, fits, out, "2a_gap_curve_by_capability",
-              acc, {j: f"acc {v:.2f}" for j, v in acc.items()}, SEQ_BLUE)
-    rel = {j: pd.to_datetime(MODELS[j]["release"]) for j in JUDGES}
-    year = {j: d.year + d.dayofyear / 366 for j, d in rel.items()}
+              {j: models.loc[j, "accuracy"] for j in JUDGES}, SEQ_BLUE)
     gap_curve(summary, fits, out, "2b_gap_curve_by_release",
-              year, {j: f"rel {MODELS[j]['release'][:7]}" for j in JUDGES}, SEQ_ORANGE)
+              {j: release_year(j) for j in JUDGES}, SEQ_ORANGE)
 
 
 # --- 3. judge strength ---------------------------------------------------
@@ -169,7 +197,7 @@ def fig_judge_strength(verdicts, models, out):
         for acc, m, lo, hi, j in pts:
             ax.errorbar(acc, m, yerr=[[m - lo], [hi - m]], fmt="o", ms=5.5, color=JCOLOR[j],
                         ecolor=JCOLOR[j], elinewidth=0.9, capsize=0, zorder=3)
-            ax.annotate(j, xy=(acc, m), xytext=(0, -10), textcoords="offset points",
+            ax.annotate(lab(j), xy=(acc, m), xytext=(0, -10), textcoords="offset points",
                         ha="center", color=INK2, fontsize=5.5, rotation=0)
         chance(ax)
         ax.set_title(f"{lab(maj)} v {lab(mnr)}", color=INK2, fontsize=7.5)
@@ -178,7 +206,7 @@ def fig_judge_strength(verdicts, models, out):
         style(ax)
     np.atleast_1d(axes)[0].set_ylabel("judge score")
     fig.supxlabel("judge's own GPQA accuracy", color=INK2, fontsize=8.5)
-    fig.text(0.99, 0.01, "every judge that judged each pair in the pilot",
+    fig.text(0.99, 0.01, "every judge that judged each pair in the pilot · error bars: 95% CI",
              ha="right", color=MUTED, fontsize=6)
     save(fig, out / "3_judge_strength")
 
@@ -201,7 +229,7 @@ def fig_length(verdicts, summary, out):
         lo, hi = wilson(k, len(d))
         dot_ci(left, JUDGES.index(j), k / len(d), lo, hi, JCOLOR[j], note=f"n={len(d)}")
     left.set_yticks(range(len(JUDGES)))
-    left.set_yticklabels(JUDGES, fontsize=7)
+    left.set_yticklabels([lab(j) for j in JUDGES], fontsize=7)
     left.invert_yaxis()
     chance(left, 0.5, axis="x")
     left.set_xlabel("P(picked the longer transcript), all verdicts pooled")
@@ -218,7 +246,8 @@ def fig_length(verdicts, summary, out):
     right.axvline(0, color=MUTED, lw=0.8)
     right.set_xlabel("stronger − weaker mean length (k chars)")
     right.set_ylabel("judge score")
-    right.text(0.02, 0.04, "one point per run · colour = judge (see left) · open = self-pair",
+    right.text(0.02, 0.04, "one point per run · colour = judge (see left) · open = self-pair\n"
+               "error bars: 95% CI",
                transform=right.transAxes, color=MUTED, fontsize=6)
     style(right)
     save(fig, out / "4_length_confound")
@@ -250,7 +279,7 @@ def fig_item_difficulty(verdicts, out,
         style(ax)
     axes[0].set_ylabel("mean judge score")
     axes[0].text(0.03, 0.05, f"n={len(d)} items · grey dots pooled over cross-model runs · "
-                 "blue: quintile means", transform=axes[0].transAxes, color=MUTED, fontsize=6)
+                 "blue: quintile means, 95% CI", transform=axes[0].transAxes, color=MUTED, fontsize=6)
     save(fig, out / "5_item_difficulty")
 
 
@@ -288,20 +317,83 @@ def fig_temporal(verdicts, out):
     ax.set_ylabel("judge score")
     ax.set_ylim(0, 1)
     style(ax)
-    jh = [Line2D([], [], marker="o", ls="-", color=JCOLOR[j], ms=5,
-                 label=f"{j} (rel {MODELS[j]['release'][:7]})") for j in judges]
+    jh = [Line2D([], [], marker="o", ls="-", color=JCOLOR[j], ms=5, label=lab(j))
+          for j in judges]
     rh = [Line2D([], [], marker=rung_marker[r], ls="", color=MUTED, ms=5,
-                 label=f"{lab(r[0])} v {lab(r[1])} ({MODELS[r[0]]['release'][:4]})")
-          for r in rungs]
+                 label=f"{lab(r[0])} v {lab(r[1])}") for r in rungs]
     l1 = ax.legend(handles=jh, frameon=False, loc="upper right", fontsize=6)
     ax.add_artist(l1)
     l2 = ax.legend(handles=rh, frameon=False, loc="lower left", fontsize=6)
     for leg in (l1, l2):
         for t in leg.get_texts():
             t.set_color(INK2)
-    ax.text(0.02, 0.97, "2026 pair is length-confounded — see 4_length_confound",
+    ax.text(0.02, 0.97, "2026 pair is length-confounded — see 4_length_confound\n"
+            "error bars: 95% CI",
             transform=ax.transAxes, ha="left", va="top", color=MUTED, fontsize=6)
     save(fig, out / "6_temporal")
+
+
+# --- 7. score vs release-date distance, every run ------------------------
+
+def fig_release_gap(summary, out):
+    """Fig 6's release-distance x-axis, but over every run, not just the rungs."""
+    fig, ax = plt.subplots(figsize=(5.0, 3.2))
+    for _, r in summary.iterrows():
+        is_self = r.major == r.minor
+        dyr = (release_year(r.major) + release_year(r.minor)) / 2 - release_year(r.judge)
+        ax.errorbar(dyr, r.score, yerr=[[r.score - r.score_lo], [r.score_hi - r.score]],
+                    fmt="o", ms=4.5, color=JCOLOR[r.judge], ecolor=JCOLOR[r.judge],
+                    elinewidth=0.9, capsize=0, mfc="white" if is_self else JCOLOR[r.judge],
+                    mew=1.1, alpha=0.9, zorder=3)
+    chance(ax)
+    ax.axvline(0, color=MUTED, lw=0.8)
+    ax.annotate("pair from judge's own era", xy=(0, 0.02), xycoords=("data", "axes fraction"),
+                rotation=90, ha="right", va="bottom", color=MUTED, fontsize=6)
+    ax.set_xlabel("pair mean release − judge release (years; + = judging newer models)")
+    ax.set_ylabel("judge score")
+    ax.set_ylim(0, 1)
+    style(ax)
+    jh = [Line2D([], [], marker="o", ls="", color=JCOLOR[j], ms=5, label=lab(j))
+          for j in JUDGES]
+    jh.append(Line2D([], [], marker="o", ls="", mfc="white", mec=INK2, ms=5,
+                     label="self-pair (control)"))
+    leg = ax.legend(handles=jh, frameon=False, loc="lower left", fontsize=5.8,
+                    title="judge", title_fontsize=6)
+    for t in leg.get_texts():
+        t.set_color(INK2)
+    leg.get_title().set_color(INK2)
+    ax.text(0.99, 0.97, "one point per run, 95% CI · capability gap varies freely here —\n"
+            "read with 2a/2b before attributing anything to age",
+            transform=ax.transAxes, ha="right", va="top", color=MUTED, fontsize=6)
+    save(fig, out / "7_release_gap")
+
+
+# --- 0. model accuracy ---------------------------------------------------
+
+def fig_model_accuracy(models, out):
+    m = models.sort_values("accuracy").reset_index()
+    arm_col = {"A": PALETTE[0], "B": PALETTE[1]}
+    fig, ax = plt.subplots(figsize=(4.2, 0.22 * len(m) + 1.0))
+    for y, r in m.iterrows():
+        k = int(round(r.accuracy * r.n_samples))
+        lo, hi = wilson(k, int(r.n_samples))
+        dot_ci(ax, y, r.accuracy, lo, hi, arm_col[r.arm],
+               note=f"{r.accuracy:.0%} (n={r.n_samples})")
+    ax.set_yticks(range(len(m)))
+    ax.set_yticklabels([lab(r.model) for _, r in m.iterrows()], fontsize=7)
+    chance(ax, 0.25, axis="x")
+    ax.set_xlabel("GPQA Diamond accuracy (all epochs; 95% CI; chance 0.25)")
+    ax.set_xlim(0, 1)
+    style(ax, grid_axis="x")
+    handles = [Line2D([], [], marker="o", ls="", color=arm_col["A"], ms=5.5,
+                      label="arm A (our collection)"),
+               Line2D([], [], marker="o", ls="", color=arm_col["B"], ms=5.5,
+                      label="arm B (Epoch logs)")]
+    leg = ax.legend(handles=handles, frameon=False, loc="upper left",
+                    bbox_to_anchor=(0.02, 0.35), fontsize=6.5)
+    for t in leg.get_texts():
+        t.set_color(INK2)
+    save(fig, out / "0_model_accuracy")
 
 
 def main():
@@ -318,13 +410,16 @@ def main():
     for stale in list(out.glob("*.png")) + list(out.glob("*.svg")):
         stale.unlink()
 
+    init_labels(models)
+    fig_model_accuracy(models, out)
     fig_run_overview(summary, out)
     fig_gap_curves(summary, fits, models, out)
     fig_judge_strength(verdicts, models, out)
     fig_length(verdicts, summary, out)
     fig_item_difficulty(verdicts, out)
     fig_temporal(verdicts, out)
-    print(f"6 figures -> {out}")
+    fig_release_gap(summary, out)
+    print(f"8 figures -> {out}")
 
 
 if __name__ == "__main__":
