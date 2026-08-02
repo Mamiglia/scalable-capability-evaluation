@@ -21,6 +21,7 @@ Transcript B:
 ---
 
 Which of the two transcripts is from the more capable model? 
+
 Answer in the instructed format.
 """
 
