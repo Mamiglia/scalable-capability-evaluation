@@ -68,7 +68,7 @@ def build_dataset(
     format_str: str = USER_PROMPT,
     max_len: int = 24000,
     require_both_correct: bool = True,
-    include_reverse: bool = True,
+include_reverse: bool = True,
     include_reasoning: bool = True,
 ):
     """
@@ -85,23 +85,40 @@ def build_dataset(
     """
     log_major = read_eval_log(major_path)
     log_minor = read_eval_log(minor_path)
-    
+
     def eligible(sample: Sample) -> bool:
         return hasattr(sample, "id") and (
             not require_both_correct or extract_score(sample)
         )
 
-    minor_samples = {s.id: s for s in log_minor.samples if eligible(s)}
-    major_samples = {s.id: s for s in log_major.samples if eligible(s)}
+    def samples_by_id(log) -> dict:
+        grouped: dict = {}
+        for s in log.samples:
+            if eligible(s):
+                grouped.setdefault(s.id, []).append(s)
+        for group in grouped.values():
+            group.sort(key=lambda s: getattr(s, "epoch", 0))
+        return grouped
+
+    self_pair = Path(major_path) == Path(minor_path)
+    major_samples = samples_by_id(log_major)
+    minor_samples = major_samples if self_pair else samples_by_id(log_minor)
 
     samples = []
-    
+
     for sample_id in sorted(minor_samples.keys() & major_samples.keys(), key=str):
-        sample_a = major_samples[sample_id]
-        sample_b = minor_samples[sample_id]
-        
+        if self_pair:
+            # For self-pair control, make sure to select two distinct correct epochs of the same model.
+            group = major_samples[sample_id]
+            if len(group) < 2:
+                continue
+            sample_a, sample_b = group[0], group[1]
+        else:
+            sample_a = major_samples[sample_id][0]
+            sample_b = minor_samples[sample_id][0]
+
         samples.append(responses_to_sample(sample_a, sample_b, target='A', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning))
-        
+
         if include_reverse:
             samples.append(responses_to_sample(sample_b, sample_a, target='B', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning))
         
