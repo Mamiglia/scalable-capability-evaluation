@@ -86,8 +86,8 @@ MODELS = {
     "gemma-4-26b-a4b-it": {"label": "Gemma-4-26B", "release": "2026-04"},
     "gemini-3.1-flash-lite": {"label": "Flash-Lite 3.1", "release": "2026-03"},
     "gemini-2.5-flash": {"label": "Gemini 2.5 Flash", "release": "2025-06"},
-    "qwen3.6-35b-a3b": {"label": "Qwen3.6-35B", "release": None},
-    "qwen3.5-122b-a10b": {"label": "Qwen3.5-122B", "release": None},
+    "qwen3.6-35b-a3b": {"label": "Qwen3.6-35B", "release": "2026-04"},   # approx: series-mates' dates
+    "qwen3.5-122b-a10b": {"label": "Qwen3.5-122B", "release": "2026-02"},  # approx: series-mates' dates
     "qwen3-32b": {"label": "Qwen3-32B", "release": "2025-04"},
     "gemini-3.5-flash": {"label": "Gemini 3.5 Flash (high)", "release": "2026-05-19"},
     "gpt-4o": {"label": "GPT-4o", "release": "2024-08-06"},

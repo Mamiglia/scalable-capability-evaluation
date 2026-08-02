@@ -8,9 +8,12 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 
 INK, INK2, MUTED, GRID, SURFACE = "#0b0b0b", "#33322f", "#4a4844", "#d3d2c9", "#ffffff"
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
+SEQ_BLUE = LinearSegmentedColormap.from_list("seq_blue", ["#b9d3f2", "#2a78d6", "#123a68"])
+SEQ_ORANGE = LinearSegmentedColormap.from_list("seq_orange", ["#f2c0a4", "#eb6834", "#7a2a10"])
 
 plt.rcParams.update({
     "font.family": "sans-serif", "font.sans-serif": ["Arial"],

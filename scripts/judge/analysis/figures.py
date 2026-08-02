@@ -17,30 +17,17 @@ import pandas as pd
 from matplotlib.lines import Line2D
 
 from comparisons import COMPARISONS, MODELS
-from plots import INK, INK2, MUTED, PALETTE, chance, dot_ci, legend, plt, save, style
+from plots import (INK, INK2, MUTED, PALETTE, SEQ_BLUE, SEQ_ORANGE, chance, dot_ci,
+                   legend, plt, save, style)
 from stats import counterbalanced, sem_ci, wilson
 
 JUDGES = ["gemini-3.1-flash-lite", "qwen3.5-122b-a10b", "gemma-4-31b-it",
           "qwen3.6-35b-a3b", "qwen3-32b", "gemini-2.5-flash", "gpt-4o"]
 JCOLOR = dict(zip(JUDGES, PALETTE))
 
-# Marker per comparison group, checked in this order.
-GROUP_MARKER = [("self_pairs", "o", "self-pair (control)"),
-                ("wide_gap", "D", "wide gap (control)"),
-                ("temporal", "^", "temporal"),
-                ("weak_judge", "v", "weak judge"),
-                ("gap_ladder", "o", "gap ladder")]
-
 
 def lab(model):
     return MODELS.get(model, {}).get("label", model)
-
-
-def group_marker(groups):
-    for key, marker, _ in GROUP_MARKER:
-        if key in groups:
-            return marker
-    return "o"
 
 
 def ordered(summary):
@@ -109,48 +96,52 @@ def fig_run_overview(summary, out):
     save(fig, out / "1_run_overview")
 
 
-# --- 2. gap curve --------------------------------------------------------
+# --- 2. gap curve, judges coloured by a scalar ---------------------------
 
-def fig_gap_curve(summary, fits, models, out):
-    fig, ax = plt.subplots(figsize=(5.4, 3.4))
+def gap_curve(summary, fits, out, name, jvalue, jtext, cmap):
+    """Score vs raw-accuracy gap; one colour ramp over judges, self-pairs open."""
+    lo, hi = min(jvalue.values()), max(jvalue.values())
+    col = {j: cmap(0.5 if hi == lo else (jvalue[j] - lo) / (hi - lo)) for j in JUDGES}
+    fitted = {f.judge: f for _, f in fits.iterrows()}
+
+    fig, ax = plt.subplots(figsize=(4.8, 3.2))
     xmax = summary.d_acc.max() * 1.05
     for _, r in summary.iterrows():
-        c = JCOLOR[r.judge]
         is_self = r.major == r.minor
+        c = col[r.judge]
         ax.errorbar(r.d_acc, r.score, yerr=[[r.score - r.score_lo], [r.score_hi - r.score]],
-                    fmt=group_marker(r.groups or ""), ms=4.5, color=c, ecolor=c,
-                    elinewidth=0.9, capsize=0, mfc="white" if is_self else c,
-                    mew=1.1, alpha=0.9, zorder=3)
+                    fmt="o", ms=4.5, color=c, ecolor=c, elinewidth=0.9, capsize=0,
+                    mfc="white" if is_self else c, mew=1.1, alpha=0.9, zorder=3)
     x = np.linspace(0, xmax, 100)
-    for _, f in fits.iterrows():
-        ax.plot(x, 1 / (1 + np.exp(-(f.a + f.d * x))), color=JCOLOR[f.judge],
-                lw=1.4, zorder=2)
+    for f in fitted.values():
+        ax.plot(x, 1 / (1 + np.exp(-(f.a + f.d * x))), color=col[f.judge], lw=1.4, zorder=2)
     chance(ax)
     ax.set_xlabel("capability gap (GPQA accuracy difference)")
     ax.set_ylabel("judge score")
     ax.set_xlim(-0.01, xmax)
     ax.set_ylim(0, 1)
     style(ax)
-    fitted = {f.judge: f for _, f in fits.iterrows()}
-    jh = [Line2D([], [], marker="o", ls="-" if j in fitted else "", color=JCOLOR[j], ms=5,
-                 label=(f"{j} (acc {models.loc[j, 'accuracy']:.2f}): d={fitted[j].d:.1f}, "
-                        f"gap-0={fitted[j].acc_at_gap0:.2f}" if j in fitted
-                        else f"{j} (acc {models.loc[j, 'accuracy']:.2f})"))
-          for j in JUDGES]
-    gh = [Line2D([], [], marker=m, ls="", color=MUTED, ms=5,
-                 mfc="white" if k == "self_pairs" else MUTED, label=label)
-          for k, m, label in GROUP_MARKER]
-    l1 = ax.legend(handles=jh, frameon=False, loc="lower right", fontsize=5.8,
-                   title="judge (fit on gap-ladder runs only)", title_fontsize=6)
-    ax.add_artist(l1)
-    l2 = ax.legend(handles=gh, frameon=False, loc="upper left", fontsize=5.8,
-                   bbox_to_anchor=(0.28, 1.0))
-    for leg in (l1, l2):
-        for t in leg.get_texts():
-            t.set_color(INK2)
-        if leg.get_title():
-            leg.get_title().set_color(INK2)
-    save(fig, out / "2_gap_curve")
+    jh = [Line2D([], [], marker="o", ls="-" if j in fitted else "", color=col[j], ms=5,
+                 label=f"{j} ({jtext[j]})")
+          for j in sorted(JUDGES, key=lambda j: jvalue[j])]
+    jh.append(Line2D([], [], marker="o", ls="", mfc="white", mec=INK2, ms=5,
+                     label="self-pair (control)"))
+    leg = ax.legend(handles=jh, frameon=False, loc="lower right", fontsize=6)
+    for t in leg.get_texts():
+        t.set_color(INK2)
+    ax.text(0.02, 0.97, "lines: sigmoid fit on gap-ladder runs", transform=ax.transAxes,
+            va="top", color=MUTED, fontsize=6)
+    save(fig, out / name)
+
+
+def fig_gap_curves(summary, fits, models, out):
+    acc = {j: models.loc[j, "accuracy"] for j in JUDGES}
+    gap_curve(summary, fits, out, "2a_gap_curve_by_capability",
+              acc, {j: f"acc {v:.2f}" for j, v in acc.items()}, SEQ_BLUE)
+    rel = {j: pd.to_datetime(MODELS[j]["release"]) for j in JUDGES}
+    year = {j: d.year + d.dayofyear / 366 for j, d in rel.items()}
+    gap_curve(summary, fits, out, "2b_gap_curve_by_release",
+              year, {j: f"rel {MODELS[j]['release'][:7]}" for j in JUDGES}, SEQ_ORANGE)
 
 
 # --- 3. judge strength ---------------------------------------------------
@@ -216,13 +207,13 @@ def fig_length(verdicts, summary, out):
                .rename("dlen").reset_index())
     m = summary.merge(per_run, on=["judge", "major", "minor"])
     for _, r in m.iterrows():
-        right.plot(r.dlen, r.score, group_marker(r.groups or ""), ms=4.5, color=JCOLOR[r.judge],
+        right.plot(r.dlen, r.score, "o", ms=4.5, color=JCOLOR[r.judge],
                    mfc="white" if r.major == r.minor else JCOLOR[r.judge], mew=1.1)
     chance(right)
     right.axvline(0, color=MUTED, lw=0.8)
     right.set_xlabel("stronger − weaker mean length (k chars)")
     right.set_ylabel("judge score")
-    right.text(0.02, 0.04, "one point per run · colour = judge (see left)\nmarker shape = group (see 2_gap_curve)",
+    right.text(0.02, 0.04, "one point per run · colour = judge (see left) · open = self-pair",
                transform=right.transAxes, color=MUTED, fontsize=6)
     style(right)
     save(fig, out / "4_length_confound")
@@ -323,7 +314,7 @@ def main():
         stale.unlink()
 
     fig_run_overview(summary, out)
-    fig_gap_curve(summary, fits, models, out)
+    fig_gap_curves(summary, fits, models, out)
     fig_judge_strength(verdicts, models, out)
     fig_length(verdicts, summary, out)
     fig_item_difficulty(verdicts, out)
