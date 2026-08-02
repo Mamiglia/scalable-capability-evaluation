@@ -52,6 +52,7 @@ class TestJudgeTask:
             max_len=12000,
             require_both_correct=True,
             include_reverse=True,
+            include_reasoning=True,
         )
 
 

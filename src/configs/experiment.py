@@ -31,6 +31,7 @@ class ExperimentConfig(DraccusConfig):
 
     require_both_correct: bool = True
     include_reverse: bool = True
+    include_reasoning: bool = True
     max_length: int = 65536
     system_prompt: str = SYSTEM_PROMPT
 
