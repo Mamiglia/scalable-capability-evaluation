@@ -7,13 +7,12 @@ Items are keyed by (benchmark, question id), so several evals can share a table.
 """
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, NamedTuple, Optional
+from typing import Iterator, NamedTuple
 
+import draccus
 import numpy as np
 import pandas as pd
 from inspect_ai.log import read_eval_log
-
-from draccus_kwargs import wrap
 
 SNIPPET_CHARS = 80 # first characters from each question to store to ensure all questions are matched correctly
 
@@ -21,7 +20,6 @@ SNIPPET_CHARS = 80 # first characters from each question to store to ensure all 
 class DataConfig:
     logs_dir: str = "external_data/epoch-gpqa"
     out: str = "external_data/epoch-gpqa/responses.parquet"
-    kwargs: Optional[dict[str, Any]] = None
 
 def question_number(sample) -> str:
     """The question id from the log"""
@@ -130,8 +128,8 @@ def encode(responses: pd.DataFrame) -> IRTData:
 
 
 
-@wrap
-def main(cfg: DataConfig) -> int:
+def main() -> int:
+    cfg = draccus.parse(DataConfig)
     responses = build_responses(Path(cfg.logs_dir))
     report = verify_alignment(responses)
     print(f"{len(responses)} responses, {report['n_models']} models")

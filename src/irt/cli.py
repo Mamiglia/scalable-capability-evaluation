@@ -2,11 +2,11 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import List
 
+import draccus
 import pandas as pd
 
-from draccus_kwargs import wrap
 from irt.fitting import save_results
 from irt.validation import compare
 
@@ -21,11 +21,10 @@ class IrtConfig:
     samples: int = 1000
     validate: bool = False  # also run the held-out model comparison (slow)
     k: int = 5
-    kwargs: Optional[dict] = None
 
 
-@wrap
-def main(cfg: IrtConfig) -> int:
+def main() -> int:
+    cfg = draccus.parse(IrtConfig)
     responses = pd.read_parquet(cfg.responses)
     caps, diffs = save_results(
         responses, models=tuple(cfg.fit_models), out_dir=cfg.out_dir,

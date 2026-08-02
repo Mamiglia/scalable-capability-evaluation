@@ -22,9 +22,8 @@ from typing import Any, Optional
 from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
 
+import draccus
 import pandas as pd
-
-from draccus_kwargs import wrap
 
 MODEL_COLUMN = "Model version"
 LOGS_COLUMN = "Logs"
@@ -43,7 +42,6 @@ class FetchConfig:
     out_dir: str = "external_data/epoch-gpqa"
     models: Any = "all"  # list of "Model version" names, or "all"
     limit: Optional[int] = None  # cap the download count, for quick test
-    kwargs: Optional[dict[str, Any]] = None
 
 
 def select_models(frame: pd.DataFrame, models: Any
@@ -103,8 +101,8 @@ def download(name: str, url: str, out_dir: Path, token: Optional[str] = None) ->
     return True
 
 
-@wrap
-def main(cfg: FetchConfig) -> int:
+def main() -> int:
+    cfg = draccus.parse(FetchConfig)
     token = os.environ.get(WAF_TOKEN_ENV)
     if not token:
         print(f"warning: ${WAF_TOKEN_ENV} is not set; downloads will hit the WAF CAPTCHA")
