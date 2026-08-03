@@ -12,13 +12,14 @@ import argparse
 import math
 import re
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
 import yaml
 from inspect_ai.log import read_eval_log
 
-from judge.dataset import USER_PROMPT, format_options, truncate_pair
+from judge.dataset import USER_PROMPT, format_options, strip_answer, truncate_pair
 from judge.util import extract_score, extract_transcript
 
 from comparisons import JUDGE_ALIASES, MODELS
@@ -37,15 +38,25 @@ def load_log(path):
     return _logs[p]
 
 
+class PairItem(NamedTuple):
+    """One item's judged content for a pair, before the two orders are assigned."""
+    question: str
+    t_major: str
+    t_minor: str
+    s_major: Any        # the sample; the prompt rebuild needs its option order
+    s_minor: Any
+    reasoning_len_major: int
+    reasoning_len_minor: int
+
+
 def pair_items(major_path, minor_path, include_reasoning, require_both_correct,
                truncate_frac=None):
-    """item -> (question, major transcript, minor transcript, major sample, minor sample).
+    """item -> PairItem.
 
     Mirrors build_dataset's epoch selection (first eligible epoch per item;
     self-pairs take the first two) and its truncation. Digest verifies the
     rebuild per item against the logged judge input, so drift from the
-    builder is caught. The samples are kept because the rebuild needs each
-    model's own option order.
+    builder is caught.
     """
     key = (str(major_path), str(minor_path), include_reasoning,
            require_both_correct, truncate_frac)
@@ -75,9 +86,12 @@ def pair_items(major_path, minor_path, include_reasoning, require_both_correct,
             a, b = major[sid][0], minor[sid][0]
         t_major = extract_transcript(a, include_reasoning=include_reasoning)[:MAX_LEN]
         t_minor = extract_transcript(b, include_reasoning=include_reasoning)[:MAX_LEN]
+        # Measured before truncation so the degenerate-transcript filter keeps
+        # the same items in every truncation condition.
+        rlen_major, rlen_minor = len(strip_answer(t_major)), len(strip_answer(t_minor))
         if truncate_frac is not None:
             t_major, t_minor = truncate_pair(t_major, t_minor, truncate_frac)
-        items[str(sid)] = (a.input, t_major, t_minor, a, b)
+        items[str(sid)] = PairItem(a.input, t_major, t_minor, a, b, rlen_major, rlen_minor)
     _pairs[key] = items
     return items
 
@@ -134,23 +148,24 @@ def digest(log_root: Path, config: Path):
             picked_major = (1.0 if picked == slot else 0.0) if picked in ("1", "2") else np.nan
             conf = (score.metadata or {}).get("confidence", np.nan) if score and score.metadata else np.nan
 
-            q, t_major, t_minor, s_major, s_minor = items.get(item, (None,) * 5)
-            len_major = len_minor = np.nan
-            if q is None:
+            it = items.get(item)
+            len_major = len_minor = rlen_major = rlen_minor = np.nan
+            if it is None:
                 n_unmatched += 1
             else:
+                rlen_major, rlen_minor = it.reasoning_len_major, it.reasoning_len_minor
                 major_first = slot == "1"
-                t_1, t_2 = (t_major, t_minor) if major_first else (t_minor, t_major)
-                s_1, s_2 = (s_major, s_minor) if major_first else (s_minor, s_major)
+                t_1, t_2 = (it.t_major, it.t_minor) if major_first else (it.t_minor, it.t_major)
+                s_1, s_2 = (it.s_major, it.s_minor) if major_first else (it.s_minor, it.s_major)
                 expected = USER_PROMPT.format(
-                    question=q,
+                    question=it.question,
                     options_1=format_options(s_1, 1),
                     options_2=format_options(s_2, 2),
                     transcript_1=t_1,
                     transcript_2=t_2,
                 )
                 if isinstance(s.input, str) and len(s.input) == len(expected):
-                    len_major, len_minor = len(t_major), len(t_minor)
+                    len_major, len_minor = len(it.t_major), len(it.t_minor)
                 else:
                     n_len_mismatch += 1
 
@@ -162,6 +177,7 @@ def digest(log_root: Path, config: Path):
                 judge=judge, major=major, minor=minor, item=item,
                 slot_of_major=slot, picked=picked, picked_major=picked_major,
                 confidence=conf, len_major=len_major, len_minor=len_minor,
+                reasoning_len_major=rlen_major, reasoning_len_minor=rlen_minor,
                 truncate_frac=tf, phase=phase, log_file=str(f),
             )
 

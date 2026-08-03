@@ -118,10 +118,10 @@ def collect_logs(log_root: Path, config: Path):
         items = pair_items(meta["major_path"], meta["minor_path"], ir, rbc,
                            truncate_frac=None)
         minor_key = f"{minor}__ep1" if self_pair else minor
-        for item, (question, t_major, t_minor, _, _) in items.items():
-            transcripts.setdefault(major, {})[item] = t_major
-            transcripts.setdefault(minor_key, {})[item] = t_minor
-            questions[item] = question
+        for item, it in items.items():
+            transcripts.setdefault(major, {})[item] = it.t_major
+            transcripts.setdefault(minor_key, {})[item] = it.t_minor
+            questions[item] = it.question
 
         for s in log.samples or []:
             item, slot = str(s.id).rsplit("_", 1)
