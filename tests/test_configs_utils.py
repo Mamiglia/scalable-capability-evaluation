@@ -93,7 +93,7 @@ def test_experiment_model_evals_subdirectories(tmp_path, monkeypatch):
             return mock_log_failed
         return mock_log_success
 
-    monkeypatch.setattr("configs.experiment.read_eval_log", mock_read_eval_log)
+    monkeypatch.setattr("configs.utils.read_eval_log", mock_read_eval_log)
     monkeypatch.setattr("configs.experiment.get_eval_path", lambda **kw: eval_dir)
     evals = exp.model_evals(model)
     assert evals == [f0, f1]

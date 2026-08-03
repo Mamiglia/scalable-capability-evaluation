@@ -82,5 +82,8 @@ def get_eval_path(
 
 def is_successful_eval(eval_path: Path) -> bool:
     """Check if an evaluation log indicates a successful run."""
-    log = read_eval_log(eval_path, header_only=True)
-    return log.status == "success"
+    try:
+        log = read_eval_log(eval_path, header_only=True)
+        return getattr(log, "status", None) == "success"
+    except Exception:
+        return False

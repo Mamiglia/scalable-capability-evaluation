@@ -4,7 +4,7 @@ Digest existing Inspect evaluation log files (.eval), filtering for success,
 completeness, and deduplication, and moving (or copying) them into the expected
 repository directory structure under data/:
 
-    data/{benchmark}/{task_args_hash}/{model_shortname}/{index}.eval
+    data/{benchmark}/{task_args_hash}/{model_shortname}/{index}/{inspect_id}.eval
 """
 
 import argparse
@@ -93,6 +93,9 @@ def get_target_path(
 
     dest_dir = get_eval_path(task=task_cfg, model=model_cfg, base_dir=base_dir)
 
+    eval_id = getattr(eval_info, "eval_id", None)
+    file_name = f"{eval_id}.eval" if eval_id else source_path.name
+
     if preserve_names:
         dest_file = dest_dir / source_path.name
         if used_targets is not None and dest_file in used_targets:
@@ -104,14 +107,24 @@ def get_target_path(
             dest_file = dest_dir / f"{stem}_{counter}{ext}"
         return dest_file
 
-    # Sequential index naming: 0.eval, 1.eval, 2.eval ...
-    i = 0
+    # Sequential epoch directory naming: 0/{eval_id}.eval, 1/{eval_id}.eval, ...
+    if source_path.parent.name.isdigit():
+        i = int(source_path.parent.name)
+    elif source_path.stem.isdigit():
+        i = int(source_path.stem)
+    else:
+        i = 0
+
     while True:
-        candidate = dest_dir / f"{i}.eval"
+        candidate_dir = dest_dir / str(i)
+        candidate = candidate_dir / file_name
         if used_targets is not None and candidate in used_targets:
             i += 1
             continue
         if candidate.exists() and candidate.resolve() != source_path.resolve():
+            i += 1
+            continue
+        if candidate_dir.exists() and any(candidate_dir.glob("*.eval")) and not (candidate.exists() and candidate.resolve() == source_path.resolve()):
             i += 1
             continue
         return candidate
