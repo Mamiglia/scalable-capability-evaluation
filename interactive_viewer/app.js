@@ -55,6 +55,7 @@ let plotInited = false;
 
 const pairCache = new Map();   // "maj__min__frac" -> Promise<pairData>
 const transCache = new Map();  // stem -> Promise<{item:text}>
+const optsCache = new Map();   // stem -> Promise<{item:[choice]}>
 
 let MODAL = null;  // { run, swapped, item, filter, search, pair, tMajor, tMinor }
 
@@ -369,13 +370,18 @@ const getPair = (major, minor, frac) => {
   return cachedJSON(pairCache, key, "data/pairs/" + key + ".json");
 };
 const getTranscript = stem => cachedJSON(transCache, stem, "data/transcripts/" + stem + ".json");
+/* Options are shuffled per model, so each side needs its own order for its
+   answer letter to mean anything. Missing file (non-MCQ benchmark) -> {}. */
+const getOptions = stem =>
+  cachedJSON(optsCache, stem, "data/options/" + stem + ".json").catch(() => ({}));
 
 /* --- modal: open + header ----------------------------------------------- */
 async function openModal(run, keepItem) {
   const prev = keepItem && MODAL ? MODAL : null;
   MODAL = { run: run, swapped: prev ? prev.swapped : false,
             item: prev ? prev.item : null, filter: prev ? prev.filter : "all",
-            search: prev ? prev.search : "", pair: null, tMajor: null, tMinor: null };
+            search: prev ? prev.search : "", pair: null, tMajor: null, tMinor: null,
+            oMajor: null, oMinor: null };
   overlay.hidden = false;
   document.body.style.overflow = "hidden";
   $("detail").hidden = true;
@@ -391,11 +397,15 @@ async function openModal(run, keepItem) {
       getPair(run.major, run.minor, run.frac),
       getTranscript(run.major),
       getTranscript(minorStem),
+      getOptions(run.major),
+      getOptions(minorStem),
     ]);
     if (MODAL.run !== run) return;  // a later click superseded this one
     MODAL.pair = results[0];
     MODAL.tMajor = results[1];
     MODAL.tMinor = results[2];
+    MODAL.oMajor = results[3];
+    MODAL.oMinor = results[4];
     buildItemFilterBar();
     renderItemList();
   } catch (e) {
@@ -566,6 +576,21 @@ function sideLabel(model, epochTag) {
   return MODAL.run.is_self ? (l + " " + epochTag) : l;
 }
 
+/* The options this side's model saw, in its own shuffled order, with the letter
+   it answered marked — the same list the judge was shown above this transcript. */
+function renderOptions(elId, choices, answered) {
+  const el = $(elId);
+  if (!el) return;
+  if (!choices.length) { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.innerHTML = choices.map((c, i) => {
+    const letter = String.fromCharCode(65 + i);
+    const cls = letter === answered ? ' class="opt picked"' : ' class="opt"';
+    return "<div" + cls + '><span class="opt-letter">' + letter + ")</span> " +
+           esc(String(c).trim()) + "</div>";
+  }).join("");
+}
+
 function renderDetail() {
   const run = MODAL.run, item = MODAL.item;
   if (!item) return;
@@ -598,10 +623,17 @@ function renderDetail() {
   const textA = swapped ? minT : majT;
   const textB = swapped ? majT : minT;
 
+  const optsMaj = (MODAL.oMajor && MODAL.oMajor[item]) || [];
+  const optsMin = (MODAL.oMinor && MODAL.oMinor[item]) || [];
+  const optsA = swapped ? optsMin : optsMaj;
+  const optsB = swapped ? optsMaj : optsMin;
+
   const ansTag = a => a ? ' <span class="ans-tag">answered ' + a +
     ' <span class="mk-good">✓</span></span>' : "";
   $("colA-head").innerHTML = '<span class="slot">1</span> = ' + esc(labelA) + ansTag(answerLetter(textA));
   $("colB-head").innerHTML = '<span class="slot">2</span> = ' + esc(labelB) + ansTag(answerLetter(textB));
+  renderOptions("colA-options", optsA, answerLetter(textA));
+  renderOptions("colB-options", optsB, answerLetter(textB));
   $("colA-text").textContent = textA;
   $("colB-text").textContent = textB;
   $("colA-text").scrollTop = 0;

@@ -92,6 +92,7 @@ def collect_logs(log_root: Path, config: Path):
     configured = {(judge_short(j), maj, mnr) for j, maj, mnr in cfg["comparisons"]}
 
     transcripts: dict[str, dict] = {}
+    options: dict[str, dict] = {}
     questions: dict[str, str] = {}
     verdict_rows: dict[tuple, dict] = {}
     selection: set[tuple] = set()
@@ -121,6 +122,10 @@ def collect_logs(log_root: Path, config: Path):
         for item, it in items.items():
             transcripts.setdefault(major, {})[item] = it.t_major
             transcripts.setdefault(minor_key, {})[item] = it.t_minor
+            # Options are shuffled per model, so the viewer needs each side's own
+            # order to make its answer letter readable.
+            options.setdefault(major, {})[item] = list(getattr(it.s_major, "choices", None) or [])
+            options.setdefault(minor_key, {})[item] = list(getattr(it.s_minor, "choices", None) or [])
             questions[item] = it.question
 
         for s in log.samples or []:
@@ -146,7 +151,7 @@ def collect_logs(log_root: Path, config: Path):
     # future config that varies them (then the key would need (ir, rbc) too).
     assert len(selection) <= 1, \
         f"include_reasoning/require_both_correct vary across runs: {selection}"
-    return transcripts, questions, verdict_rows
+    return transcripts, options, questions, verdict_rows
 
 
 def assemble_pairs(verdict_rows: dict) -> dict:
@@ -189,23 +194,26 @@ def main():
                       "acc_at_gap0": float(r.acc_at_gap0)}
             for _, r in fits_csv.iterrows()}
 
-    transcripts, questions, verdict_rows = collect_logs(args.log_root, args.config)
+    transcripts, options, questions, verdict_rows = collect_logs(args.log_root, args.config)
     pairs = assemble_pairs(verdict_rows)
 
     index = dict(models=models, judges=judges, colors=colors, questions=questions,
                  fits=fits, runs=build_runs(summary, acc, arm))
 
     # Clear stale exports, keeping the viewer's html/js/css/plotly untouched.
-    for sub in ("transcripts", "pairs"):
+    for sub in ("transcripts", "options", "pairs"):
         if (args.out / sub).exists():
             shutil.rmtree(args.out / sub)
     (args.out / "index.json").unlink(missing_ok=True)
     (args.out / "transcripts").mkdir(parents=True, exist_ok=True)
+    (args.out / "options").mkdir(parents=True, exist_ok=True)
     (args.out / "pairs").mkdir(parents=True, exist_ok=True)
 
     dump(index, args.out / "index.json")
     for model, items in transcripts.items():
         dump(items, args.out / "transcripts" / f"{model}.json")
+    for model, items in options.items():
+        dump(items, args.out / "options" / f"{model}.json")
     for (major, minor, frac), data in pairs.items():
         dump(data, args.out / "pairs" / f"{major}__{minor}__{frac}.json")
 

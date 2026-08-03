@@ -384,6 +384,25 @@ html, body {
   color: var(--ink2);
 }
 .col-head .slot { color: var(--accent); font-weight: 700; }
+/* Options in this model's own shuffled order — letters differ between the two
+   columns for the same underlying answer. */
+.options {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink2);
+  max-height: 8.5em;
+  overflow: auto;
+}
+.options .opt { display: flex; gap: 6px; word-break: break-word; }
+.options .opt-letter {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+  flex: none;
+}
+.options .opt.picked { color: var(--ink); font-weight: 600; }
+.options .opt.picked .opt-letter { color: var(--accent); }
 .transcript {
   margin: 0;
   padding: 10px 12px;

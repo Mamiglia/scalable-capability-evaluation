@@ -20,7 +20,7 @@ from scipy.stats import pearsonr
 from comparisons import COMPARISONS, MODELS
 from plots import (COL, HEAT, INK, INK2, JRAMP, MUTED, PALETTE, SEQ,
                    chance, dot_ci, legend, plt, save, style)
-from stats import (counterbalanced, drop_degenerate, perm_p, sem_ci, sigmoid_fit,
+from stats import (counterbalanced, load_verdicts, perm_p, sem_ci, sigmoid_fit,
                    stars, wilson)
 
 JUDGES = ["gemini-3.1-flash-lite", "qwen3.5-122b-a10b", "gemma-4-31b-it",
@@ -267,6 +267,8 @@ def fig_matched_judges(verdicts, models, out):
             pts.append((release_year(j), *sem_ci(means), j))
         if pts:
             panels.append((title, sorted(pts)))
+    if not panels:
+        return  # no judge has covered a whole matched set yet
     fig, axes = plt.subplots(1, len(panels), sharey=True, sharex=True,
                              figsize=(2.2 * len(panels) + 0.6, 2.7), layout="constrained")
     for ax, (title, pts) in zip(np.atleast_1d(axes), panels):
@@ -785,8 +787,7 @@ def main():
     ap.add_argument("--dir", type=Path, default=Path("judge_results/gpqa-pilot-rd2"))
     args = ap.parse_args()
 
-    verdicts = pd.read_csv(args.dir / "verdicts.csv")
-    verdicts, n_degenerate = drop_degenerate(verdicts)
+    verdicts, n_degenerate = load_verdicts(args.dir / "verdicts.csv")
     if n_degenerate:
         print(f"dropped {n_degenerate} rows on items where a transcript is answer-only")
     models = pd.read_csv(args.dir / "models.csv").set_index("model")
@@ -799,6 +800,15 @@ def main():
             models.loc[m, ["arm", "accuracy", "logit"]] = [
                 "judge", meta["accuracy"],
                 np.log(meta["accuracy"] / (1 - meta["accuracy"]))]
+
+    # A partial run (a phase-1 subset, say) covers only some judges. Keep the
+    # fixed colour assignment but plot only judges that have both data and a
+    # model row, so the suite still renders mid-pilot.
+    global JUDGES
+    have = set(summary["judge"]) & set(models.index)
+    if missing := [j for j in JUDGES if j not in have]:
+        print(f"no data yet for {len(missing)} judges, omitted: {', '.join(missing)}")
+    JUDGES = [j for j in JUDGES if j in have]
 
     trunc = verdicts[verdicts.truncate_frac.notna()]
     verdicts = verdicts[verdicts.truncate_frac.isna()]

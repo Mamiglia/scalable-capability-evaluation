@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 
 from comparisons import COMPARISONS
-from stats import (counterbalanced, drop_degenerate, perm_p, sem_ci, sigmoid_fit,
+from stats import (counterbalanced, load_verdicts, perm_p, sem_ci, sigmoid_fit,
                    stars, wilson)
 
 
@@ -77,9 +77,12 @@ def judge_fit(df: pd.DataFrame, judge: str, gaps: pd.Series) -> dict | None:
     panel = {t for k in ("gap_ladder", "judge_strength", "weak_judge")
              for t in COMPARISONS[k]}
     ladder = [t for t in panel if t[0] == judge]
-    g, y = [], []
+    g, y, n_runs = [], [], 0
     for j, maj, mnr in ladder:
         run = df[(df.judge == j) & (df.major == maj) & (df.minor == mnr)]
+        if run.empty:
+            continue  # rung not judged yet; phase 1 fits on whatever exists
+        n_runs += 1
         s = counterbalanced(run)
         g.extend([gaps[(maj, mnr)]] * len(s))
         y.extend(s)
@@ -87,7 +90,7 @@ def judge_fit(df: pd.DataFrame, judge: str, gaps: pd.Series) -> dict | None:
     if fit is None:
         return None
     a, d, se_a, se_d = fit
-    return dict(judge=judge, n_runs=len(ladder), n_items=len(y),
+    return dict(judge=judge, n_runs=n_runs, n_items=len(y),
                 a=a, d=d, se_a=se_a, se_d=se_d,
                 acc_at_gap0=1 / (1 + np.exp(-a)))
 
@@ -97,8 +100,7 @@ def main():
     ap.add_argument("--dir", type=Path, default=Path("judge_results/gpqa-pilot-rd2"))
     args = ap.parse_args()
 
-    df = pd.read_csv(args.dir / "verdicts.csv")
-    df, n_degenerate = drop_degenerate(df)
+    df, n_degenerate = load_verdicts(args.dir / "verdicts.csv")
     if n_degenerate:
         print(f"dropped {n_degenerate} rows on items where a transcript is answer-only")
     models = pd.read_csv(args.dir / "models.csv").set_index("model")

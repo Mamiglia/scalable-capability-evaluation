@@ -40,6 +40,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("configs/judge_pilot.yaml"))
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--phase", type=int, choices=(1, 2),
+                        help="run only this phase; default runs both")
     args = parser.parse_args()
 
     cfg = yaml.safe_load(args.config.read_text())
@@ -64,7 +66,7 @@ def main() -> int:
 
     # (phase, judge, major, minor, frac, sample_ids, log_dir), phase 1 rows first.
     pending = []
-    for phase in (1, 2):
+    for phase in ((args.phase,) if args.phase else (1, 2)):
         for frac in fracs:
             root = LOG_ROOT if frac is None else LOG_ROOT / f"trunc-{int(frac * 100)}"
             for judge, major, minor in cfg["comparisons"]:

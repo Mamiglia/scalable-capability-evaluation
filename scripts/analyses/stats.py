@@ -7,6 +7,11 @@ orders average to a score of 0, 0.5 or 1, which cancels position bias.
 import math
 
 import numpy as np
+import pandas as pd
+
+# Slot labels are "1"/"2", which read_csv would otherwise type as integers and
+# silently fail every comparison against the string labels.
+SLOT_COLUMNS = ["picked", "slot_of_major"]
 
 # Some models answer an MCQ item with the ANSWER line and nothing else
 # Stripping that line leaves ~12 characters, so the judge is shown no reasoning at all
@@ -25,6 +30,16 @@ def drop_degenerate(verdicts):
         return verdicts, 0
     ok = verdicts[cols].min(axis=1) >= MIN_REASONING_CHARS
     return verdicts[ok], int((~ok).sum())
+
+
+def load_verdicts(path):
+    """Read verdicts.csv with slot labels as strings, degenerate items dropped.
+
+    Returns (verdicts, n_dropped). Read without the dtype fix, "1"/"2" arrive as
+    integers and every slot comparison quietly returns nothing.
+    """
+    df = pd.read_csv(path, dtype={c: str for c in SLOT_COLUMNS})
+    return drop_degenerate(df)
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
