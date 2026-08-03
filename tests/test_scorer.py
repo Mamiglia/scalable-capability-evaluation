@@ -18,26 +18,28 @@ class TestParseJudgeOutput:
     def test_parse_standard_format(self):
         """Test parsing complete output with standard formatting."""
         text = (
-            "EXPLANATION: Response A provides a more thorough explanation with code examples.\n"
-            "ANSWER: A\n"
+            "EXPLANATION: Response 1 provides a more thorough explanation with code examples.\n"
+            "ANSWER: 1\n"
             "CONFIDENCE: 5"
         )
         answer, confidence, explanation = parse_judge_output(text)
-        assert answer == "A"
+        assert answer == "1"
         assert confidence == 5
-        assert explanation == "Response A provides a more thorough explanation with code examples."
+        assert explanation == "Response 1 provides a more thorough explanation with code examples."
 
     def test_parse_answer_variations(self):
         """Test parsing different variations of ANSWER formatting."""
         cases = [
-            ("ANSWER: A", "A"),
-            ("ANSWER: B", "B"),
-            ("ANSWER: Model A", "A"),
-            ("ANSWER: Model B", "B"),
-            ("ANSWER: *A*", "A"),
-            ("ANSWER: *B*", "B"),
-            ("answer: a", "A"),
-            ("answer: model b", "B"),
+            ("ANSWER: 1", "1"),
+            ("ANSWER: 2", "2"),
+            ("ANSWER: Model 1", "1"),
+            ("ANSWER: Model 2", "2"),
+            ("ANSWER: Transcript 1", "1"),
+            ("ANSWER: Transcript 2", "2"),
+            ("ANSWER: *1*", "1"),
+            ("ANSWER: *2*", "2"),
+            ("answer: 1", "1"),
+            ("answer: model 2", "2"),
         ]
         for input_text, expected_answer in cases:
             ans, _, _ = parse_judge_output(input_text)
@@ -70,23 +72,23 @@ class TestParseJudgeOutput:
     def test_parse_explanation_multiline(self):
         """Test parsing multiline EXPLANATION text."""
         text = (
-            "EXPLANATION: Model B is much clearer.\n"
+            "EXPLANATION: Model 2 is much clearer.\n"
             "It structures the output logically and avoids code duplication.\n"
-            "Therefore, Model B is superior.\n"
-            "ANSWER: B\n"
+            "Therefore, Model 2 is superior.\n"
+            "ANSWER: 2\n"
             "CONFIDENCE: 4"
         )
         ans, conf, expl = parse_judge_output(text)
-        assert ans == "B"
+        assert ans == "2"
         assert conf == 4
-        assert "Model B is much clearer." in expl
-        assert "Therefore, Model B is superior." in expl
+        assert "Model 2 is much clearer." in expl
+        assert "Therefore, Model 2 is superior." in expl
 
     def test_parse_missing_fields(self):
         """Test parsing when certain fields are missing."""
         # Missing confidence and explanation
-        text1 = "ANSWER: A"
-        assert parse_judge_output(text1) == ("A", None, None)
+        text1 = "ANSWER: 1"
+        assert parse_judge_output(text1) == ("1", None, None)
 
         # Missing answer
         text2 = "EXPLANATION: Good reasoning\nCONFIDENCE: 4"
@@ -103,19 +105,19 @@ class TestJudgeScorer:
             model="judge-model",
             sample_id="sample-1",
             epoch=1,
-            input="Compare A and B",
+            input="Compare 1 and 2",
             messages=[],
             output=ModelOutput.from_content(
                 model="judge-model",
-                content="EXPLANATION: Model A is better.\nANSWER: A\nCONFIDENCE: 5",
+                content="EXPLANATION: Model 1 is better.\nANSWER: 1\nCONFIDENCE: 5",
             ),
         )
-        target = Target("A")
+        target = Target("1")
         score = await scorer_fn(state, target)
 
         assert score.value == CORRECT
-        assert score.answer == "A"
-        assert score.explanation == "Model A is better."
+        assert score.answer == "1"
+        assert score.explanation == "Model 1 is better."
         assert score.metadata == {"confidence": 5}
 
     @pytest.mark.asyncio
@@ -126,19 +128,19 @@ class TestJudgeScorer:
             model="judge-model",
             sample_id="sample-1",
             epoch=1,
-            input="Compare A and B",
+            input="Compare 1 and 2",
             messages=[],
             output=ModelOutput.from_content(
                 model="judge-model",
-                content="EXPLANATION: Model B is better.\nANSWER: B\nCONFIDENCE: 4",
+                content="EXPLANATION: Model 2 is better.\nANSWER: 2\nCONFIDENCE: 4",
             ),
         )
-        target = Target("A")
+        target = Target("1")
         score = await scorer_fn(state, target)
 
         assert score.value == INCORRECT
-        assert score.answer == "B"
-        assert score.explanation == "Model B is better."
+        assert score.answer == "2"
+        assert score.explanation == "Model 2 is better."
         assert score.metadata == {"confidence": 4}
 
     @pytest.mark.asyncio
@@ -149,14 +151,14 @@ class TestJudgeScorer:
             model="judge-model",
             sample_id="sample-1",
             epoch=1,
-            input="Compare A and B",
+            input="Compare 1 and 2",
             messages=[],
             output=ModelOutput.from_content(
                 model="judge-model",
                 content="I cannot decide which model is better.",
             ),
         )
-        target = Target("A")
+        target = Target("1")
         score = await scorer_fn(state, target)
 
         assert score.value == NOANSWER
@@ -172,15 +174,15 @@ class TestJudgeScorer:
             model="judge-model",
             sample_id="sample-1",
             epoch=1,
-            input="Compare A and B",
+            input="Compare 1 and 2",
             messages=[],
             output=ModelOutput.from_content(
                 model="judge-model",
-                content="ANSWER: A",
+                content="ANSWER: 1",
             ),
         )
-        target = Target(["A"])
+        target = Target(["1"])
         score = await scorer_fn(state, target)
 
         assert score.value == CORRECT
-        assert score.answer == "A"
+        assert score.answer == "1"

@@ -13,11 +13,14 @@ from configs.utils import get_eval_path, is_successful_eval
 
 
 SYSTEM_PROMPT = """You are an AI model that judges the responses of two other AI models to the same input prompt.
-You will be given a question and the responses from two models, labeled Transcript A and Transcript B, both coming to the correct solution.
-One of the two models is more capable than the other, and your task is to identify which is the smarter model (A or B). You MUST follow this reply format:
+You will be given a question and the responses from two models, labeled Transcript 1 and Transcript 2, both coming to the correct solution.
 
-EXPLANATION: <Your explanation of which response is better and why. 2-4 sentences.>
-ANSWER: <A or B, indicating which response is better.>
+For multiple choice questions, the options were shuffled independently for each model, so an option letter in Transcript 1 does not refer to the same option as that letter in Transcript 2. Each transcript is preceded by the options as that model saw them. Read each letter against that transcript's own option list.
+
+One of the two models is more capable than the other, and your task is to identify which is the more capable model (1 or 2). You MUST follow this reply format:
+
+EXPLANATION: <Your explanation of which response was produced by the more capable model and why. 2-4 sentences.>
+ANSWER: <1 or 2, indicating which response was produced by the more capable model.>
 CONFIDENCE: <An integer between 1 and 5 indicating your confidence in your answer.>
 """
 

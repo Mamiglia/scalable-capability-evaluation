@@ -26,10 +26,10 @@ class TestResponsesToSample:
             output=ModelOutput.from_content(model="model-b", content="The capital is Paris."),
         )
 
-        res = responses_to_sample(sample_a, sample_b, target="A")
+        res = responses_to_sample(sample_a, sample_b, target="1")
 
-        assert res.id == "q1_A"
-        assert res.target == "A"
+        assert res.id == "q1_1"
+        assert res.target == "1"
         assert "What is capital of France?" in res.input
         assert "Paris is capital." in res.input
         assert "The capital is Paris." in res.input
@@ -48,9 +48,51 @@ class TestResponsesToSample:
             output=ModelOutput.from_content(model="model-b", content="Short answer"),
         )
 
-        res = responses_to_sample(sample_a, sample_b, target="A", max_len=10)
+        res = responses_to_sample(sample_a, sample_b, target="1", max_len=10)
 
-        assert "Transcript A:\n---\n" + ("A" * 10) + "\n---" in res.input
+        assert "Transcript 1:\n---\n" + ("A" * 10) + "\n---" in res.input
+
+    def test_responses_to_sample_options_per_transcript(self):
+        """Each transcript is shown the options in the order its own model saw them."""
+        sample_a = SimpleNamespace(
+            id="q1",
+            input="Pick one.",
+            choices=["blue", "red", "green", "grey"],
+            output=ModelOutput.from_content(model="model-a", content="ANSWER: A"),
+        )
+        sample_b = SimpleNamespace(
+            id="q1",
+            input="Pick one.",
+            choices=["red", "grey", "blue", "green"],
+            output=ModelOutput.from_content(model="model-b", content="ANSWER: C"),
+        )
+
+        res = responses_to_sample(sample_a, sample_b, target="1")
+
+        assert "Multiple choice options as shown to Model 1:\nA) blue" in res.input
+        assert "Multiple choice options as shown to Model 2:\nA) red" in res.input
+        # each block sits directly above its own transcript
+        assert res.input.index("A) blue") < res.input.index("Transcript 1:")
+        assert res.input.index("A) red") < res.input.index("Transcript 2:")
+        assert res.input.index("Transcript 1:") < res.input.index("A) red")
+
+    def test_responses_to_sample_no_options(self):
+        """Samples without choices render no options block."""
+        sample_a = SimpleNamespace(
+            id="q1",
+            input="What is 2+2?",
+            output=ModelOutput.from_content(model="model-a", content="4"),
+        )
+        sample_b = SimpleNamespace(
+            id="q1",
+            input="What is 2+2?",
+            output=ModelOutput.from_content(model="model-b", content="It is 4."),
+        )
+
+        res = responses_to_sample(sample_a, sample_b, target="1")
+
+        assert "Multiple choice options" not in res.input
+        assert "---\n\nTranscript 1:" in res.input
 
     def test_responses_to_sample_id_mismatch(self):
         """Test that mismatched sample IDs raise AssertionError."""
@@ -131,7 +173,7 @@ class TestBuildDataset:
         dataset = build_dataset(Path("path/major.eval"), Path("path/minor.eval"))
 
         assert isinstance(dataset, MemoryDataset)
-        assert len(dataset.samples) == 4  # 2 questions x 2 targets (A and B)
+        assert len(dataset.samples) == 4  # 2 questions x 2 targets (1 and 2)
         assert "gemma-26b" in dataset.name
         assert "gemma-2b" in dataset.name
         assert "gpqa" in dataset.name
@@ -155,7 +197,7 @@ class TestBuildDataset:
         mock_read_eval_log.side_effect = [log_major, log_minor]
 
         dataset = build_dataset(Path("path/major.eval"), Path("path/minor.eval"))
-        assert len(dataset.samples) == 2  # Only q1 paired for target A and B
+        assert len(dataset.samples) == 2  # Only q1 paired for target 1 and 2
 
     @patch("dataset.read_eval_log")
     def test_build_dataset_filtering_incorrect_samples(self, mock_read_eval_log):
@@ -195,6 +237,6 @@ class TestBuildDataset:
         dataset = build_dataset(Path("path/major.eval"), Path("path/minor.eval"))
 
         # Only q1 had 'C' for both models. q2 had 'I' for major, q3 had 'I' for minor.
-        assert len(dataset.samples) == 2  # q1 with target A and target B
-        assert dataset.samples[0].id == "q1_A"
-        assert dataset.samples[1].id == "q1_B"
+        assert len(dataset.samples) == 2  # q1 with target 1 and target 2
+        assert dataset.samples[0].id == "q1_1"
+        assert dataset.samples[1].id == "q1_2"
