@@ -18,12 +18,12 @@ def test_collect_single_eval(monkeypatch, tmp_path):
     mock_log.status = "success"
     (tmp_path / "output.eval").write_text("fake_log")
 
-    def mock_eval(**kwargs):
+    def mock_eval_set(**kwargs):
         captured.update(kwargs)
-        return [mock_log]
+        return True, [mock_log]
 
-    monkeypatch.setattr("collect.cli.eval_func", mock_eval)
-    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target.eval")
+    monkeypatch.setattr("collect.cli.eval_set", mock_eval_set)
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir")
     monkeypatch.setattr(
         "sys.argv",
         ["collect", "--bench", str(bench_config), "--model", str(model_config), "-n", "1"],
@@ -34,6 +34,7 @@ def test_collect_single_eval(monkeypatch, tmp_path):
     assert captured["tasks"] == "inspect_evals/mbpp"
     assert captured["model"] == "custom/model2"
     assert captured["seed"] == 0
+    assert captured["log_dir"] == str(tmp_path / "target_dir" / "0")
 
 
 def test_collect_multiple_evals(monkeypatch, tmp_path):
@@ -50,12 +51,12 @@ def test_collect_multiple_evals(monkeypatch, tmp_path):
     mock_log = MagicMock()
     mock_log.status = "success"
 
-    def mock_eval(**kwargs):
+    def mock_eval_set(**kwargs):
         runs.append((kwargs["tasks"], kwargs["model"]))
-        return [mock_log]
+        return True, [mock_log]
 
-    monkeypatch.setattr("collect.cli.eval_func", mock_eval)
-    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target.eval")
+    monkeypatch.setattr("collect.cli.eval_set", mock_eval_set)
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir")
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -87,12 +88,12 @@ def test_collect_args_parsing(monkeypatch, tmp_path):
     mock_log = MagicMock()
     mock_log.status = "success"
 
-    def mock_eval(**kwargs):
+    def mock_eval_set(**kwargs):
         captured.update(kwargs)
-        return [mock_log]
+        return True, [mock_log]
 
-    monkeypatch.setattr("collect.cli.eval_func", mock_eval)
-    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target.eval")
+    monkeypatch.setattr("collect.cli.eval_set", mock_eval_set)
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir")
     monkeypatch.setattr(
         "sys.argv",
         [

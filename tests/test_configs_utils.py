@@ -53,3 +53,49 @@ def test_hash_task_args_inspect_defaults():
     assert hash_task_args(task_empty) == hash_task_args(task_explicit_all)
     assert hash_task_args(task_empty) != hash_task_args(task_override)
 
+
+def test_experiment_model_evals_subdirectories(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    from configs.experiment import ExperimentConfig
+
+    bench = TaskConfig(name="bench1")
+    model = ModelConfig(name="model1", slug="model1")
+    
+    exp = ExperimentConfig(
+        name="test_exp",
+        benchmark=bench,
+        major=model,
+        minor=model,
+        judge=model,
+    )
+
+    eval_dir = get_eval_path(bench, model, base_dir=tmp_path)
+    e0 = eval_dir / "0"
+    e0.mkdir(parents=True)
+    f0 = e0 / "run1.eval"
+    f0.write_text("dummy")
+
+    e1 = eval_dir / "1"
+    e1.mkdir(parents=True)
+    f1 = e1 / "run2.eval"
+    f1.write_text("dummy")
+
+    e2 = eval_dir / "2"
+    e2.mkdir(parents=True)
+    f2 = e2 / "failed_run3.eval"
+    f2.write_text("failed_dummy")
+
+    mock_log_success = MagicMock(status="success")
+    mock_log_failed = MagicMock(status="error")
+
+    def mock_read_eval_log(path, header_only=True):
+        if "failed" in str(path):
+            return mock_log_failed
+        return mock_log_success
+
+    monkeypatch.setattr("configs.experiment.read_eval_log", mock_read_eval_log)
+    monkeypatch.setattr("configs.experiment.get_eval_path", lambda **kw: eval_dir)
+    evals = exp.model_evals(model)
+    assert evals == [f0, f1]
+
+

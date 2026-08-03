@@ -4,10 +4,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
+from inspect_ai.log import read_eval_log
+
 from configs.task import TaskConfig
 from configs.model import ModelConfig
 from configs.base import DraccusConfig
-from configs.utils import get_eval_path
+from configs.utils import get_eval_path, is_successful_eval
+
 
 SYSTEM_PROMPT = """You are an AI model that judges the responses of two other AI models to the same input prompt.
 You will be given a question and the responses from two models, labeled Transcript A and Transcript B, both coming to the correct solution.
@@ -45,8 +48,20 @@ class ExperimentConfig(DraccusConfig):
             task=self.benchmark,
             model=model,
         )
-        eval_paths = sorted(eval_path.glob("*.eval"))
-        return eval_paths
+        eval_paths = dict()
+        for eval in eval_path.rglob("*.eval"):
+            if not eval.parent.name.isdigit():
+                raise ValueError(f"Evaluation file {eval} is not in a numbered epoch directory. The data folder structure should be <benchmark>/<model>/<epoch_number>/<eval_file>.eval")
+            repeat_num = int(eval.parent.name)
+            
+            # if eval is successful store it
+            if is_successful_eval(eval):
+                if repeat_num in eval_paths:
+                    raise ValueError(f"Multiple successful evaluation files found for repeat {repeat_num} in {eval_path}.")
+                eval_paths[repeat_num] = eval
+                
+            
+        return [eval_paths[k] for k in sorted(eval_paths.keys())]
     
     @property
     def task_name(self) -> str:
