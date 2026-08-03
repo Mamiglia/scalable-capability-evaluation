@@ -4,7 +4,7 @@ from inspect_ai import Task
 from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
-from configs.experiment import ExperimentConfig, SYSTEM_PROMPT
+from configs.experiment import ExperimentConfig, SYSTEM_PROMPT, TRUNCATION_NOTE
 from judge.dataset import build_dataset
 from judge.scorer import judge_scorer
 
@@ -34,6 +34,9 @@ def judge_task(
     benchmark_name = log_major.eval.task
 
     name = task_name or f"{benchmark_name}={major_path.stem}|{minor_path.stem}"
+
+    if truncate_frac is not None:
+        system_prompt = system_prompt + TRUNCATION_NOTE
 
     return Task(
         name=name,
