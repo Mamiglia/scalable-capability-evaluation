@@ -26,7 +26,7 @@ const $ = id => document.getElementById(id);
 const plotDiv = $("plot");
 const emptyNote = $("empty-note");
 const hintEl = $("ctl-hint");
-const ctlTrunc = $("ctl-trunc"), ctlSubset = $("ctl-subset"), ctlArm = $("ctl-arm"),
+const ctlTrunc = $("ctl-trunc"), ctlSubset = $("ctl-subset"), ctlSource = $("ctl-source"),
       ctlColorby = $("ctl-colorby"), ctlCurves = $("ctl-curves");
 const overlay = $("modal");
 
@@ -152,12 +152,13 @@ function cmpJudge(a, b) {
 
 /* --- filtering ----------------------------------------------------------- */
 function filteredRuns() {
-  const frac = ctlTrunc.value, subset = ctlSubset.value, arm = ctlArm.value;
+  const frac = ctlTrunc.value, subset = ctlSubset.value, src = ctlSource.value;
   return INDEX.runs.filter(r => {
     if (r.frac !== frac) return false;
     if (subset === "weak" && !r.weak_judge) return false;
     if (subset === "old" && !r.old_judge) return false;
-    if (arm === "armA" && !r.arm_a) return false;
+    if (src === "collected" && !r.arm_a) return false;
+    if (src === "epoch" && !(INDEX.models[r.major].arm === "B" && INDEX.models[r.minor].arm === "B")) return false;
     return true;
   });
 }
@@ -188,11 +189,15 @@ function lineTrace(j, xs, ys, color) {
            x: xs, y: ys, line: { color: color, width: 1.6 }, hoverinfo: "skip",
            xaxis: "x", yaxis: "y" };
 }
+/* the stored fits are per-judge sigmoids on the full, untruncated arm-A ladder;
+   drawing them over a filtered subset misrepresents it, so only show them there */
+function sigmoidOK() {
+  return ctlTrunc.value === "full" && ctlSubset.value === "all" && ctlSource.value !== "epoch";
+}
 function buildCurve(j, crossPts, color) {
   const mode = ctlCurves.value;
   if (mode === "off") return null;
-  if (mode === "sigmoid") {
-    if (ctlTrunc.value !== "full") return null;               // fits are full-run only
+  if (mode === "sigmoid" && sigmoidOK()) {
     const f = INDEX.fits && INDEX.fits[j];
     if (!f) return null;
     const xs = [], ys = [], N = 60;
@@ -202,6 +207,7 @@ function buildCurve(j, crossPts, color) {
     }
     return lineTrace(j, xs, ys, color);
   }
+  // connect runs — also the honest fallback when a sigmoid fit can't represent the subset
   const pts = crossPts.slice().sort((a, b) => a.d_acc - b.d_acc);
   if (pts.length < 2) return null;
   return lineTrace(j, pts.map(r => r.d_acc), pts.map(r => r.score), color);
@@ -253,8 +259,8 @@ function renderPlot() {
   const runs = filteredRuns();
 
   let hint = runs.length + (runs.length === 1 ? " run shown" : " runs shown");
-  if (ctlCurves.value === "sigmoid" && ctlTrunc.value !== "full")
-    hint += " · sigmoid fits shown for Full only";
+  if (ctlCurves.value === "sigmoid" && !sigmoidOK())
+    hint += " · sigmoid fits apply to the full untruncated set — connected runs shown for this subset";
   hintEl.textContent = hint;
 
   if (!runs.length) {
@@ -683,7 +689,7 @@ overlay.addEventListener("mousedown", e => { if (e.target === overlay) closeModa
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !overlay.hidden) closeModal(); });
 
 /* --- wiring + boot ------------------------------------------------------- */
-[ctlTrunc, ctlSubset, ctlArm, ctlColorby, ctlCurves].forEach(c =>
+[ctlTrunc, ctlSubset, ctlSource, ctlColorby, ctlCurves].forEach(c =>
   c.addEventListener("change", renderPlot));
 if (window.matchMedia) {
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
