@@ -17,7 +17,7 @@ uv.lock
 .claude
 
 # logs
-data/
+/data/
 logs/
 artifacts/
 /docs/

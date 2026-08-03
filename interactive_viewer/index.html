@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Judge-pilot gap-curve viewer</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="plotly.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="titleblock">
+      <h1>Judge accuracy vs capability gap</h1>
+      <p class="subtitle">One point per run: a judge&rsquo;s counterbalanced accuracy at a pair&rsquo;s
+        GPQA gap. Click a point to open the transcripts the judge saw, both orders, with every
+        judge&rsquo;s pick and explanation.</p>
+    </div>
+  </header>
+
+  <section class="controls" aria-label="plot controls">
+    <div class="ctl">
+      <label for="ctl-trunc">Truncation</label>
+      <select id="ctl-trunc">
+        <option value="full" selected>Full</option>
+        <option value="90">90%</option>
+        <option value="50">50%</option>
+        <option value="10">10%</option>
+      </select>
+    </div>
+    <div class="ctl">
+      <label for="ctl-subset">Judge subset</label>
+      <select id="ctl-subset">
+        <option value="all" selected>All</option>
+        <option value="weak">Weaker than both</option>
+        <option value="old">Older than both</option>
+      </select>
+    </div>
+    <div class="ctl">
+      <label for="ctl-arm">Transcript arm</label>
+      <select id="ctl-arm">
+        <option value="all" selected>All pairs</option>
+        <option value="armA">Arm-A only</option>
+      </select>
+    </div>
+    <div class="ctl">
+      <label for="ctl-colorby">Order judges by</label>
+      <select id="ctl-colorby">
+        <option value="capability" selected>Capability (GPQA acc)</option>
+        <option value="release">Release date</option>
+      </select>
+    </div>
+    <div class="ctl">
+      <label for="ctl-curves">Curves</label>
+      <select id="ctl-curves">
+        <option value="sigmoid" selected>Sigmoid fit</option>
+        <option value="connect">Connect runs</option>
+        <option value="off">Off</option>
+      </select>
+    </div>
+    <div class="ctl-hint" id="ctl-hint"></div>
+  </section>
+
+  <main class="plotwrap">
+    <div id="plot" role="img" aria-label="gap curve scatter"></div>
+    <div id="empty-note" class="empty-note" hidden>No runs match the current filters.</div>
+    <p class="encoding-caption">
+      Colour = judge (legend, click to toggle) &middot; filled = cross-model run &middot;
+      <span class="hollow-swatch"></span> open marker = self-pair control (should sit at chance) &middot;
+      dashed line = chance (0.5). Legend order follows the &ldquo;order judges by&rdquo; control.
+    </p>
+  </main>
+
+  <!-- Transcript modal ---------------------------------------------------- -->
+  <div id="modal" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="transcript comparison">
+      <div class="modal-head">
+        <div class="modal-head-main">
+          <div class="cmp-bar">
+            <span class="cmp-field">
+              <select id="sel-pair" class="cmp-select cmp-select-pair" aria-label="comparison"></select>
+            </span>
+            <span class="cmp-sep">judged by</span>
+            <span class="cmp-field">
+              <select id="sel-judge" class="cmp-select" aria-label="judge"></select>
+              <span class="cmp-meta" id="meta-judge"></span>
+            </span>
+            <span class="cmp-field cmp-trunc" id="modal-trunc-wrap" hidden>
+              <label for="modal-trunc">trunc</label>
+              <select id="modal-trunc" class="cmp-select"></select>
+            </span>
+          </div>
+          <div id="cmp-submeta" class="cmp-submeta"></div>
+          <div id="modal-meta" class="modal-meta"></div>
+        </div>
+        <button id="modal-close" class="modal-close" title="Close (Esc)" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- left: item list -->
+        <aside class="item-pane">
+          <div class="item-filter">
+            <div id="item-filter-btns" class="seg" role="group" aria-label="item filter"></div>
+            <input id="item-search" type="text" placeholder="item id&hellip;" autocomplete="off" />
+          </div>
+          <ol id="item-list" class="item-list"></ol>
+        </aside>
+        <!-- right: detail -->
+        <section class="detail-pane">
+          <div id="detail-loading" class="detail-loading">Loading&hellip;</div>
+          <div id="detail" class="detail" hidden>
+            <div class="detail-qrow">
+              <div class="question">
+                <span class="qlabel">Question</span>
+                <div id="detail-question" class="qtext"></div>
+              </div>
+              <div class="detail-controls">
+                <button id="swap-btn" class="swap-btn" title="Swap which model sits in column A vs B">
+                  &#8646; swap A / B
+                </button>
+              </div>
+            </div>
+            <div id="trunc-note" class="trunc-note" hidden></div>
+            <div class="columns">
+              <div class="col">
+                <div class="col-head" id="colA-head"></div>
+                <pre class="transcript" id="colA-text"></pre>
+              </div>
+              <div class="col">
+                <div class="col-head" id="colB-head"></div>
+                <pre class="transcript" id="colB-text"></pre>
+              </div>
+            </div>
+            <div class="verdicts">
+              <div class="verdicts-head">Judgements</div>
+              <div id="verdict-list" class="verdict-list"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
