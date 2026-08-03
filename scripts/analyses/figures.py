@@ -20,7 +20,8 @@ from scipy.stats import pearsonr
 from comparisons import COMPARISONS, MODELS
 from plots import (COL, HEAT, INK, INK2, JRAMP, MUTED, PALETTE, SEQ,
                    chance, dot_ci, legend, plt, save, style)
-from stats import counterbalanced, perm_p, sem_ci, sigmoid_fit, stars, wilson
+from stats import (counterbalanced, drop_degenerate, perm_p, sem_ci, sigmoid_fit,
+                   stars, wilson)
 
 JUDGES = ["gemini-3.1-flash-lite", "qwen3.5-122b-a10b", "gemma-4-31b-it",
           "qwen3.6-35b-a3b", "qwen3-32b", "gemini-2.5-flash", "gpt-4o",
@@ -785,6 +786,9 @@ def main():
     args = ap.parse_args()
 
     verdicts = pd.read_csv(args.dir / "verdicts.csv")
+    verdicts, n_degenerate = drop_degenerate(verdicts)
+    if n_degenerate:
+        print(f"dropped {n_degenerate} rows on items where a transcript is answer-only")
     models = pd.read_csv(args.dir / "models.csv").set_index("model")
     summary = pd.read_csv(args.dir / "summary.csv")
     fits = pd.read_csv(args.dir / "judge_fits.csv")

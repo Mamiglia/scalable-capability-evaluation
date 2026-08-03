@@ -24,7 +24,8 @@ import numpy as np
 import pandas as pd
 
 from comparisons import COMPARISONS
-from stats import counterbalanced, perm_p, sem_ci, sigmoid_fit, stars, wilson
+from stats import (counterbalanced, drop_degenerate, perm_p, sem_ci, sigmoid_fit,
+                   stars, wilson)
 
 
 def run_groups() -> dict[tuple, list[str]]:
@@ -97,6 +98,9 @@ def main():
     args = ap.parse_args()
 
     df = pd.read_csv(args.dir / "verdicts.csv")
+    df, n_degenerate = drop_degenerate(df)
+    if n_degenerate:
+        print(f"dropped {n_degenerate} rows on items where a transcript is answer-only")
     models = pd.read_csv(args.dir / "models.csv").set_index("model")
     groups = run_groups()
 
