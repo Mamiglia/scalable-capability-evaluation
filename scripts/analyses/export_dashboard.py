@@ -1,4 +1,4 @@
-"""Bake the judge-pilot dashboard dataset into interactive_viewer/data/.
+"""Bake the gpqa-pilot-rd2 dashboard dataset into interactive_viewer/data/.
 
 Writes the three tiers the static viewer reads:
   index.json                          plot points, model/judge metadata, fits,
@@ -118,7 +118,7 @@ def collect_logs(log_root: Path, config: Path):
         items = pair_items(meta["major_path"], meta["minor_path"], ir, rbc,
                            truncate_frac=None)
         minor_key = f"{minor}__ep1" if self_pair else minor
-        for item, (question, t_major, t_minor) in items.items():
+        for item, (question, t_major, t_minor, _, _) in items.items():
             transcripts.setdefault(major, {})[item] = t_major
             transcripts.setdefault(minor_key, {})[item] = t_minor
             questions[item] = question
@@ -131,7 +131,7 @@ def collect_logs(log_root: Path, config: Path):
                 picked_major = None
             elif pick == slot:
                 picked_major = 1
-            elif pick in ("A", "B"):
+            elif pick in ("1", "2"):
                 picked_major = 0
             else:
                 picked_major = None
@@ -169,8 +169,8 @@ def dump(obj, path: Path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", type=Path, default=Path("configs/judge_pilot.yaml"))
-    ap.add_argument("--log-root", type=Path, default=Path("logs/judge-pilot"))
-    ap.add_argument("--results", type=Path, default=Path("judge_results/judge-pilot"))
+    ap.add_argument("--log-root", type=Path, default=Path("logs/gpqa-pilot-rd2"))
+    ap.add_argument("--results", type=Path, default=Path("judge_results/gpqa-pilot-rd2"))
     ap.add_argument("--out", type=Path, default=Path("interactive_viewer/data"))
     args = ap.parse_args()
 

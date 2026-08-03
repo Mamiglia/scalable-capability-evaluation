@@ -1,4 +1,4 @@
-/* Judge-pilot gap-curve viewer.
+/* gpqa-pilot-rd2 gap-curve viewer.
    Plot: judge accuracy vs capability gap, one point per run. Click -> the
    transcripts the judge saw, both counterbalanced orders, every judge's verdict.
    Vanilla JS + vendored Plotly. No build step, no CDN. */
@@ -176,12 +176,12 @@ const MAIN_HOVER =
   "<b>minor:</b> %{customdata[6]} (GPQA %{customdata[7]:.2f} · %{customdata[8]})<br>" +
   "<b>gap:</b> %{customdata[9]:.3f} · <b>judge acc:</b> %{customdata[10]:.2f} " +
   "[%{customdata[11]:.2f}, %{customdata[12]:.2f}]<br>" +
-  "<b>n:</b> %{customdata[13]} · <b>slot-A rate:</b> %{customdata[14]:.2f}<extra></extra>";
+  "<b>n:</b> %{customdata[13]} · <b>slot-1 rate:</b> %{customdata[14]:.2f}<extra></extra>";
 const SELF_HOVER =
   "<b>%{customdata[0]}</b> — judge · GPQA %{customdata[1]:.2f} · %{customdata[2]}<br>" +
   "<b>self-pair control:</b> %{customdata[3]} vs itself (should sit at chance)<br>" +
   "<b>judge acc:</b> %{customdata[10]:.2f} [%{customdata[11]:.2f}, %{customdata[12]:.2f}]<br>" +
-  "<b>n:</b> %{customdata[13]} · <b>slot-A rate:</b> %{customdata[14]:.2f}<extra></extra>";
+  "<b>n:</b> %{customdata[13]} · <b>slot-1 rate:</b> %{customdata[14]:.2f}<extra></extra>";
 
 /* --- curve traces -------------------------------------------------------- */
 function lineTrace(j, xs, ys, color) {
@@ -460,13 +460,13 @@ const isNull = v => v === null || v === undefined;
 function itemBadge(item) {
   const run = MODAL.run, J = run.judge;
   const orders = ordersOf(item, J);
-  const oa = orderBySlot(orders, "A"), ob = orderBySlot(orders, "B");
+  const oa = orderBySlot(orders, "1"), ob = orderBySlot(orders, "2");
 
   if (run.is_self) {
     const pa = oa ? oa.pick : null, pb = ob ? ob.pick : null;
     let cat;
     if (isNull(pa) || isNull(pb)) cat = "noanswer";
-    else if (pa === pb) cat = pa === "A" ? "slotA" : "slotB";
+    else if (pa === pb) cat = pa === "1" ? "slotA" : "slotB";
     else cat = "disagree";
     return { html: selfMark(pa) + selfMark(pb), cat: cat };
   }
@@ -492,7 +492,7 @@ const selfMark = p => isNull(p)
 /* --- item filter bar + list --------------------------------------------- */
 const CROSS_FILTERS = [["all", "all"], ["both", "both-correct"], ["wrong", "both-wrong"],
                        ["disagree", "disagreements"], ["noanswer", "no-answer"]];
-const SELF_FILTERS = [["all", "all"], ["slotA", "slot-A picked"], ["slotB", "slot-B picked"],
+const SELF_FILTERS = [["all", "all"], ["slotA", "slot-1 picked"], ["slotB", "slot-2 picked"],
                       ["disagree", "disagreements"]];
 
 function buildItemFilterBar() {
@@ -600,14 +600,14 @@ function renderDetail() {
 
   const ansTag = a => a ? ' <span class="ans-tag">answered ' + a +
     ' <span class="mk-good">✓</span></span>' : "";
-  $("colA-head").innerHTML = '<span class="slot">A</span> = ' + esc(labelA) + ansTag(answerLetter(textA));
-  $("colB-head").innerHTML = '<span class="slot">B</span> = ' + esc(labelB) + ansTag(answerLetter(textB));
+  $("colA-head").innerHTML = '<span class="slot">1</span> = ' + esc(labelA) + ansTag(answerLetter(textA));
+  $("colB-head").innerHTML = '<span class="slot">2</span> = ' + esc(labelB) + ansTag(answerLetter(textB));
   $("colA-text").textContent = textA;
   $("colB-text").textContent = textB;
   $("colA-text").scrollTop = 0;
   $("colB-text").scrollTop = 0;
 
-  const majSlot = swapped ? "B" : "A";
+  const majSlot = swapped ? "2" : "1";
   renderVerdictList(item, majSlot, labelA, labelB);
 }
 
@@ -640,7 +640,7 @@ function renderVerdictList(item, targetSlot, labelA, labelB) {
     if (!o || isNull(o.pick)) {
       pc.innerHTML = '<span class="mk-null">no answer ∅</span>';
     } else {
-      const pickedLabel = o.pick === "A" ? labelA : o.pick === "B" ? labelB : "–";
+      const pickedLabel = o.pick === "1" ? labelA : o.pick === "2" ? labelB : "–";
       let corr = "";
       if (!run.is_self) corr = o.picked_major === 1
         ? ' <span class="mk-good">✓</span>'

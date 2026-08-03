@@ -1,4 +1,4 @@
-"""Summarise judge-pilot verdicts: per-run stats, controls, per-judge gap fits.
+"""Summarise gpqa-pilot-rd2 verdicts: per-run stats, controls, per-judge gap fits.
 
 Reads verdicts.csv and models.csv, writes summary.csv and judge_fits.csv,
 prints a console report. Score is the counterbalanced per-item mean: the two
@@ -41,7 +41,7 @@ def summarise_run(run_df: pd.DataFrame) -> dict:
     p = perm_p(scores)
 
     parsed = run_df.dropna(subset=["picked_major"])
-    k_a = int((parsed["picked"] == "A").sum())
+    k_a = int((parsed["picked"] == "1").sum())
     sa_lo, sa_hi = wilson(k_a, len(parsed))
 
     # Disagreement = the two parsed orders of an item pick different slots'
@@ -93,7 +93,7 @@ def judge_fit(df: pd.DataFrame, judge: str, gaps: pd.Series) -> dict | None:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dir", type=Path, default=Path("judge_results/judge-pilot"))
+    ap.add_argument("--dir", type=Path, default=Path("judge_results/gpqa-pilot-rd2"))
     args = ap.parse_args()
 
     df = pd.read_csv(args.dir / "verdicts.csv")
@@ -130,7 +130,7 @@ def main():
     report = summary[summary["truncate_frac"].isna()]
     n_trunc_runs = len(summary) - len(report)
     print("=" * 78)
-    print(f"JUDGE-PILOT RESULTS ({n_trunc_runs} truncation-control runs in "
+    print(f"GPQA-PILOT-RD2 RESULTS ({n_trunc_runs} truncation-control runs in "
           "summary.csv, not printed)")
     print("=" * 78)
     for judge, block in report.groupby("judge", sort=True):

@@ -1,6 +1,6 @@
-# Judge-pilot interactive viewer
+# gpqa-pilot-rd2 interactive viewer
 
-A static, self-contained dashboard for exploring the judge-pilot results: the
+A static, self-contained dashboard for exploring the gpqa-pilot-rd2 results: the
 capability-gap curve (judge accuracy vs pair gap), with click-through to the
 transcripts each judge saw, both counterbalanced orders, every judge's verdict
 and explanation, and per-comparison truncation levels.

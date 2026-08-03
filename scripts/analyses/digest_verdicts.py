@@ -1,4 +1,4 @@
-"""Flatten judge-pilot eval logs into verdicts.csv and models.csv.
+"""Flatten gpqa-pilot-rd2 eval logs into verdicts.csv and models.csv.
 
 verdicts.csv has one row per judged sample (item x order x run), including the
 transcript lengths as the judge saw them. models.csv has one row per transcript
@@ -18,7 +18,7 @@ import pandas as pd
 import yaml
 from inspect_ai.log import read_eval_log
 
-from judge.dataset import USER_PROMPT, truncate_pair
+from judge.dataset import USER_PROMPT, format_options, truncate_pair
 from judge.util import extract_score, extract_transcript
 
 from comparisons import JUDGE_ALIASES, MODELS
@@ -39,12 +39,13 @@ def load_log(path):
 
 def pair_items(major_path, minor_path, include_reasoning, require_both_correct,
                truncate_frac=None):
-    """item -> (question, major transcript, minor transcript) as judged.
+    """item -> (question, major transcript, minor transcript, major sample, minor sample).
 
     Mirrors build_dataset's epoch selection (first eligible epoch per item;
     self-pairs take the first two) and its truncation. Digest verifies the
     rebuild per item against the logged judge input, so drift from the
-    builder is caught.
+    builder is caught. The samples are kept because the rebuild needs each
+    model's own option order.
     """
     key = (str(major_path), str(minor_path), include_reasoning,
            require_both_correct, truncate_frac)
@@ -76,7 +77,7 @@ def pair_items(major_path, minor_path, include_reasoning, require_both_correct,
         t_minor = extract_transcript(b, include_reasoning=include_reasoning)[:MAX_LEN]
         if truncate_frac is not None:
             t_major, t_minor = truncate_pair(t_major, t_minor, truncate_frac)
-        items[str(sid)] = (a.input, t_major, t_minor)
+        items[str(sid)] = (a.input, t_major, t_minor, a, b)
     _pairs[key] = items
     return items
 
@@ -130,16 +131,24 @@ def digest(log_root: Path, config: Path):
             item, slot = str(s.id).rsplit("_", 1)
             score = next(iter((s.scores or {}).values()), None)
             picked = getattr(score, "answer", None)
-            picked_major = (1.0 if picked == slot else 0.0) if picked in ("A", "B") else np.nan
+            picked_major = (1.0 if picked == slot else 0.0) if picked in ("1", "2") else np.nan
             conf = (score.metadata or {}).get("confidence", np.nan) if score and score.metadata else np.nan
 
-            q, t_major, t_minor = items.get(item, (None, None, None))
+            q, t_major, t_minor, s_major, s_minor = items.get(item, (None,) * 5)
             len_major = len_minor = np.nan
             if q is None:
                 n_unmatched += 1
             else:
-                a_txt, b_txt = (t_major, t_minor) if slot == "A" else (t_minor, t_major)
-                expected = USER_PROMPT.format(question=q, transcript_a=a_txt, transcript_b=b_txt)
+                major_first = slot == "1"
+                t_1, t_2 = (t_major, t_minor) if major_first else (t_minor, t_major)
+                s_1, s_2 = (s_major, s_minor) if major_first else (s_minor, s_major)
+                expected = USER_PROMPT.format(
+                    question=q,
+                    options_1=format_options(s_1, 1),
+                    options_2=format_options(s_2, 2),
+                    transcript_1=t_1,
+                    transcript_2=t_2,
+                )
                 if isinstance(s.input, str) and len(s.input) == len(expected):
                     len_major, len_minor = len(t_major), len(t_minor)
                 else:
@@ -203,9 +212,9 @@ def model_table(config: Path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--log-root", type=Path, default=Path("logs/judge-pilot"))
+    ap.add_argument("--log-root", type=Path, default=Path("logs/gpqa-pilot-rd2"))
     ap.add_argument("--config", type=Path, default=Path("configs/judge_pilot.yaml"))
-    ap.add_argument("--out", type=Path, default=Path("judge_results/judge-pilot"))
+    ap.add_argument("--out", type=Path, default=Path("judge_results/gpqa-pilot-rd2"))
     args = ap.parse_args()
 
     df = digest(args.log_root, args.config)

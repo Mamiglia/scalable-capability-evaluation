@@ -1,4 +1,4 @@
-"""Generate the judge-pilot figures from the stored tables.
+"""Generate the gpqa-pilot-rd2 figures from the stored tables.
 
 Reads verdicts.csv, models.csv, summary.csv, judge_fits.csv; writes numbered
 png+svg figures to <dir>/figures/. Judges keep a fixed colour everywhere;
@@ -428,13 +428,13 @@ def judge_rate_rows(ax, verdicts, value):
 
 
 def fig_position_bias(verdicts, out):
-    """9: slot-A pick rate per judge, over all its runs."""
-    parsed = verdicts[verdicts.picked.isin(["A", "B"])]
+    """9: first-slot pick rate per judge, over all its runs."""
+    parsed = verdicts[verdicts.picked.isin(["1", "2"])]
     if not len(parsed):
         return
     fig, ax = plt.subplots(figsize=(COL, 2.6))
-    judge_rate_rows(ax, parsed, lambda g: (g.picked == "A").mean())
-    ax.set_xlabel("P(picked slot A)")
+    judge_rate_rows(ax, parsed, lambda g: (g.picked == "1").mean())
+    ax.set_xlabel("P(picked slot 1)")
     ax.text(1.0, -0.22, "95% CI over runs", transform=ax.transAxes,
             ha="right", va="top", color=MUTED, fontsize=7)
     save(fig, out / "9_position_bias")
@@ -781,7 +781,7 @@ def render_all(verdicts, trunc, summary, fits, models, out):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dir", type=Path, default=Path("judge_results/judge-pilot"))
+    ap.add_argument("--dir", type=Path, default=Path("judge_results/gpqa-pilot-rd2"))
     args = ap.parse_args()
 
     verdicts = pd.read_csv(args.dir / "verdicts.csv")

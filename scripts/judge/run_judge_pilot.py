@@ -58,7 +58,7 @@ def main() -> int:
                 include_reasoning=False,
                 truncate_frac=frac,
                 task_name=f"{judge_short}_{major}-vs-{minor}{suffix}",
-                experiment_name="judge-pilot",
+                experiment_name="gpqa-pilot-rd2",
             )
         return tasks[key]
 
