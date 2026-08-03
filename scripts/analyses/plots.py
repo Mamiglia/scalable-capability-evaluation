@@ -11,10 +11,12 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
 INK, INK2, MUTED, GRID, SURFACE = "#0b0b0b", "#33322f", "#4a4844", "#d3d2c9", "#ffffff"
-PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948",
+           "#8c6d31", "#0b7285"]
 # Judge-ordering ramp (weak/old = red, strong/new = blue) and score heatmap
 # scale (below chance = blue, above = red); hand-picked stops, not stock maps.
 JRAMP = LinearSegmentedColormap.from_list("jramp", ["#b23c33", "#b8b5ab", "#1f63b6"])
+SEQ = LinearSegmentedColormap.from_list("seq", ["#bcd4f0", "#2a78d6", "#12365e"])
 HEAT = LinearSegmentedColormap.from_list("heat", ["#2a78d6", "#f6f4ee", "#e34948"])
 
 # Single-column / full-width figure widths; 8pt for all text.
