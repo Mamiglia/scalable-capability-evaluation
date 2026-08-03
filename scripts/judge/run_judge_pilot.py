@@ -22,7 +22,7 @@ from inspect_ai.log import read_eval_log
 
 from judge.task import judge_task
 
-LOG_ROOT = Path("logs/judge-pilot")
+LOG_ROOT = Path("logs/gpqa-pilot-rd2")
 PHASE1_ITEMS = 20
 
 
