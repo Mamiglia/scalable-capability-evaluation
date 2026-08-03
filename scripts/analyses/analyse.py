@@ -106,9 +106,11 @@ def main():
     gaps = {(maj, mnr): (0.0 if maj == mnr else acc[maj] - acc[mnr])
             for maj, mnr in df.groupby(["major", "minor"]).groups}
 
+    # Truncation-control runs are separate rows, keyed by truncate_frac.
     rows = []
-    for (judge, maj, mnr), run in df.groupby(["judge", "major", "minor"]):
-        entry = dict(judge=judge, major=maj, minor=mnr,
+    for (judge, maj, mnr, tf), run in df.groupby(
+            ["judge", "major", "minor", "truncate_frac"], dropna=False):
+        entry = dict(judge=judge, major=maj, minor=mnr, truncate_frac=tf,
                      groups=",".join(groups.get((judge, maj, mnr), [])),
                      d_acc=gaps[(maj, mnr)],
                      d_logit=0.0 if maj == mnr else logit[maj] - logit[mnr])
@@ -118,16 +120,20 @@ def main():
         rows.append(entry)
     summary = pd.DataFrame(rows).sort_values(["judge", "d_acc"])
 
+    full = df[df["truncate_frac"].isna()]
     fits = pd.DataFrame([f for j in summary["judge"].unique()
-                         if (f := judge_fit(df, j, gaps)) is not None])
+                         if (f := judge_fit(full, j, gaps)) is not None])
 
     summary.to_csv(args.dir / "summary.csv", index=False)
     fits.to_csv(args.dir / "judge_fits.csv", index=False)
 
+    report = summary[summary["truncate_frac"].isna()]
+    n_trunc_runs = len(summary) - len(report)
     print("=" * 78)
-    print("JUDGE-PILOT RESULTS")
+    print(f"JUDGE-PILOT RESULTS ({n_trunc_runs} truncation-control runs in "
+          "summary.csv, not printed)")
     print("=" * 78)
-    for judge, block in summary.groupby("judge", sort=True):
+    for judge, block in report.groupby("judge", sort=True):
         print(f"\n{judge}")
         for _, e in block.iterrows():
             tag = f" [{e.groups}]" if e.groups else ""
