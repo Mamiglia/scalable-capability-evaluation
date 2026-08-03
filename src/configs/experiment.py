@@ -36,6 +36,7 @@ class ExperimentConfig(DraccusConfig):
     system_prompt: str = SYSTEM_PROMPT
 
     log_dir: Optional[str] = None
+    epochs: Optional[int] = None
     limit: Optional[int] = None
     
     def model_evals(self, model: ModelConfig) -> List[Path]:
@@ -85,4 +86,6 @@ class ExperimentConfig(DraccusConfig):
         kwargs = self._kwargs or {}
         if self.limit is not None:
             kwargs["limit"] = self.limit
+        if self.epochs is not None:
+            kwargs["epochs"] = self.epochs
         return kwargs
