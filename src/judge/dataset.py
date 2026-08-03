@@ -10,18 +10,35 @@ USER_PROMPT = """Input question:
 {question}
 ---
 
-Transcript A:
+{options_1}Transcript 1:
 ---
-{transcript_a}
+{transcript_1}
 ---
 
-Transcript B:
+{options_2}Transcript 2:
 ---
-{transcript_b}
+{transcript_2}
 ---
 
 Which of the two transcripts is from the more capable model? Answer in the instructed format.
 """
+
+OPTIONS_BLOCK = """Multiple choice options as shown to Model {n}:
+{options}
+
+"""
+
+
+def format_options(sample: Sample, n: int) -> str:
+    """Render a sample's options in the order that model saw them. Empty if it had none."""
+    choices = getattr(sample, "choices", None)
+    if not choices:
+        return ""
+    options = "\n".join(
+        f"{chr(ord('A') + i)}) {choice.strip()}" for i, choice in enumerate(choices)
+    )
+    return OPTIONS_BLOCK.format(n=n, options=options)
+
 
 def strip_answer(text: str) -> str:
     """Drop the trailing ANSWER line."""
@@ -37,9 +54,9 @@ def truncate_pair(a: str, b: str, frac: float) -> tuple[str, str]:
 
 
 def responses_to_sample(
-    sample_a: Sample,
-    sample_b: Sample,
-    target: str = 'A',
+    sample_1: Sample,
+    sample_2: Sample,
+    target: str = '1',
     format_str: str = USER_PROMPT,
     max_len: int = 24000,
     include_reasoning: bool = True,
@@ -48,9 +65,12 @@ def responses_to_sample(
     """
     Converts two model samples into a single formatted string representation.
 
+    Options are shuffled per model, so each transcript is shown with its own
+    option order.
+
     Args:
-        sample_a (Sample): The sample from Model A.
-        sample_b (Sample): The sample from Model B.
+        sample_1 (Sample): The sample shown as Transcript 1.
+        sample_2 (Sample): The sample shown as Transcript 2.
         format_str (str): The format string to use for the output.
         max_len (int): The maximum length of each model's response.
         include_reasoning (bool): Whether to include CoT reasoning blocks.
@@ -60,22 +80,24 @@ def responses_to_sample(
     Returns:
         Sample: A formatted sample representing both model responses.
     """
-    assert sample_a.id == sample_b.id, "Sample IDs must match for comparison."
-    assert sample_a.input == sample_b.input, "Sample inputs must match for comparison."
-    input_text = sample_a.input
+    assert sample_1.id == sample_2.id, "Sample IDs must match for comparison."
+    assert sample_1.input == sample_2.input, "Sample inputs must match for comparison."
+    input_text = sample_1.input
 
-    output_a = extract_transcript(sample_a, include_reasoning=include_reasoning)[:max_len]
-    output_b = extract_transcript(sample_b, include_reasoning=include_reasoning)[:max_len]
+    output_1 = extract_transcript(sample_1, include_reasoning=include_reasoning)[:max_len]
+    output_2 = extract_transcript(sample_2, include_reasoning=include_reasoning)[:max_len]
     if truncate_frac is not None:
-        output_a, output_b = truncate_pair(output_a, output_b, truncate_frac)
+        output_1, output_2 = truncate_pair(output_1, output_2, truncate_frac)
 
     text = format_str.format(
         question=input_text,
-        transcript_a=output_a,
-        transcript_b=output_b,
+        options_1=format_options(sample_1, 1),
+        options_2=format_options(sample_2, 2),
+        transcript_1=output_1,
+        transcript_2=output_2,
     )
     return Sample(
-        id=f"{sample_a.id}_{target}",
+        id=f"{sample_1.id}_{target}",
         input=text,
         target=target
     )
@@ -131,15 +153,15 @@ include_reverse: bool = True,
             group = major_samples[sample_id]
             if len(group) < 2:
                 continue
-            sample_a, sample_b = group[0], group[1]
+            sample_major, sample_minor = group[0], group[1]
         else:
-            sample_a = major_samples[sample_id][0]
-            sample_b = minor_samples[sample_id][0]
+            sample_major = major_samples[sample_id][0]
+            sample_minor = minor_samples[sample_id][0]
 
-        samples.append(responses_to_sample(sample_a, sample_b, target='A', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning, truncate_frac=truncate_frac))
+        samples.append(responses_to_sample(sample_major, sample_minor, target='1', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning, truncate_frac=truncate_frac))
 
         if include_reverse:
-            samples.append(responses_to_sample(sample_b, sample_a, target='B', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning, truncate_frac=truncate_frac))
+            samples.append(responses_to_sample(sample_minor, sample_major, target='2', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning, truncate_frac=truncate_frac))
         
     name_major = log_major.eval.model
     name_minor = log_minor.eval.model

@@ -4,17 +4,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
+from inspect_ai.log import read_eval_log
+
 from configs.task import TaskConfig
 from configs.model import ModelConfig
 from configs.base import DraccusConfig
-from configs.utils import get_eval_path
+from configs.utils import get_eval_path, is_successful_eval
+
 
 SYSTEM_PROMPT = """You are an AI model that judges the responses of two other AI models to the same input prompt.
-You will be given a question and the responses from two models, labeled Transcript A and Transcript B, both coming to the correct solution.
-One of the two models is more capable than the other, and your task is to identify which is the smarter model (A or B). You MUST follow this reply format:
+You will be given a question and the responses from two models, labeled Transcript 1 and Transcript 2, both coming to the correct solution.
 
-EXPLANATION: <Your explanation of which response is better and why. 2-4 sentences.>
-ANSWER: <A or B, indicating which response is better.>
+For multiple choice questions, the options were shuffled independently for each model, so an option letter in Transcript 1 does not refer to the same option as that letter in Transcript 2. Each transcript is preceded by the options as that model saw them. Read each letter against that transcript's own option list.
+
+One of the two models is more capable than the other, and your task is to identify which is the more capable model (1 or 2). You MUST follow this reply format:
+
+EXPLANATION: <Your explanation of which response was produced by the more capable model and why. 2-4 sentences.>
+ANSWER: <1 or 2, indicating which response was produced by the more capable model.>
 CONFIDENCE: <An integer between 1 and 5 indicating your confidence in your answer.>
 """
 
@@ -36,6 +42,7 @@ class ExperimentConfig(DraccusConfig):
     system_prompt: str = SYSTEM_PROMPT
 
     log_dir: Optional[str] = None
+    epochs: Optional[int] = None
     limit: Optional[int] = None
     
     def model_evals(self, model: ModelConfig) -> List[Path]:
@@ -44,8 +51,20 @@ class ExperimentConfig(DraccusConfig):
             task=self.benchmark,
             model=model,
         )
-        eval_paths = sorted(eval_path.glob("*.eval"))
-        return eval_paths
+        eval_paths = dict()
+        for eval in eval_path.rglob("*.eval"):
+            if not eval.parent.name.isdigit():
+                raise ValueError(f"Evaluation file {eval} is not in a numbered epoch directory. The data folder structure should be <benchmark>/<model>/<epoch_number>/<eval_file>.eval")
+            repeat_num = int(eval.parent.name)
+            
+            # if eval is successful store it
+            if is_successful_eval(eval):
+                if repeat_num in eval_paths:
+                    raise ValueError(f"Multiple successful evaluation files found for repeat {repeat_num} in {eval_path}.")
+                eval_paths[repeat_num] = eval
+                
+            
+        return [eval_paths[k] for k in sorted(eval_paths.keys())]
     
     @property
     def task_name(self) -> str:
@@ -85,4 +104,6 @@ class ExperimentConfig(DraccusConfig):
         kwargs = self._kwargs or {}
         if self.limit is not None:
             kwargs["limit"] = self.limit
+        if self.epochs is not None:
+            kwargs["epochs"] = self.epochs
         return kwargs

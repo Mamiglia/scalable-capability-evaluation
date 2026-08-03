@@ -13,9 +13,9 @@ def parse_judge_output(output_text: str):
     if not output_text:
         return None, None, None
 
-    # Parse ANSWER (e.g., 'ANSWER: A', '**ANSWER:** A', 'ANSWER: Model B', 'ANSWER: B')
-    answer_match = re.search(r'ANSWER:[*_]*\s*(?:Model\s+)?[*_]*([AB])', output_text, re.IGNORECASE)
-    answer = answer_match.group(1).upper() if answer_match else None
+    # Parse ANSWER (e.g., 'ANSWER: 1', '**ANSWER:** 1', 'ANSWER: Model 2', 'ANSWER: Transcript 2')
+    answer_match = re.search(r'ANSWER:[*_]*\s*(?:(?:Model|Transcript)\s+)?[*_]*([12])', output_text, re.IGNORECASE)
+    answer = answer_match.group(1) if answer_match else None
 
     # Parse CONFIDENCE on a 1-5 scale (e.g., 'CONFIDENCE: 4', '**CONFIDENCE:** 5')
     conf_match = re.search(r'CONFIDENCE:[*_]*\s*[*_]*([0-9]+(?:\.[0-9]+)?)', output_text, re.IGNORECASE)

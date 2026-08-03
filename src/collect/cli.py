@@ -3,7 +3,7 @@
 import argparse
 from pathlib import Path
 
-from inspect_ai import eval as eval_func
+from inspect_ai import eval_set
 
 from configs import TaskConfig, ModelConfig, kv_pair, flag_parse
 from configs.utils import get_eval_path
@@ -95,26 +95,23 @@ def _run_eval(
     **kwargs,
 ) -> int:
     """Execute a single evaluation run for a given benchmark and model config."""
-    target_path = get_eval_path(
+    kwargs = kwargs.copy()
+    target_dir = get_eval_path(
         task=bench_cfg,
         model=model_cfg,
-        base_dir=kwargs.get("log_dir", "data"),
-    ) / f"{repeat}.eval"
-    
-    if target_path.exists():
-        print(f"Skipping {target_path} (already exists)")
-        return 0
+        base_dir=kwargs.pop("log_dir", "data"),
+    ) / f"{repeat}"
 
-    logs = eval_func(
+    success, _ = eval_set(
         tasks=bench_cfg.task,
         model=model_cfg.slug,
         model_args=model_cfg.model_args or {},
         task_args=bench_cfg.task_args or {},
         seed=repeat,
-        log_dir=str(target_path.parent),
+        log_dir=str(target_dir),
         **bench_cfg.eval_kwargs() | kwargs,
     )
-    return 0 if logs[0].status == "success" else 1
+    return 0 if success else 1
 
 
 if __name__ == "__main__":

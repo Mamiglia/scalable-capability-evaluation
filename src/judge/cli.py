@@ -84,6 +84,7 @@ def main() -> int:
                     "major": M,
                     "minor": m,
                     "judge": j,
+                    "epochs": args.epochs
                 },
                 **eval_extra_args,
             ) for b, M, m, j in zip(args.bench, args.major, args.minor, args.judge)

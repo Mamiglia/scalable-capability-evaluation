@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from inspect_ai._eval.loader import load_tasks
+from inspect_ai.log import read_eval_log
 from inspect_ai._util.registry import registry_info, registry_lookup
 
 from configs.model import ModelConfig
@@ -73,9 +74,16 @@ def get_eval_path(
     model: ModelConfig,
     base_dir: str | Path = "data",
 ) -> Path:
-    """Return storage path: data/{benchmark}/{task_args_hashing}/{model}/{N}.eval"""
+    """Return storage path: data/{benchmark}/{task_args_hashing}/{model}"""
     b_clean = task.name
     h_str = hash_task_args(task)
     m_clean = model.shortname
     return Path(base_dir) / b_clean / h_str / m_clean
 
+def is_successful_eval(eval_path: Path) -> bool:
+    """Check if an evaluation log indicates a successful run."""
+    try:
+        log = read_eval_log(eval_path, header_only=True)
+        return getattr(log, "status", None) == "success"
+    except Exception:
+        return False

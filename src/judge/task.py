@@ -27,7 +27,7 @@ def judge_task(
     log_major = read_eval_log(major_path, header_only=True)
     log_minor = read_eval_log(minor_path, header_only=True)
     
-    assert log_major.eval.task == log_minor.eval.task, "The two logs must be from the same task."
+    assert log_major.eval.task.rsplit("/", 1)[-1] == log_minor.eval.task.rsplit("/", 1)[-1], "The two logs must be from the same task."
 
     major_name = log_major.eval.model
     minor_name = log_minor.eval.model
