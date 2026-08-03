@@ -8,6 +8,24 @@ import math
 
 import numpy as np
 
+# Some models answer an MCQ item with the ANSWER line and nothing else
+# Stripping that line leaves ~12 characters, so the judge is shown no reasoning at all
+# Over the pilot transcripts, degenerate ones are ~12 characters and the next shortest real one is 234
+MIN_REASONING_CHARS = 100
+
+
+def drop_degenerate(verdicts):
+    """Drop items where either transcript is just the answer with no reasoning.
+
+    Filters on the pre-truncation length, so full and truncated runs keep the
+    same item set and stay comparable. Returns (kept, n_dropped).
+    """
+    cols = ["reasoning_len_major", "reasoning_len_minor"]
+    if not all(c in verdicts for c in cols):
+        return verdicts, 0
+    ok = verdicts[cols].min(axis=1) >= MIN_REASONING_CHARS
+    return verdicts[ok], int((~ok).sum())
+
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
     """Wilson score interval — well behaved at small n and extreme rates."""
