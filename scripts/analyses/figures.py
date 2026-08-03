@@ -478,9 +478,9 @@ def fig_capability_vs_length(verdicts, models, out):
     ax.margins(x=0.08, y=0.18)
     style(ax)
     handles = [Line2D([], [], marker="o", ls="", color=arm_col["A"], ms=5.5,
-                      label="arm A (our collection)"),
+                      label="Collected data"),
                Line2D([], [], marker="o", ls="", color=arm_col["B"], ms=5.5,
-                      label="arm B (Epoch logs)")]
+                      label="Epoch data")]
     leg = ax.legend(handles=handles, frameon=False, loc="lower left",
                     bbox_to_anchor=(0, 1.005), ncol=2, handletextpad=0.4,
                     columnspacing=1.0)
@@ -743,9 +743,9 @@ def fig_model_accuracy(models, out):
     ax.set_xlim(0, 1)
     style(ax, grid_axis="x")
     handles = [Line2D([], [], marker="o", ls="", color=arm_col["A"], ms=5.5,
-                      label="arm A (our collection)"),
+                      label="Collected data"),
                Line2D([], [], marker="o", ls="", color=arm_col["B"], ms=5.5,
-                      label="arm B (Epoch logs)")]
+                      label="Epoch data")]
     leg = ax.legend(handles=handles, frameon=False, loc="lower left",
                     bbox_to_anchor=(0, 1.005), ncol=2, handletextpad=0.4,
                     columnspacing=1.0)
