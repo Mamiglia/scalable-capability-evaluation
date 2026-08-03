@@ -27,3 +27,4 @@ external_data/**/*.eval
 /irt_results/
 /external_data/epoch-gpqa/item_domains.csv
 /judge_results/
+/irt_models_slide.pptx

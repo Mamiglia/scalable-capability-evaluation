@@ -110,6 +110,16 @@ COMPARISONS = {
         # qwen3.6-35b vs gemma-26b
         ("qwen3.5-122b-a10b", "qwen3.6-35b-a3b", "gemma-4-26b-a4b-it"),
         ("gemini-3.1-flash-lite", "qwen3.6-35b-a3b", "gemma-4-26b-a4b-it"),
+        # 2024/25 weak judges on the shared panel pairs
+        ("gpt-4o", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
+        ("gpt-4o", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
+        ("gpt-4o", "qwen3.5-122b-a10b", "qwen3-32b"),
+        ("gpt-4.1-nano", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
+        ("gpt-4.1-nano", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
+        ("gpt-4.1-nano", "qwen3.5-122b-a10b", "qwen3-32b"),
+        ("qwen-2.5-72b-instruct", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
+        ("qwen-2.5-72b-instruct", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
+        ("qwen-2.5-72b-instruct", "qwen3.5-122b-a10b", "qwen3-32b"),
     ],
     # Judge weaker than both pair members.
     "weak_judge": [
@@ -122,6 +132,15 @@ COMPARISONS = {
         ("gemma-4-26b-a4b-it", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
         ("gemma-4-26b-a4b-it", "gemma-4-31b-it", "gemini-2.5-flash"),
         ("gemma-4-26b-a4b-it", "qwen3.6-35b-a3b", "gemini-3.1-flash-lite"),
+        ("gpt-4o", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
+        ("gpt-4o", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
+        ("gpt-4o", "qwen3.5-122b-a10b", "qwen3-32b"),
+        ("gpt-4.1-nano", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
+        ("gpt-4.1-nano", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
+        ("gpt-4.1-nano", "qwen3.5-122b-a10b", "qwen3-32b"),
+        ("qwen-2.5-72b-instruct", "qwen3.5-122b-a10b", "qwen3.6-35b-a3b"),
+        ("qwen-2.5-72b-instruct", "gemma-4-31b-it", "gemma-4-26b-a4b-it"),
+        ("qwen-2.5-72b-instruct", "qwen3.5-122b-a10b", "qwen3-32b"),
     ],
     # Judge is a pair member (self-preference); (j, j, j) rows are the judge
     # judging its own self-pair.
@@ -145,6 +164,12 @@ COMPARISONS = {
         ("qwen3.5-122b-a10b", "gemini-3.5-flash", "gpt-4o"),
         ("gemini-3.1-flash-lite", "gemini-3.5-flash", "llama-3.1-70b"),
         ("qwen3.5-122b-a10b", "gemini-3.5-flash", "llama-3.1-70b"),
+        # weak judges on the widest gaps
+        ("qwen3-32b", "gemini-3.5-flash", "gpt-4o"),
+        ("qwen3-32b", "gemini-3.5-flash", "llama-3.1-70b"),
+        ("gemma-4-26b-a4b-it", "gemini-3.5-flash", "llama-3.1-70b"),
+        ("gpt-4.1-nano", "gemini-3.5-flash", "llama-3.1-70b"),
+        ("qwen-2.5-72b-instruct", "gemini-3.5-flash", "llama-3.1-70b"),
     ],
     # Era rungs (2024 / 2025 / 2026 pairs) x judges of different eras.
     "temporal": [
@@ -160,6 +185,12 @@ COMPARISONS = {
         ("gemini-3.1-flash-lite", "gpt-4.1", "mistral-medium"),
         ("gemini-3.1-flash-lite", "gpt-5.5-low", "qwen3.6-plus"),
         ("gemini-3.1-flash-lite", "gpt-5.2-medium", "qwen3.6-flash"),
+        ("gpt-4.1-nano", "claude-3-5-sonnet-0620", "llama-3.1-70b"),
+        ("gpt-4.1-nano", "gpt-4.1", "mistral-medium"),
+        ("gpt-4.1-nano", "gpt-5.5-low", "qwen3.6-plus"),
+        ("qwen-2.5-72b-instruct", "claude-3-5-sonnet-0620", "llama-3.1-70b"),
+        ("qwen-2.5-72b-instruct", "gpt-4.1", "mistral-medium"),
+        ("qwen-2.5-72b-instruct", "gpt-5.5-low", "qwen3.6-plus"),
     ],
 }
 
@@ -189,4 +220,7 @@ MODELS = {
     "qwen3.6-plus": {"label": "Qwen3.6-Plus", "release": "2026-03-31"},
     "gpt-5.2-medium": {"label": "GPT-5.2 (medium)", "release": "2025-12-11"},
     "qwen3.6-flash": {"label": "Qwen3.6-Flash", "release": "2026-04-27"},
+    # Judge-only models (no transcripts of ours); accuracy from Epoch's CSV.
+    "gpt-4.1-nano": {"label": "GPT-4.1-nano", "release": "2025-04-14", "accuracy": 0.489},
+    "qwen-2.5-72b-instruct": {"label": "Qwen2.5-72B", "release": "2024-09-19", "accuracy": 0.491},
 }

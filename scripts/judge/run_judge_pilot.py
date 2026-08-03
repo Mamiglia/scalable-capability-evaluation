@@ -91,6 +91,7 @@ def main() -> int:
             print(f"  phase{phase}{t} {judge_short:28s} {major}-vs-{minor} ({len(block)//2} items)")
         return 0
 
+    failures = []
     for phase, judge, judge_short, major, minor, frac, block, phase_dir in pending:
         success, _ = eval_set(
             tasks=[get_task(judge_short, major, minor, frac)],
@@ -100,8 +101,12 @@ def main() -> int:
             max_connections=40,
         )
         if not success:
-            print(f"FAILED: phase{phase} {judge_short} on {major}-vs-{minor}")
-            return 1
+            failures.append(f"phase{phase} {judge_short} on {major}-vs-{minor}")
+    if failures:
+        print(f"{len(failures)} FAILED runs (rest of queue completed):")
+        for f in failures:
+            print(f"  {f}")
+        return 1
     return 0
 
 

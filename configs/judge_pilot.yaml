@@ -119,3 +119,8 @@ comparisons:
   - [openrouter/qwen/qwen-2.5-72b-instruct, claude-3-5-sonnet-0620, llama-3.1-70b]
   - [openrouter/qwen/qwen-2.5-72b-instruct, gpt-4.1, mistral-medium]
   - [openrouter/qwen/qwen-2.5-72b-instruct, gpt-5.5-low, qwen3.6-plus]
+  - [openrouter/qwen/qwen3-32b, gemini-3.5-flash, gpt-4o]
+  - [openrouter/qwen/qwen3-32b, gemini-3.5-flash, llama-3.1-70b]
+  - [openrouter/google/gemma-4-26b-a4b-it, gemini-3.5-flash, llama-3.1-70b]
+  - [openrouter/openai/gpt-4.1-nano, gemini-3.5-flash, llama-3.1-70b]
+  - [openrouter/qwen/qwen-2.5-72b-instruct, gemini-3.5-flash, llama-3.1-70b]
