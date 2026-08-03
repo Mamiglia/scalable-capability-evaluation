@@ -1,0 +1,40 @@
+# Truncation controls for judge-weaker-than-both-models comparisons.
+
+transcripts:
+  gemma-4-31b-it: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_Ftg8xiDvQq9dL5XLdGh3qR.eval
+  gemma-4-26b-a4b-it: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_RKu47hcJZnjPNBPKSwMMsw.eval
+  gemini-3.1-flash-lite: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_WFQWWYCNt5pqBXa8EhkNLz.eval
+  qwen3.6-35b-a3b: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_bvWh67Jk56jv94ogQZfYA4.eval
+  gemini-2.5-flash: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_ggNyjY4zqnC9LH5UStEgdK.eval
+  qwen3.5-122b-a10b: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_jidBSJQmFg5gQTECKtuEpp.eval
+  qwen3-32b: data/gpqa/2026-07-31T16-08-53-00-00_gpqa-diamond_QqbbE3NmKU5HphKAkeYnT8.eval
+  gemini-3.5-flash: external_data/epoch-gpqa/gemini-3.5-flash_high.eval
+  gpt-4o: external_data/epoch-gpqa/gpt-4o-2024-08-06.eval
+  llama-3.1-70b: external_data/epoch-gpqa/Llama-3.1-70B-Instruct.eval
+  claude-3-5-sonnet-0620: external_data/epoch-gpqa/claude-3-5-sonnet-20240620.eval
+  gpt-4.1: external_data/epoch-gpqa/gpt-4.1-2025-04-14.eval
+  mistral-medium: external_data/epoch-gpqa/mistral-medium-2505.eval
+  gpt-5.5-low: external_data/epoch-gpqa/gpt-5.5_low.eval
+  qwen3.6-plus: external_data/epoch-gpqa/qwen3.6-plus.eval
+  gpt-5.2-medium: external_data/epoch-gpqa/gpt-5.2-2025-12-11_medium.eval
+  qwen3.6-flash: external_data/epoch-gpqa/qwen3.6-flash.eval
+
+truncate_fracs: [0.1, 0.5, 0.9]
+
+comparisons:
+  - [openrouter/openai/gpt-4o-2024-08-06, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/openai/gpt-4o-2024-08-06, gemma-4-31b-it, gemma-4-26b-a4b-it]
+  - [openrouter/openai/gpt-4o-2024-08-06, qwen3.5-122b-a10b, qwen3-32b]
+  - [openrouter/openai/gpt-4.1-nano, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/openai/gpt-4.1-nano, gemma-4-31b-it, gemma-4-26b-a4b-it]
+  - [openrouter/openai/gpt-4.1-nano, qwen3.5-122b-a10b, qwen3-32b]
+  - [openrouter/qwen/qwen-2.5-72b-instruct, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/qwen/qwen-2.5-72b-instruct, gemma-4-31b-it, gemma-4-26b-a4b-it]
+  - [openrouter/qwen/qwen-2.5-72b-instruct, qwen3.5-122b-a10b, qwen3-32b]
+  - [openrouter/qwen/qwen3-32b, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/qwen/qwen3-32b, gemma-4-31b-it, gemma-4-26b-a4b-it]
+  - [openrouter/qwen/qwen3-32b, qwen3.6-35b-a3b, gemma-4-31b-it]
+  - [openrouter/google/gemma-4-26b-a4b-it, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/google/gemini-3.1-flash-lite, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/openai/gpt-4.1-nano, gemini-3.5-flash, gpt-4o]
+  - [openrouter/qwen/qwen-2.5-72b-instruct, gemini-3.5-flash, gpt-4o]
