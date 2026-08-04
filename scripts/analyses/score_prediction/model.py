@@ -14,14 +14,22 @@ from torch import nn
 
 class TwinScorer(nn.Module):
     def __init__(self, embed_dim: int, n_judges: int, judge_embed_dim: int,
-                 hidden_dims: list[int], dropout: float):
+                 hidden_dims: list[int], dropout: float,
+                 judge_embed_init_std: float):
         super().__init__()
         self.judge_embedding = nn.Embedding(n_judges, judge_embed_dim)
+        # Keep the judge features on the scale of the unit-norm embedding dims.
+        nn.init.normal_(self.judge_embedding.weight, std=judge_embed_init_std)
         layers, width = [], embed_dim + judge_embed_dim
         for hidden in hidden_dims:
             layers += [nn.Linear(width, hidden), nn.GELU(), nn.Dropout(dropout)]
             width = hidden
-        self.mlp = nn.Sequential(*layers, nn.Linear(width, 1))
+        final = nn.Linear(width, 1)
+        # theta starts at 0: the model starts from the position baseline
+        # (logit = b_j) and learns content on top.
+        nn.init.zeros_(final.weight)
+        nn.init.zeros_(final.bias)
+        self.mlp = nn.Sequential(*layers, final)
         # Per-judge position bias and log-temperature (T_j = exp(tau_j)).
         self.b = nn.Parameter(torch.zeros(n_judges))
         self.tau = nn.Parameter(torch.zeros(n_judges))
@@ -58,9 +66,14 @@ def symmetry_check(seed: int = 0, n_rows: int = 8, embed_dim: int = 32,
     transcripts flips the content term and leaves position bias alone."""
     torch.manual_seed(seed)
     model = TwinScorer(embed_dim, n_judges, judge_embed_dim=2,
-                       hidden_dims=[16], dropout=0.0).eval()
+                       hidden_dims=[16], dropout=0.0,
+                       judge_embed_init_std=1.0).eval()
     with torch.no_grad():
         model.b.uniform_(-1, 1)
+        # Undo the zero final-layer init so the content term is nonzero
+        # and the check is not vacuous.
+        model.mlp[-1].weight.normal_()
+        model.mlp[-1].bias.normal_()
         e1, e2 = torch.randn(n_rows, embed_dim), torch.randn(n_rows, embed_dim)
         judge_idx = torch.randint(0, n_judges, (n_rows,))
         residual = (model(e1, e2, judge_idx) + model(e2, e1, judge_idx)

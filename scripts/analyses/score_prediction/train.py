@@ -43,14 +43,16 @@ def train_scorer(e1, e2, judge_idx, y, val_mask, n_judges, params, seed):
     Returns (model in eval mode, best val nll)."""
     torch.manual_seed(seed)
     model = TwinScorer(e1.shape[1], n_judges, params["judge_embed_dim"],
-                       params["hidden_dims"], params["dropout"])
+                       params["hidden_dims"], params["dropout"],
+                       params["judge_embed_init_std"])
     # No weight decay on b/tau: shrinking position bias or temperature
     # toward zero is not regularisation, it is a modelling error.
     decay = [p for name, p in model.named_parameters() if name not in ("b", "tau")]
     no_decay = [model.b, model.tau]
     opt = torch.optim.AdamW(
         [dict(params=decay, weight_decay=params["weight_decay"]),
-         dict(params=no_decay, weight_decay=0.0)], lr=params["lr"])
+         dict(params=no_decay, weight_decay=0.0)], lr=params["lr"],
+        betas=tuple(params["betas"]))
     loss_fn = nn.BCEWithLogitsLoss()
 
     # Positions within this training subset: gradient steps vs the

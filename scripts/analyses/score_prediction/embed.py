@@ -29,14 +29,22 @@ def load_done(out_path: Path) -> pd.DataFrame | None:
 
 
 def _local_encoder(encoder: dict):
+    import torch
     from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(encoder["name"], device=encoder.get("device"))
+    # Weights dtype from config; the sentence-transformers default is fp32,
+    # which is ~30 GiB for the 8B encoder.
+    model_kwargs = ({"torch_dtype": getattr(torch, encoder["dtype"])}
+                    if encoder.get("dtype") else {})
+    model = SentenceTransformer(encoder["name"], device=encoder.get("device"),
+                                model_kwargs=model_kwargs)
     dim = model.get_embedding_dimension()
     assert dim == encoder["output_dim"], f"model dim {dim} != config {encoder['output_dim']}"
 
     def embed_batch(batch_texts):
         vectors = model.encode(batch_texts, batch_size=len(batch_texts),
                                normalize_embeddings=True)
+        if model.device.type == "mps":
+            torch.mps.empty_cache()  # long texts fragment Metal memory
         n_tokens = [len(model.tokenizer(t)["input_ids"]) for t in batch_texts]
         return vectors, n_tokens
     return embed_batch

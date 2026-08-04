@@ -8,22 +8,25 @@ out_dir: judge_results/score_prediction
 
 encoder:
   provider: local               # local (sentence-transformers) | voyage (API)
-  name: Qwen/Qwen3-Embedding-0.6B
+  name: Qwen/Qwen3-Embedding-8B
   # name: voyage-3-large        # when provider: voyage
-  output_dim: 1024
-  batch_size: 2                 # texts per forward pass / API request
+  output_dim: 4096
+  batch_size: 1                 # texts per forward pass / API request
   device: null                  # null = auto (mps); cpu is slow but exact on long texts
+  dtype: bfloat16               # local only; unset = fp32 (~30 GiB for the 8B)
   price_per_m_tokens: 0.18      # voyage only, dry-run cost estimate
 
 mlp:
   judge_embed_dim: 4
+  judge_embed_init_std: 0.1   # default N(0,1) dwarfs the unit-norm embedding dims
+  betas: [0.9, 0.95]          # AdamW beta2 0.95, the tabular-MLP standard (RealMLP, fastai)
   batch_size: 256
   patience: 10
   max_epochs: 200
-  hidden_dims_grid: [[256, 64], [64], [16]]
-  dropout_grid: [0.1, 0.3]
+  hidden_dims_grid: [[256, 256], [256, 64], [64], [16]]
+  dropout_grid: [0.15, 0.3]   # 0.15 = RealMLP meta-tuned default
   lr_grid: [0.001, 0.0003]
-  weight_decay_grid: [0.1]    # won 19/19 folds over 0.01 in the first sweep
+  weight_decay_grid: [0.02, 0.1]  # 0.02 = RealMLP default; 0.1 won the first sweep
 
 folds:
   items: 5
