@@ -28,7 +28,7 @@ from model import (TwinScorer, fit_dlogit, fit_position, predict_dlogit,
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def add_dlogit(rows: pd.DataFrame, models_csv: Path) -> pd.DataFrame:
+def calculate_dlogit(rows: pd.DataFrame, models_csv: Path) -> pd.DataFrame:
     """Capability-gap column: logit(model in slot 1) - logit(slot 2)."""
     logit = pd.read_csv(models_csv).set_index("model")["logit"]
     slot1 = np.where(rows["slot_of_major"] == "1", rows["major"], rows["minor"])
@@ -94,7 +94,7 @@ def main():
     symmetry_check(seed=seed)
 
     rows, e1_np, e2_np, judge_names, judge_idx_np, y_np = load_features(out)
-    rows = add_dlogit(rows, ROOT / cfg["models_csv"])
+    rows = calculate_dlogit(rows, ROOT / cfg["models_csv"])
     e1, e2 = torch.from_numpy(e1_np), torch.from_numpy(e2_np)
     judge_idx = torch.from_numpy(judge_idx_np.astype(np.int64))
     y = torch.from_numpy(y_np.astype(np.float32))

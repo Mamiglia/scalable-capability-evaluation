@@ -16,14 +16,14 @@ encoder:
   price_per_m_tokens: 0.18      # voyage only, dry-run cost estimate
 
 mlp:
-  hidden_dims: [256, 64]
   judge_embed_dim: 4
-  dropout: 0.1
   batch_size: 256
   patience: 10
   max_epochs: 200
+  hidden_dims_grid: [[256, 64], [64], [16]]
+  dropout_grid: [0.1, 0.3]
   lr_grid: [0.001, 0.0003]
-  weight_decay_grid: [0.01, 0.1]
+  weight_decay_grid: [0.1]    # won 19/19 folds over 0.01 in the first sweep
 
 folds:
   items: 5
