@@ -92,7 +92,8 @@ def tune_and_fit(fit_fn, grid: dict, features, y, val_mask, seed: int):
     for params in options:
         model = fit_fn(features[~val_mask], y[~val_mask], params, seed)
         losses.append(log_loss(y[val_mask], model.predict_proba(features[val_mask])[:, 1]))
-    best = options[int(np.argmin(losses))]
+    # nanargmin: a diverged fit's NaN loss must not win the selection.
+    best = options[int(np.nanargmin(losses))]
     # Refit the winning option on all rows (train + inner val).
     return fit_fn(features, y, best, seed), best, float(min(losses))
 
