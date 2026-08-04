@@ -38,3 +38,11 @@ comparisons:
   - [openrouter/google/gemini-3.1-flash-lite, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
   - [openrouter/openai/gpt-4.1-nano, gemini-3.5-flash, gpt-4o]
   - [openrouter/qwen/qwen-2.5-72b-instruct, gemini-3.5-flash, gpt-4o]
+
+# Novita rejects our request shape for qwen-2.5-72b ("does not support endpoint:
+# completions"), and OpenRouter falls back to it whenever DeepInfra rate-limits.
+# Excluding it keeps the other fallbacks available.
+judge_model_args:
+  openrouter/qwen/qwen-2.5-72b-instruct:
+    provider:
+      ignore: [Novita]

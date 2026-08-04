@@ -93,11 +93,16 @@ def main() -> int:
             print(f"  phase{phase}{t} {judge_short:28s} {major}-vs-{minor} ({len(block)//2} items)")
         return 0
 
+    # Optional per-judge model args from the config, e.g. OpenRouter provider
+    # routing for a judge whose default fallback provider rejects the request.
+    model_args = cfg.get("judge_model_args") or {}
+
     failures = []
     for phase, judge, judge_short, major, minor, frac, block, phase_dir in pending:
         success, _ = eval_set(
             tasks=[get_task(judge_short, major, minor, frac)],
             model=judge,
+            model_args=model_args.get(judge, {}),
             log_dir=str(phase_dir),
             sample_id=block,
             max_connections=40,

@@ -69,3 +69,11 @@ comparisons:
   - [openrouter/qwen/qwen-2.5-72b-instruct, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
   - [openrouter/qwen/qwen-2.5-72b-instruct, gemma-4-31b-it, gemma-4-26b-a4b-it]
   - [openrouter/qwen/qwen-2.5-72b-instruct, qwen3.5-122b-a10b, qwen3-32b]
+
+# Novita rejects our request shape for qwen-2.5-72b ("does not support endpoint:
+# completions"), and OpenRouter falls back to it whenever DeepInfra rate-limits.
+# Excluding it keeps the other fallbacks available.
+judge_model_args:
+  openrouter/qwen/qwen-2.5-72b-instruct:
+    provider:
+      ignore: [Novita]

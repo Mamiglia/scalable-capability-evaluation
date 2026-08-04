@@ -1,11 +1,17 @@
-"""Bake the gpqa-pilot-rd2 dashboard dataset into interactive_viewer/data/.
+"""Bake the dashboard datasets into interactive_viewer/data/.
 
-Writes the three tiers the static viewer reads:
-  index.json                          plot points, model/judge metadata, fits,
-                                      colours, GPQA questions
-  transcripts/{model}.json            item -> full transcript, deduped across runs
-  transcripts/{model}__ep1.json       self-pair second-epoch (slot-B) transcripts
-  pairs/{major}__{minor}__{frac}.json item -> judge -> both counterbalanced orders
+One subdirectory per dataset listed in configs/dashboard_datasets.yaml, plus a
+top-level datasets.json the viewer reads to populate its dataset dropdown:
+
+  datasets.json                          [{id, label}], menu order; viewer opens
+                                         on the first entry
+  {id}/index.json                        plot points, model/judge metadata, fits,
+                                         colours, GPQA questions
+  {id}/transcripts/{model}.json          item -> full transcript, deduped across runs
+  {id}/transcripts/{model}__ep1.json     self-pair second-epoch (slot-B) transcripts
+  {id}/options/{model}.json              item -> that model's shuffled option order
+  {id}/answers/{model}.json              item -> the letter that model answered
+  {id}/pairs/{major}__{minor}__{frac}.json  item -> judge -> both counterbalanced orders
 
 Points and stats come from the already-computed CSVs (summary/models/judge_fits);
 the judge logs supply pick/confidence/explanation and the source model logs the
@@ -39,6 +45,19 @@ def num(x):
 
 def frac_str(tf):
     return "full" if pd.isna(tf) else str(int(round(tf * 100)))
+
+
+def answer_letter(sample):
+    """The letter this model answered, in its own shuffled option order.
+
+    Taken from the graded score, not the transcript text: models write the
+    answer line in whatever format they like ("ANSWER: $D$", "\\boxed{B}").
+    Falls back to the target, which is the same letter here because judged
+    items are both-correct.
+    """
+    score = next(iter((getattr(sample, "scores", None) or {}).values()), None)
+    letter = getattr(score, "answer", None) or getattr(sample, "target", None)
+    return letter if isinstance(letter, str) and len(letter) == 1 else None
 
 
 def build_models(models_csv: pd.DataFrame) -> dict:
@@ -93,6 +112,7 @@ def collect_logs(log_root: Path, config: Path):
 
     transcripts: dict[str, dict] = {}
     options: dict[str, dict] = {}
+    answers: dict[str, dict] = {}
     questions: dict[str, str] = {}
     verdict_rows: dict[tuple, dict] = {}
     selection: set[tuple] = set()
@@ -126,6 +146,8 @@ def collect_logs(log_root: Path, config: Path):
             # order to make its answer letter readable.
             options.setdefault(major, {})[item] = list(getattr(it.s_major, "choices", None) or [])
             options.setdefault(minor_key, {})[item] = list(getattr(it.s_minor, "choices", None) or [])
+            answers.setdefault(major, {})[item] = answer_letter(it.s_major)
+            answers.setdefault(minor_key, {})[item] = answer_letter(it.s_minor)
             questions[item] = it.question
 
         for s in log.samples or []:
@@ -151,7 +173,7 @@ def collect_logs(log_root: Path, config: Path):
     # future config that varies them (then the key would need (ir, rbc) too).
     assert len(selection) <= 1, \
         f"include_reasoning/require_both_correct vary across runs: {selection}"
-    return transcripts, options, questions, verdict_rows
+    return transcripts, options, answers, questions, verdict_rows
 
 
 def assemble_pairs(verdict_rows: dict) -> dict:
@@ -171,17 +193,12 @@ def dump(obj, path: Path):
     path.write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", type=Path, default=Path("configs/judge_pilot.yaml"))
-    ap.add_argument("--log-root", type=Path, default=Path("logs/gpqa-pilot-rd2"))
-    ap.add_argument("--results", type=Path, default=Path("judge_results/gpqa-pilot-rd2"))
-    ap.add_argument("--out", type=Path, default=Path("interactive_viewer/data"))
-    args = ap.parse_args()
-
-    summary = pd.read_csv(args.results / "summary.csv")
-    models_csv = pd.read_csv(args.results / "models.csv")
-    fits_csv = pd.read_csv(args.results / "judge_fits.csv")
+def export_dataset(ds: dict, out: Path):
+    """Write one dataset's tiers under out/. ds is a configs/dashboard_datasets entry."""
+    results = Path(ds["results"])
+    summary = pd.read_csv(results / "summary.csv")
+    models_csv = pd.read_csv(results / "models.csv")
+    fits_csv = pd.read_csv(results / "judge_fits.csv")
 
     models = build_models(models_csv)
     acc = {m: v["accuracy"] for m, v in models.items()}
@@ -194,33 +211,57 @@ def main():
                       "acc_at_gap0": float(r.acc_at_gap0)}
             for _, r in fits_csv.iterrows()}
 
-    transcripts, options, questions, verdict_rows = collect_logs(args.log_root, args.config)
+    transcripts, options, answers, questions, verdict_rows = collect_logs(
+        Path(ds["logs"]), Path(ds["config"]))
     pairs = assemble_pairs(verdict_rows)
 
     index = dict(models=models, judges=judges, colors=colors, questions=questions,
                  fits=fits, runs=build_runs(summary, acc, arm))
 
-    # Clear stale exports, keeping the viewer's html/js/css/plotly untouched.
-    for sub in ("transcripts", "options", "pairs"):
-        if (args.out / sub).exists():
-            shutil.rmtree(args.out / sub)
-    (args.out / "index.json").unlink(missing_ok=True)
-    (args.out / "transcripts").mkdir(parents=True, exist_ok=True)
-    (args.out / "options").mkdir(parents=True, exist_ok=True)
-    (args.out / "pairs").mkdir(parents=True, exist_ok=True)
+    # Clear this dataset's stale export, keeping html/js/css/plotly untouched.
+    if out.exists():
+        shutil.rmtree(out)
+    for sub in ("transcripts", "options", "answers", "pairs"):
+        (out / sub).mkdir(parents=True, exist_ok=True)
 
-    dump(index, args.out / "index.json")
+    dump(index, out / "index.json")
     for model, items in transcripts.items():
-        dump(items, args.out / "transcripts" / f"{model}.json")
+        dump(items, out / "transcripts" / f"{model}.json")
     for model, items in options.items():
-        dump(items, args.out / "options" / f"{model}.json")
+        dump(items, out / "options" / f"{model}.json")
+    for model, items in answers.items():
+        dump(items, out / "answers" / f"{model}.json")
     for (major, minor, frac), data in pairs.items():
-        dump(data, args.out / "pairs" / f"{major}__{minor}__{frac}.json")
+        dump(data, out / "pairs" / f"{major}__{minor}__{frac}.json")
 
-    print(f"index.json: {len(index['runs'])} runs, {len(questions)} questions, "
-          f"{len(models)} models, {len(judges)} judges")
-    print(f"transcripts/: {len(transcripts)} files")
-    print(f"pairs/: {len(pairs)} files")
+    print(f"{ds['id']}: {len(index['runs'])} runs, {len(questions)} questions, "
+          f"{len(models)} models, {len(judges)} judges, "
+          f"{len(transcripts)} transcript files, {len(pairs)} pair files")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--datasets", type=Path,
+                    default=Path("configs/dashboard_datasets.yaml"))
+    ap.add_argument("--only", help="export just this dataset id")
+    ap.add_argument("--out", type=Path, default=Path("interactive_viewer/data"))
+    args = ap.parse_args()
+
+    datasets = yaml.safe_load(args.datasets.read_text())["datasets"]
+    if args.only:
+        datasets = [d for d in datasets if d["id"] == args.only]
+        if not datasets:
+            ap.error(f"no dataset with id {args.only!r} in {args.datasets}")
+
+    args.out.mkdir(parents=True, exist_ok=True)
+    for ds in datasets:
+        export_dataset(ds, args.out / ds["id"])
+
+    # Menu list is rewritten from the full config, so --only can't drop entries.
+    menu = yaml.safe_load(args.datasets.read_text())["datasets"]
+    dump([{"id": d["id"], "label": d["label"]} for d in menu],
+         args.out / "datasets.json")
+    print(f"datasets.json: {len(menu)} datasets")
 
 
 if __name__ == "__main__":
