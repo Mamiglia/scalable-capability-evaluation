@@ -70,10 +70,32 @@ comparisons:
   - [openrouter/qwen/qwen-2.5-72b-instruct, gemma-4-31b-it, gemma-4-26b-a4b-it]
   - [openrouter/qwen/qwen-2.5-72b-instruct, qwen3.5-122b-a10b, qwen3-32b]
 
-# Novita rejects our request shape for qwen-2.5-72b ("does not support endpoint:
-# completions"), and OpenRouter falls back to it whenever DeepInfra rate-limits.
-# Excluding it keeps the other fallbacks available.
+# Judge routing pinned per the OpenRouter audit: open-weight slugs are served by
+# several endpoints at different precisions (gemma-4-31b and qwen3.5-122b both
+# have fp4 routes), so default routing silently varies the weights between runs.
+# Each pin is the highest-precision endpoint with context enough for a two-
+# transcript prompt; endpoint records snapshotted in
+# judge_results/gpqa-pilot-rd2/openrouter_endpoints_snapshot.json.
+# Proprietary judges (gemini/gpt) are effectively single-served, so they only get
+# the policy flags.
 judge_model_args:
+  openrouter/qwen/qwen3.5-122b-a10b:
+    provider: {only: [novita/bf16], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/google/gemma-4-31b-it:
+    provider: {only: [coreweave/bf16], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/google/gemma-4-26b-a4b-it:
+    provider: {only: [parasail/bf16], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/qwen/qwen3.6-35b-a3b:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/qwen/qwen3-32b:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
   openrouter/qwen/qwen-2.5-72b-instruct:
-    provider:
-      ignore: [Novita]
+    provider: {only: [deepinfra/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/google/gemini-3.1-flash-lite:
+    provider: {data_collection: deny, require_parameters: true}
+  openrouter/google/gemini-2.5-flash:
+    provider: {data_collection: deny, require_parameters: true}
+  openrouter/openai/gpt-4o-2024-08-06:
+    provider: {data_collection: deny, require_parameters: true}
+  openrouter/openai/gpt-4.1-nano:
+    provider: {data_collection: deny, require_parameters: true}
