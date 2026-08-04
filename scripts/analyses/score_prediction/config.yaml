@@ -19,20 +19,21 @@ mlp:
   hidden_dims: [256, 64]
   judge_embed_dim: 4
   dropout: 0.1
-  weight_decay: 0.01
-  lr: 0.001
   batch_size: 256
   patience: 10
   max_epochs: 200
+  lr_grid: [0.001, 0.0003]
+  weight_decay_grid: [0.01, 0.1]
 
 folds:
   items: 5
   pairs: 5   # judges regime is leave-one-judge-out, no count needed
 
+inner_folds: 5                # grouped inner split of each training fold; fold 0 = validation
+
 ml_suite:
-  inner_folds: 5              # grouped inner split of each training fold; fold 0 = validation
   logreg:
-    l2_c_grid: [0.001, 0.01, 0.1, 1.0, 10.0]
+    l2_c_grid: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
     max_iter: 2000
   gbm:
     learning_rate_grid: [0.05, 0.1]

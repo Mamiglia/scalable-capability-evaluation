@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def load_features(out_dir: Path):
-    """(rows, delta, judge_onehot, y), row-aligned."""
+    """(rows, e1, e2, judge_names, judge_idx, y), row-aligned."""
     rows = pd.read_parquet(out_dir / "rows.parquet")
     emb = pd.read_parquet(out_dir / "embeddings.parquet")
     vectors = np.stack(emb["embedding"].to_numpy()).astype(np.float32)
@@ -35,12 +35,23 @@ def load_features(out_dir: Path):
     missing = (set(rows["text_id_slot1"]) | set(rows["text_id_slot2"])) - index.keys()
     assert not missing, f"{len(missing)} text_ids lack embeddings"
 
-    delta = (vectors[rows["text_id_slot1"].map(index).to_numpy()]
-             - vectors[rows["text_id_slot2"].map(index).to_numpy()])
-    judge_onehot = pd.get_dummies(rows["judge"]).to_numpy(dtype=np.float32)
+    e1 = vectors[rows["text_id_slot1"].map(index).to_numpy()]
+    e2 = vectors[rows["text_id_slot2"].map(index).to_numpy()]
+    judge_names = sorted(rows["judge"].unique())
+    judge_idx = rows["judge"].map({j: i for i, j in enumerate(judge_names)}).to_numpy()
     y = rows["y"].to_numpy()
-    print(f"{len(rows)} rows, delta {delta.shape}, {judge_onehot.shape[1]} judges")
-    return rows, delta, judge_onehot, y
+    print(f"{len(rows)} rows, embeddings {e1.shape}, {len(judge_names)} judges")
+    return rows, e1, e2, judge_names, judge_idx, y
+
+
+def merge_preds(path: Path, frames: list[pd.DataFrame]):
+    """Write these models' rows, replacing prior rows of the same models."""
+    new = pd.concat(frames, ignore_index=True)
+    if path.exists():
+        old = pd.read_parquet(path)
+        new = pd.concat([old[~old["model"].isin(new["model"].unique())], new],
+                        ignore_index=True)
+    new.to_parquet(path, index=False)
 
 
 def grid_options(grid: dict) -> list[dict]:
@@ -91,7 +102,9 @@ def main():
     cfg = yaml.safe_load(args.config.read_text())
     out = ROOT / cfg["out_dir"]
 
-    rows, delta, judge_onehot, y = load_features(out)
+    rows, e1, e2, judge_names, judge_idx, y = load_features(out)
+    delta = e1 - e2
+    judge_onehot = np.eye(len(judge_names), dtype=np.float32)[judge_idx]
     features = np.hstack([delta, judge_onehot])
     folds = pd.read_parquet(out / "cv_folds.parquet")
     fold_of_row = folds.pivot(index="row_id", columns="regime", values="fold")
@@ -107,8 +120,7 @@ def main():
         for fold in sorted(np.unique(regime_fold)):
             test_mask = regime_fold == fold
             train_rows = rows[~test_mask]
-            inner = grouped_folds(train_rows, group_col,
-                                  cfg["ml_suite"]["inner_folds"], seed)
+            inner = grouped_folds(train_rows, group_col, cfg["inner_folds"], seed)
             val_mask = (inner == 0).to_numpy()
             frames = []
             for name, (fit_fn, grid) in fitters.items():
@@ -122,8 +134,7 @@ def main():
                       f"test nll {log_loss(y[test_mask], p):.4f} "
                       f"acc {(np.round(p) == y[test_mask]).mean():.3f} chose {best}",
                       flush=True)
-            pd.concat(frames, ignore_index=True).to_parquet(
-                preds_dir / f"{regime}_{fold}.parquet", index=False)
+            merge_preds(preds_dir / f"{regime}_{fold}.parquet", frames)
 
     all_preds = pd.concat([pd.read_parquet(f)
                            for f in sorted(preds_dir.glob("*.parquet"))])
