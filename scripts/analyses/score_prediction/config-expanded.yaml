@@ -1,0 +1,49 @@
+# Score-prediction config for the expanded judging corpus
+# (docs/2026-08-04-expanded-judging-design.md). Same pipeline, separate
+# corpus: gpqa-expanded-260804 runs under endpoint pins and is not
+# poolable with gpqa-pilot-rd2.
+
+verdicts_csv: judge_results/gpqa-expanded-260804/verdicts.csv
+models_csv: judge_results/gpqa-expanded-260804/models.csv
+summary_csv: judge_results/gpqa-expanded-260804/summary.csv
+out_dir: judge_results/score_prediction-expanded
+
+encoder:
+  provider: local               # local (sentence-transformers) | voyage (API)
+  name: Qwen/Qwen3-Embedding-0.6B
+  # name: voyage-3-large        # when provider: voyage
+  output_dim: 1024
+  batch_size: 2                 # texts per forward pass / API request
+  device: null                  # null = auto (mps); cpu is slow but exact on long texts
+  price_per_m_tokens: 0.18      # voyage only, dry-run cost estimate
+
+mlp:
+  judge_embed_dim: 4
+  batch_size: 256
+  patience: 10
+  max_epochs: 200
+  hidden_dims_grid: [[256, 64], [64], [16]]
+  dropout_grid: [0.1, 0.3]
+  lr_grid: [0.001, 0.0003]
+  weight_decay_grid: [0.1]
+
+folds:
+  items: 5
+  pairs: 5   # 30 pairs -> 6 held out per fold; judges regime is leave-one-out
+
+inner_folds: 5
+
+ml_suite:
+  logreg:
+    l2_c_grid: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+    max_iter: 2000
+  gbm:
+    learning_rate_grid: [0.03, 0.05, 0.1]
+    max_leaf_nodes_grid: [15, 31, 63]
+    max_iter: 500
+
+evaluate:
+  n_boot: 1000
+  ece_bins: 10
+
+seeds: [0, 1]
