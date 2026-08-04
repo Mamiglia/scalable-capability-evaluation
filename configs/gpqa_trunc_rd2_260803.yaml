@@ -40,18 +40,23 @@ comparisons:
 # Judge routing pinned per the OpenRouter audit: open-weight slugs are served by
 # several endpoints at different precisions (gemma-4-31b and qwen3.5-122b both
 # have fp4 routes), so default routing silently varies the weights between runs.
-# Each pin is the highest-precision endpoint with context enough for a two-
+# All judges pinned to fp8 rather than best-available precision: qwen3-32b and
+# qwen3.6-35b have no bf16 endpoint anywhere, so uniform bf16 is impossible, and
+# mixing bf16/fp8 across judges would make precision co-vary with judge identity
+# in the judge-strength comparison. siliconflow serves 5 of 6; deepinfra covers
+# qwen-2.5-72b. NB deepinfra serves qwen3.5-122b at fp4 - do not pin it there.
+# Context on each pin is enough for a two-
 # transcript prompt; endpoint records snapshotted in
 # judge_results/gpqa-pilot-rd2/openrouter_endpoints_snapshot.json.
 # Proprietary judges (gemini/gpt) are effectively single-served, so they only get
 # the policy flags.
 judge_model_args:
   openrouter/qwen/qwen3.5-122b-a10b:
-    provider: {only: [novita/bf16], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
   openrouter/google/gemma-4-31b-it:
-    provider: {only: [coreweave/bf16], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
   openrouter/google/gemma-4-26b-a4b-it:
-    provider: {only: [parasail/bf16], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
   openrouter/qwen/qwen3.6-35b-a3b:
     provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
   openrouter/qwen/qwen3-32b:
