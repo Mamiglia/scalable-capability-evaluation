@@ -2,10 +2,12 @@
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 from inspect_ai import eval_set
 
 from configs import TaskConfig, ModelConfig, kv_pair, flag_parse
+from collect.runpod import main as runpod_main
 from configs.utils import get_eval_path
 
 
@@ -40,6 +42,11 @@ def main() -> int:
         help="Number of epochs to run (default: 1).",
     )
     parser.add_argument(
+        "--runpod",
+        action="store_true",
+        help="Force Runpod for selected model(s), overriding runpod.use=false.",
+    )
+    parser.add_argument(
         "-T",
         "--task-arg",
         action="append",
@@ -57,36 +64,57 @@ def main() -> int:
     )
     args, extra = parser.parse_known_args()
     eval_extra_args = flag_parse(extra) if extra else {}
-    
+
+    benches = [TaskConfig.from_cli(path) for path in args.bench]
+    models = [ModelConfig.from_cli(path) for path in args.model]
+    for bench in benches:
+        if args.task_arg:
+            bench.task_args.update(dict(args.task_arg))
+    for model in models:
+        if args.model_arg:
+            model.model_args.update(dict(args.model_arg))
+
     # TODO: consider adding a way to run in parallel with detached processes, and show progress in a single terminal. This would be useful for running multiple benchmarks or models at once.
     # TODO: consider adding a way to resume from a previous run
-    for bench_path in args.bench:
-        bench = TaskConfig.from_cli(bench_path)
-        if args.task_arg:
-            bench.task_args.update({k: v for k, v in args.task_arg})
+    result = runpod_main(
+        models,
+        lambda model: _collect(benches, [model], args.epochs, eval_extra_args),
+        force=args.runpod,
+    )
+    if result is not None:
+        return result
+    return _collect(benches, models, args.epochs, eval_extra_args)
 
-        for model_path in args.model:
-            model = ModelConfig.from_cli(model_path)
-            if args.model_arg:
-                model.model_args.update({k: v for k, v in args.model_arg})
 
-            for i in range(args.epochs):
+def _collect(
+    benches: list[TaskConfig],
+    models: list[ModelConfig],
+    epochs: int,
+    eval_extra_args: dict[str, Any],
+) -> int:
+    """Run the ordinary collection loop."""
+    for bench in benches:
+        for model in models:
+            for repeat in range(epochs):
                 print(
-                    f"Running epoch {i}/{args.epochs} for benchmark '{bench.name}' and model '{model.slug}'"
+                    f"Running epoch {repeat}/{epochs} for benchmark "
+                    f"'{bench.name}' and model '{model.slug}'"
                 )
-                
                 exit_code = _run_eval(
                     bench_cfg=bench,
                     model_cfg=model,
-                    repeat=i,
+                    repeat=repeat,
                     **eval_extra_args,
                 )
-                if exit_code != 0:
+                if exit_code:
                     print(
-                        f"Epoch {i} failed with exit code {exit_code} for benchmark '{bench.name}' and model '{model.slug}'. Stopping further epochs."
+                        f"Epoch {repeat} failed with exit code {exit_code} for "
+                        f"benchmark '{bench.name}' and model '{model.slug}'. "
+                        "Stopping further epochs."
                     )
                     return exit_code
     return 0
+
 
 def _run_eval(
     bench_cfg: TaskConfig,
@@ -96,12 +124,14 @@ def _run_eval(
 ) -> int:
     """Execute a single evaluation run for a given benchmark and model config."""
     kwargs = kwargs.copy()
-    target_dir = get_eval_path(
-        task=bench_cfg,
-        model=model_cfg,
-        base_dir=kwargs.pop("log_dir", "data"),
-    ) / f"{repeat}"
-
+    target_dir = (
+        get_eval_path(
+            task=bench_cfg,
+            model=model_cfg,
+            base_dir=kwargs.pop("log_dir", "data"),
+        )
+        / f"{repeat}"
+    )
     success, _ = eval_set(
         tasks=bench_cfg.task,
         model=model_cfg.slug,

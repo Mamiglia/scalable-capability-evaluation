@@ -10,6 +10,8 @@ from configs.base import DraccusConfig
 class ModelConfig(DraccusConfig):
     slug: str = None
     model_args: Optional[Dict[str, Any]] = None
+    # Consumed by collect.runpod when `use: true` or --runpod is selected.
+    runpod: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if not self.slug:
