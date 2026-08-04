@@ -53,6 +53,8 @@ def train_scorer(e1, e2, judge_idx, y, val_mask, n_judges, params, seed):
          dict(params=no_decay, weight_decay=0.0)], lr=params["lr"])
     loss_fn = nn.BCEWithLogitsLoss()
 
+    # Positions within this training subset: gradient steps vs the
+    # early-stopping validation rows.
     train_idx = np.flatnonzero(~val_mask)
     val_idx = torch.from_numpy(np.flatnonzero(val_mask))
     e1_val, e2_val = e1[val_idx], e2[val_idx]
@@ -60,6 +62,7 @@ def train_scorer(e1, e2, judge_idx, y, val_mask, n_judges, params, seed):
     rng = np.random.default_rng(seed)
     best_nll, best_state, stale = np.inf, None, 0
     for _ in range(params["max_epochs"]):
+        # One epoch: minibatch gradient steps over a fresh shuffle.
         model.train()
         rng.shuffle(train_idx)
         for start in range(0, len(train_idx), params["batch_size"]):
@@ -71,6 +74,8 @@ def train_scorer(e1, e2, judge_idx, y, val_mask, n_judges, params, seed):
         model.eval()
         with torch.no_grad():
             val_nll = float(loss_fn(model(e1_val, e2_val, judge_val), y_val))
+        # Early stopping: remember the weights from the best validation
+        # epoch; give up after `patience` epochs without improvement.
         if val_nll < best_nll - 1e-5:
             best_nll, best_state, stale = val_nll, copy.deepcopy(model.state_dict()), 0
         else:
@@ -93,12 +98,15 @@ def main():
     seed = cfg["seeds"][0]
     symmetry_check(seed=seed)
 
+    # Row-aligned arrays: e1/e2 are the slot-1/slot-2 transcript embeddings
+    # of each verdict row; judge_idx codes judges 0..n-1 in judge_names order.
     rows, e1_np, e2_np, judge_names, judge_idx_np, y_np = load_features(out)
     rows = calculate_dlogit(rows, ROOT / cfg["models_csv"])
     e1, e2 = torch.from_numpy(e1_np), torch.from_numpy(e2_np)
     judge_idx = torch.from_numpy(judge_idx_np.astype(np.int64))
     y = torch.from_numpy(y_np.astype(np.float32))
 
+    # row_id -> fold number, one column per regime.
     folds = pd.read_parquet(out / "cv_folds.parquet")
     fold_of_row = folds.pivot(index="row_id", columns="regime", values="fold")
     preds_dir = out / "preds"
@@ -106,6 +114,7 @@ def main():
     ckpt_dir = out / "checkpoints"
     ckpt_dir.mkdir(exist_ok=True)
 
+    # Cartesian product of the *_grid entries in the mlp config block.
     grid = grid_options(cfg["mlp"])
     group_cols = {"items": "item", "pairs": "pair_key", "judges": "judge"}
     if args.smoke:
@@ -122,11 +131,15 @@ def main():
             train_pos = np.flatnonzero(~test_mask)
             test_pos = torch.from_numpy(np.flatnonzero(test_mask))
             train_rows = rows[~test_mask]
+            # Inner validation: regroup the training rows by the regime's
+            # group column, hold inner fold 0 out for early stopping and
+            # grid selection. The test fold is never touched.
             val_mask = (grouped_folds(train_rows, group_col,
                                       cfg["inner_folds"], seed) == 0).to_numpy()
             train_t = tuple(t[torch.from_numpy(train_pos)]
                             for t in (e1, e2, judge_idx, y))
 
+            # One scorer per grid option; keep the best inner-val NLL.
             best = None
             for params in grid:
                 model, val_nll = train_scorer(*train_t, val_mask=val_mask,
@@ -137,12 +150,15 @@ def main():
             model, _, chosen = best
 
             with torch.no_grad():
+                # Judges regime is leave-one-judge-out: the test judge was
+                # never trained on, so score without its parameters.
                 if regime == "judges":
                     logits = model.score_unseen_judge(e1[test_pos], e2[test_pos])
                 else:
                     logits = model(e1[test_pos], e2[test_pos], judge_idx[test_pos])
                 p_mlp = torch.sigmoid(logits).numpy()
 
+            # Baselines refit on exactly the same training rows.
             b_by_judge = fit_position(train_rows)
             dlogit_params = fit_dlogit(train_rows)
             test_rows = rows[test_mask]
@@ -164,7 +180,6 @@ def main():
         print("smoke run done")
         return
 
-    # Seed stability: refit items fold 0 with the second seed, same grid winner.
     test_mask = rows["row_id"].map(fold_of_row["items"]).to_numpy() == 0
     train_rows = rows[~test_mask]
     val_mask = (grouped_folds(train_rows, "item", cfg["inner_folds"],

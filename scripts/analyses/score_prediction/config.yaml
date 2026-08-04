@@ -36,8 +36,8 @@ ml_suite:
     l2_c_grid: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
     max_iter: 2000
   gbm:
-    learning_rate_grid: [0.05, 0.1]
-    max_leaf_nodes_grid: [31]
+    learning_rate_grid: [0.03, 0.05, 0.1]
+    max_leaf_nodes_grid: [15, 31, 63]
     max_iter: 500             # ceiling; early stopping picks the actual count
 
 evaluate:

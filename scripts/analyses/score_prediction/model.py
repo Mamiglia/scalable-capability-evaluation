@@ -22,6 +22,7 @@ class TwinScorer(nn.Module):
             layers += [nn.Linear(width, hidden), nn.GELU(), nn.Dropout(dropout)]
             width = hidden
         self.mlp = nn.Sequential(*layers, nn.Linear(width, 1))
+        # Per-judge position bias and log-temperature (T_j = exp(tau_j)).
         self.b = nn.Parameter(torch.zeros(n_judges))
         self.tau = nn.Parameter(torch.zeros(n_judges))
 
@@ -34,6 +35,7 @@ class TwinScorer(nn.Module):
         """Verdict logit for P(pick slot 1)."""
         tau = self.tau - self.tau.mean()  # scale gauge: mean log-temperature 0
         temperature = torch.exp(tau)[judge_idx]
+        # Same network scores both slots; only the difference carries content.
         content = self.theta(e1, judge_idx) - self.theta(e2, judge_idx)
         return content / temperature + self.b[judge_idx]
 

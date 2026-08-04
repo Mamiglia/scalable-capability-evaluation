@@ -35,6 +35,7 @@ def load_features(out_dir: Path):
     missing = (set(rows["text_id_slot1"]) | set(rows["text_id_slot2"])) - index.keys()
     assert not missing, f"{len(missing)} text_ids lack embeddings"
 
+    # One vector per unique transcript; each verdict row looks up two.
     e1 = vectors[rows["text_id_slot1"].map(index).to_numpy()]
     e2 = vectors[rows["text_id_slot2"].map(index).to_numpy()]
     judge_names = sorted(rows["judge"].unique())
@@ -92,6 +93,7 @@ def tune_and_fit(fit_fn, grid: dict, features, y, val_mask, seed: int):
         model = fit_fn(features[~val_mask], y[~val_mask], params, seed)
         losses.append(log_loss(y[val_mask], model.predict_proba(features[val_mask])[:, 1]))
     best = options[int(np.argmin(losses))]
+    # Refit the winning option on all rows (train + inner val).
     return fit_fn(features, y, best, seed), best, float(min(losses))
 
 
@@ -103,6 +105,8 @@ def main():
     out = ROOT / cfg["out_dir"]
 
     rows, e1, e2, judge_names, judge_idx, y = load_features(out)
+    # Feature matrix: embedding difference (content) + judge one-hot (in
+    # the logreg, each dummy's coefficient is that judge's position bias).
     delta = e1 - e2
     judge_onehot = np.eye(len(judge_names), dtype=np.float32)[judge_idx]
     features = np.hstack([delta, judge_onehot])
