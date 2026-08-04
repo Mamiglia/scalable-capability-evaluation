@@ -1,0 +1,42 @@
+# Score-prediction pipeline (docs/superpowers/plans/2026-08-04-transcript-score-model.md).
+# Every script under scripts/analysis/score_prediction/ reads this; no hidden defaults.
+
+verdicts_csv: judge_results/gpqa-pilot-rd2/verdicts.csv
+models_csv: judge_results/gpqa-pilot-rd2/models.csv
+summary_csv: judge_results/gpqa-pilot-rd2/summary.csv
+out_dir: judge_results/score_prediction
+
+encoder:
+  provider: local               # local (sentence-transformers) | voyage (API)
+  name: Qwen/Qwen3-Embedding-0.6B
+  # name: voyage-3-large        # when provider: voyage
+  output_dim: 1024
+  batch_size: 2                 # texts per forward pass / API request
+  device: null                  # null = auto (mps); cpu is slow but exact on long texts
+  price_per_m_tokens: 0.18      # voyage only, dry-run cost estimate
+
+mlp:
+  hidden_dims: [256, 64]
+  judge_embed_dim: 4
+  dropout: 0.1
+  weight_decay: 0.01
+  lr: 0.001
+  batch_size: 256
+  patience: 10
+  max_epochs: 200
+
+folds:
+  items: 5
+  pairs: 5   # judges regime is leave-one-judge-out, no count needed
+
+ml_suite:
+  inner_folds: 5              # grouped inner split of each training fold; fold 0 = validation
+  logreg:
+    l2_c_grid: [0.001, 0.01, 0.1, 1.0, 10.0]
+    max_iter: 2000
+  gbm:
+    learning_rate_grid: [0.05, 0.1]
+    max_leaf_nodes_grid: [31]
+    max_iter: 500             # ceiling; early stopping picks the actual count
+
+seeds: [0, 1]
