@@ -19,8 +19,8 @@ import yaml
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 import matplotlib.pyplot as plt
 
-from plots import COL, INK2, MUTED, PALETTE, WIDE, chance, dot_ci, legend, save, style
-from stats import wilson
+from plots import (COL, INK2, MUTED, PALETTE, SURFACE, WIDE, chance, dot_ci,
+                   legend, save, style)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -114,6 +114,68 @@ def fig_heldout_judge(per_fold: pd.DataFrame, judge_names: list[str],
     save(fig, out_stub)
 
 
+def fig_pair_transfer(preds: pd.DataFrame, rows: pd.DataFrame, acc: pd.Series,
+                      out_stub: str, n_boot: int, seed: int, n_labels: int = 3):
+    """Held-out NLL per pairing (logreg, pairs regime) against the pair's
+    raw accuracy gap. Tests 'near-tie pairings are the hard transfers';
+    self-pairs sit at gap 0 as open markers."""
+    from evaluate import bootstrap_nll_ci
+    frame = preds.query("regime == 'pairs' and model == 'logreg'").copy()
+    meta = rows.set_index("row_id")
+    frame["pair_key"] = frame["row_id"].map(meta["pair_key"])
+    frame["item"] = frame["row_id"].map(meta["item"])
+
+    fig, ax = plt.subplots(figsize=(COL * 1.35, 2.5))
+    points = []
+    for pair_key, pair_rows in frame.groupby("pair_key"):
+        model_a, model_b = pair_key.split("|")
+        gap = abs(acc[model_a] - acc[model_b])
+        lo, hi = bootstrap_nll_ci(pair_rows["item"].to_numpy(),
+                                  pair_rows["loss"].to_numpy(), n_boot, seed)
+        nll = pair_rows["loss"].mean()
+        self_pair = model_a == model_b
+        ax.plot([gap, gap], [lo, hi], color=PALETTE[0], lw=1.1, zorder=3)
+        ax.plot(gap, nll, "o", ms=5, mfc=SURFACE if self_pair else PALETTE[0],
+                mec=PALETTE[0], mew=1.2, zorder=4)
+        points.append((nll, gap, pair_key))
+    for nll, gap, pair_key in sorted(points, reverse=True)[:n_labels]:
+        ax.annotate(pair_key.replace("|", " vs "), (gap, nll),
+                    textcoords="offset points", xytext=(4, 4),
+                    fontsize=5.5, color=INK2)
+    chance(ax, np.log(2), axis="y")
+    ax.set_xlabel("pair accuracy gap |d_acc| (open markers: self-pairs)")
+    ax.set_ylabel("held-out NLL, nats (logreg;\nwhiskers: 95% item-bootstrap CI)")
+    style(ax)
+    save(fig, out_stub)
+
+
+def fig_reliability(preds: pd.DataFrame, out_stub: str, n_bins: int):
+    """Reliability per model, items regime: mean predicted p vs empirical
+    slot-1 rate over equal-count bins; diagonal = calibrated."""
+    frame = preds.query("regime == 'items'")
+    fig, ax = plt.subplots(figsize=(COL, COL))
+    ax.plot([0, 1], [0, 1], color=MUTED, lw=0.9, ls=(0, (4, 3)), zorder=1)
+    for model in MODEL_ORDER:
+        model_rows = frame[frame["model"] == model]
+        if not len(model_rows):
+            continue
+        p = model_rows["p_slot1"].to_numpy()
+        y = model_rows["y"].to_numpy()
+        bins = np.array_split(np.argsort(p), n_bins)
+        colour, open_marker = MODEL_STYLE[model]
+        ax.plot([p[b].mean() for b in bins], [y[b].mean() for b in bins],
+                "-o", ms=3.5, lw=1.1, color=colour,
+                mfc=SURFACE if open_marker else colour, mec=colour, mew=1.0,
+                label=model)
+    ax.set_xlabel(f"mean predicted P(slot 1), {n_bins} equal-count bins")
+    ax.set_ylabel("empirical slot-1 rate")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    legend(ax, loc="upper left")
+    style(ax, grid_axis="both")
+    save(fig, out_stub)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", type=Path, default=Path(__file__).resolve().parent / "config.yaml")
@@ -127,8 +189,18 @@ def main():
     pooled = metrics[metrics["fold"].isna()]
     per_fold = metrics[metrics["fold"].notna()]
     rows = pd.read_parquet(out / "rows.parquet")
+    preds = pd.concat([pd.read_parquet(f)
+                       for f in sorted((out / "preds").glob("*.parquet"))],
+                      ignore_index=True)
+    p = np.clip(preds["p_slot1"].to_numpy(), 1e-12, 1 - 1e-12)
+    preds["loss"] = -(preds["y"] * np.log(p) + (1 - preds["y"]) * np.log(1 - p))
+    acc = pd.read_csv(ROOT / cfg["models_csv"]).set_index("model")["accuracy"]
 
     fig_model_comparison(pooled, str(fig_dir / "1_model_comparison"))
+    fig_pair_transfer(preds, rows, acc, str(fig_dir / "4_pair_transfer"),
+                      cfg["evaluate"]["n_boot"], cfg["seeds"][0])
+    fig_reliability(preds, str(fig_dir / "5_reliability"),
+                    cfg["evaluate"]["ece_bins"])
 
     ckpts = sorted((out / "checkpoints").glob("items_*.pt"))
     if ckpts:
