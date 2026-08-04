@@ -40,4 +40,8 @@ ml_suite:
     max_leaf_nodes_grid: [31]
     max_iter: 500             # ceiling; early stopping picks the actual count
 
+evaluate:
+  n_boot: 1000                # item-resampling bootstrap for pooled NLL CIs
+  ece_bins: 10
+
 seeds: [0, 1]
