@@ -71,6 +71,51 @@ uv run collect \
   -n 1
 ```
 
+To provision a temporary vLLM Pod for a collection, add a `runpod` block to
+the model YAML. This requires an installed and authenticated `runpodctl`:
+
+```yaml
+name: qwen/qwen3.5-9b
+slug: openrouter/qwen/qwen3.5-9b
+model_args:
+  provider: {}
+runpod:
+  use: false
+  model: Qwen/Qwen3.5-9B
+  model_args: {}
+  cloud_type: COMMUNITY
+  gpu_id: NVIDIA RTX A6000
+  container_disk_in_gb: 60
+  ready_timeout: 1800
+  vllm_args:
+    - --reasoning-parser
+    - qwen3
+    - --max-model-len
+    - 32768
+```
+
+Runpod is opt-in. Either set `runpod.use: true` and use the normal `collect`
+command, or leave it false and force it for one invocation with `--runpod`:
+
+```bash
+uv run collect --runpod \
+  -b configs/bench/gsm8k.yml \
+  -m configs/models/qwen3.5-9b-runpod.yml \
+  -n 1
+```
+
+The collector creates a `vllm/vllm-openai:latest` Pod using `runpodctl`, waits
+for its OpenAI-compatible API, runs the existing collect CLI, and deletes the
+Pod afterward even if collection fails or is interrupted. Community Cloud,
+one GPU, a 20 GB container disk, and vLLM prefix caching are enabled by
+default. `gpu_id` is required because Runpod does not select a GPU type
+automatically. See `configs/models/qwen3.5-9b-runpod.yml` for every supported
+option and examples of raw `create_args`. With `use: false` and no `--runpod`,
+collection uses the model's configured provider and never calls Runpod.
+While Runpod is active, the collector temporarily switches Inspect to its
+OpenAI-compatible provider and restores the original slug and model arguments
+afterward. The same model YAML can therefore be used with OpenRouter or Runpod.
+
 ### 2. Pairwise Judge Evaluation (`judge`)
 
 The `judge` CLI evaluates pairs of model outputs (Major model vs. Minor model) using a designated Judge model.
