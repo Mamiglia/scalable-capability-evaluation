@@ -7,6 +7,7 @@ from inspect_ai import eval_set
 
 from configs import ExperimentConfig, flag_parse
 from judge.task import build_judge_tasks
+from model import Model
 
 
 def main() -> int:
@@ -94,12 +95,13 @@ def main() -> int:
         tasks = build_judge_tasks(exp)
         kwargs = exp.eval_kwargs()
 
-        success, _ = eval_set(
-            tasks=tasks,
-            model=exp.judge.slug,
-            log_dir=exp.log_dir,
-            **kwargs,
-        )
+        with Model(exp.judge) as model:
+            success, _ = eval_set(
+                tasks=tasks,
+                log_dir=exp.log_dir,
+                **model.eval_kwargs(),
+                **kwargs,
+            )
         if not success:
             print(f"Judge experiment failed for configuration: {exp}")
             return 1

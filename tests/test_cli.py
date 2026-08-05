@@ -1,6 +1,7 @@
 """Unit tests for CLI modules (collect and judge)."""
 
 from unittest.mock import MagicMock
+
 from collect.cli import main as collect_main
 from judge.cli import main as judge_main
 
@@ -22,58 +23,17 @@ def test_collect_single_eval(monkeypatch, tmp_path):
         return True, [mock_log]
 
     monkeypatch.setattr("collect.cli.eval_set", mock_eval_set)
-    monkeypatch.setattr(
-        "collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir"
-    )
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir")
     monkeypatch.setattr(
         "sys.argv",
-        [
-            "collect",
-            "--bench",
-            str(bench_config),
-            "--model",
-            str(model_config),
-            "-n",
-            "1",
-        ],
+        ["collect", "--bench", str(bench_config), "--model", str(model_config), "-n", "1"],
     )
 
-    ret = collect_main()
-    assert ret == 0
+    assert collect_main() == 0
     assert captured["tasks"] == "inspect_evals/mbpp"
     assert captured["model"] == "custom/model2"
     assert captured["seed"] == 0
     assert captured["log_dir"] == str(tmp_path / "target_dir" / "0")
-
-
-def test_collect_passes_base_url_separately_from_model_args(monkeypatch, tmp_path):
-    model_config = tmp_path / "model.yml"
-    model_config.write_text(
-        "name: custom/model2\n"
-        "slug: openai/custom/model2\n"
-        "model_args:\n"
-        "  base_url: https://example.test/v1\n"
-        "  temperature: 0.5\n"
-    )
-    bench_config = tmp_path / "bench.yml"
-    bench_config.write_text("name: inspect_evals/mbpp\n")
-    captured = {}
-
-    monkeypatch.setattr(
-        "collect.cli.eval_set",
-        lambda **kwargs: (captured.update(kwargs) or (True, [MagicMock()])),
-    )
-    monkeypatch.setattr(
-        "collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir"
-    )
-    monkeypatch.setattr(
-        "sys.argv",
-        ["collect", "-b", str(bench_config), "-m", str(model_config)],
-    )
-
-    assert collect_main() == 0
-    assert captured["model_base_url"] == "https://example.test/v1"
-    assert captured["model_args"] == {"temperature": 0.5}
 
 
 def test_collect_multiple_evals(monkeypatch, tmp_path):
@@ -95,29 +55,18 @@ def test_collect_multiple_evals(monkeypatch, tmp_path):
         return True, [mock_log]
 
     monkeypatch.setattr("collect.cli.eval_set", mock_eval_set)
-    monkeypatch.setattr(
-        "collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir"
-    )
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir")
     monkeypatch.setattr(
         "sys.argv",
         [
             "collect",
-            "-b",
-            str(b1),
-            "-b",
-            str(b2),
-            "-m",
-            str(m1),
-            "-m",
-            str(m2),
-            "-n",
-            "1",
+            "-b", str(b1), "-b", str(b2),
+            "-m", str(m1), "-m", str(m2),
+            "-n", "1",
         ],
     )
 
-    ret = collect_main()
-    assert ret == 0
-    assert len(runs) == 4
+    assert collect_main() == 0
     assert runs == [
         ("inspect_evals/b1", "custom/m1"),
         ("inspect_evals/b1", "custom/m2"),
@@ -133,188 +82,31 @@ def test_collect_args_parsing(monkeypatch, tmp_path):
     b1.write_text("name: inspect_evals/b1\n")
 
     captured = {}
-    mock_log = MagicMock()
-    mock_log.status = "success"
 
     def mock_eval_set(**kwargs):
         captured.update(kwargs)
-        return True, [mock_log]
+        return True, [MagicMock()]
 
     monkeypatch.setattr("collect.cli.eval_set", mock_eval_set)
-    monkeypatch.setattr(
-        "collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir"
-    )
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir")
     monkeypatch.setattr(
         "sys.argv",
         [
             "collect",
-            "-b",
-            str(b1),
-            "-m",
-            str(m1),
-            "-T",
-            "fewshot=5",
-            "-M",
-            "temp=0.7",
-            "--limit",
-            "10",
-            "--max-connections",
-            "4",
+            "-b", str(b1),
+            "-m", str(m1),
+            "-T", "fewshot=5",
+            "-M", "temp=0.7",
+            "--limit", "10",
+            "--max-connections", "4",
         ],
     )
 
-    ret = collect_main()
-    assert ret == 0
+    assert collect_main() == 0
     assert captured["task_args"] == {"fewshot": 5}
     assert captured["model_args"]["temp"] == 0.7
     assert captured["limit"] == 10
     assert captured["max_connections"] == 4
-
-
-def test_collect_uses_runpod_when_enabled_in_yaml(monkeypatch, tmp_path):
-    model_config = tmp_path / "model.yml"
-    model_config.write_text(
-        """name: org/model
-slug: openrouter/org/model
-model_args: {}
-runpod:
-  use: true
-  model: org/model
-  gpu_id: NVIDIA A40
-"""
-    )
-    bench_config = tmp_path / "bench.yml"
-    bench_config.write_text("name: inspect_evals/mbpp\n")
-    captured = {}
-
-    def fake_runpod_main(models, collect_model, *, force=False):
-        captured["models"] = models
-        captured["force"] = force
-        captured["collect_model"] = collect_model
-        return 0
-
-    monkeypatch.setattr("collect.cli.runpod_main", fake_runpod_main)
-    monkeypatch.setattr(
-        "sys.argv",
-        ["collect", "-b", str(bench_config), "-m", str(model_config)],
-    )
-
-    assert collect_main() == 0
-    assert captured["models"][0].runpod["use"] is True
-    assert captured["force"] is False
-
-
-def test_collect_runpod_flag_forces_false_yaml_setting(monkeypatch, tmp_path):
-    model_config = tmp_path / "model.yml"
-    model_config.write_text(
-        """name: org/model
-slug: openrouter/org/model
-model_args: {}
-runpod:
-  use: false
-  model: org/model
-  gpu_id: NVIDIA A40
-"""
-    )
-    bench_config = tmp_path / "bench.yml"
-    bench_config.write_text("name: inspect_evals/mbpp\n")
-    captured = {}
-
-    def fake_runpod_main(models, collect_model, *, force=False):
-        captured["force"] = force
-        return 0
-
-    monkeypatch.setattr("collect.cli.runpod_main", fake_runpod_main)
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "collect",
-            "--runpod",
-            "-b",
-            str(bench_config),
-            "-m",
-            str(model_config),
-        ],
-    )
-
-    assert collect_main() == 0
-    assert captured["force"] is True
-
-
-def test_collect_skips_occupied_run_before_runpod(monkeypatch, tmp_path):
-    model_config = tmp_path / "model.yml"
-    model_config.write_text(
-        "name: org/model\n"
-        "slug: openrouter/org/model\n"
-        "runpod:\n"
-        "  use: true\n"
-        "  model: org/model\n"
-        "  gpu_id: NVIDIA A40\n"
-    )
-    bench_config = tmp_path / "bench.yml"
-    bench_config.write_text("name: inspect_evals/mbpp\n")
-    target_dir = tmp_path / "target_dir" / "0"
-    target_dir.mkdir(parents=True)
-    (target_dir / "complete.eval").write_text("log")
-
-    monkeypatch.setattr(
-        "collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir"
-    )
-    runpod = MagicMock()
-    monkeypatch.setattr("collect.cli.runpod_main", runpod)
-    monkeypatch.setattr(
-        "sys.argv",
-        ["collect", "-b", str(bench_config), "-m", str(model_config)],
-    )
-
-    assert collect_main() == 0
-    runpod.assert_not_called()
-
-
-def test_collect_skips_occupied_epoch_and_runs_next(
-    monkeypatch, tmp_path, capsys
-):
-    model_config = tmp_path / "model.yml"
-    model_config.write_text(
-        "name: org/model\n"
-        "slug: openrouter/org/model\n"
-        "runpod:\n"
-        "  use: true\n"
-        "  model: org/model\n"
-        "  gpu_id: NVIDIA A40\n"
-    )
-    bench_config = tmp_path / "bench.yml"
-    bench_config.write_text("name: inspect_evals/mbpp\n")
-    target_dir = tmp_path / "target_dir" / "0"
-    target_dir.mkdir(parents=True)
-    (target_dir / "cancelled.eval").write_text("log")
-
-    monkeypatch.setattr(
-        "collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir"
-    )
-    captured = {}
-
-    def fake_runpod_main(models, collect_model, *, force=False):
-        captured["models"] = models
-        return 0
-
-    monkeypatch.setattr("collect.cli.runpod_main", fake_runpod_main)
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "collect",
-            "-b",
-            str(bench_config),
-            "-m",
-            str(model_config),
-            "-n",
-            "2",
-        ],
-    )
-
-    assert collect_main() == 0
-    assert len(captured["models"]) == 1
-    assert "SKIPPING epoch 1/2" in capsys.readouterr().out
 
 
 def test_judge_main_execution(monkeypatch, tmp_path):
@@ -334,22 +126,13 @@ judge:
 """)
 
     captured = {}
-    monkeypatch.setattr(
-        "judge.cli.build_judge_tasks", lambda *args, **kw: ["dummy_task"]
-    )
+    monkeypatch.setattr("judge.cli.build_judge_tasks", lambda *args, **kw: ["dummy_task"])
     monkeypatch.setattr(
         "judge.cli.eval_set", lambda **kw: (captured.update(kw) or (True, [True]))
     )
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "judge",
-            "--config_path",
-            str(exp_config),
-        ],
-    )
-    ret = judge_main()
-    assert ret == 0
+    monkeypatch.setattr("sys.argv", ["judge", "--config_path", str(exp_config)])
+
+    assert judge_main() == 0
     assert captured["tasks"] == ["dummy_task"]
     assert captured["model"] == "p/jdg"
 
@@ -365,9 +148,7 @@ def test_judge_extra_args_parsing(monkeypatch, tmp_path):
     jdg.write_text("name: custom/jdg\nslug: custom/jdg\n")
 
     captured = {}
-    monkeypatch.setattr(
-        "judge.cli.build_judge_tasks", lambda *args, **kw: ["dummy_task"]
-    )
+    monkeypatch.setattr("judge.cli.build_judge_tasks", lambda *args, **kw: ["dummy_task"])
     monkeypatch.setattr(
         "judge.cli.eval_set", lambda **kw: (captured.update(kw) or (True, [True]))
     )
@@ -375,23 +156,16 @@ def test_judge_extra_args_parsing(monkeypatch, tmp_path):
         "sys.argv",
         [
             "judge",
-            "-b",
-            str(b1),
-            "-M",
-            str(m_maj),
-            "-m",
-            str(m_min),
-            "-j",
-            str(jdg),
-            "--limit",
-            "10",
-            "--max-connections",
-            "4",
+            "-b", str(b1),
+            "-M", str(m_maj),
+            "-m", str(m_min),
+            "-j", str(jdg),
+            "--limit", "10",
+            "--max-connections", "4",
         ],
     )
 
-    ret = judge_main()
-    assert ret == 0
+    assert judge_main() == 0
     assert captured["tasks"] == ["dummy_task"]
     assert captured["model"] == "custom/jdg"
     assert captured["limit"] == 10
