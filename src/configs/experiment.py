@@ -21,7 +21,7 @@ One of the two models is more capable than the other, and your task is to identi
 
 EXPLANATION: <Your explanation of which response was produced by the more capable model and why. 2-4 sentences.>
 ANSWER: <1 or 2, indicating which response was produced by the more capable model.>
-CONFIDENCE: <An integer between 1 and 5 indicating your confidence in your answer.>
+CONFIDENCE: <An integer between 1 and 5, how sure you are that the model you picked is the more capable one: 1 = the two are indistinguishable and you are guessing, 5 = certain. Rate the choice, not the explanation.>
 """
 
 
