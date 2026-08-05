@@ -166,17 +166,23 @@ def fig_pair_transfer(preds: pd.DataFrame, rows: pd.DataFrame, acc: pd.Series,
                     mec=colour, mew=1.1, zorder=4, alpha=0.85)
             if not self_pair:
                 fit_points[model].append((gap, pair_acc))
-    # Per-model linear fit over real pairs (self-pairs are a control).
+    # Per-model sigmoid fit over real pairs (self-pairs are a control):
+    # accuracy is bounded [0.5, 1], so acc = 0.5 + 0.5*sigma(a*gap + b).
+    from scipy.optimize import curve_fit
+
+    def _sig(g, a, b):
+        return 0.5 + 0.5 / (1 + np.exp(-(a * g + b)))
+
     for model in shown:
         gaps, accs = map(np.array, zip(*fit_points[model]))
-        slope, intercept = np.polyfit(gaps, accs, 1)
-        xs = np.array([0, gaps.max()])
-        ax.plot(xs, slope * xs + intercept, color=MODEL_STYLE[model][0],
+        (a, b), _ = curve_fit(_sig, gaps, accs, p0=(10.0, 0.5), maxfev=10000)
+        xs = np.linspace(0, gaps.max(), 100)
+        ax.plot(xs, _sig(xs, a, b), color=MODEL_STYLE[model][0],
                 lw=1.6, zorder=2)
     chance(ax, 0.5, axis="y")
     ax.set_xlabel("pair accuracy gap |d_acc|")
     ax.set_ylabel("held-out accuracy")
-    ax.text(0, -0.28, "one point per pairing and model · lines: linear fit "
+    ax.text(0, -0.28, "one point per pairing and model · lines: sigmoid fit "
             "(self-pairs excluded) · whiskers: 95% CI · open = self-pair · "
             "dashed = chance",
             transform=ax.transAxes, va="top", color=MUTED, fontsize=7)
