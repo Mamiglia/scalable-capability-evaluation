@@ -84,7 +84,7 @@ def main():
                        for f in sorted((out / "preds").glob("*.parquet"))],
                       ignore_index=True)
     preds["item"] = preds["row_id"].map(item_of_row)
-    p = np.clip(preds["p_slot1"].to_numpy(), 1e-12, 1 - 1e-12)
+    p = np.clip(preds["p_slot1"].to_numpy(dtype=np.float64), 1e-12, 1 - 1e-12)
     preds["loss"] = -(preds["y"] * np.log(p) + (1 - preds["y"]) * np.log(1 - p))
 
     per_fold = (preds.groupby(["regime", "fold", "model"])

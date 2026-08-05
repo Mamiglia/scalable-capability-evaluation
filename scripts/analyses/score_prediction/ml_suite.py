@@ -81,7 +81,10 @@ def fit_gbm(features, y, params: dict, seed: int):
 
 
 def log_loss(y, p) -> float:
-    p = np.clip(p, 1e-12, 1 - 1e-12)
+    # float64: in float32 the clip bound rounds to 1.0 and a saturated
+    # prediction becomes 0 * -inf = NaN.
+    y = np.asarray(y, dtype=np.float64)
+    p = np.clip(np.asarray(p, dtype=np.float64), 1e-12, 1 - 1e-12)
     return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
 
 
