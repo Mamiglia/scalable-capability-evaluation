@@ -89,8 +89,8 @@ def fig_bj_crosscheck(check: pd.DataFrame, out_stub: str):
     ax.set_ylim(lo, hi)
     ax.set_xlabel("measured self-pair slot-1 rate")
     ax.set_ylabel("MLP sigma(b_j)")
-    ax.text(0.02, 0.96, "whiskers: Wilson 95% · diagonal: agreement",
-            transform=ax.transAxes, va="top", color=MUTED, fontsize=7)
+    ax.text(0, 1.02, "whiskers: Wilson 95% · diagonal: agreement",
+            transform=ax.transAxes, va="bottom", color=MUTED, fontsize=7)
     style(ax, grid_axis="both")
     save(fig, out_stub)
 
@@ -133,43 +133,48 @@ def fig_heldout_judge(per_fold: pd.DataFrame, judge_names: list[str],
 
 
 def fig_pair_transfer(preds: pd.DataFrame, rows: pd.DataFrame, acc: pd.Series,
-                      out_stub: str, n_boot: int, seed: int, n_labels: int = 3):
-    """Held-out accuracy per pairing (logreg, pairs regime) against the
-    pair's raw accuracy gap. Tests 'near-tie pairings are the hard
+                      out_stub: str, n_boot: int, seed: int):
+    """Held-out accuracy per pairing (pairs regime, every model) against
+    the pair's raw accuracy gap. Tests 'near-tie pairings are the hard
     transfers'; self-pairs sit at gap 0 as open markers."""
     from evaluate import bootstrap_mean_ci
-    frame = preds.query("regime == 'pairs' and model == 'logreg'").copy()
+    frame = preds.query("regime == 'pairs'").copy()
     meta = rows.set_index("row_id")
     frame["pair_key"] = frame["row_id"].map(meta["pair_key"])
     frame["item"] = frame["row_id"].map(meta["item"])
+    shown = [m for m in ("dlogit", "logreg", "gbm", "mlp")
+             if m in set(frame["model"])]
 
-    fig, ax = plt.subplots(figsize=(COL * 1.35, 2.5))
-    points = []
-    for pair_key, pair_rows in frame.groupby("pair_key"):
+    fig, ax = plt.subplots(figsize=(WIDE, 2.8))
+    for pair_key, pair_frame in frame.groupby("pair_key"):
         model_a, model_b = pair_key.split("|")
         gap = abs(acc[model_a] - acc[model_b])
-        lo, hi = bootstrap_mean_ci(pair_rows["item"].to_numpy(),
-                                   pair_rows["correct"].to_numpy(), n_boot, seed)
-        pair_acc = pair_rows["correct"].mean()
         self_pair = model_a == model_b
-        ax.plot([gap, gap], [lo, hi], color=PALETTE[0], lw=1.1, zorder=3)
-        ax.plot(gap, pair_acc, "o", ms=5, mfc=SURFACE if self_pair else PALETTE[0],
-                mec=PALETTE[0], mew=1.2, zorder=4)
-        points.append((pair_acc, gap, pair_key))
-    # Label the worst-predicted pairs (lowest accuracy), offsets staggered
-    # so near-coincident labels don't collide.
-    offsets = [(4, 4), (4, -12), (4, 14)]
-    for (pair_acc, gap, pair_key), xytext in zip(sorted(points)[:n_labels],
-                                                 offsets):
-        ax.annotate(pair_key.replace("|", " vs "), (gap, pair_acc),
-                    textcoords="offset points", xytext=xytext,
-                    fontsize=5.5, color=INK2)
+        for i, model in enumerate(shown):
+            pair_rows = pair_frame[pair_frame["model"] == model]
+            lo, hi = bootstrap_mean_ci(pair_rows["item"].to_numpy(),
+                                       pair_rows["correct"].to_numpy(),
+                                       n_boot, seed)
+            pair_acc = pair_rows["correct"].mean()
+            colour = MODEL_STYLE[model][0]
+            # Small x offset per model so the four series stay separable.
+            x = gap + (i - (len(shown) - 1) / 2) * 0.004
+            ax.plot([x, x], [lo, hi], color=colour, lw=1.0, zorder=3, alpha=0.8)
+            ax.plot(x, pair_acc, "o", ms=4.5,
+                    mfc=SURFACE if self_pair else colour,
+                    mec=colour, mew=1.1, zorder=4)
     chance(ax, 0.5, axis="y")
     ax.set_xlabel("pair accuracy gap |d_acc|")
-    ax.set_ylabel("held-out accuracy (logreg)")
-    ax.text(0.02, 0.97, "one point per pairing · whiskers: 95% CI · "
+    ax.set_ylabel("held-out accuracy")
+    ax.text(0, 1.02, "one point per pairing and model · whiskers: 95% CI · "
             "open = self-pair · dashed = chance",
-            transform=ax.transAxes, va="top", color=MUTED, fontsize=7)
+            transform=ax.transAxes, va="bottom", color=MUTED, fontsize=7)
+    handles = [Line2D([], [], marker="o", ls="", ms=5, color=MODEL_STYLE[m][0],
+                      label=m) for m in shown]
+    leg = ax.legend(handles=handles, frameon=False, loc="center left",
+                    bbox_to_anchor=(1.02, 0.5))
+    for t in leg.get_texts():
+        t.set_color(INK2)
     style(ax)
     save(fig, out_stub)
 
@@ -196,8 +201,8 @@ def fig_reliability(preds: pd.DataFrame, out_stub: str, n_bins: int):
     ax.set_ylabel("empirical slot-1 rate")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.text(0.98, 0.04, f"{n_bins} equal-count bins · diagonal: calibrated",
-            transform=ax.transAxes, ha="right", color=MUTED, fontsize=7)
+    ax.text(0, 1.02, f"{n_bins} equal-count bins · diagonal: calibrated",
+            transform=ax.transAxes, va="bottom", color=MUTED, fontsize=7)
     legend(ax, loc="upper left")
     style(ax, grid_axis="both")
     save(fig, out_stub)
