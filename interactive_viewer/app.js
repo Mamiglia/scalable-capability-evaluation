@@ -11,11 +11,6 @@ const stripAnswer = t => { const i = t.lastIndexOf("ANSWER:");
 const truncatePair = (a, b, f) => { a = stripAnswer(a); b = stripAnswer(b);
   const cut = Math.max(1, Math.floor(f * Math.min(a.length, b.length)));
   return [a.slice(0, cut), b.slice(0, cut)]; };
-/* the model's own final GPQA answer letter (all judged items are both-correct) */
-const answerLetter = t => { const i = t.lastIndexOf("ANSWER:");
-  if (i === -1) return null;
-  const m = /ANSWER:\s*\**\s*([A-D])/i.exec(t.slice(i, i + 48));
-  return m ? m[1].toUpperCase() : null; };
 
 /* --- house palette fallback (plots.py PALETTE), used only if colors{} miss  */
 const PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4",
@@ -26,6 +21,7 @@ const $ = id => document.getElementById(id);
 const plotDiv = $("plot");
 const emptyNote = $("empty-note");
 const hintEl = $("ctl-hint");
+const ctlDataset = $("ctl-dataset");
 const ctlTrunc = $("ctl-trunc"), ctlSubset = $("ctl-subset"), ctlSource = $("ctl-source"),
       ctlColorby = $("ctl-colorby"), ctlCurves = $("ctl-curves");
 const overlay = $("modal");
@@ -52,10 +48,15 @@ let INDEX = null;
 let XMAX = 0.4;
 let currentRunMap = [];   // parallel to plot traces: array-of-runs | null
 let plotInited = false;
+let DATASETS = [];        // [{id, label}] from data/datasets.json, menu order
+let DATASET = null;       // the selected id; every data path hangs off it
 
-const pairCache = new Map();   // "maj__min__frac" -> Promise<pairData>
-const transCache = new Map();  // stem -> Promise<{item:text}>
-const optsCache = new Map();   // stem -> Promise<{item:[choice]}>
+/* Caches are per dataset: switching datasets clears them, since the same stem
+   means a different file under a different dataset. */
+let pairCache = new Map();   // "maj__min__frac" -> Promise<pairData>
+let transCache = new Map();  // stem -> Promise<{item:text}>
+let optsCache = new Map();   // stem -> Promise<{item:[choice]}>
+let ansCache = new Map();    // stem -> Promise<{item:letter}>
 
 let MODAL = null;  // { run, swapped, item, filter, search, pair, tMajor, tMinor }
 
@@ -215,6 +216,9 @@ function buildCurve(j, crossPts, color) {
 }
 
 /* --- plot ---------------------------------------------------------------- */
+/* paper x of the y-axis: the left edge of the self strip it anchors to */
+const YAXIS_X = 0.12;
+
 function baseLayout(theme) {
   return {
     margin: { l: 20, r: 176, t: 12, b: 66 },
@@ -230,7 +234,7 @@ function baseLayout(theme) {
              title: { text: "judge accuracy" },
              showgrid: false, zeroline: false, linecolor: theme.muted,
              ticks: "outside", tickcolor: theme.muted },
-    xaxis2: { domain: [0.12, 0.16], range: [-0.85, 0.85], anchor: "y",
+    xaxis2: { domain: [YAXIS_X, 0.16], range: [-0.85, 0.85], anchor: "y",
               tickvals: [0], ticktext: ["self"], tickfont: { color: theme.muted },
               showgrid: false, zeroline: false, linecolor: theme.muted, ticks: "" },
     yaxis2: { domain: [0, 1], range: [0, 1], matches: "y", anchor: "x",
@@ -246,7 +250,8 @@ function baseLayout(theme) {
               font: { color: theme.ink2, size: 12 },
               groupclick: "togglegroup", bgcolor: "rgba(0,0,0,0)" },
     shapes: [
-      { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 0.5, y1: 0.5,
+      // starts at the y-axis, not the paper edge, or it runs over the axis label
+      { type: "line", xref: "paper", x0: YAXIS_X, x1: 1, yref: "y2", y0: 0.5, y1: 0.5,
         line: { color: theme.muted, width: 1, dash: "dash" }, layer: "below" },
       { type: "line", xref: "paper", x0: 0.20, x1: 0.20, yref: "paper", y0: 0, y1: 1,
         line: { color: theme.border, width: 1 }, layer: "below" },
@@ -265,6 +270,7 @@ function renderPlot() {
   hintEl.textContent = hint;
 
   if (!runs.length) {
+    emptyNote.textContent = "No runs match the current filters.";
     emptyNote.hidden = false;
     currentRunMap = [];
     Plotly.react(plotDiv, [], baseLayout(theme), { displayModeBar: false, responsive: true });
@@ -318,6 +324,15 @@ function renderPlot() {
     if (line) { traces.push(line); runMap.push(null); }
   });
 
+  // Plotly only instantiates x2/y2 when a trace uses them, and the ticked y-axis
+  // anchors to x2 while x anchors to y2. Truncated runs have no self-pairs, so
+  // without this placeholder those anchors dangle and nothing draws at all.
+  if (!self.length) {
+    traces.push({ type: "scatter", mode: "markers", x: [], y: [],
+                  xaxis: "x2", yaxis: "y2", showlegend: false, hoverinfo: "skip" });
+    runMap.push(null);
+  }
+
   currentRunMap = runMap;
   Plotly.react(plotDiv, traces, baseLayout(theme), { displayModeBar: false, responsive: true })
     .then(attachLegendHover);
@@ -365,15 +380,21 @@ function cachedJSON(cache, key, url) {
     cache.set(key, fetchJSON(url).catch(err => { cache.delete(key); throw err; }));
   return cache.get(key);
 }
+const dataURL = rest => "data/" + DATASET + "/" + rest;
 const getPair = (major, minor, frac) => {
   const key = major + "__" + minor + "__" + frac;
-  return cachedJSON(pairCache, key, "data/pairs/" + key + ".json");
+  return cachedJSON(pairCache, key, dataURL("pairs/" + key + ".json"));
 };
-const getTranscript = stem => cachedJSON(transCache, stem, "data/transcripts/" + stem + ".json");
+const getTranscript = stem => cachedJSON(transCache, stem, dataURL("transcripts/" + stem + ".json"));
 /* Options are shuffled per model, so each side needs its own order for its
    answer letter to mean anything. Missing file (non-MCQ benchmark) -> {}. */
 const getOptions = stem =>
-  cachedJSON(optsCache, stem, "data/options/" + stem + ".json").catch(() => ({}));
+  cachedJSON(optsCache, stem, dataURL("options/" + stem + ".json")).catch(() => ({}));
+/* The letter each model answered, graded at export time. Not scraped from the
+   transcript here: models write the answer line in whatever format they like,
+   and truncated runs have it cut off. Missing file -> {}. */
+const getAnswers = stem =>
+  cachedJSON(ansCache, stem, dataURL("answers/" + stem + ".json")).catch(() => ({}));
 
 /* --- modal: open + header ----------------------------------------------- */
 async function openModal(run, keepItem) {
@@ -381,7 +402,7 @@ async function openModal(run, keepItem) {
   MODAL = { run: run, swapped: prev ? prev.swapped : false,
             item: prev ? prev.item : null, filter: prev ? prev.filter : "all",
             search: prev ? prev.search : "", pair: null, tMajor: null, tMinor: null,
-            oMajor: null, oMinor: null };
+            oMajor: null, oMinor: null, aMajor: null, aMinor: null };
   overlay.hidden = false;
   document.body.style.overflow = "hidden";
   $("detail").hidden = true;
@@ -399,13 +420,17 @@ async function openModal(run, keepItem) {
       getTranscript(minorStem),
       getOptions(run.major),
       getOptions(minorStem),
+      getAnswers(run.major),
+      getAnswers(minorStem),
     ]);
-    if (MODAL.run !== run) return;  // a later click superseded this one
+    if (!MODAL || MODAL.run !== run) return;  // superseded by a later click, or closed
     MODAL.pair = results[0];
     MODAL.tMajor = results[1];
     MODAL.tMinor = results[2];
     MODAL.oMajor = results[3];
     MODAL.oMinor = results[4];
+    MODAL.aMajor = results[5];
+    MODAL.aMinor = results[6];
     buildItemFilterBar();
     renderItemList();
   } catch (e) {
@@ -444,7 +469,7 @@ async function setModalFrac(frac) {
   $("detail-loading").textContent = "Loading…";
   try {
     const pair = await getPair(nr.major, nr.minor, frac);
-    if (MODAL.run !== nr) return;   // superseded by another switch
+    if (!MODAL || MODAL.run !== nr) return;   // superseded by another switch, or closed
     MODAL.pair = pair;
     buildItemFilterBar();
     renderItemList();               // keeps the selected item if still present
@@ -628,12 +653,17 @@ function renderDetail() {
   const optsA = swapped ? optsMin : optsMaj;
   const optsB = swapped ? optsMaj : optsMin;
 
+  const ansMaj = (MODAL.aMajor && MODAL.aMajor[item]) || null;
+  const ansMin = (MODAL.aMinor && MODAL.aMinor[item]) || null;
+  const ansA = swapped ? ansMin : ansMaj;
+  const ansB = swapped ? ansMaj : ansMin;
+
   const ansTag = a => a ? ' <span class="ans-tag">answered ' + a +
     ' <span class="mk-good">✓</span></span>' : "";
-  $("colA-head").innerHTML = '<span class="slot">1</span> = ' + esc(labelA) + ansTag(answerLetter(textA));
-  $("colB-head").innerHTML = '<span class="slot">2</span> = ' + esc(labelB) + ansTag(answerLetter(textB));
-  renderOptions("colA-options", optsA, answerLetter(textA));
-  renderOptions("colB-options", optsB, answerLetter(textB));
+  $("colA-head").innerHTML = '<span class="slot">1</span> = ' + esc(labelA) + ansTag(ansA);
+  $("colB-head").innerHTML = '<span class="slot">2</span> = ' + esc(labelB) + ansTag(ansB);
+  renderOptions("colA-options", optsA, ansA);
+  renderOptions("colB-options", optsB, ansB);
   $("colA-text").textContent = textA;
   $("colB-text").textContent = textB;
   $("colA-text").scrollTop = 0;
@@ -730,18 +760,48 @@ if (window.matchMedia) {
   else if (mq.addListener) mq.addListener(onTheme);
 }
 
-async function boot() {
+function loadFailed(what, e) {
+  hintEl.textContent = "";
+  emptyNote.hidden = false;
+  emptyNote.textContent = "Could not load " + what + " (" + e.message +
+    "). Serve this directory over HTTP and rebuild the dataset.";
+}
+
+/* Load the selected dataset's index and redraw. Caches are dropped first: they
+   key on stems and pair keys, which mean different files in another dataset. */
+async function loadDataset(id) {
+  DATASET = id;
+  pairCache = new Map(); transCache = new Map();
+  optsCache = new Map(); ansCache = new Map();
+  INDEX = null;
   try {
-    INDEX = await fetchJSON("data/index.json");
+    INDEX = await fetchJSON(dataURL("index.json"));
   } catch (e) {
-    hintEl.textContent = "";
-    emptyNote.hidden = false;
-    emptyNote.textContent = "Could not load data/index.json (" + e.message +
-      "). Serve this directory over HTTP and rebuild the dataset.";
+    currentRunMap = [];
+    Plotly.react(plotDiv, [], baseLayout(themeColors()), { displayModeBar: false, responsive: true });
+    loadFailed("data/" + id + "/index.json", e);
     return;
   }
   const xs = INDEX.runs.filter(r => !r.is_self).map(r => r.d_acc);
   XMAX = Math.max((xs.length ? Math.max.apply(null, xs) : 0.3) * 1.06, 0.05);
   renderPlot();
+}
+
+async function boot() {
+  try {
+    DATASETS = await fetchJSON("data/datasets.json");
+  } catch (e) {
+    loadFailed("data/datasets.json", e);
+    return;
+  }
+  if (!DATASETS.length) { loadFailed("data/datasets.json", new Error("no datasets")); return; }
+  ctlDataset.innerHTML = DATASETS.map(d =>
+    '<option value="' + esc(d.id) + '">' + esc(d.label) + "</option>").join("");
+  ctlDataset.value = DATASETS[0].id;
+  ctlDataset.addEventListener("change", () => {
+    closeModal();
+    loadDataset(ctlDataset.value);
+  });
+  await loadDataset(DATASETS[0].id);
 }
 boot();

@@ -1,9 +1,13 @@
-# gpqa-pilot-rd2 interactive viewer
+# judge-pilot interactive viewer
 
-A static, self-contained dashboard for exploring the gpqa-pilot-rd2 results: the
+A static, self-contained dashboard for exploring the judge-pilot results: the
 capability-gap curve (judge accuracy vs pair gap), with click-through to the
 transcripts each judge saw, both counterbalanced orders, every judge's verdict
 and explanation, and per-comparison truncation levels.
+
+The Dataset dropdown switches between the exported datasets (currently
+`judge-pilot` and `gpqa-pilot-rd2`); each is a self-contained tree under
+`data/{id}/`.
 
 No build step, no server code, no CDN — just `index.html` + `app.js` +
 `style.css` + a vendored `plotly.min.js` + the exported `data/`.
@@ -20,19 +24,27 @@ python3 -m http.server 8765 --directory interactive_viewer
 ## Regenerate the data
 
 The viewer reads `data/` produced from the judge/source `.eval` logs (which
-stay local — they are not shipped). Re-run after the logs or analysis change:
+stay local — they are not shipped). Which datasets get exported, and the labels
+the dropdown shows, are listed in `configs/dashboard_datasets.yaml`. Re-run
+after the logs or analysis change:
 
 ```bash
-uv run python scripts/analyses/export_dashboard.py   # writes interactive_viewer/data/
+uv run python scripts/analyses/export_dashboard.py                  # every dataset
+uv run python scripts/analyses/export_dashboard.py --only judge-pilot   # just one
 ```
 
-`data/` is ~61 MB: `index.json` (plot points, metadata, fits, questions),
+`data/datasets.json` is the dropdown's menu (`[{id, label}]`, in config order).
+Each `data/{id}/` holds `index.json` (plot points, metadata, fits, questions),
 `transcripts/{model}.json` (deduped transcript text, `__ep1` for self-pairs),
+`options/{model}.json` (that model's shuffled option order),
+`answers/{model}.json` (the letter it answered, taken from the graded score —
+not scraped from the transcript, whose format varies by model), and
 `pairs/{major}__{minor}__{frac}.json` (every judge's both-order verdicts).
 
 ## Share it
 
-The whole folder is ~66 MB, largest file 4.3 MB — within every host's limits.
+The whole folder is ~100 MB (`data/` ~96 MB across both datasets), largest file
+4.3 MB — within every host's limits.
 
 **Drag-and-drop (fastest, no git).** Drop `interactive_viewer/` onto
 <https://app.netlify.com/drop> (or Cloudflare Pages) for an instant public URL.
@@ -53,5 +65,7 @@ interactive_viewer/
 ├── app.js          plot, filters, legend-hover emphasis, modal, fetch/cache
 ├── style.css       house palette, light + dark
 ├── plotly.min.js   vendored (Plotly v2.35.2)
-└── data/           exported dataset (regenerate with export_dashboard.py)
+└── data/           exported datasets (regenerate with export_dashboard.py)
+    ├── datasets.json   dropdown menu: [{id, label}]
+    └── {id}/           one self-contained tree per dataset
 ```
