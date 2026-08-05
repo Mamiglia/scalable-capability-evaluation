@@ -22,8 +22,8 @@ from inspect_ai.log import read_eval_log
 
 from judge.task import judge_task
 
-LOG_ROOT = Path("logs/gpqa-pilot-rd2")
-PHASE1_ITEMS = 20
+DEFAULT_LOG_ROOT = Path("logs/gpqa-pilot-rd2")  # used when the config omits log_root
+DEFAULT_PHASE1_ITEMS = 20  # config key phase1_items overrides
 
 
 def has_success_log(directory: Path) -> bool:
@@ -46,6 +46,11 @@ def main() -> int:
 
     cfg = yaml.safe_load(args.config.read_text())
     paths = cfg["transcripts"]
+    log_root = Path(cfg.get("log_root") or DEFAULT_LOG_ROOT)
+    phase1_items = cfg.get("phase1_items") or DEFAULT_PHASE1_ITEMS
+    # epochs > 1 judges every sample that many times; used to measure how much
+    # verdicts vary for a fixed input.
+    epochs = cfg.get("epochs") or 1
 
     fracs = cfg.get("truncate_fracs") or [None]
     tasks = {}
@@ -68,7 +73,7 @@ def main() -> int:
     pending = []
     for phase in ((args.phase,) if args.phase else (1, 2)):
         for frac in fracs:
-            root = LOG_ROOT if frac is None else LOG_ROOT / f"trunc-{int(frac * 100)}"
+            root = log_root if frac is None else log_root / f"trunc-{int(frac * 100)}"
             for judge, major, minor in cfg["comparisons"]:
                 judge_short = judge.split("/")[-1]
                 pair_dir = root / judge_short / f"{major}-vs-{minor}"
@@ -76,7 +81,7 @@ def main() -> int:
                     continue  # fully judged before phasing was introduced
                 task = get_task(judge_short, major, minor, frac)
                 ids = [s.id for s in task.dataset]
-                split = 2 * PHASE1_ITEMS
+                split = 2 * phase1_items
                 block = ids[:split] if phase == 1 else ids[split:]
                 if not block:
                     continue
@@ -105,6 +110,7 @@ def main() -> int:
             model_args=model_args.get(judge, {}),
             log_dir=str(phase_dir),
             sample_id=block,
+            epochs=epochs,
             max_connections=40,
         )
         if not success:

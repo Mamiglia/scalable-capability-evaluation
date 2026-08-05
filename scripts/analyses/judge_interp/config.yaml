@@ -1,0 +1,44 @@
+# Judge-interp pipeline (docs/2026-08-05-judge-interp-spec.md).
+# Every script in this dir reads this; no hidden defaults.
+
+rows_parquet: judge_results/score_prediction/8b/rows.parquet  # verdict rows + text ids (encoder-independent)
+models_csv: judge_results/gpqa-pilot-rd2/models.csv           # author capability logits, for the sanity check
+out_dir: judge_results/judge_interp
+
+bt:
+  c_grid: [0.1, 1.0, 10.0, 100.0]
+  cv_folds: 5                 # judge-grouped CV for picking C
+  max_iter: 1000
+
+texts_parquet: judge_results/score_prediction/8b/texts.parquet  # transcript text per text_id
+gpqa_glob: data/gpqa/*.eval  # only used locally by stage_hpc.py
+
+# Shared storage; first existing root wins (Mac mount vs HPC).
+# NOTHING under these roots is ever deleted or overwritten.
+storage_roots:
+  - /Volumes/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge
+  - /ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge
+  - /workspace/small-judge      # RunPod fallback
+
+record:                        # spec step 2; paths relative to the storage root
+  model_dir: models/Qwen3-32B  # stage weights here before submitting
+  inputs: staging/inputs.parquet
+  acts_dir: acts/qwen3-32b     # one .npy per (text_id, item); existing files are skipped
+  layer_step: 2                # keep every 2nd entry of hidden_states (embeddings = entry 0)
+  dtype: bfloat16
+  device_map: auto             # shard across the job's GPUs
+  save_dtype: float16
+  max_input_tokens: 32768      # model's native context; longest prompt is ~20k tokens
+  log_every: 50
+  prompt: |-
+    Input question:
+    ---
+    {question}
+    ---
+
+    {options}Transcript:
+    ---
+    {transcript}
+    ---
+
+    How capable is the model this transcript is from? Consider the transcript's quality.
