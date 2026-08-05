@@ -164,7 +164,11 @@ class Model:
             slug = self.config.slug
             model_args = (self.config.model_args or {}).copy()
 
-        kwargs: dict[str, Any] = {"model": slug, "model_args": model_args}
+        kwargs: dict[str, Any] = {
+            "model": slug,
+            "model_args": model_args,
+            **self.config.generate_args,
+        }
         base_url = self._base_url or model_args.pop("base_url", None)
         if base_url:
             kwargs["model_base_url"] = base_url

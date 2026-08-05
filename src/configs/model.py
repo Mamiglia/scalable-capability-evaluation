@@ -10,6 +10,7 @@ from configs.base import DraccusConfig
 class ModelConfig(DraccusConfig):
     slug: str = None
     model_args: Optional[Dict[str, Any]] = None
+    generate_args: Dict[str, Any] = None
     # Consumed by the Model context manager when enabled.
     runpod: Optional[Dict[str, Any]] = None
 
@@ -24,4 +25,6 @@ class ModelConfig(DraccusConfig):
                     "quantizations": ["bf16", "fp16"],
                 }
             }
+        if self.generate_args is None:
+            self.generate_args = {}
         self.model_args |= self._kwargs or {}

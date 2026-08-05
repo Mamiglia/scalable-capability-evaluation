@@ -4,6 +4,15 @@ slug: openrouter/qwen/qwen3.5-9b
 model_args:
   provider: {}
 
+generate_args:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 20
+  presence_penalty: 1.5
+  extra_body:
+    min_p: 0.0
+    repetition_penalty: 1.0
+
 runpod:
   # Safe default is false. Set true to enable Runpod without the CLI flag.
   use: false

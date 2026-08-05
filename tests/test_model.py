@@ -57,6 +57,18 @@ def test_runpod_model_lifecycle(monkeypatch):
     assert config.model_args == {"provider": {}}
 
 
+def test_generate_arguments():
+    config = ModelConfig(
+        name="org/model",
+        slug="vllm/org/model",
+        generate_args={"temperature": 1.0, "extra_body": {"min_p": 0.0}},
+    )
+
+    with Model(config) as model:
+        assert model.eval_kwargs()["temperature"] == 1.0
+        assert model.eval_kwargs()["extra_body"] == {"min_p": 0.0}
+
+
 def test_startup_failure_terminates_runpod(monkeypatch):
     config = ModelConfig(
         name="org/model",
