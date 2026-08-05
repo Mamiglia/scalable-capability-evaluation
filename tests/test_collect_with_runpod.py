@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import urllib.error
 from unittest.mock import MagicMock
 
 import pytest
@@ -84,6 +85,34 @@ def test_run_command_bubbles_up_cli_error(monkeypatch):
         utils.run_command(["runpodctl", "pod", "create"])
 
 
+def test_wait_retries_startup_403(monkeypatch):
+    ready = MagicMock()
+    ready.__enter__.return_value.status = 200
+    monkeypatch.setattr(
+        utils.urllib.request,
+        "urlopen",
+        MagicMock(
+            side_effect=[
+                urllib.error.HTTPError(
+                    "https://pod123-8000.proxy.runpod.net/v1/models",
+                    403,
+                    "Forbidden",
+                    None,
+                    None,
+                ),
+                ready,
+            ]
+        ),
+    )
+    monkeypatch.setattr(utils.time, "sleep", lambda _seconds: None)
+
+    assert utils.wait("pod123", 8000, 30) == (
+        "https://pod123-8000.proxy.runpod.net/v1"
+    )
+    request = utils.urllib.request.urlopen.call_args.args[0]
+    assert request.get_header("User-agent") == "small-judge/1.0"
+
+
 def test_disabled_model_runs_without_runpod(monkeypatch):
     model = model_config(use=False)
     collected = []
@@ -108,7 +137,7 @@ def test_yaml_use_true_runs_waits_collects_and_terminates(monkeypatch):
 
     def collect(value):
         events.append("collect")
-        assert value.slug == "openai/org/model"
+        assert value.slug == "vllm/org/model"
         assert value.model_args["base_url"].endswith("/v1")
         assert "provider" not in value.model_args
         return 0

@@ -14,8 +14,8 @@ runpod:
   name: small-judge-qwen35-9b
 
   # COMMUNITY is the wrapper default. Use SECURE only when required.
-  cloud_type: COMMUNITY
-  gpu_id: NVIDIA RTX A6000
+  cloud_type: SECURE
+  gpu_id: NVIDIA A40
   gpu_count: 1
 
   # Runpod's default, and the wrapper default, is 20 GB. Qwen needs more room

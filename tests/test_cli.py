@@ -46,6 +46,36 @@ def test_collect_single_eval(monkeypatch, tmp_path):
     assert captured["log_dir"] == str(tmp_path / "target_dir" / "0")
 
 
+def test_collect_passes_base_url_separately_from_model_args(monkeypatch, tmp_path):
+    model_config = tmp_path / "model.yml"
+    model_config.write_text(
+        "name: custom/model2\n"
+        "slug: openai/custom/model2\n"
+        "model_args:\n"
+        "  base_url: https://example.test/v1\n"
+        "  temperature: 0.5\n"
+    )
+    bench_config = tmp_path / "bench.yml"
+    bench_config.write_text("name: inspect_evals/mbpp\n")
+    captured = {}
+
+    monkeypatch.setattr(
+        "collect.cli.eval_set",
+        lambda **kwargs: (captured.update(kwargs) or (True, [MagicMock()])),
+    )
+    monkeypatch.setattr(
+        "collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir"
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["collect", "-b", str(bench_config), "-m", str(model_config)],
+    )
+
+    assert collect_main() == 0
+    assert captured["model_base_url"] == "https://example.test/v1"
+    assert captured["model_args"] == {"temperature": 0.5}
+
+
 def test_collect_multiple_evals(monkeypatch, tmp_path):
     m1 = tmp_path / "m1.yml"
     m1.write_text("name: custom/m1\nslug: custom/m1\n")
@@ -209,6 +239,82 @@ runpod:
 
     assert collect_main() == 0
     assert captured["force"] is True
+
+
+def test_collect_skips_occupied_run_before_runpod(monkeypatch, tmp_path):
+    model_config = tmp_path / "model.yml"
+    model_config.write_text(
+        "name: org/model\n"
+        "slug: openrouter/org/model\n"
+        "runpod:\n"
+        "  use: true\n"
+        "  model: org/model\n"
+        "  gpu_id: NVIDIA A40\n"
+    )
+    bench_config = tmp_path / "bench.yml"
+    bench_config.write_text("name: inspect_evals/mbpp\n")
+    target_dir = tmp_path / "target_dir" / "0"
+    target_dir.mkdir(parents=True)
+    (target_dir / "complete.eval").write_text("log")
+
+    monkeypatch.setattr(
+        "collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir"
+    )
+    runpod = MagicMock()
+    monkeypatch.setattr("collect.cli.runpod_main", runpod)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["collect", "-b", str(bench_config), "-m", str(model_config)],
+    )
+
+    assert collect_main() == 0
+    runpod.assert_not_called()
+
+
+def test_collect_skips_occupied_epoch_and_runs_next(
+    monkeypatch, tmp_path, capsys
+):
+    model_config = tmp_path / "model.yml"
+    model_config.write_text(
+        "name: org/model\n"
+        "slug: openrouter/org/model\n"
+        "runpod:\n"
+        "  use: true\n"
+        "  model: org/model\n"
+        "  gpu_id: NVIDIA A40\n"
+    )
+    bench_config = tmp_path / "bench.yml"
+    bench_config.write_text("name: inspect_evals/mbpp\n")
+    target_dir = tmp_path / "target_dir" / "0"
+    target_dir.mkdir(parents=True)
+    (target_dir / "cancelled.eval").write_text("log")
+
+    monkeypatch.setattr(
+        "collect.cli.get_eval_path", lambda **kw: tmp_path / "target_dir"
+    )
+    captured = {}
+
+    def fake_runpod_main(models, collect_model, *, force=False):
+        captured["models"] = models
+        return 0
+
+    monkeypatch.setattr("collect.cli.runpod_main", fake_runpod_main)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "collect",
+            "-b",
+            str(bench_config),
+            "-m",
+            str(model_config),
+            "-n",
+            "2",
+        ],
+    )
+
+    assert collect_main() == 0
+    assert len(captured["models"]) == 1
+    assert "SKIPPING epoch 1/2" in capsys.readouterr().out
 
 
 def test_judge_main_execution(monkeypatch, tmp_path):

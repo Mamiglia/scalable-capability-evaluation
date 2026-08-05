@@ -18,7 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_IMAGE = "vllm/vllm-openai:latest"
 DEFAULT_CLOUD_TYPE = "COMMUNITY"
-DEFAULT_CONTAINER_DISK_IN_GB = 20
+DEFAULT_CONTAINER_DISK_IN_GB = 40
 DEFAULT_GPU_COUNT = 1
 DEFAULT_PORT = 8000
 DEFAULT_READY_TIMEOUT = 1800
@@ -211,6 +211,9 @@ def wait(pod_id: str, port: int, timeout: float) -> str:
     """Wait for vLLM's model endpoint and return its OpenAI base URL."""
     base_url = f"https://{pod_id}-{port}.proxy.runpod.net/v1"
     health_url = f"{base_url}/models"
+    health_request = urllib.request.Request(
+        health_url, headers={"User-Agent": "small-judge/1.0"}
+    )
     started = time.monotonic()
     deadline = started + timeout
     next_progress_log = started + 30
@@ -222,7 +225,7 @@ def wait(pod_id: str, port: int, timeout: float) -> str:
     )
     while True:
         try:
-            with urllib.request.urlopen(health_url, timeout=10) as response:
+            with urllib.request.urlopen(health_request, timeout=10) as response:
                 if 200 <= response.status < 300:
                     LOGGER.info(
                         "vLLM ready: pod=%s elapsed=%.1fs",
@@ -232,7 +235,7 @@ def wait(pod_id: str, port: int, timeout: float) -> str:
                     return base_url
                 LOGGER.debug("vLLM readiness returned HTTP %s", response.status)
         except urllib.error.HTTPError as exc:
-            if exc.code not in {404, 502, 503, 504}:
+            if exc.code not in {403, 404, 502, 503, 504}:
                 raise RuntimeError(
                     f"vLLM readiness request failed with HTTP {exc.code}: {health_url}"
                 ) from exc

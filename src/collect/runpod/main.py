@@ -52,7 +52,7 @@ def _run_one(
         pod_id = utils.run(config)
         base_url = utils.wait(pod_id, config["port"], config["ready_timeout"])
         os.environ.setdefault("OPENAI_API_KEY", "runpod-local")
-        model.slug = f"openai/{config['model']}"
+        model.slug = "vllm/" + config["model"]
         model.model_args = config["model_args"] | {"base_url": base_url}
         LOGGER.info(
             "Starting collection against Runpod: model=%s pod=%s", model.name, pod_id
