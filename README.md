@@ -71,8 +71,8 @@ uv run collect \
   -n 1
 ```
 
-To provision a temporary vLLM Pod for a collection, add a `runpod` block to
-the model YAML. This requires an installed and authenticated `runpodctl`:
+Models can provision a temporary vLLM Pod by adding a `runpod` block. This
+requires an installed and authenticated `runpodctl`:
 
 ```yaml
 name: qwen/qwen3.5-9b
@@ -82,11 +82,7 @@ model_args:
 runpod:
   use: false
   model: Qwen/Qwen3.5-9B
-  model_args: {}
-  cloud_type: COMMUNITY
-  gpu_id: NVIDIA RTX A6000
-  container_disk_in_gb: 60
-  ready_timeout: 1800
+  gpu_id: NVIDIA A40
   vllm_args:
     - --reasoning-parser
     - qwen3
@@ -94,27 +90,21 @@ runpod:
     - 32768
 ```
 
-Runpod is opt-in. Either set `runpod.use: true` and use the normal `collect`
-command, or leave it false and force it for one invocation with `--runpod`:
+Set `use: true`, or force it for one collection with `--runpod`:
 
 ```bash
 uv run collect --runpod \
   -b configs/bench/gsm8k.yml \
-  -m configs/models/qwen3.5-9b-runpod.yml \
+  -m configs/models/qwen3.5-9b.yml \
   -n 1
 ```
 
-The collector creates a `vllm/vllm-openai:latest` Pod using `runpodctl`, waits
-for its OpenAI-compatible API, runs the existing collect CLI, and deletes the
-Pod afterward even if collection fails or is interrupted. Community Cloud,
-one GPU, a 20 GB container disk, and vLLM prefix caching are enabled by
-default. `gpu_id` is required because Runpod does not select a GPU type
-automatically. See `configs/models/qwen3.5-9b-runpod.yml` for every supported
-option and examples of raw `create_args`. With `use: false` and no `--runpod`,
-collection uses the model's configured provider and never calls Runpod.
-While Runpod is active, the collector temporarily switches Inspect to its
-OpenAI-compatible provider and restores the original slug and model arguments
-afterward. The same model YAML can therefore be used with OpenRouter or Runpod.
+`Model` creates the Pod, waits for its OpenAI endpoint, and deletes it when the
+last evaluation context exits, including on errors and interrupts. Concurrent
+contexts with the same Runpod configuration share one Pod. It defaults to
+Community Cloud, one GPU, a 40 GB container disk, four-hour auto-termination,
+and vLLM prefix caching. Judge evaluations use the same lifecycle whenever
+their judge model has `runpod.use: true`.
 
 ### 2. Pairwise Judge Evaluation (`judge`)
 
