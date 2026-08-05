@@ -89,8 +89,8 @@ def fig_bj_crosscheck(check: pd.DataFrame, out_stub: str):
     ax.set_ylim(lo, hi)
     ax.set_xlabel("measured self-pair slot-1 rate")
     ax.set_ylabel("MLP sigma(b_j)")
-    ax.text(0, 1.02, "whiskers: Wilson 95% · diagonal: agreement",
-            transform=ax.transAxes, va="bottom", color=MUTED, fontsize=7)
+    ax.text(0, -0.16, "whiskers: Wilson 95% · diagonal: agreement",
+            transform=ax.transAxes, va="top", color=MUTED, fontsize=7)
     style(ax, grid_axis="both")
     save(fig, out_stub)
 
@@ -146,6 +146,7 @@ def fig_pair_transfer(preds: pd.DataFrame, rows: pd.DataFrame, acc: pd.Series,
              if m in set(frame["model"])]
 
     fig, ax = plt.subplots(figsize=(WIDE, 2.8))
+    fit_points = {m: [] for m in shown}
     for pair_key, pair_frame in frame.groupby("pair_key"):
         model_a, model_b = pair_key.split("|")
         gap = abs(acc[model_a] - acc[model_b])
@@ -159,17 +160,27 @@ def fig_pair_transfer(preds: pd.DataFrame, rows: pd.DataFrame, acc: pd.Series,
             colour = MODEL_STYLE[model][0]
             # Small x offset per model so the four series stay separable.
             x = gap + (i - (len(shown) - 1) / 2) * 0.004
-            ax.plot([x, x], [lo, hi], color=colour, lw=1.0, zorder=3, alpha=0.8)
+            ax.plot([x, x], [lo, hi], color=colour, lw=1.0, zorder=3, alpha=0.55)
             ax.plot(x, pair_acc, "o", ms=4.5,
                     mfc=SURFACE if self_pair else colour,
-                    mec=colour, mew=1.1, zorder=4)
+                    mec=colour, mew=1.1, zorder=4, alpha=0.85)
+            if not self_pair:
+                fit_points[model].append((gap, pair_acc))
+    # Per-model linear fit over real pairs (self-pairs are a control).
+    for model in shown:
+        gaps, accs = map(np.array, zip(*fit_points[model]))
+        slope, intercept = np.polyfit(gaps, accs, 1)
+        xs = np.array([0, gaps.max()])
+        ax.plot(xs, slope * xs + intercept, color=MODEL_STYLE[model][0],
+                lw=1.6, zorder=2)
     chance(ax, 0.5, axis="y")
     ax.set_xlabel("pair accuracy gap |d_acc|")
     ax.set_ylabel("held-out accuracy")
-    ax.text(0, 1.02, "one point per pairing and model · whiskers: 95% CI · "
-            "open = self-pair · dashed = chance",
-            transform=ax.transAxes, va="bottom", color=MUTED, fontsize=7)
-    handles = [Line2D([], [], marker="o", ls="", ms=5, color=MODEL_STYLE[m][0],
+    ax.text(0, -0.28, "one point per pairing and model · lines: linear fit "
+            "(self-pairs excluded) · whiskers: 95% CI · open = self-pair · "
+            "dashed = chance",
+            transform=ax.transAxes, va="top", color=MUTED, fontsize=7)
+    handles = [Line2D([], [], marker="o", ls="-", ms=5, color=MODEL_STYLE[m][0],
                       label=m) for m in shown]
     leg = ax.legend(handles=handles, frameon=False, loc="center left",
                     bbox_to_anchor=(1.02, 0.5))
@@ -201,8 +212,8 @@ def fig_reliability(preds: pd.DataFrame, out_stub: str, n_bins: int):
     ax.set_ylabel("empirical slot-1 rate")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.text(0, 1.02, f"{n_bins} equal-count bins · diagonal: calibrated",
-            transform=ax.transAxes, va="bottom", color=MUTED, fontsize=7)
+    ax.text(0, -0.16, f"{n_bins} equal-count bins · diagonal: calibrated",
+            transform=ax.transAxes, va="top", color=MUTED, fontsize=7)
     legend(ax, loc="upper left")
     style(ax, grid_axis="both")
     save(fig, out_stub)
