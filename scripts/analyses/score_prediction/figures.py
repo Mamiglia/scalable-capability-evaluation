@@ -27,9 +27,10 @@ ROOT = Path(__file__).resolve().parents[3]
 
 # Fixed model -> colour assignment (identity, never rank). Baselines are
 # open ink-tone markers so they read as inline controls.
-MODEL_ORDER = ["position", "dlogit", "logreg", "gbm", "mlp"]
+MODEL_ORDER = ["position", "capability", "dlogit", "logreg", "gbm", "mlp"]
 MODEL_STYLE = {  # colour, open_marker
     "position": (MUTED, True),
+    "capability": (PALETTE[3], True),
     "dlogit": (INK2, True),
     "logreg": (PALETTE[0], False),
     "gbm": (PALETTE[1], False),
@@ -142,7 +143,7 @@ def fig_pair_transfer(preds: pd.DataFrame, rows: pd.DataFrame, acc: pd.Series,
     meta = rows.set_index("row_id")
     frame["pair_key"] = frame["row_id"].map(meta["pair_key"])
     frame["item"] = frame["row_id"].map(meta["item"])
-    shown = [m for m in ("dlogit", "logreg", "gbm", "mlp")
+    shown = [m for m in ("position", "capability", "logreg", "gbm", "mlp")
              if m in set(frame["model"])]
 
     fig, ax = plt.subplots(figsize=(WIDE, 2.8))
@@ -165,17 +166,24 @@ def fig_pair_transfer(preds: pd.DataFrame, rows: pd.DataFrame, acc: pd.Series,
                     mfc=SURFACE if self_pair else colour,
                     mec=colour, mew=1.1, zorder=4, alpha=0.85)
             if not self_pair:
-                fit_points[model].append((gap, pair_acc))
-    # Per-model sigmoid fit over real pairs (self-pairs are a control):
-    # accuracy is bounded [0.5, 1], so acc = 0.5 + 0.5*sigma(a*gap + b).
-    from scipy.optimize import curve_fit
+                fit_points[model].append(
+                    (gap, pair_rows["correct"].sum(), len(pair_rows)))
+    # Per-model psychometric fit over real pairs (self-pairs are a
+    # control): acc = 0.5 + 0.5*sigma(a*gap + b), maximum likelihood on
+    # the per-pair binomial counts (row-level, not point-level LS).
+    from scipy.optimize import minimize
 
     def _sig(g, a, b):
         return 0.5 + 0.5 / (1 + np.exp(-(a * g + b)))
 
     for model in shown:
-        gaps, accs = map(np.array, zip(*fit_points[model]))
-        (a, b), _ = curve_fit(_sig, gaps, accs, p0=(10.0, 0.5), maxfev=10000)
+        gaps, ks, ns = map(np.array, zip(*fit_points[model]))
+
+        def nll(params):
+            acc = np.clip(_sig(gaps, *params), 1e-9, 1 - 1e-9)
+            return -np.sum(ks * np.log(acc) + (ns - ks) * np.log(1 - acc))
+
+        a, b = minimize(nll, x0=(5.0, 0.0), method="Nelder-Mead").x
         xs = np.linspace(0, gaps.max(), 100)
         ax.plot(xs, _sig(xs, a, b), color=MODEL_STYLE[model][0],
                 lw=1.6, zorder=2)
