@@ -33,9 +33,10 @@ def ece(y, p, n_bins: int) -> float:
     return float(np.mean([abs(y[b].mean() - p[b].mean()) for b in bins if len(b)]))
 
 
-def bootstrap_nll_ci(items, losses, n_boot: int, seed: int) -> tuple[float, float]:
-    """95% percentile CI for mean loss, resampling items (the cluster unit)."""
-    per_item = (pd.DataFrame(dict(item=items, loss=losses))
+def bootstrap_mean_ci(items, values, n_boot: int, seed: int) -> tuple[float, float]:
+    """95% percentile CI for the mean of a per-row value (loss, correctness),
+    resampling items (the cluster unit)."""
+    per_item = (pd.DataFrame(dict(item=items, loss=values))
                 .groupby("item")["loss"].agg(["sum", "count"]))
     sums, counts = per_item["sum"].to_numpy(), per_item["count"].to_numpy()
     rng = np.random.default_rng(seed)
@@ -97,8 +98,8 @@ def main():
 
     pooled_rows = []
     for (regime, model), g in preds.groupby(["regime", "model"]):
-        lo, hi = bootstrap_nll_ci(g["item"].to_numpy(), g["loss"].to_numpy(),
-                                  n_boot, seed)
+        lo, hi = bootstrap_mean_ci(g["item"].to_numpy(), g["loss"].to_numpy(),
+                                   n_boot, seed)
         pooled_rows.append(dict(
             regime=regime, fold=np.nan, model=model, nll=float(g["loss"].mean()),
             nll_lo=lo, nll_hi=hi,

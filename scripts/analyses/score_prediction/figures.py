@@ -39,7 +39,7 @@ REGIME_TITLE = {"items": "held-out items", "pairs": "held-out pairs",
 
 
 def fig_model_comparison(pooled: pd.DataFrame, out_stub: str):
-    """Dot+CI per model, one panel per regime, shared NLL axis."""
+    """Dot+CI per model, one panel per regime, shared accuracy axis."""
     regimes = [r for r in ("items", "pairs", "judges") if r in set(pooled["regime"])]
     fig, axes = plt.subplots(1, len(regimes), figsize=(WIDE, 1.9), sharex=True)
     for ax, regime in zip(np.atleast_1d(axes), regimes):
@@ -48,16 +48,16 @@ def fig_model_comparison(pooled: pd.DataFrame, out_stub: str):
         for y, model in enumerate(reversed(present)):
             r = rows.loc[model]
             colour, open_marker = MODEL_STYLE[model]
-            dot_ci(ax, y, r["nll"], r["nll_lo"], r["nll_hi"], colour,
-                   note=f"acc {r['acc']:.2f}", open_marker=open_marker)
+            dot_ci(ax, y, r["acc"], r["acc_lo"], r["acc_hi"], colour,
+                   open_marker=open_marker)
         ax.set_yticks(range(len(present)), list(reversed(present)))
-        chance(ax, np.log(2), axis="x")
+        chance(ax, 0.5, axis="x")
         ax.set_title(REGIME_TITLE[regime], fontsize=8, color=INK2)
         ax.set_ylim(-0.6, len(present) - 0.4)
         style(ax, grid_axis="x")
     np.atleast_1d(axes)[0].figure.supxlabel(
-        "held-out NLL, nats (dots: mean; whiskers: 95% item-bootstrap CI; "
-        "dashed: chance ln 2; open markers: baselines)", fontsize=7, color=MUTED)
+        "held-out accuracy (dots: mean; whiskers: 95% item-bootstrap CI; "
+        "dashed: chance 0.5; open markers: baselines)", fontsize=7, color=MUTED)
     save(fig, out_stub)
 
 
@@ -84,8 +84,8 @@ def fig_bj_crosscheck(check: pd.DataFrame, out_stub: str):
 
 def fig_heldout_judge(per_fold: pd.DataFrame, judge_names: list[str],
                       slot1_rates: pd.Series, out_stub: str):
-    """Per held-out judge: NLL of each content model vs the dlogit control,
-    judges ordered by position-bias extremity."""
+    """Per held-out judge: accuracy of each content model vs the dlogit
+    control, judges ordered by position-bias extremity."""
     judges_frame = per_fold[per_fold["regime"] == "judges"].copy()
     judges_frame["judge"] = judges_frame["fold"].astype(int).map(dict(enumerate(judge_names)))
     order = sorted(judge_names, key=lambda j: abs(slot1_rates[j] - 0.5))
@@ -98,7 +98,7 @@ def fig_heldout_judge(per_fold: pd.DataFrame, judge_names: list[str],
             if not len(r):
                 continue
             colour, open_marker = MODEL_STYLE[model]
-            ax.plot(r["nll"].squeeze(), y, "o", ms=5,
+            ax.plot(r["acc"].squeeze(), y, "o", ms=5,
                     mfc="#ffffff" if open_marker else colour,
                     mec=colour, mew=1.2, zorder=4,
                     label=model if y == 0 else None)
@@ -107,8 +107,8 @@ def fig_heldout_judge(per_fold: pd.DataFrame, judge_names: list[str],
                     va="center", ha="left", color=MUTED, fontsize=6.5,
                     annotation_clip=False)
     ax.set_yticks(range(len(order)), order)
-    chance(ax, np.log(2), axis="x")
-    ax.set_xlabel("held-out NLL, nats (judge unseen in training; dashed: chance)")
+    chance(ax, 0.5, axis="x")
+    ax.set_xlabel("held-out accuracy (judge unseen in training; dashed: chance)")
     legend(ax, loc="lower right")
     style(ax, grid_axis="x")
     save(fig, out_stub)
@@ -116,10 +116,10 @@ def fig_heldout_judge(per_fold: pd.DataFrame, judge_names: list[str],
 
 def fig_pair_transfer(preds: pd.DataFrame, rows: pd.DataFrame, acc: pd.Series,
                       out_stub: str, n_boot: int, seed: int, n_labels: int = 3):
-    """Held-out NLL per pairing (logreg, pairs regime) against the pair's
-    raw accuracy gap. Tests 'near-tie pairings are the hard transfers';
-    self-pairs sit at gap 0 as open markers."""
-    from evaluate import bootstrap_nll_ci
+    """Held-out accuracy per pairing (logreg, pairs regime) against the
+    pair's raw accuracy gap. Tests 'near-tie pairings are the hard
+    transfers'; self-pairs sit at gap 0 as open markers."""
+    from evaluate import bootstrap_mean_ci
     frame = preds.query("regime == 'pairs' and model == 'logreg'").copy()
     meta = rows.set_index("row_id")
     frame["pair_key"] = frame["row_id"].map(meta["pair_key"])
@@ -130,21 +130,22 @@ def fig_pair_transfer(preds: pd.DataFrame, rows: pd.DataFrame, acc: pd.Series,
     for pair_key, pair_rows in frame.groupby("pair_key"):
         model_a, model_b = pair_key.split("|")
         gap = abs(acc[model_a] - acc[model_b])
-        lo, hi = bootstrap_nll_ci(pair_rows["item"].to_numpy(),
-                                  pair_rows["loss"].to_numpy(), n_boot, seed)
-        nll = pair_rows["loss"].mean()
+        lo, hi = bootstrap_mean_ci(pair_rows["item"].to_numpy(),
+                                   pair_rows["correct"].to_numpy(), n_boot, seed)
+        pair_acc = pair_rows["correct"].mean()
         self_pair = model_a == model_b
         ax.plot([gap, gap], [lo, hi], color=PALETTE[0], lw=1.1, zorder=3)
-        ax.plot(gap, nll, "o", ms=5, mfc=SURFACE if self_pair else PALETTE[0],
+        ax.plot(gap, pair_acc, "o", ms=5, mfc=SURFACE if self_pair else PALETTE[0],
                 mec=PALETTE[0], mew=1.2, zorder=4)
-        points.append((nll, gap, pair_key))
-    for nll, gap, pair_key in sorted(points, reverse=True)[:n_labels]:
-        ax.annotate(pair_key.replace("|", " vs "), (gap, nll),
+        points.append((pair_acc, gap, pair_key))
+    # Label the worst-predicted pairs (lowest accuracy).
+    for pair_acc, gap, pair_key in sorted(points)[:n_labels]:
+        ax.annotate(pair_key.replace("|", " vs "), (gap, pair_acc),
                     textcoords="offset points", xytext=(4, 4),
                     fontsize=5.5, color=INK2)
-    chance(ax, np.log(2), axis="y")
+    chance(ax, 0.5, axis="y")
     ax.set_xlabel("pair accuracy gap |d_acc| (open markers: self-pairs)")
-    ax.set_ylabel("held-out NLL, nats (logreg;\nwhiskers: 95% item-bootstrap CI)")
+    ax.set_ylabel("held-out accuracy (logreg;\nwhiskers: 95% item-bootstrap CI)")
     style(ax)
     save(fig, out_stub)
 
@@ -192,9 +193,19 @@ def main():
     preds = pd.concat([pd.read_parquet(f)
                        for f in sorted((out / "preds").glob("*.parquet"))],
                       ignore_index=True)
-    p = np.clip(preds["p_slot1"].to_numpy(), 1e-12, 1 - 1e-12)
-    preds["loss"] = -(preds["y"] * np.log(p) + (1 - preds["y"]) * np.log(1 - p))
+    preds["correct"] = (preds["p_slot1"].round() == preds["y"]).astype(float)
+    preds["item"] = preds["row_id"].map(rows.set_index("row_id")["item"])
     acc = pd.read_csv(ROOT / cfg["models_csv"]).set_index("model")["accuracy"]
+
+    # Accuracy CIs for the pooled panel (metrics.csv only carries NLL CIs).
+    from evaluate import bootstrap_mean_ci
+    ci = {(regime, model): bootstrap_mean_ci(
+              g["item"].to_numpy(), g["correct"].to_numpy(),
+              cfg["evaluate"]["n_boot"], cfg["seeds"][0])
+          for (regime, model), g in preds.groupby(["regime", "model"])}
+    pooled = pooled.copy()
+    pooled["acc_lo"] = [ci[(r.regime, r.model)][0] for r in pooled.itertuples()]
+    pooled["acc_hi"] = [ci[(r.regime, r.model)][1] for r in pooled.itertuples()]
 
     fig_model_comparison(pooled, str(fig_dir / "1_model_comparison"))
     fig_pair_transfer(preds, rows, acc, str(fig_dir / "4_pair_transfer"),

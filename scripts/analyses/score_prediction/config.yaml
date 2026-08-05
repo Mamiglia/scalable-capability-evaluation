@@ -4,7 +4,7 @@
 verdicts_csv: judge_results/gpqa-pilot-rd2/verdicts.csv
 models_csv: judge_results/gpqa-pilot-rd2/models.csv
 summary_csv: judge_results/gpqa-pilot-rd2/summary.csv
-out_dir: judge_results/score_prediction
+out_dir: judge_results/score_prediction/8b   # one self-contained dir per encoder (0.6b/, 8b/)
 
 encoder:
   provider: local               # local (sentence-transformers) | voyage (API)
