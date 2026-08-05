@@ -158,16 +158,21 @@ class Model:
     def eval_kwargs(self) -> dict[str, Any]:
         """Return the model arguments expected by ``inspect_ai.eval_set``."""
         if self._runpod_config:
-            slug = f"vllm/{self._runpod_config['model']}"
-            model_args = self._runpod_config["model_args"].copy()
+            slug = f"openai-api/runpod/{self._runpod_config['model']}"
+            model_args = {
+                "api_key": "inspectai",
+                "stream": True,
+            } | self._runpod_config["model_args"]
+            generate_args = {"max_retries": 2} | self.config.generate_args
         else:
             slug = self.config.slug
             model_args = (self.config.model_args or {}).copy()
+            generate_args = self.config.generate_args
 
         kwargs: dict[str, Any] = {
             "model": slug,
             "model_args": model_args,
-            **self.config.generate_args,
+            **generate_args,
         }
         base_url = self._base_url or model_args.pop("base_url", None)
         if base_url:
