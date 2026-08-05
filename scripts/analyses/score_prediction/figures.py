@@ -18,6 +18,7 @@ import yaml
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 from plots import (COL, INK2, MUTED, PALETTE, SURFACE, WIDE, chance, dot_ci,
                    legend, save, style)
@@ -55,9 +56,19 @@ def fig_model_comparison(pooled: pd.DataFrame, out_stub: str):
         ax.set_title(REGIME_TITLE[regime], fontsize=8, color=INK2)
         ax.set_ylim(-0.6, len(present) - 0.4)
         style(ax, grid_axis="x")
-    np.atleast_1d(axes)[0].figure.supxlabel(
-        "held-out accuracy (dots: mean; whiskers: 95% item-bootstrap CI; "
-        "dashed: chance 0.5; open markers: baselines)", fontsize=7, color=MUTED)
+    fig.supxlabel("held-out accuracy", fontsize=8, color=INK2)
+    handles = [
+        Line2D([], [], marker="o", ls="-", color=INK2, ms=5.5,
+               label="mean, 95% CI (item bootstrap)"),
+        Line2D([], [], marker="o", ls="", mfc=SURFACE, mec=INK2, ms=5.5,
+               label="baseline"),
+        Line2D([], [], ls=(0, (4, 3)), color=MUTED, lw=0.9, label="chance"),
+    ]
+    leg = fig.legend(handles=handles, frameon=False, loc="lower center",
+                     bbox_to_anchor=(0.5, 1.0), ncol=3,
+                     handletextpad=0.4, columnspacing=1.2)
+    for t in leg.get_texts():
+        t.set_color(INK2)
     save(fig, out_stub)
 
 
@@ -76,8 +87,10 @@ def fig_bj_crosscheck(check: pd.DataFrame, out_stub: str):
                     fontsize=6.5, color=INK2)
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
-    ax.set_xlabel("self-pair slot-1 rate (whiskers: Wilson 95%)")
-    ax.set_ylabel("MLP sigma(b_j), items-fold mean")
+    ax.set_xlabel("measured self-pair slot-1 rate")
+    ax.set_ylabel("MLP sigma(b_j)")
+    ax.text(0.02, 0.96, "whiskers: Wilson 95% · diagonal: agreement",
+            transform=ax.transAxes, va="top", color=MUTED, fontsize=7)
     style(ax, grid_axis="both")
     save(fig, out_stub)
 
@@ -108,8 +121,13 @@ def fig_heldout_judge(per_fold: pd.DataFrame, judge_names: list[str],
                     annotation_clip=False)
     ax.set_yticks(range(len(order)), order)
     chance(ax, 0.5, axis="x")
-    ax.set_xlabel("held-out accuracy (judge unseen in training; dashed: chance)")
-    legend(ax, loc="lower right")
+    ax.set_xlabel("held-out accuracy (judge unseen in training)")
+    handles = [Line2D([], [], marker="o", ls="", ms=5,
+                      mfc=SURFACE if MODEL_STYLE[m][1] else MODEL_STYLE[m][0],
+                      mec=MODEL_STYLE[m][0], mew=1.2, label=m) for m in shown]
+    handles.append(Line2D([], [], ls=(0, (4, 3)), color=MUTED, lw=0.9,
+                          label="chance"))
+    legend(ax, loc="lower right", handles=handles)
     style(ax, grid_axis="x")
     save(fig, out_stub)
 
@@ -138,14 +156,20 @@ def fig_pair_transfer(preds: pd.DataFrame, rows: pd.DataFrame, acc: pd.Series,
         ax.plot(gap, pair_acc, "o", ms=5, mfc=SURFACE if self_pair else PALETTE[0],
                 mec=PALETTE[0], mew=1.2, zorder=4)
         points.append((pair_acc, gap, pair_key))
-    # Label the worst-predicted pairs (lowest accuracy).
-    for pair_acc, gap, pair_key in sorted(points)[:n_labels]:
+    # Label the worst-predicted pairs (lowest accuracy), offsets staggered
+    # so near-coincident labels don't collide.
+    offsets = [(4, 4), (4, -12), (4, 14)]
+    for (pair_acc, gap, pair_key), xytext in zip(sorted(points)[:n_labels],
+                                                 offsets):
         ax.annotate(pair_key.replace("|", " vs "), (gap, pair_acc),
-                    textcoords="offset points", xytext=(4, 4),
+                    textcoords="offset points", xytext=xytext,
                     fontsize=5.5, color=INK2)
     chance(ax, 0.5, axis="y")
-    ax.set_xlabel("pair accuracy gap |d_acc| (open markers: self-pairs)")
-    ax.set_ylabel("held-out accuracy (logreg;\nwhiskers: 95% item-bootstrap CI)")
+    ax.set_xlabel("pair accuracy gap |d_acc|")
+    ax.set_ylabel("held-out accuracy (logreg)")
+    ax.text(0.02, 0.97, "one point per pairing · whiskers: 95% CI · "
+            "open = self-pair · dashed = chance",
+            transform=ax.transAxes, va="top", color=MUTED, fontsize=7)
     style(ax)
     save(fig, out_stub)
 
@@ -168,10 +192,12 @@ def fig_reliability(preds: pd.DataFrame, out_stub: str, n_bins: int):
                 "-o", ms=3.5, lw=1.1, color=colour,
                 mfc=SURFACE if open_marker else colour, mec=colour, mew=1.0,
                 label=model)
-    ax.set_xlabel(f"mean predicted P(slot 1), {n_bins} equal-count bins")
+    ax.set_xlabel("mean predicted P(slot 1)")
     ax.set_ylabel("empirical slot-1 rate")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
+    ax.text(0.98, 0.04, f"{n_bins} equal-count bins · diagonal: calibrated",
+            transform=ax.transAxes, ha="right", color=MUTED, fontsize=7)
     legend(ax, loc="upper left")
     style(ax, grid_axis="both")
     save(fig, out_stub)
