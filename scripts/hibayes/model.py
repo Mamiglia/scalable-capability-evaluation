@@ -13,6 +13,7 @@ from hibayes.process import Features
 @model
 def judge_feature_logistic_model(
     predictors: Sequence[str],
+    pool_judge_effects: bool = True,
     prior_intercept_scale: float = 1.5,
     prior_effect_scale: float = 0.5,
     prior_item_scale: float = 0.5,
@@ -39,10 +40,23 @@ def judge_feature_logistic_model(
         intercepts = numpyro.sample(
             "judge_intercepts", dist.Normal(0, prior_intercept_scale).expand([num_judges]).to_event(1)
         )
-        effects = numpyro.sample(
-            "judge_predictor_effects",
-            dist.Normal(0, prior_effect_scale).expand([num_judges, len(predictors)]).to_event(2),
-        )
+        if pool_judge_effects:
+            effect_mean = numpyro.sample(
+                "predictor_effect_mean", dist.Normal(0, prior_effect_scale).expand([len(predictors)]).to_event(1)
+            )
+            effect_scale = numpyro.sample(
+                "predictor_effect_scale", dist.HalfNormal(prior_effect_scale).expand([len(predictors)]).to_event(1)
+            )
+            effect_raw = numpyro.sample(
+                "judge_predictor_effects_raw", dist.Normal(0, 1).expand([num_judges, len(predictors)]).to_event(2)
+            )
+            effects = effect_mean + effect_scale * effect_raw
+            numpyro.deterministic("judge_predictor_effects", effects)
+        else:
+            effects = numpyro.sample(
+                "judge_predictor_effects",
+                dist.Normal(0, prior_effect_scale).expand([num_judges, len(predictors)]).to_event(2),
+            )
         condition_free = numpyro.sample(
             "judge_condition_effects_free",
             dist.Normal(0, prior_effect_scale).expand([num_judges, num_conditions - 1]).to_event(2),
