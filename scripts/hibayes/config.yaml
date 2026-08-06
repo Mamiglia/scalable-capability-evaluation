@@ -35,6 +35,7 @@ model:
 
 check:
   checkers:
+    - prior_predictive_check: {num_samples: 200}
     - prior_predictive_plot: {interactive: false, kind: cumulative}
     - divergences
     - r_hat
@@ -57,4 +58,4 @@ communicate:
 
 platform:
   device_type: cpu
-  chain_method: sequential
+  chain_method: parallel
