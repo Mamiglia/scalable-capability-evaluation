@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import zipfile
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -87,20 +88,24 @@ def token_usage(sample: dict) -> dict[str, int]:
     }
 
 
-def extract_attempts(log_root: Path, capabilities: dict[str, float]) -> pd.DataFrame:
+def extract_attempts(log_root: Path, capabilities: dict[str, float]) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows = []
     seen_samples = set()
+    accounting = defaultdict(Counter)
     for path in sorted(log_root.rglob("*.eval")):
         judge, pair, condition = log_identity(path, log_root)
+        accounting[judge]["eval_files_found"] += 1
         major, minor = pair.split("-vs-", 1)
         if major not in capabilities or minor not in capabilities:
             raise ValueError(f"Missing capability estimate for pair {pair}")
         try:
             with zipfile.ZipFile(path) as archive:
                 if "header.json" not in archive.namelist():
+                    accounting[judge]["files_skipped_no_header"] += 1
                     continue
                 header = json.loads(archive.read("header.json"))
                 if header.get("status") != "success":
+                    accounting[judge]["files_skipped_not_success"] += 1
                     continue
                 eval_id = header["eval"].get("eval_id")
                 eval_metadata = header["eval"].get("metadata") or {}
@@ -112,6 +117,7 @@ def extract_attempts(log_root: Path, capabilities: dict[str, float]) -> pd.DataF
                     sample = json.loads(archive.read(name))
                     sample_key = sample.get("uuid") or (eval_id, sample.get("id"), sample.get("epoch"))
                     if sample_key in seen_samples:
+                        accounting[judge]["duplicate_attempts_skipped"] += 1
                         continue
                     answer, confidence = judge_answer(sample)
                     if answer is None:
@@ -163,9 +169,10 @@ def extract_attempts(log_root: Path, capabilities: dict[str, float]) -> pd.DataF
                         }
                     )
                     seen_samples.add(sample_key)
+                    accounting[judge]["attempts_kept"] += 1
         except (OSError, KeyError, ValueError, zipfile.BadZipFile) as error:
             raise ValueError(f"Failed to extract {path}: {error}") from error
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), pd.DataFrame.from_dict(accounting, orient="index").fillna(0).astype(int)
 
 
 def prepare(
@@ -175,8 +182,8 @@ def prepare(
     *,
     min_pairs: int = 3,
     min_samples: int = 500,
-) -> pd.DataFrame:
-    data = extract_attempts(log_root, load_capabilities(models_path, responses_path))
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    data, accounting = extract_attempts(log_root, load_capabilities(models_path, responses_path))
     eligibility = data.groupby("judge").agg(pairs=("model_pair", "nunique"), samples=("judge", "size"))
     judges = eligibility[(eligibility["pairs"] > min_pairs) & (eligibility["samples"] >= min_samples)].index
     data = data[data["judge"].isin(judges)].copy()
@@ -187,7 +194,7 @@ def prepare(
         if not scale:
             raise ValueError(f"Cannot standardise constant feature: {column}")
         data[f"{column}_sd"] = (data[column] - data[column].mean()) / scale
-    return data.sort_values(["judge", "model_pair", "item", "transcript_condition"]).reset_index(drop=True)
+    return data.sort_values(["judge", "model_pair", "item", "transcript_condition"]).reset_index(drop=True), accounting, eligibility
 
 
 def main() -> None:
@@ -199,10 +206,13 @@ def main() -> None:
     parser.add_argument("--min-pairs", type=int, default=3, help="Require strictly more than this many model pairs")
     parser.add_argument("--min-samples", type=int, default=500)
     args = parser.parse_args()
-    data = prepare(args.logs, args.models, args.responses, min_pairs=args.min_pairs, min_samples=args.min_samples)
+    data, accounting, eligibility = prepare(
+        args.logs, args.models, args.responses, min_pairs=args.min_pairs, min_samples=args.min_samples
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     data.to_csv(args.out, index=False)
-    summary = data.groupby("judge").agg(pairs=("model_pair", "nunique"), samples=("judge", "size"))
+    eligibility["included"] = (eligibility["pairs"] > args.min_pairs) & (eligibility["samples"] >= args.min_samples)
+    summary = accounting.join(eligibility, how="left").fillna({"pairs": 0, "samples": 0, "included": False})
     print(f"Wrote {len(data):,} attempts to {args.out}\n{summary}")
 
 
