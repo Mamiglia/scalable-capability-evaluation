@@ -30,7 +30,7 @@ interp_pod:                   # token maps + steered rewrites on a rented GPU
     axes: [approval, v_cap, v_pref, v_pref_orth]
     random_axis: random_a     # matched-norm control, steered at the middle alpha
     max_new_tokens: 2048
-  mix:                        # stage-1 titration: steered replication via pod_mix
+  mix:                        # exact-replication titration (closed: greedy dead zone)
     n_stage0: 10              # replication-fidelity transcripts (axis none, p 0)
     axes: [approval, v_pref_judge]
     alpha_fracs: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]   # both signs, p 1
@@ -38,6 +38,20 @@ interp_pod:                   # token maps + steered rewrites on a rented GPU
     n_shards: 8
     stage2_layers: [28, 30]   # extra steering layers (top last-token probe r after 26)
     stage2_alpha_fracs: [0.05, 0.1, 0.2, 0.5]        # both signs, all layers at once
+  judge_steer:                # reader steering: slot-masked vectors while judging
+    n_pairs: 120              # qwen-judged pairs, stratified by |elo gap| terciles
+    axes: [approval, v_pref_judge]
+    alpha_fracs: [0.1, 0.5]   # both signs, per slot
+    random_axis: random_a     # same strengths, both signs, per slot
+    spot_check: 20            # baseline full-format generations per shard (format validity)
+    seed: 0
+  rewrite:                    # style-mimic rewrites, sampled so steering can show
+    temperature: 0.7
+    seeds: 3                  # generations per (transcript, condition)
+    n_shards: 3
+    axes: [v_pref_judge, approval]
+    alpha_fracs: [0.1, 0.5]   # both signs
+    random_axis: random_a     # at the top strength, both signs
 
 bt_probe:                     # direction fit directly on verdicts
   c_grid: [0.0001, 0.001, 0.01, 0.1]
