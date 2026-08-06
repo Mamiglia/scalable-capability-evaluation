@@ -87,3 +87,96 @@ def is_successful_eval(eval_path: Path) -> bool:
         return getattr(log, "status", None) == "success"
     except Exception:
         return False
+
+
+import contextlib
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
+import time
+from typing import Callable, Iterator, Sequence, Tuple
+
+import inspect_ai._display.core.active as active_module
+from inspect_ai._display.plain.display import PlainDisplay, PlainTaskDisplay
+from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeRemainingColumn
+
+
+class QueueTaskDisplay(PlainTaskDisplay):
+    def __init__(self, task_with_result, queue, task_id, show_task_names=True, show_model_names=True, **kwargs):
+        super().__init__(task_with_result, show_task_names=show_task_names, show_model_names=show_model_names, **kwargs)
+        self.queue = queue
+        self.task_id = task_id
+
+    def sample_complete(self, complete: int, total: int) -> None:
+        super().sample_complete(complete, total)
+        self.queue.put(("sample", self.task_id, complete, total))
+
+    def complete(self, result) -> None:
+        super().complete(result)
+        self.queue.put(("complete", self.task_id, self.samples_complete, self.samples_total))
+
+
+class QueueDisplay(PlainDisplay):
+    def __init__(self, queue, task_id):
+        super().__init__()
+        self.queue = queue
+        self.task_id = task_id
+
+    @contextlib.contextmanager
+    def task(self, profile) -> Iterator[PlainTaskDisplay]:
+        with super().task(profile) as task_display:
+            yield QueueTaskDisplay(
+                task_display.task,
+                self.queue,
+                self.task_id,
+                show_task_names=task_display.show_task_names,
+                show_model_names=task_display.show_model_names,
+            )
+
+
+def attach_queue_display(queue: Any, task_id: str) -> None:
+    if queue is not None:
+        active_module._active_display = QueueDisplay(queue, task_id)
+
+
+def _eval_runner_worker(worker_fn: Callable[..., int], args: Tuple[Any, ...], queue: Any, label: str) -> int:
+    if queue is not None and label is not None:
+        attach_queue_display(queue, label)
+    return worker_fn(*args)
+
+
+def eval_runner(jobs: Sequence[Tuple[Callable[..., int], Tuple[Any, ...], str]]) -> int:
+    """Execute evaluation jobs in parallel across child processes with live per-subtask progress bars."""
+    if not jobs:
+        return 0
+
+    manager = mp.Manager()
+    queue = manager.Queue()
+    labels = [label for _, _, label in jobs]
+
+    with ProcessPoolExecutor(max_workers=max(len(jobs), 1)) as executor:
+        futures = [
+            executor.submit(_eval_runner_worker, fn, args, queue, label)
+            for fn, args, label in jobs
+        ]
+
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+        ) as progress:
+            task_ids = {label: progress.add_task(label, total=None) for label in labels}
+            completed_count = 0
+            while completed_count < len(jobs):
+                while not queue.empty():
+                    msg = queue.get()
+                    kind, label, complete, total = msg
+                    if label in task_ids:
+                        progress.update(task_ids[label], completed=complete, total=total)
+                        if kind == "complete":
+                            completed_count += 1
+                time.sleep(0.05)
+
+        results = [f.result() for f in futures]
+
+    return 0 if all(r == 0 for r in results) else 1

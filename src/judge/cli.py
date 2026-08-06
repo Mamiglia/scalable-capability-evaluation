@@ -1,12 +1,12 @@
 """CLI interface for running judge experiments comparing model pairs across benchmarks."""
 
 import argparse
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from inspect_ai import eval_set
 
 from configs import ExperimentConfig, flag_parse
+from configs.utils import eval_runner
 from judge.task import build_judge_tasks
 from model import Model
 
@@ -114,11 +114,9 @@ def main() -> int:
             for b, M, m, j in zip(args.bench, args.major, args.minor, args.judge)
         ]
 
-    with ProcessPoolExecutor(max_workers=max(len(experiments), 1)) as executor:
-        futures = [executor.submit(_run_experiment_worker, exp) for exp in experiments]
-        results = [f.result() for f in futures]
+    jobs = [(_run_experiment_worker, (exp,), exp.name) for exp in experiments]
 
-    return 0 if all(r == 0 for r in results) else 1
+    return eval_runner(jobs)
 
 
 if __name__ == "__main__":

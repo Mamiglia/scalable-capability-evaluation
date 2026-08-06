@@ -25,8 +25,9 @@ class SynchronousExecutor:
 
 @pytest.fixture(autouse=True)
 def mock_process_pool(monkeypatch):
-    monkeypatch.setattr("collect.cli.ProcessPoolExecutor", SynchronousExecutor)
-    monkeypatch.setattr("judge.cli.ProcessPoolExecutor", SynchronousExecutor)
+    monkeypatch.setattr("configs.utils.ProcessPoolExecutor", SynchronousExecutor)
+
+
 
 
 def test_collect_single_eval(monkeypatch, tmp_path):

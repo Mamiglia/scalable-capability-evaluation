@@ -1,13 +1,12 @@
 """CLI interface for collecting benchmark transcripts."""
 
 import argparse
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from inspect_ai import eval_set
 
 from configs import ModelConfig, TaskConfig, flag_parse, kv_pair
-from configs.utils import get_eval_path
+from configs.utils import eval_runner, get_eval_path
 from model import Model
 
 
@@ -110,16 +109,9 @@ def main() -> int:
     eval_extra_args = flag_parse(extra) if extra else {}
 
     jobs = [
-        (bench_path, model_path, repeat)
-        for bench_path in args.bench
-        for model_path in args.model
-        for repeat in range(args.epochs)
-    ]
-
-    with ProcessPoolExecutor(max_workers=max(len(jobs), 1)) as executor:
-        futures = [
-            executor.submit(
-                _run_eval_worker,
+        (
+            _run_eval_worker,
+            (
                 bench_path,
                 model_path,
                 repeat,
@@ -127,12 +119,15 @@ def main() -> int:
                 args.task_arg,
                 args.model_arg,
                 eval_extra_args,
-            )
-            for bench_path, model_path, repeat in jobs
-        ]
-        results = [f.result() for f in futures]
+            ),
+            f"{bench_path.stem}/{model_path.stem} (epoch {repeat})",
+        )
+        for bench_path in args.bench
+        for model_path in args.model
+        for repeat in range(args.epochs)
+    ]
 
-    return 0 if all(r == 0 for r in results) else 1
+    return eval_runner(jobs)
 
 
 if __name__ == "__main__":
