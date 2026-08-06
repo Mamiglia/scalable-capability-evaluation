@@ -41,12 +41,18 @@ def main():
     name = f"acts_{acts_dir.name}"
 
     elo = pd.read_csv(out / "elo.csv")
-    entities = list(zip(elo["text_id"], elo["item"]))
-    missing = [f"{t}_{i}" for t, i in entities
-               if not (acts_dir / f"{t}_{i}.npy").exists()]
-    if missing:
-        raise SystemExit(f"{len(missing)}/{len(entities)} entities lack "
+    have = [(acts_dir / f"{t}_{i}.npy").exists()
+            for t, i in zip(elo["text_id"], elo["item"])]
+    missing = [f"{t}_{i}" for (t, i), ok in
+               zip(zip(elo["text_id"], elo["item"]), have) if not ok]
+    if len(missing) > cfg["consolidate"]["max_missing"]:
+        raise SystemExit(f"{len(missing)}/{len(elo)} entities lack "
                          f"activations, e.g. {missing[:3]}")
+    if missing:
+        print(f"dropping {len(missing)} entities without activations "
+              f"(recorder skipped them over the token limit): {missing}")
+        elo = elo[have].reset_index(drop=True)
+    entities = list(zip(elo["text_id"], elo["item"]))
 
     first = np.load(acts_dir / f"{entities[0][0]}_{entities[0][1]}.npy")
     acts = np.empty((len(entities),) + first.shape, dtype=first.dtype)
@@ -57,7 +63,8 @@ def main():
 
     np.save(out / f"{name}.npy", acts)
     meta = json.loads((acts_dir / "meta.json").read_text())
-    meta["row_order"] = "elo.csv row order"
+    meta["row_order"] = "elo.csv row order, minus dropped_entities"
+    meta["dropped_entities"] = missing
     meta["shape"] = list(acts.shape)
     (out / f"{name}.meta.json").write_text(json.dumps(meta, indent=2))
     print(f"{acts.shape} {acts.dtype} row-aligned to elo.csv "

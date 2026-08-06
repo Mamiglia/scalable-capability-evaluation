@@ -1,4 +1,4 @@
-"""Per-transcript elo from the pairwise verdicts (spec step 1).
+"""Per-transcript elo from the pairwise verdicts.
 
 Bradley-Terry as sparse logistic regression: one coefficient per
 transcript plus a global slot-1 position term, P(slot1 picked) =

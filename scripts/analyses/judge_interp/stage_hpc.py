@@ -1,4 +1,4 @@
-"""Stage recording inputs onto the shared storage (spec step 2 prep).
+"""Stage recording inputs onto the shared storage.
 
 Builds staging/inputs.parquet: one row per elo entity (text_id, item)
 with the question, the multiple-choice options as the author model saw

@@ -1,4 +1,4 @@
-"""Record judge activations per transcript (spec step 2).
+"""Record judge activations per transcript.
 
 For each (text_id, item) in staging/inputs.parquet, runs the single-
 transcript read prompt through the judge and saves, at every
