@@ -166,16 +166,24 @@ def eval_runner(jobs: Sequence[Tuple[Callable[..., int], Tuple[Any, ...], str]])
             TimeRemainingColumn(),
         ) as progress:
             task_ids = {label: progress.add_task(label, total=None) for label in labels}
-            completed_count = 0
-            while completed_count < len(jobs):
+            
+            while not all(f.done() for f in futures):
                 while not queue.empty():
-                    msg = queue.get()
-                    kind, label, complete, total = msg
+                    try:
+                        kind, label, complete, total = queue.get_nowait()
+                        if label in task_ids:
+                            progress.update(task_ids[label], completed=complete, total=total)
+                    except Exception:
+                        break
+                time.sleep(0.05)
+
+            while not queue.empty():
+                try:
+                    kind, label, complete, total = queue.get_nowait()
                     if label in task_ids:
                         progress.update(task_ids[label], completed=complete, total=total)
-                        if kind == "complete":
-                            completed_count += 1
-                time.sleep(0.05)
+                except Exception:
+                    break
 
         results = [f.result() for f in futures]
 
