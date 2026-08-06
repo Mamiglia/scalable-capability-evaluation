@@ -1,6 +1,7 @@
 """CLI interface for running judge experiments comparing model pairs across benchmarks."""
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from inspect_ai import eval_set
@@ -8,6 +9,24 @@ from inspect_ai import eval_set
 from configs import ExperimentConfig, flag_parse
 from judge.task import build_judge_tasks
 from model import Model
+
+
+def _run_experiment_worker(exp: ExperimentConfig) -> int:
+    tasks = build_judge_tasks(exp)
+    kwargs = exp.eval_kwargs()
+
+    with Model(exp.judge) as model:
+        success, _ = eval_set(
+            tasks=tasks,
+            log_dir=exp.log_dir,
+            display="plain",
+            **model.eval_kwargs(),
+            **kwargs,
+        )
+    if not success:
+        print(f"Judge experiment failed for configuration: {exp}")
+        return 1
+    return 0
 
 
 def main() -> int:
@@ -19,7 +38,7 @@ def main() -> int:
         "--config",
         '--cfg',
         type=Path,
-        action ="extend",
+        action="extend",
         nargs="+",
         default=None,
         help="Path(s) to experiment YAML configuration file.",
@@ -68,14 +87,17 @@ def main() -> int:
 
     args, extra = parser.parse_known_args()
     eval_extra_args = flag_parse(extra) if extra else {}
-    
+
     if args.config_path and (args.bench or args.major or args.minor or args.judge):
         parser.error(
             "Cannot specify both --config_path and any of (-b/--bench, --major, --minor, -j/--judge)."
         )
-        
+
     if args.config_path:
-        experiments = [ExperimentConfig.from_cli(cfg_path, args=extra, **eval_extra_args) for cfg_path in args.config_path]
+        experiments = [
+            ExperimentConfig.from_cli(cfg_path, args=extra, **eval_extra_args)
+            for cfg_path in args.config_path
+        ]
     else:
         experiments = [
             ExperimentConfig.from_cli(
@@ -85,28 +107,18 @@ def main() -> int:
                     "major": M,
                     "minor": m,
                     "judge": j,
-                    "epochs": args.epochs
+                    "epochs": args.epochs,
                 },
                 **eval_extra_args,
-            ) for b, M, m, j in zip(args.bench, args.major, args.minor, args.judge)
-        ]
-        
-    for exp in experiments:
-        tasks = build_judge_tasks(exp)
-        kwargs = exp.eval_kwargs()
-
-        with Model(exp.judge) as model:
-            success, _ = eval_set(
-                tasks=tasks,
-                log_dir=exp.log_dir,
-                **model.eval_kwargs(),
-                **kwargs,
             )
-        if not success:
-            print(f"Judge experiment failed for configuration: {exp}")
-            return 1
-        
-    return 0
+            for b, M, m, j in zip(args.bench, args.major, args.minor, args.judge)
+        ]
+
+    with ProcessPoolExecutor(max_workers=max(len(experiments), 1)) as executor:
+        futures = [executor.submit(_run_experiment_worker, exp) for exp in experiments]
+        results = [f.result() for f in futures]
+
+    return 0 if all(r == 0 for r in results) else 1
 
 
 if __name__ == "__main__":

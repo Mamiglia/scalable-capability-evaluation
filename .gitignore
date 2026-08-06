@@ -21,6 +21,7 @@ data/
 logs/
 artifacts/
 /docs/
+analysis/
 
 # external reference data: keep small CSVs for scores only, ignore downloaded logs
 external_data/**/*.eval

@@ -1,9 +1,32 @@
 """Unit tests for CLI modules (collect and judge)."""
 
 from unittest.mock import MagicMock
+import pytest
 
 from collect.cli import main as collect_main
 from judge.cli import main as judge_main
+
+
+class SynchronousExecutor:
+    def __init__(self, max_workers=None):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def submit(self, fn, *args, **kwargs):
+        mock_fut = MagicMock()
+        mock_fut.result.return_value = fn(*args, **kwargs)
+        return mock_fut
+
+
+@pytest.fixture(autouse=True)
+def mock_process_pool(monkeypatch):
+    monkeypatch.setattr("collect.cli.ProcessPoolExecutor", SynchronousExecutor)
+    monkeypatch.setattr("judge.cli.ProcessPoolExecutor", SynchronousExecutor)
 
 
 def test_collect_single_eval(monkeypatch, tmp_path):
@@ -34,6 +57,7 @@ def test_collect_single_eval(monkeypatch, tmp_path):
     assert captured["model"] == "custom/model2"
     assert captured["seed"] == 0
     assert captured["log_dir"] == str(tmp_path / "target_dir" / "0")
+    assert captured["display"] == "plain"
 
 
 def test_collect_multiple_evals(monkeypatch, tmp_path):
@@ -107,6 +131,7 @@ def test_collect_args_parsing(monkeypatch, tmp_path):
     assert captured["model_args"]["temp"] == 0.7
     assert captured["limit"] == 10
     assert captured["max_connections"] == 4
+    assert captured["display"] == "plain"
 
 
 def test_judge_main_execution(monkeypatch, tmp_path):
@@ -135,6 +160,7 @@ judge:
     assert judge_main() == 0
     assert captured["tasks"] == ["dummy_task"]
     assert captured["model"] == "p/jdg"
+    assert captured["display"] == "plain"
 
 
 def test_judge_extra_args_parsing(monkeypatch, tmp_path):
@@ -170,3 +196,4 @@ def test_judge_extra_args_parsing(monkeypatch, tmp_path):
     assert captured["model"] == "custom/jdg"
     assert captured["limit"] == 10
     assert captured["max_connections"] == 4
+    assert captured["display"] == "plain"

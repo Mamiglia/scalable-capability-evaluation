@@ -1,6 +1,7 @@
 """CLI interface for collecting benchmark transcripts."""
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from inspect_ai import eval_set
@@ -8,6 +9,50 @@ from inspect_ai import eval_set
 from configs import ModelConfig, TaskConfig, flag_parse, kv_pair
 from configs.utils import get_eval_path
 from model import Model
+
+
+def _run_eval_worker(
+    bench_path: Path,
+    model_path: Path,
+    repeat: int,
+    use_runpod: bool,
+    task_arg: list | None,
+    model_arg: list | None,
+    eval_extra_args: dict,
+) -> int:
+    bench = TaskConfig.from_cli(bench_path)
+    if task_arg:
+        bench.task_args.update(dict(task_arg))
+
+    model_config = ModelConfig.from_cli(model_path)
+    if model_arg:
+        model_config.model_args.update(dict(model_arg))
+
+    print(
+        f"Running epoch {repeat}/{eval_extra_args.get('epochs', 1)} for benchmark "
+        f"'{bench.name}' and model '{model_config.slug}'"
+    )
+
+    with Model(model_config, use_runpod=use_runpod) as model:
+        target_dir = get_eval_path(
+            task=bench,
+            model=model.config,
+            base_dir=eval_extra_args.get("log_dir", "data"),
+        ) / f"{repeat}"
+
+        kwargs = eval_extra_args.copy()
+        kwargs.pop("log_dir", None)
+
+        success, _ = eval_set(
+            tasks=bench.task,
+            task_args=bench.task_args or {},
+            seed=repeat,
+            log_dir=str(target_dir),
+            display="plain",
+            **model.eval_kwargs(),
+            **bench.eval_kwargs() | kwargs,
+        )
+        return 0 if success else 1
 
 
 def main() -> int:
@@ -64,60 +109,30 @@ def main() -> int:
     args, extra = parser.parse_known_args()
     eval_extra_args = flag_parse(extra) if extra else {}
 
-    for bench_path in args.bench:
-        bench = TaskConfig.from_cli(bench_path)
-        if args.task_arg:
-            bench.task_args.update(dict(args.task_arg))
+    jobs = [
+        (bench_path, model_path, repeat)
+        for bench_path in args.bench
+        for model_path in args.model
+        for repeat in range(args.epochs)
+    ]
 
-        for model_path in args.model:
-            model_config = ModelConfig.from_cli(model_path)
-            if args.model_arg:
-                model_config.model_args.update(dict(args.model_arg))
+    with ProcessPoolExecutor(max_workers=max(len(jobs), 1)) as executor:
+        futures = [
+            executor.submit(
+                _run_eval_worker,
+                bench_path,
+                model_path,
+                repeat,
+                args.runpod,
+                args.task_arg,
+                args.model_arg,
+                eval_extra_args,
+            )
+            for bench_path, model_path, repeat in jobs
+        ]
+        results = [f.result() for f in futures]
 
-            with Model(model_config, use_runpod=args.runpod) as model:
-                for repeat in range(args.epochs):
-                    print(
-                        f"Running epoch {repeat}/{args.epochs} for benchmark "
-                        f"'{bench.name}' and model '{model_config.slug}'"
-                    )
-                    exit_code = _run_eval(
-                        bench_cfg=bench,
-                        model=model,
-                        repeat=repeat,
-                        **eval_extra_args,
-                    )
-                    if exit_code:
-                        print(
-                            f"Epoch {repeat} failed with exit code {exit_code} for "
-                            f"benchmark '{bench.name}' and model "
-                            f"'{model_config.slug}'. Stopping further epochs."
-                        )
-                        return exit_code
-    return 0
-
-
-def _run_eval(
-    bench_cfg: TaskConfig,
-    model: Model,
-    repeat: int,
-    **kwargs,
-) -> int:
-    """Execute one evaluation run."""
-    target_dir = get_eval_path(
-        task=bench_cfg,
-        model=model.config,
-        base_dir=kwargs.pop("log_dir", "data"),
-    ) / f"{repeat}"
-
-    success, _ = eval_set(
-        tasks=bench_cfg.task,
-        task_args=bench_cfg.task_args or {},
-        seed=repeat,
-        log_dir=str(target_dir),
-        **model.eval_kwargs(),
-        **bench_cfg.eval_kwargs() | kwargs,
-    )
-    return 0 if success else 1
+    return 0 if all(r == 0 for r in results) else 1
 
 
 if __name__ == "__main__":
