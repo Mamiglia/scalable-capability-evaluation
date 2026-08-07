@@ -1,5 +1,5 @@
 name: google/gemma-4-31b-it
-model_args:
+generate_args:
   extra_body:
     chat_template_kwargs:
       enable_thinking: true
