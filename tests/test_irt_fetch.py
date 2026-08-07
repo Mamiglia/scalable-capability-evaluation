@@ -137,14 +137,15 @@ def test_main_downloads_missing_only_and_is_idempotent(tmp_path, monkeypatch):
     fake = FakeUrlopen()
     monkeypatch.setattr(fetch, "urlopen", fake)
     cfg = FetchConfig(csv=str(csv), out_dir=str(out_dir), models="all")
+    monkeypatch.setattr(fetch.draccus, "parse", lambda *a, **k: cfg)
 
-    assert main(cfg) == 0
+    assert main() == 0
     assert {p.name for p in out_dir.glob("*.eval")} == {"a.eval", "b.eval"}
     assert len(fake.calls) == 2
 
     # second run: everything already present → nothing re-downloaded
     fake.calls.clear()
-    assert main(cfg) == 0
+    assert main() == 0
     assert fake.calls == []
 
 

@@ -41,7 +41,8 @@ class FetchConfig:
     csv: str = "external_data/epoch-gpqa/gpqa_diamond.csv"
     out_dir: str = "external_data/epoch-gpqa"
     models: Any = "all"  # list of "Model version" names, or "all"
-    limit: Optional[int] = None  # cap the download count, for quick test
+    limit: int = 0  # cap the download count for a quick test; 0 = no cap
+    # (plain int, not Optional[int]: draccus 0.8 + py3.14 rejects the union type)
 
 
 def select_models(frame: pd.DataFrame, models: Any
@@ -109,7 +110,7 @@ def main() -> int:
 
     frame = pd.read_csv(cfg.csv, keep_default_na=False)
     resolved, missing_url, not_found = select_models(frame, cfg.models)
-    if cfg.limit is not None:
+    if cfg.limit:
         resolved = resolved[: cfg.limit]
 
     out_dir = Path(cfg.out_dir)
