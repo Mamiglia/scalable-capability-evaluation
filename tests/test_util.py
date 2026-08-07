@@ -15,7 +15,7 @@ from inspect_ai.model import (
 from inspect_ai.tool import ToolCall, ToolCallError
 from inspect_ai.scorer import Score
 
-from util import format_message, extract_transcript, extract_score
+from util import format_message, extract_transcript, extract_score, format_content, strip_think
 
 
 class TestFormatMessage:
@@ -149,3 +149,25 @@ class TestExtractScore:
         """Test score extraction when score value is 'I' (Incorrect)."""
         sample = SimpleNamespace(score=Score(value="I"))
         assert extract_score(sample) is False
+
+
+class TestStripThink:
+    """Inline DeepSeek <think> CoT must be dropped when reasoning is excluded."""
+
+    def test_closed_think_keeps_only_answer(self):
+        assert strip_think("<think>lots of reasoning</think>\n\nThe answer is 42.") == "The answer is 42."
+
+    def test_unclosed_think_drops_everything(self):
+        # model looped and never closed the tag / never produced an answer
+        assert strip_think("<think>reasoning that never ends") == ""
+
+    def test_no_think_unchanged(self):
+        assert strip_think("Just a plain answer.") == "Just a plain answer."
+
+    def test_format_content_strips_inline_think_only_when_excluded(self):
+        block = [ContentText(type="text", text="<think>secret CoT</think>Answer")]
+        assert format_content(block, include_reasoning=False) == "Answer"
+        assert "secret CoT" in format_content(block, include_reasoning=True)
+
+    def test_format_content_str_content_stripped(self):
+        assert format_content("<think>x</think>Y", include_reasoning=False) == "Y"

@@ -3,12 +3,29 @@ from inspect_ai.model import ChatMessage
 from inspect_ai.dataset import Sample
 
 
+def strip_think(text: str) -> str:
+    """
+    Drop DeepSeek-style inline chain-of-thought from a text block.
+
+    DeepSeek emits reasoning as `<think> ... </think>` then the answer. When the
+    provider returns it as plain text (not a separate reasoning block) it reaches
+    the judge verbatim. Keep only what follows the last `</think>`; if `<think>`
+    is never closed (the model spent its whole budget reasoning) there is no
+    answer, so drop everything from the first `<think>` on.
+    """
+    if "</think>" in text:
+        return text.rsplit("</think>", 1)[1].lstrip()
+    if "<think>" in text:
+        return text.split("<think>", 1)[0].rstrip()
+    return text
+
+
 def format_content(content: Any, include_reasoning: bool = True) -> str:
     """
     Format content blocks (text, reasoning, image, audio, video, etc.) into readable string.
     """
     if isinstance(content, str):
-        return content
+        return content if include_reasoning else strip_think(content)
     if not isinstance(content, list):
         return str(content)
 
@@ -17,7 +34,8 @@ def format_content(content: Any, include_reasoning: bool = True) -> str:
         b_type = getattr(block, "type", None)
         if b_type == "text":
             text_val = getattr(block, "text", "")
-            texts.append(str(text_val) if text_val is not None else "")
+            text_val = str(text_val) if text_val is not None else ""
+            texts.append(text_val if include_reasoning else strip_think(text_val))
         elif b_type == "reasoning":
             if include_reasoning:
                 text_val = getattr(block, "text", "")
