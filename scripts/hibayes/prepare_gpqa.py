@@ -213,7 +213,7 @@ def main() -> None:
     data.to_csv(args.out, index=False)
     eligibility["included"] = (eligibility["pairs"] > args.min_pairs) & (eligibility["samples"] >= args.min_samples)
     summary = accounting.join(eligibility, how="left").fillna({"pairs": 0, "samples": 0, "included": False})
-    print(f"Wrote {len(data):,} attempts to {args.out}\n{summary}")
+    print(f"Wrote {len(data):,} attempts to {args.out}\n{summary.to_string()}")
 
 
 if __name__ == "__main__":

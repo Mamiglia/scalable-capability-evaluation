@@ -18,7 +18,7 @@ def judge_feature_logistic_model(
     prior_effect_scale: float = 0.5,
     prior_item_scale: float = 0.5,
 ) -> Model:
-    """Left-choice Bernoulli GLM with per-judge slopes and a random item intercept."""
+    """Left-choice Bernoulli GLM with population effects and pooled judge deviations."""
 
     def statistical_model(features: Features) -> None:
         required = [
@@ -37,9 +37,11 @@ def judge_feature_logistic_model(
         num_conditions = features["num_transcript_condition"]
         judge = features["judge_index"]
 
-        intercepts = numpyro.sample(
-            "judge_intercepts", dist.Normal(0, prior_intercept_scale).expand([num_judges]).to_event(1)
-        )
+        position_mean = numpyro.sample("position_effect_mean", dist.Normal(0, prior_intercept_scale))
+        position_scale = numpyro.sample("position_effect_scale", dist.HalfNormal(prior_effect_scale))
+        position_raw = numpyro.sample("judge_position_effects_raw", dist.Normal(0, 1).expand([num_judges]).to_event(1))
+        intercepts = position_mean + position_scale * position_raw
+        numpyro.deterministic("judge_intercepts", intercepts)
         if pool_judge_effects:
             effect_mean = numpyro.sample(
                 "predictor_effect_mean", dist.Normal(0, prior_effect_scale).expand([len(predictors)]).to_event(1)
