@@ -10,6 +10,7 @@ Usage:
 import argparse
 import csv
 import glob
+import json
 import math
 from collections import defaultdict
 from pathlib import Path
@@ -20,6 +21,7 @@ from inspect_ai.log import read_eval_log
 MAIN_ROOT = "logs/data-expansion"
 PROBE_ROOT = "logs/data-expansion-biggap"
 COMPARISONS_CSV = "configs/comparisons/comparisons.csv"
+MODEL_SET = "configs/comparisons/model_set.json"
 
 # ECI gaps for the epoch-transcript probe pairs (ECIs in configs/judge_biggap_gpqa.yaml).
 PROBE_GAPS = {
@@ -67,6 +69,7 @@ def load_rows(main_root, probe_root, comparisons_csv):
     delta = {}
     for r in csv.DictReader(open(comparisons_csv)):
         delta[frozenset([r["model_a"], r["model_b"]])] = float(r["delta_eci"])
+    eci = {m["name"]: m["eci"] for m in json.load(open(MODEL_SET))["models"]}
     rows = []  # (source_eval, judge, pair, gap, correct, n)
     counts = defaultdict(lambda: [0, 0])
     for p in glob.glob(f"{main_root}/*/*/*/phase-*/*.eval") + glob.glob(f"{probe_root}/*/*/*/phase-*/*.eval"):
@@ -78,15 +81,18 @@ def load_rows(main_root, probe_root, comparisons_csv):
         if read_eval_log(p, header_only=True).status != "success":
             continue
         if probe_root.endswith(parts[1]):
-            src, gap = "gpqa (epoch transcripts)", PROBE_GAPS[pair]
+            src, gap, flip = "gpqa (epoch transcripts)", PROBE_GAPS[pair], False
         else:
             src, gap = bench, delta[frozenset([DISPLAY[a], DISPLAY[b]])]
+            # "C" = picked the first-named model; comparisons.csv naming is
+            # mixed, so correct = "I" where the first-named is the ECI-weaker
+            flip = eci[DISPLAY[a]] < eci[DISPLAY[b]]
         for s in read_eval_log(p).samples:
             sc = list(s.scores.values())[0] if s.scores else None
             if sc and sc.value in ("C", "I"):
                 key = (src, judge, pair, gap)
                 counts[key][1] += 1
-                if sc.value == "C":
+                if sc.value == ("I" if flip else "C"):
                     counts[key][0] += 1
     for (src, judge, pair, gap), (c, n) in counts.items():
         rows.append({"eval": src, "judge": judge, "pair": pair, "eci_gap": gap,
