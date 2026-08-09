@@ -56,7 +56,7 @@ def test_collect_single_eval(monkeypatch, tmp_path):
     assert collect_main() == 0
     assert captured["tasks"] == "inspect_evals/mbpp"
     assert captured["model"] == "custom/model2"
-    assert captured["seed"] == 0
+    assert "seed" not in captured
     assert captured["log_dir"] == str(tmp_path / "target_dir" / "0")
     assert captured["display"] == "plain"
 
