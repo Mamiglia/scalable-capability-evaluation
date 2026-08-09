@@ -98,7 +98,7 @@ class Model:
 
     def _enabled(self) -> bool:
         config = self.config.runpod
-        if config is None:
+        if not config:
             if self.use_runpod:
                 raise ValueError(
                     f"model '{self.config.name}' needs a runpod mapping with --runpod"

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Tuple
 
 from inspect_ai.log import read_eval_log
 
@@ -33,7 +33,8 @@ class ExperimentConfig(DraccusConfig):
     benchmark: TaskConfig | str
 
     mode: Literal["paired", "combinatorial", "custom"] = "paired"
-    pairs: Optional[List[Tuple[int, int]]] = None
+    # Optional[...] breaks draccus on py3.14; 0 / empty / None-default plain types mean unset.
+    pairs: List[Tuple[int, int]] = field(default_factory=list)
 
     require_both_correct: bool = True
     include_reverse: bool = True
@@ -41,9 +42,9 @@ class ExperimentConfig(DraccusConfig):
     max_length: int = 65536
     system_prompt: str = SYSTEM_PROMPT
 
-    log_dir: Optional[str] = None
-    epochs: Optional[int] = None
-    limit: Optional[int] = None
+    log_dir: str = None
+    epochs: int = 0
+    limit: int = 0
     
     def model_evals(self, model: ModelConfig) -> List[Path]:
         """Return a list of all model evaluation paths for a given <model, task> tuple."""
@@ -102,8 +103,8 @@ class ExperimentConfig(DraccusConfig):
     def eval_kwargs(self) -> Dict[str, Any]:
         """Return keyword arguments for inspect_ai.eval."""
         kwargs = self._kwargs or {}
-        if self.limit is not None:
+        if self.limit:
             kwargs["limit"] = self.limit
-        if self.epochs is not None:
+        if self.epochs:
             kwargs["epochs"] = self.epochs
         return kwargs
