@@ -1,0 +1,7 @@
+# atlas-cloud/fp8 is the only fp8 endpoint (Z.AI first-party serves fp4).
+name: z-ai/glm-4.6
+model_args:
+  provider: {only: [atlas-cloud/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+generate_args:
+  extra_body:
+    reasoning: {enabled: true}

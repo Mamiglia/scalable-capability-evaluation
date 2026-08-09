@@ -1,3 +1,5 @@
+# Sole endpoint (novita); quantization undeclared by the provider - recorded, not chosen.
+# Non-thinking instruct model, no reasoning args.
 name: inclusionai/ling-2.6-flash
 model_args:
-  provider: {}
+  provider: {only: [novita], allow_fallbacks: false, require_parameters: true, data_collection: deny}

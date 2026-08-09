@@ -1,0 +1,5 @@
+# 30 items, free-form integer answers, scored by numeric match
+# epochs is a top-level eval arg here: the aime tasks take no task_args.
+name: aime2025
+task: inspect_evals/aime2025
+epochs: 4
