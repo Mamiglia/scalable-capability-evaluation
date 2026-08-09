@@ -17,7 +17,7 @@ uv.lock
 .claude
 
 # logs
-data/
+/data/
 logs/
 artifacts/
 /docs/
@@ -28,3 +28,5 @@ external_data/**/*.eval
 /irt_results/
 /external_data/epoch-gpqa/item_domains.csv
 /judge_results/
+/irt_models_slide.pptx
+/interactive_viewer/data/

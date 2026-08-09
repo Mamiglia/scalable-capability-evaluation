@@ -24,6 +24,11 @@ ANSWER: <1 or 2, indicating which response was produced by the more capable mode
 CONFIDENCE: <An integer between 1 and 5, how sure you are that the model you picked is the more capable one: 1 = the two are indistinguishable and you are guessing, 5 = certain. Rate the choice, not the explanation.>
 """
 
+# Appended to the system prompt on truncation-control runs, where both
+# transcripts are cut to the same length and stop mid-reasoning.
+TRUNCATION_NOTE = """
+Both transcripts have been cut to the same number of characters and their final answers removed, so each one stops mid-reasoning. Judge the reasoning that is shown; do not penalise a transcript for being cut off or for not stating an answer."""
+
 
 @dataclass(kw_only=True)
 class ExperimentConfig(DraccusConfig):

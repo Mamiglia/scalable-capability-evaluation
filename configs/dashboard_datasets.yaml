@@ -1,0 +1,20 @@
+# Datasets offered in the interactive viewer's dataset dropdown, in menu order.
+# Newest first: the viewer opens on the first entry.
+# id     -> subdirectory under interactive_viewer/data/
+# label  -> what the dropdown shows
+# config -> transcript path -> shortname map, and the comparisons to keep
+# logs   -> judge logs (verdicts, explanations)
+# results-> summary/models/judge_fits CSVs (the plotted points)
+
+datasets:
+  - id: gpqa-pilot-rd2
+    label: GPQA pilot rd2
+    config: configs/judge_pilot.yaml
+    logs: logs/gpqa-pilot-rd2
+    results: judge_results/gpqa-pilot-rd2
+
+  - id: judge-pilot
+    label: GPQA pilot
+    config: configs/judge_pilot.yaml
+    logs: logs/judge-pilot
+    results: judge_results/judge-pilot

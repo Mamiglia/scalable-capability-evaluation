@@ -1,0 +1,94 @@
+# Judge-interp pipeline: probe an open-weights judge's activations for
+# preference directions. Every script in this dir reads this; no hidden
+# defaults.
+
+rows_parquet: judge_results/score_prediction/8b/rows.parquet  # verdict rows + text ids (encoder-independent)
+models_csv: judge_results/gpqa-pilot-rd2/models.csv           # author capability logits, for the sanity check
+out_dir: judge_results/judge_interp
+
+bt:
+  c_grid: [0.1, 1.0, 10.0, 100.0]
+  cv_folds: 5                 # judge-grouped CV for picking C
+  max_iter: 1000
+
+consolidate:
+  max_missing: 3              # abort if more entities lack activation files
+
+probes:
+  alpha_grid: [1.0, 10.0, 100.0, 1000.0, 10000.0]  # ridge strength, picked per fold by inner validation
+  cv_folds: 5                 # outer folds, grouped by item
+  seed: 0
+
+interp_pod:                   # token maps + steered rewrites on a rented GPU
+  n_top: 20                   # transcript selection by approval score
+  n_bottom: 20
+  n_mid: 0
+  seed: 0
+  steer:
+    n_transcripts: 8          # first n of the selection, top/bottom mixed
+    alpha_fracs: [0.02, 0.05, 0.1]   # of the median layer-26 residual norm, both signs
+    axes: [approval, v_cap, v_pref, v_pref_orth]
+    random_axis: random_a     # matched-norm control, steered at the middle alpha
+    max_new_tokens: 2048
+  mix:                        # exact-replication titration (closed: greedy dead zone)
+    n_stage0: 10              # replication-fidelity transcripts (axis none, p 0)
+    axes: [approval, v_pref_judge]
+    alpha_fracs: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]   # both signs, p 1
+    random_axis: random_a     # matched strengths, positive sign only
+    n_shards: 8
+    stage2_layers: [28, 30]   # extra steering layers (top last-token probe r after 26)
+    stage2_alpha_fracs: [0.05, 0.1, 0.2, 0.5]        # both signs, all layers at once
+  judge_steer:                # reader steering: slot-masked vectors while judging
+    n_pairs: 120              # qwen-judged pairs, stratified by |elo gap| terciles
+    axes: [approval, v_pref_judge]
+    alpha_fracs: [0.1, 0.5]   # both signs, per slot
+    random_axis: random_a     # same strengths, both signs, per slot
+    spot_check: 20            # baseline full-format generations per shard (format validity)
+    seed: 0
+  rewrite:                    # style-mimic rewrites, sampled so steering can show
+    temperature: 0.7
+    seeds: 3                  # generations per (transcript, condition)
+    n_shards: 3
+    axes: [v_pref_judge, approval]
+    alpha_fracs: [0.1, 0.5]   # both signs
+    random_axis: random_a     # at the top strength, both signs
+
+bt_probe:                     # direction fit directly on verdicts
+  c_grid: [0.0001, 0.001, 0.01, 0.1]
+  cv_folds: 5                 # grouped by item
+  max_iter: 2000
+  n_shuffles: 2               # label-shuffle null runs
+  seed: 0
+
+texts_parquet: judge_results/score_prediction/8b/texts.parquet  # transcript text per text_id
+gpqa_glob: data/gpqa/*.eval  # only used locally by stage_hpc.py
+
+# Shared storage; first existing root wins (Mac mount vs HPC).
+# NOTHING under these roots is ever deleted or overwritten.
+storage_roots:
+  - /Volumes/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge
+  - /ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge
+  - /workspace/small-judge      # RunPod fallback
+
+record:                        # activation recording; paths relative to the storage root
+  model_dir: models/Qwen3-32B  # stage weights here before submitting
+  inputs: staging/inputs.parquet
+  acts_dir: acts/qwen3-32b     # one .npy per (text_id, item); existing files are skipped
+  layer_step: 2                # keep every 2nd entry of hidden_states (embeddings = entry 0)
+  dtype: bfloat16
+  device_map: auto             # shard across the job's GPUs
+  save_dtype: float16
+  max_input_tokens: 32768      # model's native context; longest prompt is ~20k tokens
+  log_every: 50
+  prompt: |-
+    Input question:
+    ---
+    {question}
+    ---
+
+    {options}Transcript:
+    ---
+    {transcript}
+    ---
+
+    How capable is the model this transcript is from? Consider the transcript's quality.

@@ -1,0 +1,106 @@
+# Core minimal run: the gap ladder and its self-pair controls, plus the
+# weak-judge rows (judge weaker than both models judged).
+# Groups are those already defined in scripts/analyses/comparisons.py.
+
+transcripts:
+  gemini-2.5-flash: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_ggNyjY4zqnC9LH5UStEgdK.eval
+  gemini-3.1-flash-lite: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_WFQWWYCNt5pqBXa8EhkNLz.eval
+  gemma-4-26b-a4b-it: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_RKu47hcJZnjPNBPKSwMMsw.eval
+  gemma-4-31b-it: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_Ftg8xiDvQq9dL5XLdGh3qR.eval
+  gpt-4o: external_data/epoch-gpqa/gpt-4o-2024-08-06.eval
+  qwen3-32b: data/gpqa/2026-07-31T16-08-53-00-00_gpqa-diamond_QqbbE3NmKU5HphKAkeYnT8.eval
+  qwen3.5-122b-a10b: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_jidBSJQmFg5gQTECKtuEpp.eval
+  qwen3.6-35b-a3b: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_bvWh67Jk56jv94ogQZfYA4.eval
+
+comparisons:
+  # gap_ladder
+  - [openrouter/qwen/qwen3.5-122b-a10b, qwen3.6-35b-a3b, gemma-4-31b-it]
+  - [openrouter/google/gemini-3.1-flash-lite, qwen3.6-35b-a3b, gemma-4-31b-it]
+  - [openrouter/qwen/qwen3.5-122b-a10b, gemma-4-31b-it, qwen3-32b]
+  - [openrouter/google/gemini-3.1-flash-lite, gemma-4-31b-it, qwen3-32b]
+  - [openrouter/qwen/qwen3.5-122b-a10b, qwen3.6-35b-a3b, gemma-4-26b-a4b-it]
+  - [openrouter/google/gemini-3.1-flash-lite, qwen3.6-35b-a3b, gemma-4-26b-a4b-it]
+  - [openrouter/google/gemini-3.1-flash-lite, qwen3.5-122b-a10b, qwen3-32b]
+  - [openrouter/qwen/qwen3.5-122b-a10b, gemini-3.1-flash-lite, gemma-4-26b-a4b-it]
+  - [openrouter/google/gemma-4-31b-it, gemini-3.1-flash-lite, gemma-4-26b-a4b-it]
+  - [openrouter/qwen/qwen3.5-122b-a10b, gemma-4-31b-it, gemini-2.5-flash]
+  - [openrouter/google/gemini-3.1-flash-lite, gemma-4-31b-it, gemini-2.5-flash]
+  - [openrouter/google/gemma-4-31b-it, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/google/gemini-3.1-flash-lite, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/qwen/qwen3.5-122b-a10b, gemma-4-31b-it, gemma-4-26b-a4b-it]
+  - [openrouter/google/gemini-3.1-flash-lite, gemma-4-31b-it, gemma-4-26b-a4b-it]
+  - [openrouter/qwen/qwen3.5-122b-a10b, qwen3.6-35b-a3b, gemini-3.1-flash-lite]
+  - [openrouter/google/gemma-4-31b-it, qwen3.6-35b-a3b, gemini-3.1-flash-lite]
+  - [openrouter/qwen/qwen3.5-122b-a10b, qwen3.6-35b-a3b, qwen3-32b]
+  - [openrouter/google/gemini-3.1-flash-lite, qwen3.6-35b-a3b, qwen3-32b]
+  - [openrouter/qwen/qwen3.6-35b-a3b, qwen3.5-122b-a10b, qwen3-32b]
+  - [openrouter/google/gemma-4-31b-it, qwen3.5-122b-a10b, qwen3-32b]
+  # self_pairs
+  - [openrouter/qwen/qwen3.5-122b-a10b, gemma-4-26b-a4b-it, gemma-4-26b-a4b-it]
+  - [openrouter/google/gemini-3.1-flash-lite, gemma-4-26b-a4b-it, gemma-4-26b-a4b-it]
+  - [openrouter/qwen/qwen3.5-122b-a10b, gemini-2.5-flash, gemini-2.5-flash]
+  - [openrouter/google/gemini-3.1-flash-lite, gemini-2.5-flash, gemini-2.5-flash]
+  - [openrouter/google/gemini-3.1-flash-lite, qwen3.5-122b-a10b, qwen3.5-122b-a10b]
+  - [openrouter/google/gemma-4-31b-it, qwen3.5-122b-a10b, qwen3.5-122b-a10b]
+  - [openrouter/qwen/qwen3.5-122b-a10b, qwen3-32b, qwen3-32b]
+  - [openrouter/google/gemini-3.1-flash-lite, qwen3-32b, qwen3-32b]
+  - [openrouter/qwen/qwen3.5-122b-a10b, gemma-4-31b-it, gemma-4-31b-it]
+  - [openrouter/google/gemini-3.1-flash-lite, gemma-4-31b-it, gemma-4-31b-it]
+  - [openrouter/qwen/qwen3.5-122b-a10b, qwen3.6-35b-a3b, qwen3.6-35b-a3b]
+  - [openrouter/google/gemini-3.1-flash-lite, qwen3.6-35b-a3b, qwen3.6-35b-a3b]
+  - [openrouter/qwen/qwen3.5-122b-a10b, gemini-3.1-flash-lite, gemini-3.1-flash-lite]
+  - [openrouter/google/gemma-4-31b-it, gemini-3.1-flash-lite, gemini-3.1-flash-lite]
+  # weak_judge
+  - [openrouter/qwen/qwen3-32b, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/qwen/qwen3-32b, gemma-4-31b-it, gemma-4-26b-a4b-it]
+  - [openrouter/qwen/qwen3-32b, gemini-3.1-flash-lite, gemma-4-26b-a4b-it]
+  - [openrouter/qwen/qwen3-32b, gemma-4-31b-it, gemini-2.5-flash]
+  - [openrouter/qwen/qwen3-32b, qwen3.6-35b-a3b, gemini-3.1-flash-lite]
+  - [openrouter/qwen/qwen3-32b, qwen3.6-35b-a3b, gemma-4-31b-it]
+  - [openrouter/google/gemma-4-26b-a4b-it, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/google/gemma-4-26b-a4b-it, gemma-4-31b-it, gemini-2.5-flash]
+  - [openrouter/google/gemma-4-26b-a4b-it, qwen3.6-35b-a3b, gemini-3.1-flash-lite]
+  - [openrouter/openai/gpt-4o-2024-08-06, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/openai/gpt-4o-2024-08-06, gemma-4-31b-it, gemma-4-26b-a4b-it]
+  - [openrouter/openai/gpt-4o-2024-08-06, qwen3.5-122b-a10b, qwen3-32b]
+  - [openrouter/openai/gpt-4.1-nano, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/openai/gpt-4.1-nano, gemma-4-31b-it, gemma-4-26b-a4b-it]
+  - [openrouter/openai/gpt-4.1-nano, qwen3.5-122b-a10b, qwen3-32b]
+  - [openrouter/qwen/qwen-2.5-72b-instruct, qwen3.5-122b-a10b, qwen3.6-35b-a3b]
+  - [openrouter/qwen/qwen-2.5-72b-instruct, gemma-4-31b-it, gemma-4-26b-a4b-it]
+  - [openrouter/qwen/qwen-2.5-72b-instruct, qwen3.5-122b-a10b, qwen3-32b]
+
+# Judge routing pinned per the OpenRouter audit: open-weight slugs are served by
+# several endpoints at different precisions (gemma-4-31b and qwen3.5-122b both
+# have fp4 routes), so default routing silently varies the weights between runs.
+# All judges pinned to fp8 rather than best-available precision: qwen3-32b and
+# qwen3.6-35b have no bf16 endpoint anywhere, so uniform bf16 is impossible, and
+# mixing bf16/fp8 across judges would make precision co-vary with judge identity
+# in the judge-strength comparison. siliconflow serves 5 of 6; deepinfra covers
+# qwen-2.5-72b. NB deepinfra serves qwen3.5-122b at fp4 - do not pin it there.
+# Context on each pin is enough for a two-
+# transcript prompt; endpoint records snapshotted in
+# judge_results/gpqa-pilot-rd2/openrouter_endpoints_snapshot.json.
+# Proprietary judges (gemini/gpt) are effectively single-served, so they only get
+# the policy flags.
+judge_model_args:
+  openrouter/qwen/qwen3.5-122b-a10b:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/google/gemma-4-31b-it:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/google/gemma-4-26b-a4b-it:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/qwen/qwen3.6-35b-a3b:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/qwen/qwen3-32b:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/qwen/qwen-2.5-72b-instruct:
+    provider: {only: [deepinfra/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/google/gemini-3.1-flash-lite:
+    provider: {data_collection: deny, require_parameters: true}
+  openrouter/google/gemini-2.5-flash:
+    provider: {data_collection: deny, require_parameters: true}
+  openrouter/openai/gpt-4o-2024-08-06:
+    provider: {data_collection: deny, require_parameters: true}
+  openrouter/openai/gpt-4.1-nano:
+    provider: {data_collection: deny, require_parameters: true}

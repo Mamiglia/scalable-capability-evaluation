@@ -126,4 +126,4 @@ def extract_score(sample: Sample) -> bool:
     Extract the score from the sample's output.
     """
     score = sample.score
-    return score.value == "C"
+    return score is not None and score.value == "C"

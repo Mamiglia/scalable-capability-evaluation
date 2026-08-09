@@ -4,7 +4,7 @@ from inspect_ai import Task
 from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
-from configs.experiment import ExperimentConfig, SYSTEM_PROMPT
+from configs.experiment import ExperimentConfig, SYSTEM_PROMPT, TRUNCATION_NOTE
 from judge.dataset import build_dataset
 from judge.scorer import judge_scorer
 
@@ -17,6 +17,7 @@ def judge_task(
     require_both_correct: bool = True,
     include_reverse: bool = True,
     include_reasoning: bool = True,
+    truncate_frac: float | None = None,
     experiment_name: str | None = None,
     task_name: str | None = None,
 ) -> Task:
@@ -34,6 +35,9 @@ def judge_task(
 
     name = task_name or f"{benchmark_name}={major_path.stem}|{minor_path.stem}"
 
+    if truncate_frac is not None:
+        system_prompt = system_prompt + TRUNCATION_NOTE
+
     return Task(
         name=name,
         description="Judge the responses of two AI models to the same input prompt.",
@@ -44,6 +48,7 @@ def judge_task(
             require_both_correct=require_both_correct,
             include_reverse=include_reverse,
             include_reasoning=include_reasoning,
+            truncate_frac=truncate_frac,
         ),
         solver=[system_message(system_prompt), generate()],
         scorer=judge_scorer(),
@@ -57,6 +62,7 @@ def judge_task(
             "require_both_correct": require_both_correct,
             "include_reverse": include_reverse,
             "include_reasoning": include_reasoning,
+            "truncate_frac": truncate_frac,
             "experiment_name": experiment_name,
         },
     )
