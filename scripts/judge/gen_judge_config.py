@@ -14,11 +14,14 @@ Usage:
 
 import argparse
 import csv
+import json
 from pathlib import Path
 
 import yaml
 
 MODELS_DIR = Path("configs/models")
+MODEL_SET = Path("configs/comparisons/model_set.json")
+ECI_EXTRA = {"qwen3-32b": 130.0}  # judge-only in model_set.json
 
 # CSV display name -> configs/models shortname (also the collect dir name).
 SHORTNAME = {
@@ -75,12 +78,25 @@ def main() -> int:
     judges = sorted({shortname(r["judge"]) for r in rows})
     pins = {j: judge_slug_and_pins(j) for j in judges}  # short -> (slug, model_args)
 
+    data = json.loads(MODEL_SET.read_text())
+    eci = {SHORTNAME[m["name"]]: m["eci"] for m in data["models"] if m["name"] in SHORTNAME}
+    eci |= ECI_EXTRA
+
+    def oriented(judge_short, a, b):
+        """major = higher-ECI member; keep CSV order where that pair dir already
+        has logs (renaming it would make run_judging re-judge the pair)."""
+        if a == b or eci.get(a) is None or eci.get(b) is None or eci[a] >= eci[b]:
+            return a, b
+        if (Path(args.log_root) / judge_short / f"{a}-vs-{b}").exists():
+            return a, b
+        return b, a
+
     cfg = {
         "log_root": args.log_root,
         "transcripts": {m: transcript_path(args.transcripts_dir, m) for m in members},
         "comparisons": [
-            [pins[shortname(r["judge"])][0], shortname(r["model_a"]), shortname(r["model_b"])]
-            for r in rows
+            [pins[j][0], *oriented(j, shortname(r["model_a"]), shortname(r["model_b"]))]
+            for r in rows for j in [shortname(r["judge"])]
         ],
         "judge_model_args": {slug: margs for slug, margs in pins.values()},
     }
