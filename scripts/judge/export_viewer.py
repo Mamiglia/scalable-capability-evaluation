@@ -185,7 +185,8 @@ def main():
                 if m in oidx["models"]:
                     meta[f"acc_{ob}"] = oidx["models"][m]["accuracy"]
         json.dump(idx, open(DATA_ROOT / f"data-expansion-{b}/index.json", "w"))
-    listing = json.load(open(DATA_ROOT / "datasets.json"))
+    listing_path = DATA_ROOT / "datasets.json"
+    listing = json.load(open(listing_path)) if listing_path.exists() else []
     listing = entries + [d for d in listing if not d["id"].startswith("data-expansion-")]
     json.dump(listing, open(DATA_ROOT / "datasets.json", "w"))
 
