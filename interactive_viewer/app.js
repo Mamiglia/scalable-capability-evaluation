@@ -23,7 +23,19 @@ const emptyNote = $("empty-note");
 const hintEl = $("ctl-hint");
 const ctlDataset = $("ctl-dataset");
 const ctlTrunc = $("ctl-trunc"), ctlSubset = $("ctl-subset"), ctlSource = $("ctl-source"),
-      ctlColorby = $("ctl-colorby"), ctlCurves = $("ctl-curves");
+      ctlColorby = $("ctl-colorby"), ctlCurves = $("ctl-curves"), ctlXmetric = $("ctl-xmetric");
+
+/* x-axis gap under the selected metric; datasets without the fields (older
+   bakes) fall back to their baked per-bench d_acc */
+function gapOf(r) {
+  const M = INDEX.models[r.major], N = INDEX.models[r.minor], k = ctlXmetric.value;
+  const f = k === "eci" ? "eci" : "acc_" + k;
+  if (M && N && M[f] != null && N[f] != null) return Math.abs(M[f] - N[f]);
+  return r.d_acc;
+}
+const X_TITLES = { eci: "capability gap (ECI)", gpqa: "capability gap (GPQA accuracy difference)",
+                   aime2025: "capability gap (AIME 2025 accuracy difference)",
+                   aime2026: "capability gap (AIME 2026 accuracy difference)" };
 const overlay = $("modal");
 
 /* --- utils --------------------------------------------------------------- */
@@ -169,7 +181,7 @@ function filteredRuns() {
 function hoverData(r) {
   const j = modelMeta(r.judge), M = modelMeta(r.major), N = modelMeta(r.minor);
   return [j.label, num(j.acc), j.rel, M.label, num(M.acc), M.rel,
-          N.label, num(N.acc), N.rel, r.d_acc, r.score, r.score_lo, r.score_hi,
+          N.label, num(N.acc), N.rel, gapOf(r), r.score, r.score_lo, r.score_hi,
           r.n_items, r.slot_a];
 }
 const MAIN_HOVER =
@@ -210,9 +222,9 @@ function buildCurve(j, crossPts, color) {
     return lineTrace(j, xs, ys, color);
   }
   // connect runs — also the honest fallback when a sigmoid fit can't represent the subset
-  const pts = crossPts.slice().sort((a, b) => a.d_acc - b.d_acc);
+  const pts = crossPts.slice().sort((a, b) => gapOf(a) - gapOf(b));
   if (pts.length < 2) return null;
-  return lineTrace(j, pts.map(r => r.d_acc), pts.map(r => r.score), color);
+  return lineTrace(j, pts.map(r => gapOf(r)), pts.map(r => r.score), color);
 }
 
 /* --- plot ---------------------------------------------------------------- */
@@ -240,7 +252,7 @@ function baseLayout(theme) {
     yaxis2: { domain: [0, 1], range: [0, 1], matches: "y", anchor: "x",
               showticklabels: false, gridcolor: theme.grid, showgrid: true, zeroline: false },
     xaxis: { domain: [0.24, 1], range: [0, XMAX], anchor: "y2",
-             title: { text: "capability gap (GPQA accuracy difference)" },
+             title: { text: X_TITLES[ctlXmetric.value] || X_TITLES.eci },
              gridcolor: theme.grid, zeroline: false, linecolor: theme.muted,
              ticks: "outside", tickcolor: theme.muted },
     legend: { x: 1.02, y: 0.5, xanchor: "left", yanchor: "middle",
@@ -299,7 +311,7 @@ function renderPlot() {
     const cj = cross.filter(r => r.judge === j);
     traces.push({
       type: "scatter", mode: "markers", name: label, legendgroup: j, showlegend: true,
-      x: cj.map(r => r.d_acc), y: cj.map(r => r.score),
+      x: cj.map(r => gapOf(r)), y: cj.map(r => r.score),
       customdata: cj.map(hoverData), hovertemplate: MAIN_HOVER,
       marker: { color: color, size: 9, symbol: "circle",
                 line: { color: theme.surface, width: 0.8 } },
@@ -444,7 +456,7 @@ function buildHeader(run) {
   $("cmp-submeta").innerHTML = run.is_self
     ? esc(M.label) + " " + metaStr(run.major) + " vs itself (self-pair)"
     : esc(M.label) + " " + metaStr(run.major) + " vs " + esc(N.label) + " " + metaStr(run.minor) +
-      " · <b>gap</b> " + fmt(run.d_acc);
+      " · <b>gap</b> " + fmt(gapOf(run));
   const parts = [
     "judge accuracy <b>" + fmt(run.score) + "</b> [" + fmt(run.score_lo) + ", " +
       fmt(run.score_hi) + "] · n=" + run.n_items,
@@ -751,7 +763,9 @@ overlay.addEventListener("mousedown", e => { if (e.target === overlay) closeModa
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !overlay.hidden) closeModal(); });
 
 /* --- wiring + boot ------------------------------------------------------- */
-[ctlTrunc, ctlSubset, ctlSource, ctlColorby, ctlCurves].forEach(c =>
+[ctlTrunc, ctlSubset, ctlSource, ctlColorby, ctlCurves, ctlXmetric].forEach(c =>
+  c.addEventListener("change", rescaleX));
+[ctlTrunc, ctlSubset, ctlSource, ctlColorby, ctlCurves, ctlXmetric].forEach(c =>
   c.addEventListener("change", renderPlot));
 if (window.matchMedia) {
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -782,9 +796,13 @@ async function loadDataset(id) {
     loadFailed("data/" + id + "/index.json", e);
     return;
   }
-  const xs = INDEX.runs.filter(r => !r.is_self).map(r => r.d_acc);
-  XMAX = Math.max((xs.length ? Math.max.apply(null, xs) : 0.3) * 1.06, 0.05);
+  rescaleX();
   renderPlot();
+}
+
+function rescaleX() {
+  const xs = INDEX && INDEX.runs ? INDEX.runs.filter(r => !r.is_self).map(r => gapOf(r)) : [];
+  XMAX = Math.max((xs.length ? Math.max.apply(null, xs) : 0.3) * 1.06, 0.05);
 }
 
 async function boot() {
