@@ -1,0 +1,7 @@
+# Sole endpoint (OpenAI). Always reasons; effort pinned so the setting is recorded.
+name: openai/o4-mini
+model_args:
+  provider: {only: [openai], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+generate_args:
+  extra_body:
+    reasoning: {enabled: true, effort: medium}

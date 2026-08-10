@@ -1,0 +1,89 @@
+log_root: logs/data-expansion/gpqa
+transcripts: {deepseek-v4-flash-0731: data/gpqa/63793eb6/deepseek-v4-flash-0731/0/2026-08-08T01-31-11-00-00_gpqa-diamond_eX65fvZSwXQJpSeH3K525M.eval,
+  glm-4.6: data/gpqa/63793eb6/glm-4.6/0/2026-08-08T01-25-38-00-00_gpqa-diamond_kLajRUZ5SjXGvTpaW4xYQT.eval,
+  ling-2.6-flash: data/gpqa/63793eb6/ling-2.6-flash/0/2026-08-08T01-25-38-00-00_gpqa-diamond_jCZEbYsNruehR4wAfatRy3.eval,
+  qwen3-8b: data/gpqa/63793eb6/qwen3-8b/0/2026-08-08T01-25-38-00-00_gpqa-diamond_Q9XRPGahJtyTnMhVoe9rTz.eval,
+  qwen3-vl-30b-a3b-instruct: data/gpqa/63793eb6/qwen3-vl-30b-a3b-instruct/0/2026-08-08T01-25-38-00-00_gpqa-diamond_LV45Hio8wkeTDacq4KkmYM.eval}
+comparisons:
+- [openrouter/qwen/qwen3-8b, qwen3-vl-30b-a3b-instruct, ling-2.6-flash]
+- [openrouter/qwen/qwen3-8b, qwen3-vl-30b-a3b-instruct, glm-4.6]
+- [openrouter/qwen/qwen3-8b, qwen3-vl-30b-a3b-instruct, deepseek-v4-flash-0731]
+- [openrouter/qwen/qwen3-8b, glm-4.6, ling-2.6-flash]
+- [openrouter/qwen/qwen3-8b, ling-2.6-flash, deepseek-v4-flash-0731]
+- [openrouter/qwen/qwen3-8b, glm-4.6, deepseek-v4-flash-0731]
+- [openrouter/qwen/qwen3-32b, qwen3-8b, qwen3-vl-30b-a3b-instruct]
+- [openrouter/qwen/qwen3-32b, qwen3-8b, ling-2.6-flash]
+- [openrouter/qwen/qwen3-32b, qwen3-8b, glm-4.6]
+- [openrouter/qwen/qwen3-32b, qwen3-8b, deepseek-v4-flash-0731]
+- [openrouter/qwen/qwen3-32b, qwen3-vl-30b-a3b-instruct, ling-2.6-flash]
+- [openrouter/qwen/qwen3-32b, qwen3-vl-30b-a3b-instruct, glm-4.6]
+- [openrouter/qwen/qwen3-32b, qwen3-vl-30b-a3b-instruct, deepseek-v4-flash-0731]
+- [openrouter/qwen/qwen3-32b, glm-4.6, ling-2.6-flash]
+- [openrouter/qwen/qwen3-32b, ling-2.6-flash, deepseek-v4-flash-0731]
+- [openrouter/qwen/qwen3-32b, glm-4.6, deepseek-v4-flash-0731]
+- [openrouter/qwen/qwen3-vl-30b-a3b-instruct, qwen3-8b, ling-2.6-flash]
+- [openrouter/qwen/qwen3-vl-30b-a3b-instruct, qwen3-8b, glm-4.6]
+- [openrouter/qwen/qwen3-vl-30b-a3b-instruct, qwen3-8b, deepseek-v4-flash-0731]
+- [openrouter/qwen/qwen3-vl-30b-a3b-instruct, glm-4.6, ling-2.6-flash]
+- [openrouter/qwen/qwen3-vl-30b-a3b-instruct, ling-2.6-flash, deepseek-v4-flash-0731]
+- [openrouter/qwen/qwen3-vl-30b-a3b-instruct, glm-4.6, deepseek-v4-flash-0731]
+- [openrouter/inclusionai/ling-2.6-flash, qwen3-8b, qwen3-vl-30b-a3b-instruct]
+- [openrouter/inclusionai/ling-2.6-flash, qwen3-8b, glm-4.6]
+- [openrouter/inclusionai/ling-2.6-flash, qwen3-8b, deepseek-v4-flash-0731]
+- [openrouter/inclusionai/ling-2.6-flash, qwen3-vl-30b-a3b-instruct, glm-4.6]
+- [openrouter/inclusionai/ling-2.6-flash, qwen3-vl-30b-a3b-instruct, deepseek-v4-flash-0731]
+- [openrouter/inclusionai/ling-2.6-flash, glm-4.6, deepseek-v4-flash-0731]
+- [openrouter/z-ai/glm-4.6, qwen3-8b, qwen3-vl-30b-a3b-instruct]
+- [openrouter/z-ai/glm-4.6, qwen3-8b, ling-2.6-flash]
+- [openrouter/z-ai/glm-4.6, qwen3-8b, deepseek-v4-flash-0731]
+- [openrouter/z-ai/glm-4.6, qwen3-vl-30b-a3b-instruct, ling-2.6-flash]
+- [openrouter/z-ai/glm-4.6, qwen3-vl-30b-a3b-instruct, deepseek-v4-flash-0731]
+- [openrouter/z-ai/glm-4.6, ling-2.6-flash, deepseek-v4-flash-0731]
+- [openrouter/deepseek/deepseek-v4-flash-0731, qwen3-8b, qwen3-vl-30b-a3b-instruct]
+- [openrouter/deepseek/deepseek-v4-flash-0731, qwen3-8b, ling-2.6-flash]
+- [openrouter/deepseek/deepseek-v4-flash-0731, qwen3-8b, glm-4.6]
+- [openrouter/deepseek/deepseek-v4-flash-0731, qwen3-vl-30b-a3b-instruct, ling-2.6-flash]
+- [openrouter/deepseek/deepseek-v4-flash-0731, qwen3-vl-30b-a3b-instruct, glm-4.6]
+- [openrouter/deepseek/deepseek-v4-flash-0731, glm-4.6, ling-2.6-flash]
+- [openrouter/qwen/qwen3-8b, glm-4.6, glm-4.6]
+- [openrouter/qwen/qwen3-32b, glm-4.6, glm-4.6]
+- [openrouter/qwen/qwen3-vl-30b-a3b-instruct, glm-4.6, glm-4.6]
+- [openrouter/inclusionai/ling-2.6-flash, glm-4.6, glm-4.6]
+- [openrouter/deepseek/deepseek-v4-flash-0731, glm-4.6, glm-4.6]
+judge_model_args:
+  openrouter/deepseek/deepseek-v4-flash-0731:
+    provider:
+      only: [novita/fp8]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/z-ai/glm-4.6:
+    provider:
+      only: [atlas-cloud/fp8]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/inclusionai/ling-2.6-flash:
+    provider:
+      only: [novita]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/qwen/qwen3-32b:
+    provider:
+      only: [siliconflow/fp8]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/qwen/qwen3-8b:
+    provider:
+      only: [alibaba/fp8]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/qwen/qwen3-vl-30b-a3b-instruct:
+    provider:
+      only: [siliconflow/fp8]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny

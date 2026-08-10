@@ -1,0 +1,6 @@
+# fp8 kept uniform with the other open models (a novita/bf16 exists; mixing
+# precisions across models would make precision co-vary with model identity).
+# Instruct variant: non-reasoning, no reasoning args.
+name: qwen/qwen3-vl-30b-a3b-instruct
+model_args:
+  provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}

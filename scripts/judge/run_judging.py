@@ -1,16 +1,26 @@
 """Run the judge comparisons listed in a config file.
 
-The config (default configs/judge_pilot.yaml) has two sections:
-  transcripts:  model shortname -> eval log path
-  comparisons:  list of [judge, major, minor] rows
+The config (see gen_judge_config.py) has these sections:
+  log_root:          where judge logs go
+  transcripts:       model shortname -> eval log path
+  comparisons:       list of [judge, major, minor] rows
+  judge_model_args:  per-judge model args (endpoint pins), keyed by judge slug
+Optional knobs:
+  phase1_items:      items judged in the early phase (default 20)
+  epochs:            judge every sample this many times, to measure how much
+                     verdicts vary for a fixed input (default 1)
+  truncate_fracs:    list of fractions; each adds a length-control run with both
+                     transcripts cut to that fraction of the shorter one
+                     (logs under trunc-<pct>/)
+  include_reasoning: judges see candidates' reasoning (protocol default: false)
 
-Each comparison runs in two phases: first the first PHASE1_ITEMS items of
+Each comparison runs in two phases: first the first phase1_items items of
 every comparison (so every analysis has low-n data early), then the rest.
 Phases with a successful log are skipped, so re-running only does new work.
 
 Usage:
-  uv run python scripts/judge/run_judge_pilot.py --dry-run
-  uv run python scripts/judge/run_judge_pilot.py
+  uv run python scripts/judge/run_judging.py --config configs/judge_cheap6_gpqa.yaml --dry-run
+  uv run python scripts/judge/run_judging.py --config configs/judge_cheap6_gpqa.yaml
 """
 
 import argparse
@@ -22,8 +32,7 @@ from inspect_ai.log import read_eval_log
 
 from judge.task import judge_task
 
-DEFAULT_LOG_ROOT = Path("logs/gpqa-pilot-rd2")  # used when the config omits log_root
-DEFAULT_PHASE1_ITEMS = 20  # config key phase1_items overrides
+DEFAULT_PHASE1_ITEMS = 20
 
 
 def has_success_log(directory: Path) -> bool:
@@ -38,7 +47,7 @@ def has_success_log(directory: Path) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("configs/judge_pilot.yaml"))
+    parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--phase", type=int, choices=(1, 2),
                         help="run only this phase; default runs both")
@@ -46,13 +55,15 @@ def main() -> int:
 
     cfg = yaml.safe_load(args.config.read_text())
     paths = cfg["transcripts"]
-    log_root = Path(cfg.get("log_root") or DEFAULT_LOG_ROOT)
+    log_root = Path(cfg["log_root"])
     phase1_items = cfg.get("phase1_items") or DEFAULT_PHASE1_ITEMS
-    # epochs > 1 judges every sample that many times; used to measure how much
-    # verdicts vary for a fixed input.
     epochs = cfg.get("epochs") or 1
-
     fracs = cfg.get("truncate_fracs") or [None]
+    # Ablation switch: judges see candidates' reasoning. Protocol default stays False.
+    include_reasoning = bool(cfg.get("include_reasoning", False))
+    # Per-judge OpenRouter routing (endpoint pins); keyed by judge slug.
+    judge_model_args = cfg.get("judge_model_args") or {}
+
     tasks = {}
 
     def get_task(judge_short, major, minor, frac):
@@ -62,10 +73,10 @@ def main() -> int:
             tasks[key] = judge_task(
                 major_path=Path(paths[major]),
                 minor_path=Path(paths[minor]),
-                include_reasoning=False,
+                include_reasoning=include_reasoning,
                 truncate_frac=frac,
                 task_name=f"{judge_short}_{major}-vs-{minor}{suffix}",
-                experiment_name="gpqa-pilot-rd2",
+                experiment_name=args.config.stem,
             )
         return tasks[key]
 
@@ -79,7 +90,11 @@ def main() -> int:
                 pair_dir = root / judge_short / f"{major}-vs-{minor}"
                 if frac is None and has_success_log(pair_dir):
                     continue  # fully judged before phasing was introduced
-                task = get_task(judge_short, major, minor, frac)
+                try:
+                    task = get_task(judge_short, major, minor, frac)
+                except ValueError as e:
+                    print(f"SKIP {judge_short} {major}-vs-{minor}: {e}")
+                    continue
                 ids = [s.id for s in task.dataset]
                 split = 2 * phase1_items
                 block = ids[:split] if phase == 1 else ids[split:]
@@ -98,16 +113,12 @@ def main() -> int:
             print(f"  phase{phase}{t} {judge_short:28s} {major}-vs-{minor} ({len(block)//2} items)")
         return 0
 
-    # Optional per-judge model args from the config, e.g. OpenRouter provider
-    # routing for a judge whose default fallback provider rejects the request.
-    model_args = cfg.get("judge_model_args") or {}
-
     failures = []
     for phase, judge, judge_short, major, minor, frac, block, phase_dir in pending:
         success, _ = eval_set(
             tasks=[get_task(judge_short, major, minor, frac)],
             model=judge,
-            model_args=model_args.get(judge, {}),
+            model_args=judge_model_args.get(judge, {}),
             log_dir=str(phase_dir),
             sample_id=block,
             epochs=epochs,

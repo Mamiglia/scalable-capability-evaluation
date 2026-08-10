@@ -1,0 +1,42 @@
+# Big-gap probe: can weak judges detect LARGE capability gaps (ECI gap 24-37)?
+# Members come from Epoch's gpqa transcripts (external_data), judged like the pilot.
+# gpt-5.5_low: ECI 159.21 is for standard effort - low effort is weaker, gap approximate.
+log_root: logs/data-expansion-biggap/gpqa
+
+transcripts:
+  gpt-5.5-low: external_data/epoch-gpqa/gpt-5.5_low.eval             # ~159 (see caveat)
+  gemini-3.5-flash: external_data/epoch-gpqa/gemini-3.5-flash_high.eval  # 154.6
+  qwen3.6-plus: external_data/epoch-gpqa/qwen3.6-plus.eval           # 149.0
+  claude-3-5-sonnet-0620: external_data/epoch-gpqa/claude-3-5-sonnet-20240620.eval  # 130.0
+  llama-3.1-70b: external_data/epoch-gpqa/Llama-3.1-70B-Instruct.eval    # 125.2
+  gemma-2-27b: external_data/epoch-gpqa/gemma-2-27b-it.eval          # 122.1
+
+comparisons:
+  # gap ~23.8
+  - [openrouter/qwen/qwen3-8b, qwen3.6-plus, llama-3.1-70b]
+  - [openrouter/qwen/qwen3-32b, qwen3.6-plus, llama-3.1-70b]
+  - [openrouter/inclusionai/ling-2.6-flash, qwen3.6-plus, llama-3.1-70b]
+  # gap ~29.2
+  - [openrouter/qwen/qwen3-8b, gpt-5.5-low, claude-3-5-sonnet-0620]
+  - [openrouter/qwen/qwen3-32b, gpt-5.5-low, claude-3-5-sonnet-0620]
+  - [openrouter/inclusionai/ling-2.6-flash, gpt-5.5-low, claude-3-5-sonnet-0620]
+  # gap ~29.4
+  - [openrouter/qwen/qwen3-8b, gemini-3.5-flash, llama-3.1-70b]
+  - [openrouter/qwen/qwen3-32b, gemini-3.5-flash, llama-3.1-70b]
+  - [openrouter/inclusionai/ling-2.6-flash, gemini-3.5-flash, llama-3.1-70b]
+  # gap ~34.0
+  - [openrouter/qwen/qwen3-8b, gpt-5.5-low, llama-3.1-70b]
+  - [openrouter/qwen/qwen3-32b, gpt-5.5-low, llama-3.1-70b]
+  - [openrouter/inclusionai/ling-2.6-flash, gpt-5.5-low, llama-3.1-70b]
+  # gap ~37.1
+  - [openrouter/qwen/qwen3-8b, gpt-5.5-low, gemma-2-27b]
+  - [openrouter/qwen/qwen3-32b, gpt-5.5-low, gemma-2-27b]
+  - [openrouter/inclusionai/ling-2.6-flash, gpt-5.5-low, gemma-2-27b]
+
+judge_model_args:
+  openrouter/qwen/qwen3-8b:
+    provider: {only: [alibaba/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/qwen/qwen3-32b:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/inclusionai/ling-2.6-flash:
+    provider: {only: [novita], allow_fallbacks: false, require_parameters: true, data_collection: deny}

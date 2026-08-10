@@ -8,9 +8,11 @@
 ```text
 small-judge/
 ├── configs/              # YAML configuration files
-│   ├── bench/            # Benchmark task configs (e.g., gsm8k, mbpp, core-bench)
-│   ├── models/           # Model configs (e.g., ling-2.6-flash)
-│   └── experiments/      # Experiment configs combining benchmark, judge, major, & minor models
+│   ├── bench/            # Benchmark task configs (e.g., gsm8k, gpqa, aime2025)
+│   ├── models/           # Model configs (endpoint pins, reasoning settings)
+│   ├── comparisons/      # Comparison grid (comparisons.csv) and model set
+│   ├── experiments/      # Experiment configs combining benchmark, judge, major, & minor models
+│   └── judge_*.yaml      # Batch judge run configs (see scripts/judge/run_judging.py)
 ├── src/                  # Core library source code (DO NOT DIRECTLY EDIT FOR EXPERIMENTAL CHANGES)
 │   ├── collect/          # Collection CLI implementation
 │   │   └── cli.py
@@ -26,8 +28,8 @@ small-judge/
 │       ├── scorer.py
 │       ├── task.py
 │       └── util.py
-├── script/               # Helper scripts (e.g., leave-one-out experiments)
-│   └── run_corebench_leave_one_out.sh
+├── scripts/
+│   └── judge/            # Batch judging runner, config generator, & analyses
 ├── tests/                # Pytest unit test suite
 │   ├── conftest.py
 │   ├── test_cli.py
@@ -121,6 +123,30 @@ uv run judge \
   --minor qwen/qwen3.5-9b \
   -j openrouter/google/gemma-4-31b-it
 ```
+
+### 3. Batch Judging & Analyses (`scripts/judge/`)
+
+For many comparisons at once, generate a run config from a comparisons CSV and
+run it with the resumable batch runner (phases with a successful log are
+skipped, so re-running only does new work):
+
+```bash
+# comparisons.csv -> run config (transcript paths, judge endpoint pins)
+uv run python scripts/judge/gen_judge_config.py \
+    --comparisons configs/comparisons/comparisons.csv \
+    --transcripts-dir data/gpqa/<task_args_hash> \
+    --log-root logs/data-expansion/gpqa \
+    --out configs/judge_expansion_gpqa.yaml
+
+# run (add --dry-run to preview pending work)
+uv run python scripts/judge/run_judging.py --config configs/judge_expansion_gpqa.yaml
+
+# accuracy vs capability-gap figures + summary CSV from the judge logs
+uv run python scripts/judge/gap_curves.py --out-dir judge_results/<run>
+```
+
+`scripts/judge/rescore_mcq.py` rescores an MCQ collection log whose answers the
+stock parser missed (e.g. `ANSWER: $C$`), writing a corrected copy.
 
 ---
 

@@ -1,0 +1,7 @@
+# siliconflow/fp8: 131k ctx + 131k out (alibaba caps out at 8k, deepinfra ctx at 40k).
+name: qwen/qwen3-32b
+model_args:
+  provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+generate_args:
+  extra_body:
+    reasoning: {enabled: true}
