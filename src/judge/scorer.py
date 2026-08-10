@@ -13,12 +13,13 @@ def parse_judge_output(output_text: str):
     if not output_text:
         return None, None, None
 
-    # Parse ANSWER (e.g., 'ANSWER: 1', '**ANSWER:** 1', 'ANSWER: Model 2', 'ANSWER: Transcript 2')
-    answer_match = re.search(r'ANSWER:[*_]*\s*(?:(?:Model|Transcript)\s+)?[*_]*([12])', output_text, re.IGNORECASE)
+    # Parse ANSWER (e.g., 'ANSWER: 1', '**ANSWER:** 1', 'ANSWER: Model 2', 'ANSWER: $1$';
+    # some models wrap the answer in $..$, imitating the prompt's '$LETTER' placeholder)
+    answer_match = re.search(r'ANSWER:[*_]*\s*(?:(?:Model|Transcript)\s+)?[*_$]*([12])', output_text, re.IGNORECASE)
     answer = answer_match.group(1) if answer_match else None
 
     # Parse CONFIDENCE on a 1-5 scale (e.g., 'CONFIDENCE: 4', '**CONFIDENCE:** 5')
-    conf_match = re.search(r'CONFIDENCE:[*_]*\s*[*_]*([0-9]+(?:\.[0-9]+)?)', output_text, re.IGNORECASE)
+    conf_match = re.search(r'CONFIDENCE:[*_]*\s*[*_$]*([0-9]+(?:\.[0-9]+)?)', output_text, re.IGNORECASE)
     confidence = None
     if conf_match:
         try:

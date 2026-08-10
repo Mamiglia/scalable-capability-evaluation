@@ -40,6 +40,8 @@ class TestParseJudgeOutput:
             ("ANSWER: *2*", "2"),
             ("answer: 1", "1"),
             ("answer: model 2", "2"),
+            ("ANSWER: $1$", "1"),
+            ("ANSWER: $2$", "2"),
         ]
         for input_text, expected_answer in cases:
             ans, _, _ = parse_judge_output(input_text)
