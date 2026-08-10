@@ -42,10 +42,11 @@ def _run_eval_worker(
         kwargs = eval_extra_args.copy()
         kwargs.pop("log_dir", None)
 
+        # No seed: several pinned endpoints reject it under require_parameters,
+        # and a fixed seed can collapse epochs into identical generations.
         success, _ = eval_set(
             tasks=bench.task,
             task_args=bench.task_args or {},
-            seed=repeat,
             log_dir=str(target_dir),
             display="plain",
             **model.eval_kwargs(),
