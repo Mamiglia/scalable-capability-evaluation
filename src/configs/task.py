@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict
 
+from inspect_ai import Epochs
 from inspect_ai.model import CachePolicy
 
 from configs.base import DraccusConfig
@@ -13,9 +14,10 @@ class TaskConfig(DraccusConfig):
     task: str = ''
     task_args: Dict[str, Any] = field(default_factory=dict)
     cache: Any = field(default_factory=lambda: CachePolicy(expiry="1M"))
-    limit: int = 0
-    epochs: int = 0
-    eval_path: Path = None
+    limit: Optional[int] = None
+    epochs: int = 1
+    epochs_reducer: Any = None
+    eval_path: Optional[Path] = None
     
     def __post_init__(self):
         if not self.task:
@@ -28,6 +30,10 @@ class TaskConfig(DraccusConfig):
             kwargs["cache"] = self.cache
         if self.limit:
             kwargs["limit"] = self.limit
-        if self.epochs:
-            kwargs["epochs"] = self.epochs
+        if self.epochs is not None:
+            kwargs["epochs"] = (
+                Epochs(self.epochs, self.epochs_reducer)
+                if self.epochs_reducer is not None
+                else self.epochs
+            )
         return kwargs
