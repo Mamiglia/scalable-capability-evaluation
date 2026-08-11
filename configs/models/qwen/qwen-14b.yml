@@ -1,0 +1,10 @@
+name: Qwen/Qwen-14B
+slug: vllm/Qwen/Qwen-14B
+release_date: "2023-09-25"
+runpod:
+  use: true
+  model: Qwen/Qwen-14B
+  name: small-judge-qwen-14b
+  gpu_id: NVIDIA A40
+  container_disk_in_gb: 40
+  vllm_args: [--trust-remote-code]

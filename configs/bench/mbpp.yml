@@ -1,1 +1,2 @@
 name: inspect_evals/mbpp
+epochs_reducer: mean

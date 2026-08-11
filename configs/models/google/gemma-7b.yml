@@ -1,0 +1,8 @@
+name: google/gemma-7b
+slug: vllm/google/gemma-7b
+release_date: "2024-02-21"
+runpod:
+  use: true
+  model: google/gemma-7b
+  name: small-judge-gemma-7b
+  gpu_id: NVIDIA A40

@@ -1,0 +1,9 @@
+name: microsoft/Phi-3-medium-128k-instruct
+slug: vllm/microsoft/Phi-3-medium-128k-instruct
+release_date: "2024-04-23/2024-05-21"
+runpod:
+  use: true
+  model: microsoft/Phi-3-medium-128k-instruct
+  name: small-judge-phi3-medium-14b
+  gpu_id: NVIDIA A40
+  container_disk_in_gb: 40

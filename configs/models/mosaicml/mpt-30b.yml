@@ -1,0 +1,11 @@
+name: mosaicml/mpt-30b
+slug: vllm/mosaicml/mpt-30b
+release_date: "2023-06-22"
+runpod:
+  use: true
+  model: mosaicml/mpt-30b
+  name: small-judge-mpt-30b
+  gpu_id: NVIDIA A40
+  gpu_count: 2
+  container_disk_in_gb: 80
+  vllm_args: [--trust-remote-code]

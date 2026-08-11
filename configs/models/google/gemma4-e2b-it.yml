@@ -1,0 +1,8 @@
+name: google/gemma-4-E2B-it
+slug: vllm/google/gemma-4-E2B-it
+release_date: "2026-03-31"
+runpod:
+  use: true
+  model: google/gemma-4-E2B-it
+  name: small-judge-gemma4-e2b-it
+  gpu_id: NVIDIA A40

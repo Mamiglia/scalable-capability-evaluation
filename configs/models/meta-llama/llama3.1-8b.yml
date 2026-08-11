@@ -1,0 +1,8 @@
+name: meta-llama/Llama-3.1-8B
+slug: vllm/meta-llama/Llama-3.1-8B
+release_date: "2024-07-23"
+runpod:
+  use: true
+  model: meta-llama/Llama-3.1-8B
+  name: small-judge-llama31-8b
+  gpu_id: NVIDIA A40

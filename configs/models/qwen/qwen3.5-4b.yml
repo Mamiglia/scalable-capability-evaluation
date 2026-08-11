@@ -1,0 +1,9 @@
+name: Qwen/Qwen3.5-4B
+slug: vllm/Qwen/Qwen3.5-4B
+release_date: "2026-02-27"
+runpod:
+  use: true
+  model: Qwen/Qwen3.5-4B
+  name: small-judge-qwen35-4b
+  gpu_id: NVIDIA A40
+  vllm_args: [--reasoning-parser, qwen3]

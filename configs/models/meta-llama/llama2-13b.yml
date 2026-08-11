@@ -1,0 +1,9 @@
+name: meta-llama/Llama-2-13b
+slug: vllm/meta-llama/Llama-2-13b
+release_date: "2023-07-18"
+runpod:
+  use: true
+  model: meta-llama/Llama-2-13b
+  name: small-judge-llama2-13b
+  gpu_id: NVIDIA A40
+  container_disk_in_gb: 40

@@ -1,0 +1,7 @@
+name: Qwen/Qwen3-32B
+slug: openrouter/qwen/qwen3-32b
+release_date: "2025-04-28"
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: true
