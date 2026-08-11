@@ -10,8 +10,9 @@ from configs.base import DraccusConfig
 class ModelConfig(DraccusConfig):
     # Optional[...] on these fields breaks draccus on py3.14; empty dict means unset.
     slug: str = None
-    model_args: Dict[str, Any] = field(default_factory=dict)
-    generate_args: Dict[str, Any] = field(default_factory=dict)
+    release_date: str | None = None
+    model_args: Optional[Dict[str, Any]] = None
+    generate_args: Dict[str, Any] = None
     # Consumed by the Model context manager when enabled.
     runpod: Dict[str, Any] = field(default_factory=dict)
 
