@@ -1,7 +1,7 @@
 """Model configuration dataclass."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from configs.base import DraccusConfig
 

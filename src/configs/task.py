@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from inspect_ai import Epochs
 from inspect_ai.model import CachePolicy
