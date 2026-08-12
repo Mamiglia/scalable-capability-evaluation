@@ -1,3 +1,10 @@
+# Quantization: FP8 Fallback (StreamLake)
 name: deepseek-ai/DeepSeek-V3.2
 slug: openrouter/deepseek/deepseek-v3.2
-release_date: "2025-12-01"
+release_date: '2025-12-01'
+model_args:
+  provider:
+    order:
+    - StreamLake
+    quantizations:
+    - fp8

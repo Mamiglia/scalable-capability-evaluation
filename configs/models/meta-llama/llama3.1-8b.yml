@@ -1,10 +1,10 @@
-name: meta-llama/Llama-3.1-8B
-slug: vllm/meta-llama/Llama-3.1-8B
+name: meta-llama/Llama-3.1-8B-Instruct
+slug: vllm/meta-llama/Llama-3.1-8B-Instruct
 release_date: "2024-07-23"
 runpod:
   use: true
-  model: meta-llama/Llama-3.1-8B
+  model: meta-llama/Llama-3.1-8B-Instruct
   name: small-judge-llama31-8b
   cloud_type: SECURE
   gpu_id: NVIDIA A40
-  ready_timeout: 300
+  ready_timeout: 900

@@ -7,5 +7,5 @@ runpod:
   name: small-judge-llama-7b
   cloud_type: SECURE
   gpu_id: NVIDIA A40
-  ready_timeout: 300
+  ready_timeout: 900
 

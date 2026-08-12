@@ -1,11 +1,11 @@
-name: meta-llama/Llama-2-13b
-slug: vllm/meta-llama/Llama-2-13b
+name: meta-llama/Llama-2-13b-chat-hf
+slug: vllm/meta-llama/Llama-2-13b-chat-hf
 release_date: "2023-07-18"
 runpod:
   use: true
-  model: meta-llama/Llama-2-13b
+  model: meta-llama/Llama-2-13b-chat-hf
   name: small-judge-llama2-13b
   cloud_type: SECURE
   gpu_id: NVIDIA A40
-  ready_timeout: 300
+  ready_timeout: 900
   container_disk_in_gb: 40

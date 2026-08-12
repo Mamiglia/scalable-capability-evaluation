@@ -1,3 +1,10 @@
+# Quantization: FP8 Fallback (Novita)
 name: moonshotai/Kimi-K2-Instruct
 slug: openrouter/moonshotai/kimi-k2
-release_date: "2025-07-11"
+release_date: '2025-07-11'
+model_args:
+  provider:
+    order:
+    - Novita
+    quantizations:
+    - fp8

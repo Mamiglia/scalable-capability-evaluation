@@ -1,3 +1,8 @@
+# Quantization: Proprietary Direct (Mistral)
 name: mistralai/mistral-medium-3
 slug: openrouter/mistralai/mistral-medium-3
-release_date: "2025-05-07"
+release_date: '2025-05-07'
+model_args:
+  provider:
+    order:
+    - Mistral

@@ -1,3 +1,10 @@
+# Quantization: Unquantized BF16 (DeepInfra)
 name: moonshotai/Kimi-K3
 slug: openrouter/moonshotai/kimi-k3
-release_date: "2026-07-16"
+release_date: '2026-07-16'
+model_args:
+  provider:
+    order:
+    - DeepInfra
+    quantizations:
+    - bf16

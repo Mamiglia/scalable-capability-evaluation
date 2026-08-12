@@ -1,9 +1,6 @@
+# Quantization: Unquantized BF16 (DeepInfra)
 name: qwen/qwen3.5-9b
 slug: openrouter/qwen/qwen3.5-9b
-
-model_args:
-  provider: {}
-
 generate_args:
   temperature: 1.0
   top_p: 0.95
@@ -12,39 +9,30 @@ generate_args:
   extra_body:
     min_p: 0.0
     repetition_penalty: 1.0
-
 runpod:
-  # Safe default is false. Set true to enable Runpod without the CLI flag.
   use: false
   model: Qwen/Qwen3.5-9B
-  # Optional Inspect OpenAI-client arguments used only while Runpod is active.
   model_args: {}
   image: vllm/vllm-openai:latest
   name: small-judge-qwen35-9b
-
-  # COMMUNITY is the wrapper default. Use SECURE only when required.
   cloud_type: SECURE
   gpu_id: NVIDIA A40
   gpu_count: 1
-
-  # Runpod's default, and the wrapper default, is 20 GB. Qwen needs more room
-  # when its weights are downloaded into the temporary container filesystem.
   container_disk_in_gb: 40
   port: 8000
   ready_timeout: 1800
   terminate_after: 4h
-
-  # Passed directly to `runpodctl pod create`. Examples:
-  #   --country-code=US
-  #   --min-cuda-version=12.4
   create_args: []
-
-  # Appended after the wrapper defaults: --model MODEL and
-  # --enable-prefix-caching.
   vllm_args:
-    - --reasoning-parser
-    - qwen3
-    - --max-model-len
-    - 32768
-    - --gpu-memory-utilization
-    - 0.90
+  - --reasoning-parser
+  - qwen3
+  - --max-model-len
+  - 32768
+  - --gpu-memory-utilization
+  - 0.9
+model_args:
+  provider:
+    order:
+    - DeepInfra
+    quantizations:
+    - bf16

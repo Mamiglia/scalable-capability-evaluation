@@ -1,3 +1,17 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
 name: Qwen/Qwen3-14B
-slug: openrouter/qwen/qwen3-14b
+slug: vllm/Qwen/Qwen3-14B
 release_date: "2025-04-28/2025-04-29"
+
+runpod:
+  use: true
+  model: Qwen/Qwen3-14B
+  name: small-judge-qwen3-14b
+  cloud_type: SECURE
+  gpu_id: NVIDIA A40
+  gpu_count: 1
+  container_disk_in_gb: 40
+  ready_timeout: 900
+  vllm_args:
+    - --dtype
+    - bfloat16

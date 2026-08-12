@@ -1,1 +1,8 @@
+# Quantization: Unquantized BF16 (Crusoe)
 name: moonshotai/kimi-k2.6
+model_args:
+  provider:
+    order:
+    - Crusoe
+    quantizations:
+    - bf16

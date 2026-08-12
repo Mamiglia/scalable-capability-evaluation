@@ -1,15 +1,19 @@
 name: google/gemma-4-E2B-it
 slug: vllm/google/gemma-4-E2B-it
 release_date: "2026-03-31"
+
+generate_args:
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: true
+
 runpod:
   use: true
   model: google/gemma-4-E2B-it
   name: small-judge-gemma4-e2b-it
   cloud_type: SECURE
   gpu_id: NVIDIA A40
-  ready_timeout: 300
+  image: vllm/vllm-openai:v0.20.1
   vllm_args:
-    - --hf-overrides
-    - '{"allow_global_per_layer_attribute_access": true}'
     - --trust-remote-code
 

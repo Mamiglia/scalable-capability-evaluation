@@ -1,3 +1,10 @@
+# Quantization: Unquantized BF16 (CoreWeave)
 name: ibm-granite/granite-4.1-8b
 slug: openrouter/ibm-granite/granite-4.1-8b
-release_date: "2026-04-29"
+release_date: '2026-04-29'
+model_args:
+  provider:
+    order:
+    - CoreWeave
+    quantizations:
+    - bf16

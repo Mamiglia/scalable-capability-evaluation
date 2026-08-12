@@ -1,8 +1,9 @@
+# Quantization: vLLM Fallback (Runpod)
 name: mosaicml/mpt-30b
-slug: maddes8cht/mosaicml-mpt-30b-chat-gguf
+slug: vllm/mosaicml/mpt-30b
 release_date: "2023-06-22"
 runpod:
-  use: false
+  use: true
   model: mosaicml/mpt-30b
   name: small-judge-mpt-30b
   cloud_type: SECURE
@@ -11,4 +12,5 @@ runpod:
   ready_timeout: 300
   container_disk_in_gb: 80
   vllm_args: [--trust-remote-code]
+
 

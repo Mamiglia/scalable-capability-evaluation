@@ -1,0 +1,22 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
+name: Qwen/Qwen3-32B
+slug: vllm/Qwen/Qwen3-32B
+release_date: "2025-04-28"
+
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: true
+
+runpod:
+  use: true
+  model: Qwen/Qwen3-32B
+  name: small-judge-qwen3-32b
+  cloud_type: SECURE
+  gpu_id: NVIDIA A40
+  gpu_count: 1
+  container_disk_in_gb: 80
+  ready_timeout: 900
+  vllm_args:
+    - --dtype
+    - bfloat16

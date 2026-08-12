@@ -1,3 +1,14 @@
+# Quantization: Unquantized BF16 (NextBit)
 name: google/gemma-4-26B-A4B-it
 slug: openrouter/google/gemma-4-26b-a4b-it
-release_date: "2026-03-31"
+release_date: '2026-03-31'
+generate_args:
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: true
+model_args:
+  provider:
+    order:
+    - NextBit
+    quantizations:
+    - bf16
