@@ -1,3 +1,3 @@
 [submodule "data"]
 	path = data
-	url = https://huggingface.co/datasets/mamiglia/benchmarks
+	url = https://huggingface.co/datasets/LASR-G5/benchmarks
