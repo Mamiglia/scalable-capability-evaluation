@@ -8,7 +8,6 @@ export UV_CACHE_DIR=/tmp/small-judge-uv-cache
 export PYTHONUNBUFFERED=1
 
 mapfile -t models < <(grep -rl '^  use: true$' configs/models --include='*.yml' | sort)
-benchmarks=(configs/bench/{gpqa,aime24,aime25,aime26,mbpp}.yml)
 PARALLEL_JOBS="${MAX_CONCURRENCY:-3}"
 
 run_model() {
@@ -23,5 +22,3 @@ run_model() {
 export -f run_model
 
 printf '%s\n' "${models[@]}" | xargs -n 1 -P "$PARALLEL_JOBS" bash -c 'run_model "$@"' _
-
-
