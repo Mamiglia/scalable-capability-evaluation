@@ -1,2 +1,3 @@
-name: inspect_evals/mbpp
+task: inspect_evals/mbpp
+name: mbpp
 epochs_reducer: mean

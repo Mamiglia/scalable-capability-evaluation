@@ -1,4 +1,5 @@
-name: inspect_evals/gsm8k
-limit: 100
+task: inspect_evals/gsm8k
+name: gsm8k
+
 task_args:
   fewshot: 0
