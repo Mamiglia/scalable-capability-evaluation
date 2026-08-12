@@ -77,9 +77,9 @@ def get_eval_path(
     base_dir: str | Path = "data",
 ) -> Path:
     """Return storage path: data/{benchmark}/{task_args_hashing}/{model}"""
-    b_clean = task.name
+    b_clean = task.name.lower()
     h_str = hash_task_args(task)
-    m_clean = model.shortname
+    m_clean = model.shortname.lower()
     return Path(base_dir) / b_clean / h_str / m_clean
 
 def is_successful_eval(eval_path: Path) -> bool:
