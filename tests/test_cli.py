@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 import pytest
+from inspect_ai import Epochs
 
 from collect.cli import main as collect_main
 from judge.cli import main as judge_main
@@ -34,7 +35,7 @@ def test_collect_single_eval(monkeypatch, tmp_path):
     model_config = tmp_path / "model.yml"
     model_config.write_text("name: custom/model2\nslug: custom/model2\n")
     bench_config = tmp_path / "bench.yml"
-    bench_config.write_text("name: inspect_evals/mbpp\n")
+    bench_config.write_text("name: inspect_evals/mbpp\nepochs_reducer: mean\n")
 
     captured = {}
     mock_log = MagicMock()
@@ -59,6 +60,30 @@ def test_collect_single_eval(monkeypatch, tmp_path):
     assert "seed" not in captured
     assert captured["log_dir"] == str(tmp_path / "target_dir" / "0")
     assert captured["display"] == "plain"
+    assert isinstance(captured["epochs"], Epochs)
+    assert captured["epochs"].epochs == 1
+
+
+def test_collect_skips_completed_epoch(monkeypatch, tmp_path):
+    model_config = tmp_path / "model.yml"
+    model_config.write_text("name: custom/model\n")
+    bench_config = tmp_path / "bench.yml"
+    bench_config.write_text("name: inspect_evals/mbpp\n")
+    target = tmp_path / "target" / "0"
+    target.mkdir(parents=True)
+    (target / "existing.eval").touch()
+
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: target.parent)
+    monkeypatch.setattr("collect.cli.is_successful_eval", lambda path: True)
+    eval_set = MagicMock()
+    monkeypatch.setattr("collect.cli.eval_set", eval_set)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["collect", "-b", str(bench_config), "-m", str(model_config)],
+    )
+
+    assert collect_main() == 0
+    eval_set.assert_not_called()
 
 
 def test_collect_multiple_evals(monkeypatch, tmp_path):

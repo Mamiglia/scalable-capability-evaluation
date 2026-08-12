@@ -4,9 +4,11 @@ import inspect
 import json
 from pathlib import Path
 from typing import Any, Dict
+import zipfile
+
+import zstandard
 
 from inspect_ai._eval.loader import load_tasks
-from inspect_ai.log import read_eval_log
 from inspect_ai._util.registry import registry_info, registry_lookup
 
 from configs.model import ModelConfig
@@ -83,10 +85,18 @@ def get_eval_path(
 def is_successful_eval(eval_path: Path) -> bool:
     """Check if an evaluation log indicates a successful run."""
     try:
-        log = read_eval_log(eval_path, header_only=True)
-        return getattr(log, "status", None) == "success"
+        get_decompressor = zipfile._get_decompressor
+        zipfile._get_decompressor = lambda compression: (
+            zstandard.ZstdDecompressor().decompressobj()
+            if compression == 93
+            else get_decompressor(compression)
+        )
+        with zipfile.ZipFile(eval_path) as archive:
+            return json.loads(archive.read("header.json"))["status"] == "success"
     except Exception:
         return False
+    finally:
+        zipfile._get_decompressor = get_decompressor
 
 
 import contextlib
