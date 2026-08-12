@@ -6,7 +6,7 @@ from pathlib import Path
 from inspect_ai import eval_set
 
 from configs import ModelConfig, TaskConfig, flag_parse, kv_pair
-from configs.utils import eval_runner, get_eval_path
+from configs.utils import eval_runner, get_eval_path, is_successful_eval
 from model import Model
 
 
@@ -32,13 +32,16 @@ def _run_eval_worker(
         f"'{bench.name}' and model '{model_config.slug}'"
     )
 
-    with Model(model_config, use_runpod=use_runpod) as model:
-        target_dir = get_eval_path(
-            task=bench,
-            model=model.config,
-            base_dir=eval_extra_args.get("log_dir", "data"),
-        ) / f"{repeat}"
+    target_dir = get_eval_path(
+        task=bench,
+        model=model_config,
+        base_dir=eval_extra_args.get("log_dir", "data"),
+    ) / f"{repeat}"
+    if any(is_successful_eval(path) for path in target_dir.glob("*.eval")):
+        print(f"Skipping completed epoch {repeat + 1}: {target_dir}")
+        return 0
 
+    with Model(model_config, use_runpod=use_runpod) as model:
         kwargs = eval_extra_args.copy()
         kwargs.pop("log_dir", None)
 
