@@ -5,6 +5,8 @@ runpod:
   use: true
   model: Qwen/Qwen-14B
   name: small-judge-qwen-14b
+  cloud_type: SECURE
   gpu_id: NVIDIA A40
+  ready_timeout: 300
   container_disk_in_gb: 40
   vllm_args: [--trust-remote-code]

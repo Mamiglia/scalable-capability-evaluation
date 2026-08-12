@@ -5,4 +5,7 @@ runpod:
   use: true
   model: huggyllama/llama-7b
   name: small-judge-llama-7b
+  cloud_type: SECURE
   gpu_id: NVIDIA A40
+  ready_timeout: 300
+

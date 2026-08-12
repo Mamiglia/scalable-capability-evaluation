@@ -5,4 +5,11 @@ runpod:
   use: true
   model: google/gemma-4-E2B-it
   name: small-judge-gemma4-e2b-it
+  cloud_type: SECURE
   gpu_id: NVIDIA A40
+  ready_timeout: 300
+  vllm_args:
+    - --hf-overrides
+    - '{"allow_global_per_layer_attribute_access": true}'
+    - --trust-remote-code
+

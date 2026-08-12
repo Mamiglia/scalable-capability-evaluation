@@ -5,4 +5,6 @@ runpod:
   use: true
   model: meta-llama/Llama-3.1-8B
   name: small-judge-llama31-8b
+  cloud_type: SECURE
   gpu_id: NVIDIA A40
+  ready_timeout: 300

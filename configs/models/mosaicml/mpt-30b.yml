@@ -1,11 +1,14 @@
 name: mosaicml/mpt-30b
-slug: vllm/mosaicml/mpt-30b
+slug: maddes8cht/mosaicml-mpt-30b-chat-gguf
 release_date: "2023-06-22"
 runpod:
-  use: true
+  use: false
   model: mosaicml/mpt-30b
   name: small-judge-mpt-30b
-  gpu_id: NVIDIA A40
-  gpu_count: 2
+  cloud_type: SECURE
+  gpu_id: NVIDIA A100 80GB PCIe
+  gpu_count: 1
+  ready_timeout: 300
   container_disk_in_gb: 80
   vllm_args: [--trust-remote-code]
+

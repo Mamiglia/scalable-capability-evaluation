@@ -5,5 +5,7 @@ runpod:
   use: true
   model: Qwen/Qwen3.5-4B
   name: small-judge-qwen35-4b
+  cloud_type: SECURE
   gpu_id: NVIDIA A40
+  ready_timeout: 300
   vllm_args: [--reasoning-parser, qwen3]
