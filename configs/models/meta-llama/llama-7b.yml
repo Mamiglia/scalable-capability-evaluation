@@ -3,6 +3,6 @@ slug: vllm/meta-llama/Llama-7B
 release_date: "2023-02"
 runpod:
   use: true
-  model: meta-llama/Llama-7B
+  model: huggyllama/llama-7b
   name: small-judge-llama-7b
   gpu_id: NVIDIA A40
