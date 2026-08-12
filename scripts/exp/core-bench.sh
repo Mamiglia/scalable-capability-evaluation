@@ -2,19 +2,19 @@
 TASKS=(easy medium hard)
 
 JUDGE_MODELS=(
-  "configs/models/kimi-k2.6.yml"
-  "configs/models/gemma4-31b.yml"
-  "configs/models/qwen3.5-9b.yml"
+  "configs/models/moonshotai/kimi-k2.6.yml"
+  "configs/models/google/gemma4-31b.yml"
+  "configs/models/qwen/qwen3.5-9b.yml"
 )
 MAJOR_MODELS=(
-  "configs/models/gemma4-31b.yml"
-  "configs/models/kimi-k2.6.yml"
-  "configs/models/kimi-k2.6.yml"
+  "configs/models/google/gemma4-31b.yml"
+  "configs/models/moonshotai/kimi-k2.6.yml"
+  "configs/models/moonshotai/kimi-k2.6.yml"
 )
 MINOR_MODELS=(
-  "configs/models/qwen3.5-9b.yml"
-  "configs/models/qwen3.5-9b.yml"
-  "configs/models/gemma4-31b.yml"
+  "configs/models/qwen/qwen3.5-9b.yml"
+  "configs/models/qwen/qwen3.5-9b.yml"
+  "configs/models/google/gemma4-31b.yml"
 )
 
 MAX_PARALLEL=16    # tune to your OpenRouter rate limit / CPU

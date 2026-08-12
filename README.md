@@ -64,12 +64,12 @@ The `collect` CLI evaluates one or more models on specified benchmarks and saves
 
 ```bash
 # Run collection for a single benchmark and model
-uv run collect -b configs/bench/gsm8k.yml -m configs/models/ling-2.6-flash.yml -n 1
+uv run collect -b configs/bench/gsm8k.yml -m configs/models/inclusionai/ling-2.6-flash.yml -n 1
 
 # Run collection across multiple benchmarks and models
 uv run collect \
   -b configs/bench/gsm8k.yml -b configs/bench/mbpp.yml \
-  -m configs/models/ling-2.6-flash.yml \
+  -m configs/models/inclusionai/ling-2.6-flash.yml \
   -n 1
 ```
 
@@ -97,7 +97,7 @@ Set `use: true`, or force it for one collection with `--runpod`:
 ```bash
 uv run collect --runpod \
   -b configs/bench/gsm8k.yml \
-  -m configs/models/qwen3.5-9b.yml \
+  -m configs/models/qwen/qwen3.5-9b.yml \
   -n 1
 ```
 
@@ -162,7 +162,7 @@ task_args:
 ```
 
 ### Model Config (`ModelConfig`)
-Example `configs/models/ling-2.6-flash.yml`:
+Example `configs/models/inclusionai/ling-2.6-flash.yml`:
 ```yaml
 name: openrouter/inclusionai/ling-2.6-flash
 slug: openrouter/inclusionai/ling-2.6-flash
