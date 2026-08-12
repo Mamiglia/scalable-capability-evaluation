@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shlex
 import subprocess
@@ -100,6 +101,12 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def create(config: dict[str, Any]) -> str:
+    create_args = list(config["create_args"])
+    hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    if hf_token and not any(arg.startswith("--env=") for arg in create_args):
+        env_dict = {"HF_TOKEN": hf_token, "HUGGING_FACE_HUB_TOKEN": hf_token}
+        create_args.append(f"--env={json.dumps(env_dict)}")
+
     command = [
         "runpodctl",
         "pod",
@@ -123,7 +130,7 @@ def create(config: dict[str, Any]) -> str:
     ]
     if config.get("name"):
         command.append(f"--name={config['name']}")
-    command.extend(config["create_args"])
+    command.extend(create_args)
     LOGGER.info("Creating Runpod for %s on %s", config["model"], config["gpu_id"])
     output = _run(command).stdout
     try:
