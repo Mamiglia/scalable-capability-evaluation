@@ -18,8 +18,11 @@ class ModelConfig(DraccusConfig):
 
     def __post_init__(self):
         if not self.slug:
-            clean_name = self.name.removeprefix("openrouter/")
-            self.slug = f"openrouter/{clean_name}"
+            clean_name = self.name.removeprefix("openrouter/").removeprefix("vllm/")
+            if self.runpod and self.runpod.get("use"):
+                self.slug = f"vllm/{clean_name}"
+            else:
+                self.slug = f"openrouter/{clean_name}"
 
         if not self.model_args:
             self.model_args = {
