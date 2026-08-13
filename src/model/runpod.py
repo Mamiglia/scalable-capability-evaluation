@@ -20,10 +20,11 @@ DEFAULTS = {
     "image": "vllm/vllm-openai:latest",
     "cloud_type": "COMMUNITY",
     "gpu_count": 1,
-    "container_disk_in_gb": 20,
+    "container_disk_in_gb": 40,
     "port": 8000,
     "ready_timeout": 1800,
     "terminate_after": "4h",
+    "keep_alive": 0,
     "model_args": {},
     "vllm_args": [],
     "create_args": [],
@@ -62,12 +63,18 @@ def validate(config: dict[str, Any] | None) -> dict[str, Any]:
         result["ready_timeout"] = float(result["ready_timeout"])
     except (TypeError, ValueError) as exc:
         raise ValueError("runpod.ready_timeout must be a number") from exc
+    try:
+        result["keep_alive"] = float(result.get("keep_alive", 60))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("runpod.keep_alive must be a number") from exc
     if result["gpu_count"] < 1 or result["container_disk_in_gb"] < 1:
         raise ValueError("runpod GPU count and container disk size must be positive")
     if not 1 <= result["port"] <= 65535:
         raise ValueError("runpod.port must be between 1 and 65535")
     if result["ready_timeout"] <= 0:
         raise ValueError("runpod.ready_timeout must be positive")
+    if result["keep_alive"] < 0:
+        raise ValueError("runpod.keep_alive cannot be negative")
     return result
 
 
