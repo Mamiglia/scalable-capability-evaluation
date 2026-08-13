@@ -153,8 +153,65 @@ def test_runpod_command(monkeypatch):
 
     assert runpod.create(config) == "pod1"
     assert captured[0][:3] == ["runpodctl", "pod", "create"]
-    assert "--container-disk-in-gb=20" in captured[0]
+    assert "--container-disk-in-gb=40" in captured[0]
     assert (
         "--docker-args=--model org/model --enable-prefix-caching --max-model-len 8192"
         in captured[0]
     )
+
+
+def _worker_eval(config_dict):
+    config = ModelConfig(
+        name="org/mp-model",
+        runpod=config_dict,
+    )
+    with Model(config) as model:
+        return model.eval_kwargs()["model_base_url"]
+
+
+def test_cross_process_runpod_sharing(monkeypatch):
+    monkeypatch.setattr(runpod, "create", lambda cfg: "shared-mp-pod")
+    monkeypatch.setattr(runpod, "wait", lambda pod_id, port, timeout: "http://shared-mp-url/v1")
+    monkeypatch.setattr(runpod, "is_healthy", lambda base_url: True)
+    monkeypatch.setattr(runpod, "terminate", lambda pod_id: None)
+
+    config_dict = {
+        "use": True,
+        "model": "org/mp-model",
+        "gpu_id": "NVIDIA A40",
+        "keep_alive": 0,
+    }
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(_worker_eval, [config_dict, config_dict]))
+
+    assert results == ["http://shared-mp-url/v1", "http://shared-mp-url/v1"]
+
+
+def test_keep_alive_timer(monkeypatch):
+    config = ModelConfig(
+        name="org/timer-model",
+        runpod={
+            "use": True,
+            "model": "org/timer-model",
+            "gpu_id": "NVIDIA A40",
+            "keep_alive": 0.2,
+        },
+    )
+    terminated = []
+    monkeypatch.setattr(runpod, "create", lambda cfg: "timer-pod")
+    monkeypatch.setattr(runpod, "wait", lambda pod_id, port, timeout: "http://timer-url/v1")
+    monkeypatch.setattr(runpod, "is_healthy", lambda base_url: True)
+    monkeypatch.setattr(runpod, "terminate", terminated.append)
+
+    with Model(config) as model:
+        assert model.eval_kwargs()["model_base_url"] == "http://timer-url/v1"
+
+    assert terminated == []
+
+    import time
+    time.sleep(0.35)
+
+    assert terminated == ["timer-pod"]
+
+

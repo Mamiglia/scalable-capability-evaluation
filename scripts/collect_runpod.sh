@@ -8,14 +8,13 @@ export UV_CACHE_DIR=/tmp/small-judge-uv-cache
 export PYTHONUNBUFFERED=1
 
 mapfile -t models < <(grep -rl '^  use: true$' configs/models --include='*.yml' | sort)
-PARALLEL_JOBS="${MAX_CONCURRENCY:-3}"
+PARALLEL_JOBS="${MAX_CONCURRENCY:-5}"
 
 run_model() {
   local model="$1"
   local benchmarks=(configs/bench/{gpqa,aime24,aime25,aime26,mbpp}.yml)
   for benchmark in "${benchmarks[@]}"; do
-    DOCKER_HOST=unix:///var/run/docker.sock uv run collect -b "$benchmark" -m "$model" -n 1 --max-tokens 4096 --log-dir data || true
-    DOCKER_HOST=unix:///var/run/docker.sock uv run collect -b "$benchmark" -m "$model" -n 2 --max-tokens 4096 --log-dir data || true
+    DOCKER_HOST=unix:///var/run/docker.sock uv run collect -b "$benchmark" -m "$model" -n 2 --log-dir data || true
   done
 }
 

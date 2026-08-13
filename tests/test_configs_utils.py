@@ -85,17 +85,23 @@ def test_experiment_model_evals_subdirectories(tmp_path, monkeypatch):
     f2 = e2 / "failed_run3.eval"
     f2.write_text("failed_dummy")
 
-    mock_log_success = MagicMock(status="success")
-    mock_log_failed = MagicMock(status="error")
+    def mock_is_successful_eval(path):
+        return "failed" not in str(path)
 
-    def mock_read_eval_log(path, header_only=True):
-        if "failed" in str(path):
-            return mock_log_failed
-        return mock_log_success
-
-    monkeypatch.setattr("configs.utils.read_eval_log", mock_read_eval_log)
+    monkeypatch.setattr("configs.experiment.is_successful_eval", mock_is_successful_eval)
     monkeypatch.setattr("configs.experiment.get_eval_path", lambda **kw: eval_dir)
     evals = exp.model_evals(model)
     assert evals == [f0, f1]
+
+
+def _dummy_worker():
+    return 0
+
+
+def test_eval_runner_success():
+    from configs.utils import eval_runner
+
+    jobs = [(_dummy_worker, (), "job_1"), (_dummy_worker, (), "job_2")]
+    assert eval_runner(jobs) == 0
 
 

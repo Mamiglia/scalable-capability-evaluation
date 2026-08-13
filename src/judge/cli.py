@@ -20,6 +20,7 @@ def _run_experiment_worker(exp: ExperimentConfig) -> int:
             tasks=tasks,
             log_dir=exp.log_dir,
             display="plain",
+            embed_viewer=False,
             **model.eval_kwargs(),
             **kwargs,
         )
