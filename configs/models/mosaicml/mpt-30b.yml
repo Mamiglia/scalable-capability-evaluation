@@ -4,13 +4,15 @@ slug: vllm/mosaicml/mpt-30b
 release_date: "2023-06-22"
 runpod:
   use: true
-  model: mosaicml/mpt-30b
+  model: adamrb/mpt-30b-chat-safetensors
   name: small-judge-mpt-30b
   cloud_type: SECURE
-  gpu_id: NVIDIA A100 80GB PCIe
+  gpu_id: NVIDIA A100-SXM4-80GB
   gpu_count: 1
-  ready_timeout: 300
-  container_disk_in_gb: 80
+  ready_timeout: 3600
+  container_disk_in_gb: 100
   vllm_args: [--trust-remote-code]
+
+
 
 

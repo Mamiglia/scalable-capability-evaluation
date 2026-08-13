@@ -8,3 +8,19 @@ runpod:
   cloud_type: SECURE
   gpu_id: NVIDIA A40
   ready_timeout: 900
+  image: vllm/vllm-openai:v0.18.0
+  model_args:
+    stream: false
+  vllm_args:
+    - "--gpu-memory-utilization"
+    - "0.9"
+    - "--max-model-len"
+    - "8192"
+    - "--chat-template"
+    - "{% for message in messages %}{{ '<start_of_turn>' + message['role'] + '\n' + message['content'] + '<end_of_turn>\n' }}{% endfor %}{% if add_generation_prompt %}{{ '<start_of_turn>model\n' }}{% endif %}"
+generate_args:
+  max_connections: 10
+  max_retries: 5
+  stop_seqs:
+    - "<end_of_turn>"
+    - "<eos>"

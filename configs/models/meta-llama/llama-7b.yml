@@ -1,11 +1,14 @@
 name: meta-llama/Llama-7B
 slug: vllm/meta-llama/Llama-7B
 release_date: "2023-02"
+generate_args: {}
+
 runpod:
   use: true
   model: huggyllama/llama-7b
   name: small-judge-llama-7b
   cloud_type: SECURE
   gpu_id: NVIDIA A40
+  container_disk_in_gb: 40
   ready_timeout: 900
-
+  image: vllm/vllm-openai:v0.18.0
