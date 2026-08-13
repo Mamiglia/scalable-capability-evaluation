@@ -14,6 +14,8 @@ from inspect_ai._util.registry import registry_info, registry_lookup
 from configs.model import ModelConfig
 from configs.task import TaskConfig
 
+MAX_WORKERS = 32  # Limit the number of parallel workers to avoid overwhelming the system
+
 
 def get_task_args_with_defaults(task: TaskConfig) -> Dict[str, Any]:
     """Load the task from inspect_ai and extract all task arguments including defaults."""
@@ -194,7 +196,7 @@ def eval_runner(jobs: Sequence[Tuple[Callable[..., int], Tuple[Any, ...], str]])
     queue = manager.Queue()
     labels = [label for _, _, label in jobs]
 
-    with ProcessPoolExecutor(max_workers=max(len(jobs), 1)) as executor:
+    with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
             executor.submit(_eval_runner_worker, fn, args, queue, label): label
             for fn, args, label in jobs
@@ -208,6 +210,20 @@ def eval_runner(jobs: Sequence[Tuple[Callable[..., int], Tuple[Any, ...], str]])
             TimeRemainingColumn(),
         ) as progress:
             task_ids = {label: progress.add_task(label, total=None) for label in labels}
+            finished_tasks = set()
+
+            def _mark_finished(f_done, label_done):
+                if label_done in finished_tasks or label_done not in task_ids:
+                    return
+                finished_tasks.add(label_done)
+                tid = task_ids[label_done]
+                t_obj = progress.tasks[tid]
+                if t_obj.total is None:
+                    progress.update(tid, completed=1, total=1, visible=False)
+                elif t_obj.completed < t_obj.total:
+                    progress.update(tid, completed=t_obj.total, visible=False)
+                else:
+                    progress.update(tid, visible=False)
 
             while not all(f.done() for f in fut_list):
                 while not queue.empty():
@@ -218,6 +234,11 @@ def eval_runner(jobs: Sequence[Tuple[Callable[..., int], Tuple[Any, ...], str]])
                             progress.update(task_ids[label], completed=complete, total=total)
                     except Exception:
                         break
+
+                for f, label in futures.items():
+                    if f.done():
+                        _mark_finished(f, label)
+
                 time.sleep(0.05)
 
             while not queue.empty():
@@ -230,15 +251,8 @@ def eval_runner(jobs: Sequence[Tuple[Callable[..., int], Tuple[Any, ...], str]])
                     break
 
             for f, label in futures.items():
-                if f.done() and f.exception() is None:
-                    res = f.result()
-                    code = res[0] if isinstance(res, tuple) else res
-                    if isinstance(code, int) and code == 0:
-                        t_obj = progress.tasks[task_ids[label]]
-                        if t_obj.total is None:
-                            progress.update(task_ids[label], completed=1, total=1)
-                        elif t_obj.completed < t_obj.total:
-                            progress.update(task_ids[label], completed=t_obj.total)
+                if f.done():
+                    _mark_finished(f, label)
 
         errors = []
         for f, label in futures.items():
