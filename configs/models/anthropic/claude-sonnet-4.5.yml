@@ -1,4 +1,8 @@
+# Pinned to Anthropic first-party (Bedrock/Vertex also serve this slug).
+# Thinking is off by default on this model - enabled explicitly.
 name: anthropic/claude-sonnet-4.5
-slug: openrouter/anthropic/claude-sonnet-4.5
-release_date: '2025-09-29'
-
+model_args:
+  provider: {only: [anthropic], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+generate_args:
+  extra_body:
+    reasoning: {enabled: true}

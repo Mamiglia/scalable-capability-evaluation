@@ -1,7 +1,0 @@
-# Sole endpoint (alibaba/fp8). NB max_out 8192: thinking may truncate on AIME.
-name: qwen/qwen3-8b
-model_args:
-  provider: {only: [alibaba/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
-generate_args:
-  extra_body:
-    reasoning: {enabled: true}

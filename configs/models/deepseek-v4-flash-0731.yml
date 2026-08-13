@@ -1,9 +1,0 @@
-# Dated snapshot (bare slug can drift). First-party deepseek/fp8 trains on API
-# data ("paid model training") so data_collection: deny excludes it - 404.
-# novita/fp8 instead: fp8 like the rest of the grid, 1M ctx, 393k max out.
-name: deepseek/deepseek-v4-flash-0731
-model_args:
-  provider: {only: [novita/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
-generate_args:
-  extra_body:
-    reasoning: {enabled: true}
