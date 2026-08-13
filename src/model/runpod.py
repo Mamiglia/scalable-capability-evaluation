@@ -78,6 +78,20 @@ def validate(config: dict[str, Any] | None) -> dict[str, Any]:
     return result
 
 
+def is_healthy(base_url: str) -> bool:
+    if not base_url.startswith("http://") and not base_url.startswith("https://"):
+        return True
+    request = urllib.request.Request(
+        f"{base_url}/models", headers={"User-Agent": "small-judge/1.0"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            return 200 <= response.status < 300
+    except Exception:
+        return False
+
+
+
 def _deadline(value: Any) -> str:
     text = str(value)
     duration = re.fullmatch(r"(\d+(?:\.\d+)?)([smhd])", text)
@@ -107,7 +121,18 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
         raise RuntimeError(f"runpodctl failed: {detail}") from exc
 
 
-def create(config: dict[str, Any]) -> str:
+FALLBACK_GPUS = [
+    "NVIDIA A100-SXM4-80GB",
+    "NVIDIA A100 80GB PCIe",
+    "NVIDIA H100 80GB PCIe",
+    "NVIDIA H100 SXM",
+    "NVIDIA L40S",
+    "NVIDIA RTX A6000",
+    "NVIDIA A40",
+]
+
+
+def _create_pod_once(config: dict[str, Any], gpu_id: str) -> str:
     create_args = list(config["create_args"])
     hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     if hf_token and not any(arg.startswith("--env=") for arg in create_args):
@@ -120,7 +145,7 @@ def create(config: dict[str, Any]) -> str:
         "create",
         f"--image={config['image']}",
         f"--cloud-type={config['cloud_type']}",
-        f"--gpu-id={config['gpu_id']}",
+        f"--gpu-id={gpu_id}",
         f"--gpu-count={config['gpu_count']}",
         f"--container-disk-in-gb={config['container_disk_in_gb']}",
         f"--ports={config['port']}/http",
@@ -138,7 +163,7 @@ def create(config: dict[str, Any]) -> str:
     if config.get("name"):
         command.append(f"--name={config['name']}")
     command.extend(create_args)
-    LOGGER.info("Creating Runpod for %s on %s", config["model"], config["gpu_id"])
+    LOGGER.info("Creating Runpod for %s on %s", config["model"], gpu_id)
     output = _run(command).stdout
     try:
         pod_id = json.loads(output)["id"]
@@ -147,6 +172,24 @@ def create(config: dict[str, Any]) -> str:
     if not isinstance(pod_id, str) or not pod_id:
         raise RuntimeError(f"runpodctl returned no Pod id: {output!r}")
     return pod_id
+
+
+def create(config: dict[str, Any]) -> str:
+    gpu_candidates = [config["gpu_id"]] + [g for g in FALLBACK_GPUS if g != config["gpu_id"]]
+    last_exc = None
+    for gpu in gpu_candidates:
+        try:
+            return _create_pod_once(config, gpu)
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "graphql" in err_str or "resources" in err_str or "something went wrong" in err_str or "failed to create pod" in err_str:
+                LOGGER.warning("GPU %s failed for %s (%s), trying next fallback GPU...", gpu, config["model"], exc)
+                last_exc = exc
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("Failed to create pod with any GPU candidate")
 
 
 def wait(pod_id: str, port: int, timeout: float) -> str:
