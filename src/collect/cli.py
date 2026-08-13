@@ -47,13 +47,15 @@ def _run_eval_worker(
 
         # No seed: several pinned endpoints reject it under require_parameters,
         # and a fixed seed can collapse epochs into identical generations.
+        eval_kwargs = model.eval_kwargs() | bench.eval_kwargs() | kwargs
         success, _ = eval_set(
             tasks=bench.task,
             task_args=bench.task_args or {},
             log_dir=str(target_dir),
+            log_dir_allow_dirty=True,
             display="plain",
-            **model.eval_kwargs(),
-            **bench.eval_kwargs() | kwargs,
+            embed_viewer=False,
+            **eval_kwargs,
         )
         return 0 if success else 1
 

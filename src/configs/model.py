@@ -12,7 +12,7 @@ class ModelConfig(DraccusConfig):
     slug: str = None
     release_date: str | None = None
     model_args: Optional[Dict[str, Any]] = None
-    generate_args: Dict[str, Any] = None
+    generate_args: Optional[Dict[str, Any]] = None
     # Consumed by the Model context manager when enabled.
     runpod: Dict[str, Any] = field(default_factory=dict)
 
@@ -24,10 +24,13 @@ class ModelConfig(DraccusConfig):
             else:
                 self.slug = f"openrouter/{clean_name}"
 
-        if not self.model_args:
+        if self.model_args is None:
             self.model_args = {
                 "provider": {
                     "quantizations": ["bf16", "fp16"],
                 }
             }
-        self.model_args |= self._kwargs or {}
+        if self._kwargs:
+            self.model_args = self.model_args | self._kwargs
+        if self.generate_args is None:
+            self.generate_args = {}
