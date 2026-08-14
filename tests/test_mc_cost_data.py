@@ -31,13 +31,16 @@ def test_prepare_judgments_builds_signed_and_symmetric_features():
     got = prepare_judgments(attempts, catalogue, items)
 
     row = got.iloc[0]
-    assert list(got) == JUDGMENT_COLUMNS
+    assert list(got.columns[:len(JUDGMENT_COLUMNS)]) == JUDGMENT_COLUMNS
     assert row.theta_gap == 1.0
     assert row.oversight == 1.0
     assert row.theta_gap_x_oversight == 1.0
     assert row.theta_gap_x_difficulty == 0.7
     assert row.release_gap_days == 731
     assert row.relative_release_days == 0.5
+    token_row = judge_token_rows(got).iloc[0]
+    assert token_row.input_tokens == 300
+    assert token_row.ordinary_output_tokens == 30
 
 
 def test_prepare_judgments_names_missing_metadata():
@@ -110,10 +113,29 @@ def test_candidate_rows_deduplicate_and_exclude_zero_usage(monkeypatch):
     assert got.attrs["accounting"]["zero_usage_or_error"] == 1
 
 
+def test_candidate_rows_reject_missing_fitting_metadata(monkeypatch):
+    import mc_cost.data as data
+
+    sample = SimpleNamespace(
+        id="missing_1", epoch=1, error=None,
+        model_usage={"m": SimpleNamespace(input_tokens=1, output_tokens=1, reasoning_tokens=0, total_tokens=2)},
+        scores={}, output=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="answer"))]),
+    )
+    log = SimpleNamespace(
+        eval=SimpleNamespace(task="gpqa", model="openrouter/candidate", task_args={}), samples=[sample],
+    )
+    monkeypatch.setattr(data, "list_eval_logs", lambda _: [SimpleNamespace(name="one")])
+    monkeypatch.setattr(data, "read_eval_log", lambda _: log)
+    catalogue = pd.DataFrame([{"model_id": "candidate", "theta": None, "release": None}])
+
+    with pytest.raises(ValueError, match="candidate.*missing.*theta.*release.*item.*missing"):
+        candidate_token_rows(["unused"], catalogue, pd.DataFrame())
+
+
 def test_write_prepared_tables_stores_training_standardization(tmp_path):
     judgments = pd.DataFrame([{column: 0.0 for column in JUDGMENT_COLUMNS}, {column: 2.0 for column in JUDGMENT_COLUMNS}])
     judgments[["judge", "item", "left_model", "right_model"]] = "identity"
-    paths = write_prepared_tables(tmp_path, judgments, pd.DataFrame(), pd.DataFrame())
+    paths = write_prepared_tables(tmp_path, judgments, pd.DataFrame(), pd.DataFrame(), training_rows=[True, True])
 
     stored = pd.read_parquet(paths["judgments"])
     stats = pd.read_json(paths["judgment_standardization"])
@@ -121,3 +143,18 @@ def test_write_prepared_tables_stores_training_standardization(tmp_path):
     assert stats.loc["theta_gap", "mean"] == 1.0
     assert paths["candidate_tokens"].exists()
     assert paths["judge_tokens"].exists()
+
+
+def test_write_prepared_tables_uses_only_explicit_training_rows(tmp_path):
+    judgments = pd.DataFrame([{column: 0.0 for column in JUDGMENT_COLUMNS} for _ in range(3)])
+    judgments["theta_gap"] = [0.0, 2.0, 100.0]
+    judgments[["judge", "item", "left_model", "right_model"]] = "identity"
+
+    paths = write_prepared_tables(
+        tmp_path, judgments, pd.DataFrame(), pd.DataFrame(), training_rows=[True, True, False],
+    )
+
+    stored = pd.read_parquet(paths["judgments"])
+    stats = pd.read_json(paths["judgment_standardization"])
+    assert stats.loc["theta_gap", "mean"] == 1.0
+    assert stored.theta_gap.tolist() == [-1.0, 1.0, 99.0]

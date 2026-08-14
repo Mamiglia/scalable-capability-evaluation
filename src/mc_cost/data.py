@@ -118,7 +118,7 @@ def prepare_judgments(attempts: pd.DataFrame, catalogue: pd.DataFrame, items: pd
     frame["theta_gap_x_oversight"] = frame["theta_gap"] * frame["oversight"]
     frame["theta_gap_x_difficulty"] = frame["theta_gap"] * frame["difficulty"]
     frame["same_family_x_theta_gap"] = frame["same_model_family"] * frame["theta_gap"]
-    return frame.reindex(columns=JUDGMENT_COLUMNS)
+    return frame.reindex(columns=JUDGMENT_COLUMNS + [column for column in frame if column not in JUDGMENT_COLUMNS])
 
 
 def _candidate_item_id(sample) -> str:
@@ -151,17 +151,30 @@ def candidate_token_rows(log_roots, catalogue: pd.DataFrame, items: pd.DataFrame
                 if key in seen_samples:
                     continue
                 seen_samples.add(key)
-                try:
-                    model_data = metadata.loc[model]
-                except KeyError:
-                    continue
+                model_data = metadata.loc[model] if model in metadata.index else None
+                item_difficulty = difficulty.get((benchmark, item), np.nan)
+                missing = []
+                if model_data is None or pd.isna(model_data["theta"]):
+                    missing.append("theta")
+                if model_data is None or pd.isna(model_data["release_day"]):
+                    missing.append("release")
+                if pd.isna(item_difficulty):
+                    missing.append("difficulty")
+                if missing:
+                    details = []
+                    model_fields = [field for field in missing if field != "difficulty"]
+                    if model_fields:
+                        details.append(f"model {model} missing {', '.join(model_fields)}")
+                    if "difficulty" in missing:
+                        details.append(f"item {item} missing difficulty")
+                    raise ValueError("; ".join(details))
                 transcript = extract_transcript(sample, include_reasoning=True)
                 reasoning_tokens = tokens["reasoning"]
                 rows.append({
                     "role": "candidate", "benchmark": benchmark, "model": model, "item": item, "epoch": epoch,
                     "response_chars": len(transcript), "correct": _sample_correct(sample),
                     "theta": model_data["theta"], "release_day": model_data["release_day"],
-                    "difficulty": difficulty.get((benchmark, item), np.nan),
+                    "difficulty": item_difficulty,
                     "visible_reasoning": int("<THOUGHT_START>" in transcript or "<think>" in transcript),
                     "reasoning_class": model_data.get("reasoning_class", pd.NA),
                     "input_tokens": tokens["input"], "output_tokens": tokens["output"],
@@ -187,14 +200,20 @@ def judge_token_rows(judgments: pd.DataFrame) -> pd.DataFrame:
     })
 
 
-def standardize_judgments(judgments: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def standardize_judgments(
+    judgments: pd.DataFrame, training_rows,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Standardize continuous predictors using the supplied training rows."""
     frame = judgments.copy()
+    training_rows = np.asarray(training_rows, dtype=bool)
+    if training_rows.shape != (len(frame),) or not training_rows.any():
+        raise ValueError("training_rows must select at least one judgment row")
     stats = []
     for column in CONTINUOUS_JUDGMENT_COLUMNS:
         values = pd.to_numeric(frame[column], errors="raise")
-        mean = float(values.mean())
-        scale = float(values.std(ddof=0)) or 1.0
+        training_values = values[training_rows]
+        mean = float(training_values.mean())
+        scale = float(training_values.std(ddof=0)) or 1.0
         frame[column] = (values - mean) / scale
         stats.append({"feature": column, "mean": mean, "scale": scale})
     return frame, pd.DataFrame(stats).set_index("feature")
@@ -205,11 +224,12 @@ def write_prepared_tables(
     judgments: pd.DataFrame,
     candidate_tokens: pd.DataFrame,
     judge_tokens: pd.DataFrame,
+    training_rows,
 ) -> dict[str, Path]:
     """Write standardized training judgments, token rows, and their scales."""
     output_directory = Path(output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
-    standardized, scales = standardize_judgments(judgments)
+    standardized, scales = standardize_judgments(judgments, training_rows)
     paths = {
         "judgments": output_directory / "judgments.parquet",
         "candidate_tokens": output_directory / "token_candidate.parquet",
