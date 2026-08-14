@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Judge-preference sentence attribution</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="sentences.css" />
+  <link rel="stylesheet" href="sentences_ml.css" />
+  <script src="plotly.min.js"></script>
+</head>
+<body class="viz-root">
+  <header class="topbar">
+    <div class="titleblock">
+      <h1>What raises and lowers the judge&rsquo;s preference, sentence by sentence</h1>
+      <p class="subtitle">Occlusion attribution on the qwen3-32b judge. Each sentence&rsquo;s value is
+        how much the judge&rsquo;s last-token score on the selected direction <em>drops</em> when that
+        sentence is deleted from the transcript: <strong>positive = the sentence drives the direction
+        UP</strong>, negative = DOWN. Longer sentences move the score more just by being longer, so a
+        length-adjusted view (residual of the effect on sentence length) sits alongside the raw effect.</p>
+    </div>
+  </header>
+
+  <section class="controls" aria-label="global controls">
+    <div class="ctl">
+      <label for="ctl-dir">Direction</label>
+      <select id="ctl-dir"></select>
+    </div>
+    <div class="ctl">
+      <label>Effect</label>
+      <div class="toggle" id="ctl-adj" role="group" aria-label="raw or length-adjusted">
+        <button data-adj="raw" type="button">raw</button>
+        <button data-adj="len" class="active" type="button">length-adj</button>
+      </div>
+    </div>
+    <div class="ctl-hint" id="dir-note"></div>
+  </section>
+
+  <nav class="tabs" aria-label="views">
+    <button class="tab is-active" data-view="drivers" type="button">Drivers (all)</button>
+    <button class="tab" data-view="byitem" type="button">By transcript</button>
+    <button class="tab" data-view="transcript" type="button">Transcript</button>
+    <button class="tab" data-view="scatter" type="button">Scatter</button>
+    <button class="tab" data-view="tsne" type="button">t-SNE</button>
+    <button class="tab" data-view="table" type="button">Table</button>
+  </nav>
+
+  <main>
+    <section id="view-drivers" class="view">
+      <div class="driver-cols">
+        <div class="driver-col">
+          <h2 class="drv-head up"><span class="swatch s-pos2"></span> Raises <span id="drv-dir-up"></span></h2>
+          <ol id="drivers-up" class="driver-list"></ol>
+        </div>
+        <div class="driver-col">
+          <h2 class="drv-head down"><span class="swatch s-neg2"></span> Lowers <span id="drv-dir-down"></span></h2>
+          <ol id="drivers-down" class="driver-list"></ol>
+        </div>
+      </div>
+      <p class="note" id="drivers-note"></p>
+    </section>
+
+    <section id="view-byitem" class="view" hidden>
+      <p class="note" id="byitem-note"></p>
+      <div id="byitem-body" class="byitem-list"></div>
+    </section>
+
+    <section id="view-transcript" class="view" hidden>
+      <div class="ctl inline">
+        <label for="ctl-transcript">Transcript</label>
+        <select id="ctl-transcript"></select>
+        <label class="chk"><input type="checkbox" id="ctl-tokens" /> shade tokens by projection</label>
+      </div>
+      <div class="scale-legend">
+        <span id="scale-lo">lowers</span><span class="swatch s-neg2"></span><span class="swatch s-neg1"></span>
+        <span class="swatch s-zero"></span><span class="swatch s-pos1"></span>
+        <span class="swatch s-pos2"></span><span id="scale-hi">raises</span>
+      </div>
+      <div id="transcript-body" class="transcript"></div>
+    </section>
+
+    <section id="view-scatter" class="view" hidden>
+      <div class="ctl inline">
+        <label for="ctl-x">x axis</label><select id="ctl-x"></select>
+        <label for="ctl-y">y axis</label><select id="ctl-y"></select>
+      </div>
+      <figure class="plotbox">
+        <figcaption>One point per transcript &mdash; last-token score on each direction
+          <span class="hint">Colour = elo (item-centred Bradley&ndash;Terry; blue low, red high). Hover for author &amp; elo; click to open.</span>
+        </figcaption>
+        <div id="plot-scatter"></div>
+      </figure>
+    </section>
+
+    <section id="view-tsne" class="view" hidden>
+      <div class="ctl inline">
+        <label>Colour by</label>
+        <div class="toggle" id="ctl-tsne-color" role="group" aria-label="colour by">
+          <button data-color="dir" class="active" type="button">direction</button>
+          <button data-color="cluster" type="button">cluster</button>
+        </div>
+      </div>
+      <figure class="plotbox">
+        <figcaption>2-D t-SNE of sentence embeddings (Qwen3-Embedding-0.6B)
+          <span class="hint" id="tsne-hint"></span>
+        </figcaption>
+        <div id="plot-tsne"></div>
+      </figure>
+      <div id="tsne-legend" class="cluster-legend" hidden></div>
+    </section>
+
+    <section id="view-table" class="view" hidden>
+      <table class="sent-table">
+        <thead><tr>
+          <th data-sort="raw" class="num sortable" id="th-raw">raw</th>
+          <th data-sort="len" class="num sortable" id="th-len">len-adj</th>
+          <th data-sort="n_chars" class="num sortable">chars</th>
+          <th data-sort="role" class="sortable">author</th>
+          <th data-sort="elo" class="num sortable">elo</th>
+          <th data-sort="sentence" class="sortable">sentence</th>
+        </tr></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+      <p class="note" id="table-note"></p>
+    </section>
+  </main>
+
+  <script src="sentences_ml.js"></script>
+</body>
+</html>

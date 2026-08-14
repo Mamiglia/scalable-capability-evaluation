@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sentence attribution viewer</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="sentences.css" />
+  <script src="plotly.min.js"></script>
+</head>
+<body class="viz-root">
+  <header class="topbar">
+    <div class="titleblock">
+      <h1>What moves the judge&rsquo;s axes, sentence by sentence</h1>
+      <p class="subtitle">Each point is one sentence from a recorded transcript. Its value on an
+        axis is how far the judge&rsquo;s score drops when that sentence is deleted, corrected for
+        sentence length and centred within its own transcript. Click any point to read it.</p>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="views">
+    <button class="tab is-active" data-view="home">Plots</button>
+    <button class="tab" data-view="table">Table</button>
+    <button class="tab" data-view="transcript">Transcript</button>
+  </nav>
+
+  <section class="controls" aria-label="controls">
+    <div class="ctl">
+      <label for="ctl-x">Scatter x</label>
+      <select id="ctl-x"></select>
+    </div>
+    <div class="ctl">
+      <label for="ctl-y">Scatter y</label>
+      <select id="ctl-y"></select>
+    </div>
+    <div class="ctl">
+      <label for="ctl-colour">Map colour</label>
+      <select id="ctl-colour"></select>
+    </div>
+    <div class="ctl">
+      <label for="ctl-search">Search text</label>
+      <input id="ctl-search" type="search" placeholder="e.g. boxed" />
+    </div>
+    <div class="ctl ctl-count"><span id="ctl-n"></span></div>
+  </section>
+
+  <main>
+    <section id="view-home" class="view">
+      <div class="plots">
+        <figure class="plotbox">
+          <figcaption>One axis against another
+            <span class="hint">Click a legend entry to hide that model; double-click to show only it.</span>
+          </figcaption>
+          <div id="plot-scatter"></div>
+        </figure>
+        <figure class="plotbox">
+          <figcaption>Semantic map
+            <span class="hint">t-SNE over Qwen3-Embedding sentence vectors: near = similar meaning. Colour = loading.</span>
+          </figcaption>
+          <div id="plot-tsne"></div>
+        </figure>
+      </div>
+      <aside id="detail" class="detail" hidden></aside>
+    </section>
+
+    <section id="view-table" class="view" hidden>
+      <table class="sent-table">
+        <thead><tr>
+          <th data-sort="v_pref_judge_res" class="num sortable">v_pref_judge</th>
+          <th data-sort="v_cap_res" class="num sortable">v_cap</th>
+          <th data-sort="n_chars" class="num sortable">chars</th>
+          <th data-sort="model" class="sortable">model</th>
+          <th data-sort="sentence" class="sortable">sentence</th>
+        </tr></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+      <p class="note" id="table-note"></p>
+    </section>
+
+    <section id="view-transcript" class="view" hidden>
+      <div class="ctl inline">
+        <label for="ctl-transcript">Transcript</label>
+        <select id="ctl-transcript"></select>
+        <label for="ctl-taxis">Shade by</label>
+        <select id="ctl-taxis"></select>
+      </div>
+      <div class="scale-legend">
+        <span>lowers</span><span class="swatch s-neg2"></span><span class="swatch s-neg1"></span>
+        <span class="swatch s-zero"></span><span class="swatch s-pos1"></span>
+        <span class="swatch s-pos2"></span><span>raises</span>
+      </div>
+      <div id="transcript-body" class="transcript"></div>
+    </section>
+  </main>
+
+  <script src="sentences.js"></script>
+</body>
+</html>

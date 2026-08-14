@@ -1,0 +1,1 @@
+{"directions": ["v_cap", "v_pref_gen", "v_pref_gen_orth", "v_pref_spec", "v_pref_spec_orth"], "layers": {"v_cap": 26, "v_pref_gen": 26, "v_pref_gen_orth": 26, "v_pref_spec": 50, "v_pref_spec_orth": 50}, "min_chars": 25, "n_transcripts": 55, "n_sentences": 2256, "elo_min": -2.141, "elo_max": 1.898}

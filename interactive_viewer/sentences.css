@@ -1,0 +1,89 @@
+/* Sentence attribution viewer. Roles first, hex only in the token block, so
+   light/dark swap in one place. Diverging blue/red with a gray midpoint: the
+   axes are signed, and gray has to read as "this sentence does nothing". */
+.viz-root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --surface-2: #f2f1ee;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #7a7975;
+  --grid: #e3e2de;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
+  --series-4: #eda100; --series-5: #e87ba4; --series-6: #008300;
+  --series-7: #4a3aa7;
+  --muted-mark: #b9b8b3;
+  --div-neg-2: #2a78d6;  /* lowers the axis */
+  --div-neg-1: #9ec5f4;
+  --div-zero:  #f0efec;
+  --div-pos-1: #f2a9a8;
+  --div-pos-2: #d03b3b;  /* raises the axis */
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-1: #1a1a19; --surface-2: #242422;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #97968d;
+    --grid: #3a3a37; --muted-mark: #5c5c58;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+    --series-4: #c98500; --series-5: #d55181; --series-6: #008300;
+    --series-7: #9085e9;
+    --div-neg-2: #3987e5; --div-neg-1: #1c5cab; --div-zero: #383835;
+    --div-pos-1: #8f3b3b; --div-pos-2: #e66767;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface-1: #1a1a19; --surface-2: #242422;
+  --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #97968d;
+  --grid: #3a3a37; --muted-mark: #5c5c58;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+  --series-4: #c98500; --series-5: #d55181; --series-6: #008300;
+  --series-7: #9085e9;
+  --div-neg-2: #3987e5; --div-neg-1: #1c5cab; --div-zero: #383835;
+  --div-pos-1: #8f3b3b; --div-pos-2: #e66767;
+}
+
+body.viz-root { background: var(--surface-1); color: var(--text-primary); }
+
+.tabs { display: flex; gap: .25rem; padding: 0 1.25rem; border-bottom: 1px solid var(--grid); }
+.tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: .55rem .9rem; font: inherit; color: var(--text-secondary); cursor: pointer; }
+.tab.is-active { color: var(--text-primary); border-bottom-color: var(--series-1); font-weight: 600; }
+.tab:hover { color: var(--text-primary); }
+
+.ctl.inline { display: inline-flex; gap: .5rem; align-items: center; margin: .75rem 1.25rem; }
+.ctl-count { color: var(--text-muted); align-self: end; }
+
+.view { padding: 1rem 1.25rem 3rem; }
+.plots { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 1.25rem; }
+.plotbox { margin: 0; }
+.plotbox figcaption { font-weight: 600; margin-bottom: .35rem; }
+.plotbox .hint { display: block; font-weight: 400; color: var(--text-muted); font-size: 13px; }
+#plot-scatter, #plot-tsne { height: 460px; }
+
+.detail { margin-top: 1rem; padding: .9rem 1rem; background: var(--surface-2);
+  border-left: 3px solid var(--series-1); border-radius: 4px; }
+.detail .meta { color: var(--text-secondary); font-size: 13px; margin-bottom: .4rem; }
+.detail .sent { white-space: pre-wrap; }
+
+.sent-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.sent-table th, .sent-table td { border-bottom: 1px solid var(--grid); padding: .35rem .5rem;
+  text-align: left; vertical-align: top; }
+.sent-table th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.sent-table th.sortable:hover { color: var(--series-1); }
+.sent-table th.sorted::after { content: " ▾"; }
+.sent-table th.sorted.asc::after { content: " ▴"; }
+.sent-table .num { text-align: right; font-variant-numeric: tabular-nums; width: 6rem; }
+.sent-table tbody tr:hover { background: var(--surface-2); }
+
+.transcript { max-width: 65rem; line-height: 1.75; }
+.transcript .s { padding: .05rem .15rem; border-radius: 3px; cursor: default; }
+.transcript .s:hover { outline: 1px solid var(--text-muted); }
+.scale-legend { display: flex; align-items: center; gap: .35rem; margin: 0 1.25rem .75rem;
+  color: var(--text-muted); font-size: 13px; }
+.swatch { width: 22px; height: 12px; display: inline-block; border-radius: 2px; }
+.s-neg2 { background: var(--div-neg-2); } .s-neg1 { background: var(--div-neg-1); }
+.s-zero { background: var(--div-zero); }
+.s-pos1 { background: var(--div-pos-1); } .s-pos2 { background: var(--div-pos-2); }
+.note { color: var(--text-muted); font-size: 13px; }

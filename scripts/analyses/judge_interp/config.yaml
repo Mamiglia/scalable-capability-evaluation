@@ -36,7 +36,7 @@ interp_pod:                   # token maps + steered rewrites on a rented GPU
     alpha_fracs: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]   # both signs, p 1
     random_axis: random_a     # matched strengths, positive sign only
     n_shards: 8
-    stage2_layers: [28, 30]   # extra steering layers (top last-token probe r after 26)
+    stage2_layers: [28, 30, 32, 34, 36, 42, 44, 46, 48, 50, 52, 54]  # steering band: every layer whose last-token probe r is within .03 of the peak
     stage2_alpha_fracs: [0.05, 0.1, 0.2, 0.5]        # both signs, all layers at once
   judge_steer:                # reader steering: slot-masked vectors while judging
     n_pairs: 120              # qwen-judged pairs, stratified by |elo gap| terciles

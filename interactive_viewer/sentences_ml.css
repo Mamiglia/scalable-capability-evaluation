@@ -1,0 +1,55 @@
+/* ML attribution dashboard: reuses sentences.css (palette, tabs, transcript
+   spans, swatches, table). Only the new pieces live here. */
+
+.toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.toggle button { appearance: none; background: var(--panel); color: var(--text-secondary);
+  border: 0; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.toggle button + button { border-left: 1px solid var(--border); }
+.toggle button.active { background: var(--series-1); color: #fff; font-weight: 600; }
+
+.dir-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+
+.driver-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1.5rem; }
+.drv-head { font-size: 15px; margin: 0 0 .6rem; display: flex; align-items: center; gap: .4rem; }
+.drv-head .swatch { width: 16px; height: 16px; }
+.driver-list { list-style: none; margin: 0; padding: 0; counter-reset: drv; }
+.driver-list li { display: grid; grid-template-columns: 3.4rem 1fr; gap: .1rem .7rem;
+  padding: .45rem .3rem; border-bottom: 1px solid var(--grid); cursor: pointer; }
+.driver-list li:hover { background: var(--surface-2); }
+.driver-list .val { font-variant-numeric: tabular-nums; font-weight: 700; text-align: right;
+  grid-row: span 2; align-self: center; }
+.driver-list .val.up { color: var(--div-pos-2); }
+.driver-list .val.down { color: var(--div-neg-2); }
+.driver-list .sent { line-height: 1.35; }
+.driver-list .sub { color: var(--text-muted); font-size: 12px; }
+
+.chk { display: inline-flex; align-items: center; gap: .35rem; color: var(--text-secondary); font-size: 13px; }
+.transcript .s.here { outline: 2px solid var(--series-1); }
+.transcript .tok { padding: 0 .02rem; border-radius: 2px; white-space: pre-wrap; }
+
+/* word clouds */
+.cloud-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1.5rem; }
+.cloud { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .55rem; line-height: 1.5;
+  padding: .6rem .3rem; }
+.cloud .term { cursor: pointer; font-variant-numeric: tabular-nums; border-radius: 3px; padding: 0 .12rem; }
+.cloud .term:hover { outline: 1px solid currentColor; }
+.cloud .term.up { color: var(--div-pos-2); }
+.cloud .term.down { color: var(--div-neg-2); }
+
+/* t-SNE cluster legend */
+.cluster-legend { display: flex; flex-wrap: wrap; gap: .25rem .9rem; margin-top: .6rem;
+  font-size: 12px; color: var(--text-secondary); }
+.cl-item { display: inline-flex; align-items: center; gap: .3rem; }
+.cl-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+/* By-transcript view: each transcript's highest + lowest sentence */
+.byitem-list { display: grid; gap: 8px; }
+.bt-card { border: 1px solid var(--grid); border-radius: 6px; padding: 6px 10px; }
+.bt-head { font-size: .78rem; color: var(--text-secondary); margin-bottom: 3px; }
+.bt-row { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
+.bt-row .val { flex: 0 0 3.4em; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.bt-row .val.up { color: var(--div-pos-2); }
+.bt-row .val.down { color: var(--div-neg-2); }
+.bt-row .sent { cursor: pointer; }
+.bt-row .sent:hover { text-decoration: underline; }
