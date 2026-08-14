@@ -82,7 +82,9 @@ def build_judge_tasks(experiment: ExperimentConfig) -> list[Task]:
     tasks = []
     for index, (major, minor) in enumerate(pairs):
         # Several pairs in one eval_set need distinct names, or their logs collide.
-        task_name = experiment.task_name if len(pairs) == 1 else f"{experiment.task_name}#{index}"
+        # Inspect builds file:// URLs from log paths, so "#" in the filename truncates the path
+        # at urlparse() time and breaks header reads.
+        task_name = experiment.task_name if len(pairs) == 1 else f"{experiment.task_name}+{index}"
         tasks.append(
             judge_task(
                 major_path=major,
