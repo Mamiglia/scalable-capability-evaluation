@@ -5,12 +5,15 @@ Default: the data-expansion run with ECI gap axis (the run's design variable).
 have no ECI, so combined runs use --gap acc (per-bench accuracy diff).
 Exported scores are P(pick first-named); load() reorients every pair so score
 = P(pick the gap-axis-stronger member). Truncation runs are skipped.
+--exclude-members drops answer models by name fragment (the deepseek family has
+a terse-answer artefact, so its pairs get their own figure set).
 
 Usage:
   uv run python scripts/judge/figures_expansion.py --out-dir judge_results/multi-eval-pilot/figures
   uv run python scripts/judge/figures_expansion.py --out-dir judge_results/combined/figures \
       --datasets data-expansion-gpqa data-expansion-aime2025 data-expansion-aime2026 gpqa-pilot-rd2 \
       --gap acc
+  ... --out-dir judge_results/multi-eval-pilot/figures-no-deepseek --exclude-members deepseek
 """
 
 import argparse
@@ -35,7 +38,13 @@ BENCHES = []       # series names, in dataset order (same bench pools across dat
 DIRS = {}          # series -> list of viewer dataset dirs
 GAP_AXIS = "eci"   # model-meta key the gap and pair orientation use
 GAP_LABEL = "capability gap (ECI)"
-EXCLUDE = set()    # members whose pairs are dropped everywhere
+EXCLUDE = set()    # lowercased name fragments; matching answer models are dropped
+                   # (they can still judge — the artefact is in their transcripts)
+
+
+def excluded(member):
+    """True if the member name contains any --exclude-members fragment."""
+    return any(frag in member.lower() for frag in EXCLUDE)
 
 
 def series_name(dataset):
@@ -53,18 +62,21 @@ JUDGE_COLORS = dict(zip(JUDGE_ORDER, ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 
 def load():
     """rows: one per (eval, judge, pair run); models: per-eval metadata."""
-    rows, models = [], {}
+    rows, models, dropped, kept = [], {}, set(), set()
     for s in BENCHES:
       for d in DIRS[s]:
         if not (d / "index.json").exists():
             continue
         idx = json.load(open(d / "index.json"))
+        # excluded models stay in models{} so jlabel() can still caption them as
+        # judges; the figures that plot members skip them
         for m, meta in idx["models"].items():
+            (dropped if excluded(m) else kept).add(m)
             models.setdefault(s, {}).setdefault(m, meta)
         for r in idx["runs"]:
             if r.get("frac", "full") != "full":
                 continue
-            if r["major"] in EXCLUDE or r["minor"] in EXCLUDE:
+            if excluded(r["major"]) or excluded(r["minor"]):
                 continue
             r = dict(r)
             M, N = idx["models"][r["major"]], idx["models"][r["minor"]]
@@ -89,6 +101,8 @@ def load():
             else:
                 r["eci_gap"] = r["score_eci"] = None
             rows.append(r)
+    print(f"excluded members: {', '.join(sorted(dropped)) or 'none'}")
+    print(f"{len(kept)} members kept")
     return rows, models
 
 
@@ -155,10 +169,11 @@ def jlabel(models, j):
 
 
 def fig_model_accuracy(models, out):
-    grid, labels = [m for m in JUDGE_ORDER if m in models.get("gpqa", {})], {}
+    grid, labels = [m for m in JUDGE_ORDER
+                    if m in models.get("gpqa", {}) and not excluded(m)], {}
     for s in BENCHES:
         for m, meta in models.get(s, {}).items():
-            if meta["arm"] == "A" and m not in grid:
+            if meta["arm"] == "A" and m not in grid and not excluded(m):
                 grid.append(m)
             labels.setdefault(m, meta["label"])
     fig, ax = plt.subplots(figsize=(1.1 * len(grid) + 3, 4.5))
@@ -580,7 +595,7 @@ def _pick_longer_rate(bench):
                  if "__ep1" not in f}
         for pf in glob.glob(str(d / "pairs/*__full.json")):
             major, minor, _ = Path(pf).stem.split("__")
-            if major == minor or major in EXCLUDE or minor in EXCLUDE:
+            if major == minor or excluded(major) or excluded(minor):
                 continue
             for item, judges in json.load(open(pf)).items():
                 for j, cell in judges.items():
@@ -636,7 +651,7 @@ def fig_capability_vs_length(models, out):
                 continue
             for m, meta in json.load(open(d / "index.json"))["models"].items():
                 f = d / f"transcripts/{m}.json"
-                if meta.get(GAP_AXIS) is None or not f.exists():
+                if excluded(m) or meta.get(GAP_AXIS) is None or not f.exists():
                     continue
                 tr = json.load(open(f))
                 if tr:
@@ -671,7 +686,7 @@ def fig_item_difficulty(models, out):
             if not (d / "index.json").exists():
                 continue
             meta = json.load(open(d / "index.json"))["models"]
-            grid = [m for m, mm in meta.items() if mm["arm"] == "A"]
+            grid = [m for m, mm in meta.items() if mm["arm"] == "A" and not excluded(m)]
             solved = defaultdict(int)
             for m in grid:
                 f = d / f"transcripts/{m}.json"
@@ -681,7 +696,7 @@ def fig_item_difficulty(models, out):
             for pf in glob.glob(str(d / "pairs/*__full.json")):
                 major, minor, _ = Path(pf).stem.split("__")
                 if (major == minor or major not in grid or minor not in grid
-                        or major in EXCLUDE or minor in EXCLUDE):
+                        or excluded(major) or excluded(minor)):
                     continue
                 ca, cb = meta[major].get(GAP_AXIS), meta[minor].get(GAP_AXIS)
                 if ca is None or cb is None:
@@ -716,7 +731,8 @@ def fig_fill_plan(rows, models, out):
     if "gpqa" not in models:
         return
     judges = JUDGE_ORDER + ["gpt-4.1", "o4-mini", "claude-sonnet-4.5"]
-    members = [m for m in models["gpqa"] if models["gpqa"][m]["arm"] == "A"] + ["qwen3-32b"]
+    members = [m for m in models["gpqa"]
+               if models["gpqa"][m]["arm"] == "A" and not excluded(m)] + ["qwen3-32b"]
     done = defaultdict(set)
     for r in rows:
         if r["eval"] in BENCHES:
@@ -747,9 +763,10 @@ def main():
     ap.add_argument("--gap", choices=["eci", "acc"], default="eci",
                     help="capability measure for the gap axis and pair orientation")
     ap.add_argument("--exclude-members", nargs="*", default=[],
-                    help="drop every pair containing these members")
+                    help="drop members whose name contains any of these "
+                         "(case-insensitive), and every pair they appear in")
     args = ap.parse_args()
-    EXCLUDE.update(args.exclude_members)
+    EXCLUDE.update(f.lower() for f in args.exclude_members)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     BENCHES = list(dict.fromkeys(series_name(d) for d in args.datasets))
     DIRS = {s: [] for s in BENCHES}
