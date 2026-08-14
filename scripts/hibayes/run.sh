@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
+# Submit the two headline models. This never prepares or replaces input data.
 set -euo pipefail
 
-export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$PWD/analysis/hibayes/.cache}"
-export MPLCONFIGDIR="${MPLCONFIGDIR:-$XDG_CACHE_HOME/matplotlib}"
-
-.venv/bin/python scripts/hibayes/prepare_gpqa.py
-.venv/bin/hibayes-full --config scripts/hibayes/config.yaml --out analysis/hibayes/run --no-tui
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo=$(cd -- "$script_dir/../.." && pwd)
+cd "$repo"
+mkdir -p /fast/jyeon/smalljudge_glm_check/condor/logs_headline \
+  /fast/jyeon/smalljudge_glm_check/condor/logs
+exec condor_submit_bid 100 scripts/hibayes/condor/headline.sub

@@ -1,0 +1,16 @@
+initialdir = $ENV(PWD)
+executable = scripts/hibayes/condor/sae.sh
+arguments = features
+output = /fast/jyeon/smalljudge_glm_check/condor/logs/sae-features.$(Cluster).out
+error = /fast/jyeon/smalljudge_glm_check/condor/logs/sae-features.$(Cluster).err
+log = /fast/jyeon/smalljudge_glm_check/condor/logs/sae-features.$(Cluster).log
+
+request_cpus = 4
+request_memory = 48GB
+request_disk = 16GB
+getenv = PATH,HOME,USER,LOGNAME,LANG,LC_ALL,SMALL_JUDGE_*
+should_transfer_files = NO
++MaxRuntime = 14400
++BypassLXCfs = "true"
+
+queue

@@ -1,0 +1,18 @@
+initialdir = $ENV(PWD)
+executable = scripts/hibayes/condor/sae.sh
+arguments = embed
+output = /fast/jyeon/smalljudge_glm_check/condor/logs/sae-embed.$(Cluster).out
+error = /fast/jyeon/smalljudge_glm_check/condor/logs/sae-embed.$(Cluster).err
+log = /fast/jyeon/smalljudge_glm_check/condor/logs/sae-embed.$(Cluster).log
+
+request_cpus = 8
+request_memory = 64GB
+request_disk = 40GB
+request_gpus = 1
+requirements = (TARGET.CUDAGlobalMemoryMb >= 40000) && (TARGET.CUDACapability <= 9.0)
+getenv = PATH,HOME,USER,LOGNAME,LANG,LC_ALL,SMALL_JUDGE_*
+should_transfer_files = NO
++MaxRuntime = 21600
++BypassLXCfs = "true"
+
+queue

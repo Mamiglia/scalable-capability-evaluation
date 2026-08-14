@@ -1,0 +1,18 @@
+initialdir = $ENV(PWD)
+executable = scripts/hibayes/condor/fit.sh
+arguments = $(config) $(output_dir) headline
+output = /fast/jyeon/smalljudge_glm_check/condor/logs_headline/$(name).out
+error = /fast/jyeon/smalljudge_glm_check/condor/logs_headline/$(name).err
+log = /fast/jyeon/smalljudge_glm_check/condor/logs/fit_headline.log
+
+request_cpus = 5
+request_memory = 32GB
+request_disk = 16GB
+should_transfer_files = NO
++MaxRuntime = 21600
++BypassLXCfs = true
+
+queue config, output_dir, name from (
+  scripts/hibayes/config.yaml analysis/hibayes/run run
+  scripts/hibayes/config_correctness.yaml analysis/hibayes/run-correctness run-correctness
+)

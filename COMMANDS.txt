@@ -1,0 +1,741 @@
+# small-judge — stable commands
+#
+# PURPOSE
+# Two repositories measure different things about the same GPQA transcripts.
+# gpqa_tfa measures whether a model-level transcript property is associated with
+# held-out GPQA accuracy. This repository measures whether an LLM judge follows that same
+# property when choosing between two transcripts. A property the judge follows
+# that does not track accuracy is a judge bias, and the bias map is the output
+# that names them.
+#
+# Read the RUN LOG at the end for what has actually been run and what it found.
+
+
+# ============================================================ provenance
+# Record these with any result. The fitted numbers depend on all of them.
+#
+#   small-judge          34d906e16341f28e5d3a2fa3e8d7769520787cf4  (+ uncommitted
+#                        work in scripts/hibayes; commit before publishing)
+#   gpqa_tfa             63605fd2199876cbdfb7cb80bdd2cd315a4d55d8
+#   local feature code   records the three gpqa_tfa source hashes in
+#                        scripts/hibayes/gpqa_features.py
+#   capability source    sha256 ca617a2aaf6d94a85ac9365b17f245048dd0af5cf48b9dd7eaad926bfe268118
+#   local capability CSV sha256 fcc67b4df1bbdd75aa962cac656cd4fe88ab604c4ba07a1bb83c505c8d4485dc
+#   hibayes              1.0.0 at commit
+#                        010be6e0bd5aedc4a3f6233379d6d6bc72dcb552
+#                        from github.com/UKGovernmentBEIS/hibayes
+#   numpyro 0.21.0   jax 0.11.0   arviz 0.23.4   numpy 2.5.2
+#
+#   md5 0abf58bcbd6a0ac1f7a89b47b869e9c9  w1_gpqa-20260810T163003Z-1-001.zip
+#   md5 0129d60a0f3ec4b5267841690b0dc52d  drive-download-20260810T171128Z-1-001.zip
+#   md5 a5d257ae1efeeb569a8fa4afca3ec814  external_data/epoch-gpqa/responses.parquet
+
+
+# ============================================================ environments
+# Data preparation and feature extraction. Python 3.10 is enough.
+/home/jyeon/.venvs/smalljudge-glm/bin/python
+
+# Model fitting. hibayes needs Python 3.13 and is not published to PyPI.
+/home/jyeon/.venvs/smalljudge-glm313/bin/hibayes-full
+
+# env.sh pins the commit above. The environment was originally built from the
+# default branch; the pin was recovered afterwards from
+# <venv>/lib/python3.13/site-packages/hibayes-1.0.0.dist-info/direct_url.json.
+# Rebuilding without it can install a different hibayes and change the numbers
+# under a fixed seed.
+
+# Build the fitting environment. Runs on the cluster because the download size
+# is not known ahead of time, and uv needs flock, which Lustre does not provide:
+# its cache must sit in Condor scratch.
+condor_submit_bid 100 /fast/jyeon/smalljudge_glm_check/condor/env.sub
+
+
+# ============================================================ external inputs
+# Feature code, capability tables, and fixed SAE assets are local to this
+# working tree. A gpqa_tfa source checkout is not required for the hand-built or
+# SAE analyses. Set GPQA_TFA_DATA only for the optional hand-built feature
+# parity check against frozen per-record reference files. The separate TF-IDF
+# extractor still reads its fitted topic models from /fast/jyeon/gpqa_tfa.
+export GPQA_TFA_DATA=/fast/jyeon/gpqa_tfa
+
+# Judge logs and rollouts, unpacked from the two zips listed under provenance.
+# The zips live in /home/jyeon/LASR; the unpacked trees are derived artifacts.
+#     cd /fast/jyeon/judge_logs && unzip -q /home/jyeon/LASR/w1_gpqa-<...>.zip
+#     mkdir -p rollouts && cd rollouts && unzip -q /home/jyeon/LASR/drive-download-<...>.zip
+#
+#   /fast/jyeon/judge_logs/w1_gpqa    931 judge logs, <judge>/<pair>/ and
+#                                     trunc-NN/<judge>/<pair>/
+#   /fast/jyeon/judge_logs/rollouts     7 collection logs, flat. These are NOT
+#                                     judge logs: they supply the GPQA accuracy
+#                                     of the seven models that are not in the
+#                                     Epoch pool, and are passed via --collected.
+
+
+# =============================================== verify the feature contract
+# Reproduces 137 comparable features and the answer_masked view from frozen
+# gpqa_tfa reference files. The local reasoning_to_response_ratio is always
+# missing because the judge receives one concatenated transcript. Must print
+# FEATURE PARITY: OK after any change to the local feature contract.
+/home/jyeon/.venvs/smalljudge-glm/bin/python scripts/hibayes/pipeline.py \
+    check-features --runs 5 --records 600
+
+
+# ============================================================ prepare the data
+# Writes gpqa_glm.csv (all attempts) and gpqa_correctness.csv (self-pairs
+# removed). The extractor computes 138 raw feature differences. It omits two
+# uninformative differences that are constant or all missing in this corpus, so
+# the prepared tables contain 136 within-pair and 136 between-pair columns.
+# About 10 minutes for 931 logs.
+/home/jyeon/.venvs/smalljudge-glm/bin/python scripts/hibayes/pipeline.py prepare \
+    --logs /fast/jyeon/judge_logs/w1_gpqa \
+    --collected /fast/jyeon/judge_logs/rollouts \
+    --responses external_data/epoch-gpqa/responses.parquet \
+    --out analysis/hibayes/gpqa_glm.csv \
+    --out-correctness analysis/hibayes/gpqa_correctness.csv
+
+# --models is only needed for models that neither the Epoch pool nor a
+# --collected run resolves. With both of the above it is not needed at all.
+
+
+# ============================================================ fit
+# The two original models: which side the judge picked, and whether it was right.
+# run.sh now submits both to Condor. It previously called a .venv that does not
+# exist here, and regenerated gpqa_glm.csv and gpqa_correctness.csv first, which
+# would have overwritten the source files every feature fit was built from.
+bash scripts/hibayes/run.sh
+#   equivalently: condor_submit_bid 100 scripts/hibayes/condor/headline.sub
+
+# The feature models. Each --part / --subset combination MUST have its own
+# --out-dir: run names encode the family and specification but not the part or
+# the subset, so sharing a directory silently overwrites one analysis with
+# another. Each call writes 152 configs: 8 joint, 8 adjusted, 136 marginal.
+#
+#   within      the item's deviation from its pair mean. This removes a fixed
+#               model-pair difference but not every model-recognition cue. It
+#               is the primary estimand and the default.
+#   between     the pair's average difference. Limited by 25 distinct pairs, so
+#               any family with more than 25 features is rank deficient and is
+#               refitted on principal components.
+#   crossfam    within, restricted to different model-name families
+#   samefam     within, restricted to the same model-name family (5 pairs only)
+#               This is a name-prefix heuristic, not a verified developer map.
+#
+P=/home/jyeon/.venvs/smalljudge-glm/bin/python
+$P scripts/hibayes/pipeline.py generate-fits --part within  --out-dir analysis/hibayes/features_within
+$P scripts/hibayes/pipeline.py generate-fits --part between --out-dir analysis/hibayes/features_between
+$P scripts/hibayes/pipeline.py generate-fits --part within  --out-dir analysis/hibayes/features_crossfam --subset same_model_family=0
+$P scripts/hibayes/pipeline.py generate-fits --part within  --out-dir analysis/hibayes/features_samefam  --subset same_model_family=1
+# (--csv defaults to analysis/hibayes/gpqa_correctness.csv)
+
+# generate-fits writes configs and derived analysis samples without fitting.
+# The repository runner snapshots the complete config and hashes the model,
+# communicator, and input CSV before each fit. It rejects a source change that
+# occurs while the job runs.
+mkdir -p /fast/jyeon/smalljudge_glm_check/condor/logs_features_refactor \
+    /fast/jyeon/smalljudge_glm_check/condor/logs
+GLM_FEATURE_OUT_DIR=analysis/hibayes/features_within \
+    condor_submit_bid 100 scripts/hibayes/condor/features.sub
+GLM_FEATURE_OUT_DIR=analysis/hibayes/features_between \
+    condor_submit_bid 100 scripts/hibayes/condor/features.sub
+GLM_FEATURE_OUT_DIR=analysis/hibayes/features_crossfam \
+    condor_submit_bid 100 scripts/hibayes/condor/features.sub
+GLM_FEATURE_OUT_DIR=analysis/hibayes/features_samefam \
+    condor_submit_bid 100 scripts/hibayes/condor/features.sub
+
+# The bias map, once a directory's fits exist.
+/home/jyeon/.venvs/smalljudge-glm313/bin/python scripts/hibayes/pipeline.py \
+    collect analysis/hibayes/features_within
+
+
+# ============================== keep-answer truncation runs (next step 1)
+# The equal-length condition that RETAINS each transcript's final ANSWER line,
+# so length equalisation is separated from answer removal. Same cut point as
+# trunc-NN (bodies measured with answers stripped), each transcript's own
+# ANSWER line re-appended. Logs land in
+# /fast/jyeon/judge_logs/w1_gpqa/trunc-keepans-NN/<judge>/<pair>/.
+#
+# Coverage: the 59 of 66 production trunc-NN judge/pair combos whose transcripts
+# exist on this machine. The 7 dropped combos need Epoch-pool eval logs
+# (gemini-3.5-flash_high, gpt-4o-2024-08-06, gpt-5.2-medium, gpt-5.5_low,
+# qwen3.6-plus, qwen3.6-flash) that were never on this machine; restore them to
+# external_data/epoch-gpqa/ and add those rows to the config to close the gap.
+#
+# Validation job: no API calls. Checks keep-answer semantics, log_identity
+# parsing, a real-pair dataset build, and a 354-run dry-run of the config.
+mkdir -p /fast/jyeon/smalljudge_glm_check/condor/keepans_check
+condor_submit_bid 100 scripts/judge/condor/keepans_check.sub
+
+# The judge run itself. Needs OPENROUTER_API_KEY in the environment; it is a
+# paid API workload (roughly 59 pairs x ~150 items x 2 orders x 3 fracs ~ 53k
+# calls to small models). Resumable: phases with a successful log are skipped.
+# PYTHONPATH=src <python-with-inspect_ai> scripts/judge/run_judge_pilot.py \
+#     --config configs/gpqa_trunc_keepans_260812.yaml --dry-run   # then drop --dry-run
+
+# After the run: re-prepare into NEW output files (never overwrite the two
+# protected CSVs all existing fits were built from), then fit with the three
+# new conditions. fit_features.py CONDITION_ORDER must be extended with
+# truncated_keepans_{10,50,90} before fitting the new CSV; prepare_gpqa labels
+# the new rows with those condition names.
+
+
+# ============================================================ code validation
+# Synthetic GLM tests run through HTCondor and use Condor scratch. They read the
+# protected CSVs only to compare hashes and scan artifact metadata before and
+# after the tests. They do not modify analysis data or fitted artifacts.
+mkdir -p /fast/jyeon/smalljudge_glm_check/condor/refactor_tests
+condor_submit_bid 100 scripts/hibayes/condor/test.sub
+
+
+# ============================================================ evaluation outputs
+# Use a new directory until the revised item-level values have been reviewed.
+# Both commands are analysis jobs and run through HTCondor.
+mkdir -p /fast/jyeon/smalljudge_glm_check/condor/logs_analysis \
+    /fast/jyeon/smalljudge_glm_check/condor/logs
+condor_submit_bid 100 scripts/hibayes/condor/analysis.sub
+condor_submit_bid 100 scripts/hibayes/condor/figures.sub
+
+
+# ============================================================ what gets written
+#   <out-dir>/complete_cases.csv             the analysis sample for that run
+#   <out-dir>/complete_cases_factorised.csv  with principal components added
+#   <out-dir>/block_conditioning.csv         condition number per joint block
+#   <out-dir>/factor_loadings.csv            what each component is made of
+#   <out-dir>/<run>/communicate/             per-run coefficients and figures
+#   <out-dir>/<run>/source_config.yaml        exact configuration used by new runs
+#   <out-dir>/<run>/source_hashes.sha256      model, communicator, and input hashes
+#   <out-dir>/bias_map.csv                   judge betas against capability betas
+#
+# All of these are overwritten in place on a rerun into the same --out-dir, and
+# analysis/ is gitignored, so copy a directory aside before rerunning if the
+# previous numbers still matter.
+
+
+# ============================================================ cluster notes
+# Stable headline and test submit files live in scripts/hibayes/condor/. The
+# historical feature-sweep files and their logs remain under
+# /fast/jyeon/smalljudge_glm_check/condor/.
+#
+# What each one is, after the 2026-08-11 cleanup:
+#   env.sh/.sub                build the venv and fit one fixture end to end
+#   repair_venv.sh/.sub        reinstall the interpreter if it goes missing
+#   fit_one.sh                 per-fit runner for clusters 17449063-66
+#   fit_one_redo.sh            same, but moves the posterior to /fast
+#   fit_headline.sh            the two headline models
+#   finish_analysis.sh/.sub    regenerate between-part loadings, build bias maps
+#   sub_features_{within,between,crossfam,samefam}.sub   the original sweep
+#   sub_features_redo.sub      the 309-fit refit
+#   sub_features_stragglers.sub  the last 3 fits
+#   sub_headline.sub           the historical two-headline submission
+# Eleven superseded files from 2026-08-10 (fit_fac, fit_family*, fit_marg,
+# refit*, setup_and_fit*) were deleted; they are in
+# superseded_submit_files_2026-08-10.tar.gz in the same directory.
+#
+# Never edit fit_one.sh while any job references it. Condor reads the executable
+# when a job starts, so an edit changes the code of every job that starts or
+# retries afterwards, and there is then no record of which version produced
+# which result. Copy it to a new name for a new sweep instead.
+#
+# uv's cache must be node-local (Condor scratch). On Lustre it fails with
+# "Function not implemented (os error 38)" because flock is unavailable.
+#
+# Condor cannot see the session scratchpad under /tmp on the execute node. Job
+# output, error, and log paths must be on /home or /fast.
+#
+# Known gaps in the submit files, from the site validator: no +MaxRuntime, no
+# +BypassLXCfs, should_transfer_files and when_to_transfer_output not set, and
+# the four original feature clusters share one Condor event log. None corrupts a
+# completed run's output, but the shared event log makes holds and evictions hard
+# to attribute. The later submissions use their own logs: fit_redo.log,
+# fit_headline.log, finish_analysis.log, repair_venv.log.
+#
+# A second gap, found 2026-08-11: sub_features_redo.sub writes job output to the
+# same logs_features_*/$(name).out paths the original clusters used, so a refit
+# overwrites the failure log of the attempt it replaces. Give each attempt its
+# own log directory.
+
+
+# ================================================================== RUN LOG
+
+# 2026-08-10  Historical dynamic feature bridge verified against gpqa_tfa.
+#   --self-check --runs 5 --records 600
+#     max |recomputed - frozen| = 8.882e-16 over 2598 records x 137 features
+#     view-transform mismatches 0 of 2598; family taxonomy matches
+#   All 138 feature names join gpqa_tfa's evidence/primary_and_robustness.csv
+#   with 0 unmatched either way. The 35 hand-built discoveries reproduce the
+#   counts in the frozen capability table. The upstream table and its generator
+#   were not tracked by the recorded gpqa_tfa commit, so their SHA-256 values are
+#   recorded above as the evidence provenance.
+
+# 2026-08-11  Corpus claim corrected.
+#   The two gpqa_diamond.csv files are not identical: the small-judge file has
+#   199 model rows (md5 50b2d25c70517f8122f24f81e8b0e5ac), while the gpqa_tfa
+#   file has 201 (md5 ce564e3bdd4cb103ed9650ad5a98c7ff). Neither file has a
+#   question_id column, and neither is an input to the current GLM. The bias map
+#   joins feature names, not question IDs. Current items come from judge logs.
+
+# 2026-08-10  Data prepared from the restored backup.
+#   931 judge logs -> 97,698 attempts, 92,252 after removing self-pairs, in
+#   10 minutes. 10 judges, 25 model pairs, 195 items, 4 truncation conditions.
+#   Capabilities for all 17 models resolved from log metadata plus the seven
+#   collection logs; models.csv was not needed.
+#   One judge (gemini-3.5-flash) contributed a single header-less file and is
+#   excluded. qwen-2.5-72b-instruct had 17 files with status != success.
+
+# 2026-08-10  Descriptive results, before any model.
+#   Judge accuracy 0.6066 overall; every judge above chance, 0.549 to 0.650.
+#   Position: judges pick the right-hand transcript 60% of the time, and
+#   accuracy is 0.506 when the stronger model is on the left against 0.707 when
+#   it is on the right. Side is the largest single effect in the corpus.
+#   Truncation: 0.553 at 10%, 0.620 at 50%, 0.639 at 90%, 0.612 raw. More text
+#   helps, and raw scores below 90% truncation, whose only difference is that
+#   truncation removes the final ANSWER line.
+#   Same model-name-family pairs 0.571 against 0.636 across name families.
+
+# 2026-08-11  Four specifications submitted, 152 fits each.
+#   17449063 within   17449064 between   17449065 crossfam   17449066 samefam
+#   Every block carries major_is_right after the position result above.
+
+# --------------------------------------------------------------- corrections
+# Recorded because each was wrong in an earlier version of this analysis.
+#
+# The R-hat checker never worked. model.py recorded the reference column of
+# judge_condition_effects, which is identically zero, so its R-hat is NaN and
+# hibayes' `np.all(r_hat < threshold)` was false on every run regardless of
+# convergence. Fixed by recording only the free contrasts: 251 parameters with
+# 4 NaN became 247 with none, and the checker passes.
+#
+# `identified` was always true for condition contrasts. It looked up
+# "transcript_condition", but hibayes stores "transcript_condition_index".
+#
+# NaN in a predictor kills the sampler silently. Process features are NaN on
+# answer-only transcripts (771 rows, 0.84%). hibayes passes them into the design
+# matrix, every gradient becomes NaN, and the fit still "completes" and emits
+# coefficients. Complete cases are now taken for every fit, uniformly, so the
+# families stay comparable.
+#
+# Two feature pairs are exact linear identities and cannot share a block:
+# proc_conclusion_tail_frac = 1 - proc_first_conclusion_position, and
+# repetition = 1 - ttr. gpqa_tfa never saw this because it fits one feature at
+# a time. Dropped from joint blocks, kept in marginal fits.
+#
+# length_structure is one construct measured nine ways: condition number 27.5
+# with n_chars and n_words correlated at 0.992. Its joint coefficients were
+# meaningless (log_n_words +0.92 against n_words -0.71). The block is now
+# refitted on the 4 components spanning 90% of its variance, following
+# gpqa_tfa/src/stats/factor_check.py. Condition number after: 1.000.
+#
+# A credible interval is not a multiplicity-controlled claim. The judge analysis
+# now reports Benjamini-Hochberg values within family and globally, and it uses
+# the global value for verdicts. The capability table applies one correction
+# across all 138 hand-built features (`method == hand-built`).
+#
+# `process` was reported as failing convergence three times before the numbers
+# were checked. Its worst R-hat is 1.01 against a strict `< 1.01` threshold and
+# its lowest effective sample size is 889 against 1000, across 891 parameters.
+# It was never broken.
+#
+# The truncation prediction in transcript_features.py was wrong. The process
+# NaN gate was documented as firing far more often under truncation; measured,
+# it fires on 0.8% of rows and is flat across truncation levels.
+#
+# FIXED 2026-08-11. The between-part factor loadings written before that date
+# had a trailing underscore on every label: the index stripped a fixed 7
+# characters, which fits "_within" but not "_between". fit_features.py:260 now
+# uses a regex, and factor_loadings.csv has been regenerated. The component
+# scores, and therefore the fits, were never affected.
+
+# 2026-08-11  The sweep filled the home quota and lost 309 of 608 fits.
+#   Each fit writes inference_data.nc at 1.2G to 2.6G, because CHECKS enables
+#   `loo` and the communicator's _loo_accuracy both need the pointwise
+#   log-likelihood: 8000 draws x up to 91k observations. crossfam and samefam
+#   sit near 1.4G; features_within, with 91k rows against their 50k, is 2.6G.
+#   608 fits is roughly 850G. The quota stopped
+#   writes partway, and 244 jobs died with "Disk quota exceeded" while writing
+#   inference_data.tmp.nc. A fit that dies there leaves no population_effects.csv.
+#
+#   Dropping `loo` from CHECKS does NOT shrink the file. hibayes writes the whole
+#   InferenceData object unconditionally (analysis_state.py:405), and the
+#   log_likelihood group is what _loo_accuracy in communicators.py reads.
+#   The fix is where the posterior lands, not which checkers run.
+#
+#   Reclaimed 400G: 271 posteriors from crossfam and samefam, deleted only where
+#   population_effects.csv, judge_feature_effects.csv, and the diagnostics summary
+#   were all already on disk; plus 54 stale .tmp.nc from the killed jobs.
+#
+#   fit_one_redo.sh moves each posterior to /fast after the fit, so the repo keeps
+#   only the CSVs that collect() and bias_map() read. fit_one.sh is unchanged: it
+#   is still referenced by clusters 17449063-66, and editing it mid-run would make
+#   the produced results untraceable to a version.
+#
+#   Refit the fits that have no population_effects.csv and are not in the queue:
+#     condor_submit_bid 100 /fast/jyeon/smalljudge_glm_check/condor/sub_features_redo.sub
+#   max_materialize = 60 caps the posteriors held in the repo at once (~84G).
+#
+#   The 309-fit refit took three submissions. Only the third produced results:
+#     17449117  removed before it ran. It referenced fit_one.sh, which had been
+#               edited in place while clusters 17449063-66 still used it. That
+#               breaks the rule in the cluster notes above, so the edit was
+#               reverted and moved to fit_one_redo.sh.
+#     17449133  all 309 jobs exited 126 within seconds. The venv interpreter had
+#               been deleted; see the entry below.
+#     17449140  306 exited 0, 3 hit a transient quota spike and were refitted as
+#               17449236. This is the cluster that produced the results.
+#   An earlier version of this log named 17449133 as the run. That was written
+#   before the interpreter fault was found. 17449133 produced nothing.
+
+# 2026-08-11  The venv interpreter was deleted mid-run, cause unknown.
+#   smalljudge-glm313 holds no interpreter of its own. Every bin/ entry links to
+#   /home/jyeon/.local/share/uv/python/cpython-3.13-linux-x86_64-gnu, and that
+#   directory was removed at 01:09. Every new job then exited 126 with
+#   "bad interpreter: No such file or directory". Jobs already running were
+#   unaffected: a running process holds its interpreter open after deletion,
+#   which is why cluster 17449133 died while 17449063-66 kept producing results.
+#
+#   What did NOT do it: the env.sub build job, which ran 18:00-18:10 the evening
+#   before and succeeded. No deletion in this project touches that path. The
+#   cause is unexplained and could recur.
+#
+#   repair_venv.sh reinstalls it and links the versioned directory to the
+#   unversioned name the venv expects. The 1.1G of cp313 packages were never
+#   damaged, so nothing needed reinstalling:
+#     condor_submit_bid 100 /fast/jyeon/smalljudge_glm_check/condor/repair_venv.sub
+#   It pins 3.13.15, the patch pyvenv.cfg records. Do not float it to "3.13":
+#   a different patch would silently sit under 1.1G of cp313 packages.
+
+# 2026-08-11  All 608 fits complete. Convergence audited across every one.
+#   152/152 in each of features_within, features_between, features_crossfam,
+#   features_samefam. Aggregated from each fit's diagnostics:
+#     divergences   0 in all 608                      <- the check that matters
+#     r_hat         max 1.01; 50 fits at that value
+#     ess_bulk      min 432; 139 fits below 1000
+#     ess_tail      min 574; 4 fits below 1000
+#     pareto k      59 fits have at least one k > 0.70, so their loo is not
+#                   trustworthy. 26 of them are samefam, which has 5 pairs.
+#                   Coefficients are unaffected; judge_loo_accuracy is not.
+#   The r_hat figures are rounded to two decimals in both the summary CSV and
+#   diagnostics.json, so 1.01 cannot be separated from 1.005 or 1.015 without
+#   reading the posteriors. With zero divergences this was not pursued.
+#   See the 2026-08-10 note above: a fit at exactly this boundary was called a
+#   convergence failure three times before anyone checked the numbers.
+
+# 2026-08-11  Label fix and bias maps.
+#     condor_submit_bid 100 /fast/jyeon/smalljudge_glm_check/condor/finish_analysis.sub
+#   Step 1 regenerates the features_between derived data so factor_loadings.csv
+#   loses the trailing underscore on every label. Verified: after normalising the
+#   label, the new file is identical to the old one, so no number moved.
+#   block_conditioning.csv changed in its low-order digits and two worst_pair
+#   labels list the same pair in the opposite order; every joint_interpretable
+#   verdict is unchanged. The two large shifts (formatting 3.77e15 -> 3.81e15,
+#   function_word 1.63e16 -> 2.14e16) are condition numbers on singular matrices,
+#   where the value carries no information and the verdict is False either way.
+#
+#   Step 2 writes bias_map.csv for all four sets. Quadrant counts:
+#     features_within    JUDGE BIAS 185, correctly ignored 106, INVERTED 36,
+#                        missed signal 34, justified signal 25, component 8
+#     features_between   correctly ignored 60, component 56, JUDGE BIAS 55,
+#                        missed signal 33, justified signal 9, INVERTED 1
+#     features_crossfam  JUDGE BIAS 153, correctly ignored 138, missed 52,
+#                        INVERTED 23, justified 20, component 8
+#     features_samefam   JUDGE BIAS 154, correctly ignored 137, missed 54,
+#                        INVERTED 25, justified 16, component 10
+#   Read these against the pareto k caveat above, especially for samefam.
+
+# 2026-08-11  The two headline models were fitted for the first time.
+#   They had never been produced in this checkout: analysis/hibayes/run and
+#   run-correctness did not exist. run.sh could not have made them. It called
+#   .venv/bin/python, which is not in this checkout, and its first step was
+#   prepare_gpqa.py with no arguments, which defaults to writing gpqa_glm.csv
+#   and gpqa_correctness.csv and would have overwritten the two files all 608
+#   feature fits were built from. Its default input paths do not exist here
+#   either. The current run.sh submits scripts/hibayes/condor/headline.sub
+#   instead. The completed historical headline run used /fast/.../sub_headline.sub.
+#
+#   First attempt, cluster 17449263 at samples: 1000, both exit 0 but both
+#   failed checkers: run failed r_hat (1.010); run-correctness failed r_hat,
+#   ess_bulk and ess_tail (min ess_bulk 577). Those outputs are kept at
+#   /fast/jyeon/smalljudge_glm_check/headline_1000samples/ for comparison.
+#
+#   Refitted at samples: 2000, cluster 17449336, both exit 0, 46 and 36 minutes.
+#   Every checker passes for both models:
+#     run               all pass. max r_hat 1.000, min ess_bulk 1905
+#     run-correctness   all pass. max r_hat 1.000, min ess_bulk 1028
+#   Doubling the draws moved r_hat from 1.010 to 1.000, so the failure was
+#   sampling precision, not model geometry. That is evidence for reading the
+#   feature sweep's 50 fits at r_hat 1.01 the same way: they sit at the rounding
+#   boundary rather than indicating a real convergence problem.
+#   These two are the converged headline results. Quote these, not the first pair.
+
+# 2026-08-11  Provenance of the finished sweep.
+#   analysis/hibayes/fit_manifest.csv gives one row per fit: set, name, whether
+#   its posterior survives, and which runner produced it. Generated from disk,
+#   not from memory. It shows 271 fits with no posterior, all of them in
+#   crossfam (137) and samefam (134); features_within and features_between keep
+#   all 152 each. 309 fits came from fit_one_redo.sh and 299 from fit_one.sh.
+#   Posteriors live in /fast/jyeon/smalljudge_glm_check/posteriors/, 339 files
+#   between 1.18G and 2.64G, all verified to carry a valid HDF5 header.
+#
+#   Known gaps in this record:
+#   - The pre-refit failure logs for those 309 fits are gone. sub_features_redo.sub
+#     writes to the same logs_features_*/ paths the original clusters used, so the
+#     refit overwrote the quota-failure evidence. Use distinct log paths per
+#     attempt next time.
+#   - fit_one_redo.sh and fit_headline.sh originally moved the posterior with a
+#     plain `mv`. Across filesystems that is copy-then-unlink, and an interrupted
+#     copy leaves a truncated .nc carrying a valid HDF5 header. One 2.6G posterior
+#     was truncated exactly this way during cleanup and had to be recopied. Both
+#     scripts were amended after the run to copy, compare sizes, then rename and
+#     delete the source. All 339 surviving posteriors were checked and none is
+#     truncated, but the fits already produced were made by the `mv` version.
+#   - seed: 0 is set in every config, but a fixed seed does not guarantee
+#     bit-identical resampling here. The fits span an interpreter replacement and
+#     ran across different execute hosts, and JAX numerics can vary with build
+#     and hardware.
+#   - The home quota limit was never read. Home is NFS from sc-fb1, so lfs quota
+#     does not apply and the quota command is not installed on the login node.
+#     Every sizing decision here was inferred from observed write failures.
+
+# 2026-08-11  GLM refactor validation, synthetic fixtures only.
+#   17450478 exited 1, but the next attempt overwrote its stdout and stderr, so
+#   the retained record does not establish the cause. 17450482 and 17450489
+#   passed earlier versions of the suite and do not validate the final source.
+#
+#   17450539 and 17450541 passed before final source-manifest corrections.
+#   17450546 validated the refactor before the gpqa_tfa integration. It recorded
+#   hashes for every GLM source, config, Condor wrapper, and test. All 13 tests
+#   passed. A focused check in smalljudge-glm313 confirmed that communicators.py
+#   reads both stored transcript-condition posterior layouts. The job then
+#   confirmed that the source hashes and the complete analysis-artifact metadata
+#   manifest were unchanged. It also confirmed unchanged SHA-256 hashes for
+#   gpqa_glm.csv and gpqa_correctness.csv. Exit code 0.
+
+# 2026-08-11  First self-contained integration validation, cluster 17450842.
+#   The job recorded the current GLM source, local feature-contract, frozen
+#   capability-table, config, Condor-wrapper, and test hashes before execution.
+#   All 15 synthetic tests passed, and the communicator compatibility check
+#   passed. The sampled parity check compared 137 of 138 schema features over
+#   2,598 frozen records: maximum absolute error 8.882e-16, zero answer-masked
+#   view differences, complete family coverage, FEATURE PARITY: OK. The job
+#   confirmed that every recorded source hash, both protected prepared-CSV
+#   hashes, and the complete analysis-artifact metadata manifest were unchanged.
+#   Empty stderr; exit code 0. A later source-docstring correction superseded
+#   this snapshot without changing runtime behavior.
+
+# 2026-08-11  Final integration validation, cluster 17450884.
+#   The job repeated the checks above on the final executable-source snapshot.
+#   All 15 synthetic tests and communicator compatibility passed. The sampled
+#   parity check again compared 137 features over 2,598 frozen records, with
+#   maximum absolute error 8.882e-16, zero view differences, complete family
+#   coverage, and FEATURE PARITY: OK. It confirmed unchanged source hashes,
+#   protected prepared-CSV hashes, and complete analysis-artifact metadata.
+#   Empty stderr; exit code 0.
+
+# 2026-08-12  Keep-answer truncation condition implemented (next step 1).
+#   Code: truncate_pair gained keep_answer (same cut as trunc-NN, measured on
+#   answer-stripped bodies; each transcript's own ANSWER line re-appended);
+#   threaded through build_dataset, judge_task (TRUNCATION_KEEP_ANSWER_NOTE in
+#   the system prompt, truncate_keep_answer in task metadata), and
+#   run_judge_pilot.py (config key truncate_keep_answer; logs under
+#   trunc-keepans-NN; task suffix _tNNk). prepare_gpqa.log_identity parses
+#   trunc-keepans-NN to condition truncated_keepans_NN. digest_verdicts.py
+#   carries the flag so keepans rows neither collide with trunc-NN rows nor
+#   rebuild without the answer. New config gpqa_trunc_keepans_260812.yaml: 59
+#   comparisons mirroring the 66-combo production trunc coverage; 7 combos
+#   dropped for missing Epoch-pool transcripts (see the keep-answer section).
+#
+#   Validation cluster 17452075 (no API calls): keep-answer semantics OK,
+#   log_identity OK, real-pair dataset build OK (296 samples on
+#   gemini-3.1-flash-lite vs gemma-4-26b-a4b-it at frac 0.5; 590/592
+#   transcripts end with a retained ANSWER line, the other 2 never had one;
+#   keepans body identical to the answer-removed transcript for every sample).
+#   The dry-run step failed there: smalljudge-glm313 lacks draccus, which the
+#   runner imports via src/configs. Exit code 1 on that step only.
+#
+#   Correctness review findings (resolved): answer_line originally returned
+#   everything from the last "ANSWER:" to the end of the transcript, so any
+#   post-answer content was re-appended too, quietly reintroducing a length
+#   confound. Fixed: only the ANSWER line itself is retained (content after it
+#   is dropped, exactly as strip_answer drops it), with a pinning unit test.
+#   The reviewer confirmed: non-keepans runner behaviour byte-identical,
+#   log_identity distinct across raw/trunc/keepans, all 59 config rows resolve
+#   their transcripts, all 10 judges have judge_model_args entries, and
+#   digest_verdicts keepans rows cannot collide with trunc-NN rows.
+#
+#   Validation clusters 17452076/17452080/17452111 built the judge-runner venv
+#   /home/jyeon/.venvs/smalljudge-judge (python 3.13: inspect-ai 0.3.255,
+#   draccus, openai 3.0.0, pyyaml, pytest; the frozen fitting venv is
+#   untouched). Final source state, cluster 17452111: 14/14 dataset+task tests
+#   pass and the runner dry-run over gpqa_trunc_keepans_260812.yaml reports
+#   exactly 354 phase-runs (59 comparisons x 3 fracs x 2 phases), exit 0.
+#   17452080 additionally confirmed the same dry-run count; its 13-test tally
+#   predates the answer_line fix's added test. The judge run itself has NOT
+#   been started: OPENROUTER_API_KEY is not available in this environment.
+
+# ============================================== planned: TF-IDF judge extraction
+# Goal: the per-method decomposition of the judge analysis (fig 7 covers only
+# the 138 hand-built features; gpqa_tfa also has 240 TF-IDF and 32 SAE features).
+#
+# The 240 TF-IDF features are five component blocks from gpqa_tfa
+# src/features/topic.py: nmf16/nmf32/nmf64 + wlsa (64) over word tf-idf, and
+# clsa (64) over char tf-idf. Fitted on the discovery split, seed 20260804,
+# view answer_masked. topic.py saves transformed values only, NOT the fitted
+# vectorizers/NMF/SVD objects. Judge-side extraction therefore requires:
+#   1. DONE ALREADY by gpqa_tfa topic_refit.py: fitted vectorizers, NMF and
+#      LSA objects are saved under
+#      /fast/jyeon/gpqa_tfa/data_interim/topic_models/answer_masked/.
+#   2. DONE: scripts/hibayes/tfidf_parity.py. LSA components reproduce exactly
+#      (1.5e-08); NMF components agree to 1.5e-05, which is the reproducibility
+#      floor of NMF.transform itself (fit tol 1e-4) and appears identically
+#      under scikit-learn 1.7.2 and 1.9.0. The venv is now pinned to 1.7.2,
+#      matching the pickles. The grouped-CV table was produced under 1.9.0.
+#   3. Judge-side extractor: apply the answer_masked view transform to both
+#      judge transcripts per comparison, project through the dumped objects,
+#      emit d_<comp>_within/between deltas like transcript_features.deltas.
+#   4. generate-fits for the new family (~240 within-pair marginal fits, one
+#      Condor sweep; posteriors to /fast from the start).
+#   5. Per-method decomposition then falls out of bias_map: the method column
+#      is already plumbed through the join.
+# SAE (32 features) needs activations over judge transcripts (GPU); deferred
+# until the current runs finish.
+
+# ============================================== 2026-08-12 TF-IDF + SAE judge extraction
+# TF-IDF steps 3-4 DONE: scripts/hibayes/tfidf_features.py walked the judge
+# logs (97,698 samples, 9,625 unique answer_masked texts), projected through
+# the saved topic models, joined 92,252/92,252 rows against
+# gpqa_correctness.csv, 0 constant features dropped, and wrote
+# analysis/hibayes/features_tfidf/complete_cases.csv + 240 marginal configs.
+# Sweep: GLM_FEATURE_OUT_DIR=analysis/hibayes/features_tfidf \
+#   condor_submit_bid 100 scripts/hibayes/condor/features.sub   (cluster 17452560)
+#
+# SAE: the evidence latents sae_s0_000..031 are NOT the 0.6B SignedTopKSAE
+# (features_sae, dim 1024, retired first pass). They are the upstream WIMHF
+# SparseAutoencoder (rmovva/wimhf @ 13f705ea, vendor_wimhf), M=32 K=4
+# prefixes [8,32] seed 0, extended schedule, trained by wimhf_adapter.py on
+# question-residualised Qwen3-Embedding-8B INSTRUCTED embeddings (emb8,
+# dim 4096, format "Instruct: <task>\nQuery: Question: <q>\n\nResponse: <view>")
+# and exported per record by wimhf_export.py into features_wimhf8
+# (checkpoint wimhf8/residual/extended/answer_masked/sae_M32_K4_s0.pt).
+# Capability prompts differ across runs for the same question (option order),
+# so the judge side uses the question from the judge prompt's "Input question"
+# block. scripts/hibayes/sae_judge.py --stage embed embeds the 10,285 unique
+# (question, view) texts on GPU (cluster 17452803, CUDAGlobalMemoryMb>=40000);
+# --stage features residualises with emb8 per-question means, encodes through
+# the s0 checkpoint, and writes features_sae_judge/ + 32 marginal configs.
+# Then: GLM_FEATURE_OUT_DIR=analysis/hibayes/features_sae_judge \
+#   condor_submit_bid 100 scripts/hibayes/condor/features.sub
+#
+# 2026-08-13 RESULTS. Embed attempts: 17452803 hung with zero bytes downloaded
+# (HF cache on Lustre; flock fails there and the SoftFileLock fallback hangs,
+# so HF_HOME now points at Condor scratch and the finished snapshot is copied
+# to /fast/jyeon/hf_cache afterwards); 17452930 downloaded and loaded the
+# model but died on a Blackwell GPU ("no kernel image": torch cu118), so
+# sae_embed.sub now also requires TARGET.CUDACapability <= 9.0; 17452935
+# succeeded (10,285 unique instructed texts, 10,291 chunks). Features stage
+# 17453050: 92,252/92,252 rows joined, 198 question means, mean active
+# latents 8.35/8.42, 0 constant latents. Sweeps: TF-IDF 17452560 240/240
+# fits, SAE 17453057 32/32 fits, zero failures in both.
+# Bias maps (17453059, 17454933): fit_features.py --bias-map <dir> --method
+# {TF-IDF,SAE} joins evidence betas from primary_and_robustness.csv
+# (SHA-pinned ca617a2a...); hand-built keeps the frozen local copy.
+# Marginal within-pair decomposition per method (followed = q_global < 0.05):
+#   hand-built n 136: followed  98, bias  71, inverted 18, justified  9, missed  8
+#   TF-IDF     n 240: followed 140, bias 122, inverted  7, justified 11, missed 12
+#   SAE        n  32: followed  17, bias   9, inverted  3, justified  5, missed  6
+# followed-and-tracks + missed = the method's capability discovery count
+# (35/30/14), so the join is complete. Figure 15 (readme_figures/15.png,
+# method_decomposition.py) is embedded in ANALYSIS_README.md as image15.
+# method_decomposition.py now asserts this identity per method.
+#
+# -------- reproducibility notes (post-review corrections and rerun commands)
+# The SAE workflow in this working tree is self-contained for project-specific
+# code and fixed inputs. scripts/hibayes/sae_assets contains the unchanged WIMHF source at
+# caf97042..., its license, the seed-0 checkpoint at a26a214d..., and the 198
+# question means at 72c14a06.... learned_capability_features.csv contains the
+# complete frozen capability table at ca617a2a.... sae_judge.py resolves these
+# paths from its own location. It does not import or read gpqa_tfa.
+#
+# The embedding stage loads Qwen/Qwen3-Embedding-8B at revision
+# 1d8ad4ca9b3dd8059ad90a75d4983776a23d44af through Transformers. The Condor
+# runner uses job scratch and can seed it from SMALL_JUDGE_HF_CACHE. The
+# default shared cache is /fast/jyeon/hf_cache. A cold run downloads the pinned
+# revision to scratch but does not publish into the shared cache.
+#
+# The SAE stages also use the normal judge-analysis inputs: judge logs for the
+# embedding stage and analysis/hibayes/gpqa_correctness.csv for the feature
+# stage. The prepare command above creates gpqa_correctness.csv. These are
+# experiment inputs, not dependencies on the gpqa_tfa source or data trees.
+#
+# TF-IDF model extraction and parity are separate from the SAE workflow. SAE
+# reuses tfidf_features.collect_texts only as its local judge-log reader. The
+# TF-IDF commands still use fitted models and parity data under
+# /fast/jyeon/gpqa_tfa.
+#
+# Venv routing per script (the two-venv rule above does not hold here):
+#   smalljudge-glm313: tfidf_features.py, tfidf_parity.py, fit.sh sweeps,
+#                      fit_features.py --bias-map, method_decomposition.py
+#   smalljudge-glm:    sae_judge.py (both stages; needs torch+transformers)
+# smalljudge-glm313 was mutated after the provenance block above:
+# scikit-learn==1.7.2 was uv-pip-installed into it (cluster 17452540 era) to
+# match the topic-model pickles. Add it to any venv rebuild.
+#
+# Rerun commands (all via Condor; SAE submit files are in this repository):
+#   tff.sub      -> glm313 python scripts/hibayes/tfidf_features.py   (17452551)
+#   tfp2.sub     -> glm313 python scripts/hibayes/tfidf_parity.py     (17452540)
+#   scripts/hibayes/condor/sae_check.sub    -> local asset and inference check
+#   scripts/hibayes/condor/sae_embed.sub    -> Qwen embedding stage
+#   scripts/hibayes/condor/sae_features.sub -> local SAE feature stage
+#   features.sub -> GLM_FEATURE_OUT_DIR=<dir> condor_submit_bid 100 ...
+#   tfbias.sub   -> glm313 python scripts/hibayes/fit_features.py --bias-map
+#                   analysis/hibayes/features_tfidf --method TF-IDF (and
+#                   features_sae_judge --method SAE), then method_decomposition.py
+# tfidf_parity.py now exits non-zero on failure (it previously printed PARITY
+# FAILED with exit 0: cluster 17452479 under scikit-learn 1.9.0, an OLDER
+# script version with a stricter uniform criterion). The "same 1.5e-05
+# residual under 1.7.2 and 1.9.0" claim compares numeric residuals across
+# those two script versions; the current per-block-tolerance validator has
+# only been run under 1.7.2 (17452540, PARITY OK, worst 1.484e-05).
+# Full sae_embed attempt history: 17452562 and 17452760 were the retired
+# 0.6B-model pipeline (killed; the second diagnosed the HF stall), then
+# 17452803 (Lustre cache hang), 17452930 (Blackwell/cu118), 17452935 (OK).
+
+# ============================================== local SAE assets
+# The judge-side SAE workflow keeps its fixed inputs in
+# scripts/hibayes/sae_assets. A normal run does not require gpqa_tfa source or
+# data paths. The local question_means.npz is the fixed 198-question
+# residualization table used by the judge-side rerun.
+
+# Check all local asset hashes and run two records through the checkpoint.
+condor_submit_bid 100 scripts/hibayes/condor/sae_check.sub
+
+# Generate judge embeddings on one GPU, then create the 32 feature tables on
+# one CPU worker. Both submit files call the project-local runner.
+condor_submit_bid 100 scripts/hibayes/condor/sae_embed.sub
+condor_submit_bid 100 scripts/hibayes/condor/sae_features.sub
+
+# RUN LOG 2026-08-14
+# Cluster 17457048 exported 198 question means with dimension 4096. The output
+# is scripts/hibayes/sae_assets/question_means.npz (3,012,642 bytes, SHA-256
+# 72c14a06944436dfee119471e1da9ad601737e34941558f18a279b5d41739423).
+# Cluster 17457064 verified the four files listed in ASSET_SHA256 and loaded the
+# checkpoint. Its two-record inference check reported 198 questions and 32 SAE
+# latents. Cluster 17457079 also validated the manifest's declared model
+# revision, both embedding-store hashes, 97,698 judge rows, and 10,285 unique
+# texts. The original embedding run did not record the model revision, so this
+# manifest does not independently prove the revision used for that old output.
+# Test cluster 17457070 was canceled while idle because its source manifest
+# glob also selected __pycache__. Cluster 17457080 then passed 16 tests and
+# failed the new corruption test because Parquet rejected the corrupted file
+# before the test's expected hash error. The loader now verifies hashes before
+# parsing the files.
+# Cluster 17457082 passed 17 synthetic tests, the communicator compatibility
+# check, and the 2,598-record frozen feature parity check. Source and analysis
+# manifests were unchanged. Cluster 17457083 then regenerated the local SAE
+# feature table: 92,252 rows joined, 32 latents written, and zero constants.
+# Final validation cluster 17457086 repeated the 17 tests, communicator check,
+# feature parity, and unchanged-manifest checks after the config cleanup.
+# Cluster 17457087 repeated feature generation with the final source. It joined
+# 92,252 rows, wrote all 32 configs, dropped no latents, and retained the same
+# complete_cases.csv SHA-256:
+# db89c5759cb9ae8a69f1371573b6775bf5d2d257a3fe7deb418d345e4a5e2109.
+# Final clusters 17457099 and 17457100 repeated the asset check and full test
+# suite after the import cleanup. Both exited 0; the suite again passed all 17
+# tests, communicator compatibility, feature parity, and manifest checks.

@@ -1,0 +1,15 @@
+initialdir = $ENV(PWD)
+executable = scripts/hibayes/condor/analysis.sh
+arguments = figures --out-dir analysis/hibayes/figures_feature_refactor
+output = /fast/jyeon/smalljudge_glm_check/condor/logs_analysis/figures-feature-refactor.out
+error = /fast/jyeon/smalljudge_glm_check/condor/logs_analysis/figures-feature-refactor.err
+log = /fast/jyeon/smalljudge_glm_check/condor/logs/analysis-figures.log
+
+request_cpus = 2
+request_memory = 16GB
+request_disk = 8GB
+should_transfer_files = NO
++MaxRuntime = 21600
++BypassLXCfs = true
+
+queue

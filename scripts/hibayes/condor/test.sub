@@ -1,0 +1,14 @@
+initialdir = $ENV(PWD)
+executable = scripts/hibayes/condor/test.sh
+output = /fast/jyeon/smalljudge_glm_check/condor/refactor_tests/$(ClusterId).out
+error = /fast/jyeon/smalljudge_glm_check/condor/refactor_tests/$(ClusterId).err
+log = /fast/jyeon/smalljudge_glm_check/condor/refactor_tests/$(ClusterId).log
+
+request_cpus = 2
+request_memory = 4GB
+request_disk = 4GB
+should_transfer_files = NO
++MaxRuntime = 1800
++BypassLXCfs = true
+
+queue

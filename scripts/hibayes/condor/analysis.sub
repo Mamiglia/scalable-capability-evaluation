@@ -1,0 +1,15 @@
+initialdir = $ENV(PWD)
+executable = scripts/hibayes/condor/analysis.sh
+arguments = evaluate --csv analysis/hibayes/gpqa_correctness.csv --out-dir analysis/hibayes/figures_item_level
+output = /fast/jyeon/smalljudge_glm_check/condor/logs_analysis/evaluation-item-level.out
+error = /fast/jyeon/smalljudge_glm_check/condor/logs_analysis/evaluation-item-level.err
+log = /fast/jyeon/smalljudge_glm_check/condor/logs/analysis-evaluation.log
+
+request_cpus = 2
+request_memory = 16GB
+request_disk = 8GB
+should_transfer_files = NO
++MaxRuntime = 21600
++BypassLXCfs = true
+
+queue

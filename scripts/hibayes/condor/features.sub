@@ -1,0 +1,16 @@
+initialdir = $ENV(PWD)
+executable = scripts/hibayes/condor/fit.sh
+arguments = $(config)
+output = /fast/jyeon/smalljudge_glm_check/condor/logs_features_refactor/$(ClusterId).$(ProcId).out
+error = /fast/jyeon/smalljudge_glm_check/condor/logs_features_refactor/$(ClusterId).$(ProcId).err
+log = /fast/jyeon/smalljudge_glm_check/condor/logs/features-$(ClusterId).log
+
+request_cpus = 5
+request_memory = 32GB
+request_disk = 16GB
+should_transfer_files = NO
++MaxRuntime = 21600
++BypassLXCfs = true
+max_materialize = 60
+
+queue config matching files $ENV(GLM_FEATURE_OUT_DIR)/*.yaml

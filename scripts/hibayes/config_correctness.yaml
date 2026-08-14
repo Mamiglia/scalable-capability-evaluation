@@ -1,0 +1,83 @@
+# Correctness model: is_correct ~ capability gap + transcript condition + judge
+# + truth side + (1|item). Companion to config.yaml, which models which side the
+# judge picked rather than whether it was right.
+#
+# Two things differ from config.yaml beyond the outcome:
+#   - The input CSV excludes self-pairs. Their capability gap is zero, so "correct"
+#     is a coin flip for them by construction and carries no signal here.
+#   - The continuous predictors are scaled but not centred, so the intercept reads
+#     as judge accuracy at zero capability gap.
+#
+# "Correct" means the judge picked the major model, which is what the eval scored.
+# prepare_gpqa.py rejects the data if any pair's major model is not the more
+# capable one.
+#
+# length_difference_major_sd is an addition beyond the agreed formula, which was
+# capability gap + condition + judge + truth side + (1|item). Drop it from both
+# lists below to fit that formula exactly.
+
+data_loader:
+  paths:
+    extracted_data:
+      - analysis/hibayes/gpqa_correctness.csv
+
+data_process:
+  processors:
+    - extract_observed_feature: {feature_name: is_correct}
+    - extract_features:
+        categorical_features: [judge, item, transcript_condition]
+        continuous_features:
+          - capability_difference_major_sd
+          - length_difference_major_sd
+          - major_is_right
+        category_order:
+          transcript_condition: [raw, truncated_10, truncated_50, truncated_90]
+
+model:
+  path: scripts/hibayes/model.py
+  models:
+    - name: judge_feature_logistic_model
+      config:
+        predictors:
+          - capability_difference_major_sd
+          - length_difference_major_sd
+          - major_is_right
+        fit:
+          # 2000, not 1000: at 1000 this model failed the r_hat, ess_bulk and
+          # ess_tail checkers, with worst effective sample size 577. 2000
+          # samples x 4 chains gives 8000 draws, matching the feature sweep.
+          samples: 2000
+          warmup: 1000
+          chains: 4
+          seed: 0
+          target_accept: 0.95
+
+check:
+  checkers:
+    - prior_predictive_check: {num_samples: 200}
+    - prior_predictive_plot: {interactive: false, kind: cumulative}
+    - divergences
+    - r_hat
+    - ess_bulk
+    - ess_tail
+    - bfmi
+    - loo
+    - posterior_predictive_plot: {interactive: false, kind: cumulative, num_samples: 200}
+
+communicate:
+  path: scripts/hibayes/communicators.py
+  communicators:
+    - judge_feature_report:
+        intercept_label: baseline_accuracy
+        title: How judge accuracy responds to capability gap, length, and side
+        heatmap_title: Judge-specific effects on answering correctly
+        effect_axis_label: Effect on accuracy log-odds (95% HDI)
+        predictors:
+          - capability_difference_major_sd
+          - length_difference_major_sd
+          - major_is_right
+    - trace_plot: {vars: [judge_intercepts, judge_predictor_effects, item_sigma], best_model: false}
+
+platform:
+  device_type: cpu
+  chain_method: parallel

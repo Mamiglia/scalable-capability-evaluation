@@ -21,14 +21,16 @@ model:
   models:
     - name: judge_feature_logistic_model
       config:
-        pool_judge_effects: true
         predictors:
           - length_difference_sd
           - capability_difference_sd
           - same_model_family
           - self_comparison
         fit:
-          samples: 1000
+          # 2000, not 1000: at 1000 this model's worst effective sample size was
+          # 1087 and r_hat rounded to 1.010, so the r_hat checker failed. 2000
+          # samples x 4 chains gives 8000 draws, matching the feature sweep.
+          samples: 2000
           warmup: 1000
           chains: 4
           seed: 0
