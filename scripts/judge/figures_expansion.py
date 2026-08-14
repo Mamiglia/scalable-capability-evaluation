@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import curve_fit
 from scipy.stats import beta as beta_dist
+from scipy.stats import t as t_dist
 
 DATA = Path("interactive_viewer/data")
 MODEL_SET_CSV = Path("configs/comparisons/model_set.csv")
@@ -38,13 +39,13 @@ BENCHES = []       # series names, in dataset order (same bench pools across dat
 DIRS = {}          # series -> list of viewer dataset dirs
 GAP_AXIS = "eci"   # model-meta key the gap and pair orientation use
 GAP_LABEL = "capability gap (ECI)"
-EXCLUDE = set()    # lowercased name fragments; matching answer models are dropped
-                   # (they can still judge — the artefact is in their transcripts)
+EXCLUDE = set()    # lowercased name fragments; matching models are dropped from
+                   # every role, as answer models and as judges
 
 
-def excluded(member):
-    """True if the member name contains any --exclude-members fragment."""
-    return any(frag in member.lower() for frag in EXCLUDE)
+def excluded(model):
+    """True if the model name contains any --exclude-members fragment."""
+    return any(frag in model.lower() for frag in EXCLUDE)
 
 
 def series_name(dataset):
@@ -68,15 +69,13 @@ def load():
         if not (d / "index.json").exists():
             continue
         idx = json.load(open(d / "index.json"))
-        # excluded models stay in models{} so jlabel() can still caption them as
-        # judges; the figures that plot members skip them
         for m, meta in idx["models"].items():
             (dropped if excluded(m) else kept).add(m)
             models.setdefault(s, {}).setdefault(m, meta)
         for r in idx["runs"]:
             if r.get("frac", "full") != "full":
                 continue
-            if excluded(r["major"]) or excluded(r["minor"]):
+            if excluded(r["major"]) or excluded(r["minor"]) or excluded(r["judge"]):
                 continue
             r = dict(r)
             M, N = idx["models"][r["major"]], idx["models"][r["minor"]]
@@ -104,6 +103,16 @@ def load():
     print(f"excluded members: {', '.join(sorted(dropped)) or 'none'}")
     print(f"{len(kept)} members kept")
     return rows, models
+
+
+def assert_nothing_excluded_plotted(rows):
+    """Stop the run if an excluded name reached the answer models or the judges."""
+    members = {m for r in rows for m in (r["major"], r["minor"])}
+    judges = set(JUDGE_ORDER) | {r["judge"] for r in rows}
+    for role, names in (("answer models", members), ("judges", judges)):
+        bad = sorted(n for n in names if excluded(n))
+        assert not bad, f"excluded names reached the plotted {role}: {bad}"
+        print(f"plotted {role}: {len(names)}, none matching {sorted(EXCLUDE) or 'nothing'}")
 
 
 def _month_gap(a, b):
@@ -147,8 +156,8 @@ def style(ax):
         ax.spines[s].set_visible(False)
 
 
-def save(fig, out, name):
-    fig.savefig(out / f"{name}.png", dpi=150)
+def save(fig, out, name, dpi=150):
+    fig.savefig(out / f"{name}.png", dpi=dpi)
     fig.savefig(out / f"{name}.svg")
     plt.close(fig)
     print(" ", name)
@@ -198,9 +207,17 @@ def fig_model_accuracy(models, out):
     save(fig, out, "0_model_accuracy")
 
 
-def _gap_curve(ax, rows, key, series, colors, labelfn, xlab, fit=True):
+GAP_CURVE_BINS = 4       # gap bins behind the judges-averaged panel
+MANUSCRIPT_DPI = 300
+MEAN_COLOUR = "#222"     # neutral: the palette already encodes judge identity
+GAP_CURVE_RC = {"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
+                "xtick.labelsize": 7, "ytick.labelsize": 7}
+
+
+def _gap_curve(ax, rows, key, series, colors, fit=True):
+    """Per-run scatter plus one sigmoid fit per series."""
     style(ax)
-    ax.axhline(0.5, ls="--", c="#8a8a86", lw=1)
+    ax.axhline(0.5, ls="--", c="#8a8a86", lw=0.8)
     for s in series:
         rs = [r for r in rows if r["_series"] == s and not r["is_self"] and r.get(key) is not None
               and r["score"] is not None]
@@ -209,23 +226,96 @@ def _gap_curve(ax, rows, key, series, colors, labelfn, xlab, fit=True):
         xs = np.array([r[key] for r in rs], float)
         ys = np.array([r["score"] for r in rs], float)
         ns = np.array([max(r["n_items"], 1) for r in rs], float)
-        ax.scatter(xs, ys, s=8 + ns / 4, color=colors[s], alpha=0.55,
-                   edgecolors="white", linewidths=0.5, label=labelfn(s))
+        ax.scatter(xs, ys, s=3, color=colors[s], alpha=0.35, linewidths=0)
         if fit and len(rs) >= 4:
             f = fit_sigmoid(xs, ys, ns)
             if f:
-                gx = np.linspace(0, max(xs) * 1.02, 100)
-                ax.plot(gx, sigmoid(gx, *f), color=colors[s], lw=1.8)
-    ax.set_xlabel(xlab)
-    ax.set_ylabel("judge accuracy")
-    ax.set_ylim(0.05, 1.02)
+                gx = np.linspace(min(xs.min(), 0), xs.max(), 100)
+                ax.plot(gx, sigmoid(gx, *f), color=colors[s], lw=1)
+
+
+def _judge_mean_band(ax, rows, key):
+    """Accuracy binned along the gap axis, averaged over judges.
+
+    Judges are the replication unit: per-judge rate within each bin, then mean
+    and t-based 95% CI across judges. Returns how many judges contributed.
+    """
+    style(ax)
+    ax.axhline(0.5, ls="--", c="#8a8a86", lw=0.8)
+    rs = [r for r in rows if not r["is_self"] and r.get(key) is not None
+          and r["score"] is not None]
+    if not rs:
+        return 0
+    edges = np.linspace(min(r[key] for r in rs), max(r[key] for r in rs), GAP_CURVE_BINS + 1)
+    cx, mu, lo, hi, judges = [], [], [], [], set()
+    for i, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
+        last = i == GAP_CURVE_BINS - 1
+        per_judge = defaultdict(lambda: [0.0, 0.0])
+        for r in rs:
+            inside = a <= r[key] <= b if last else a <= r[key] < b
+            if inside:
+                w = max(r["n_items"], 1)
+                per_judge[r["judge"]][0] += r["score"] * w
+                per_judge[r["judge"]][1] += w
+        rates = np.array([c / n for c, n in per_judge.values()])
+        if len(rates) < 2:
+            continue
+        judges |= set(per_judge)
+        half = t_dist.ppf(0.975, len(rates) - 1) * float(rates.std(ddof=1)) / np.sqrt(len(rates))
+        cx.append((a + b) / 2)
+        mu.append(float(rates.mean()))
+        lo.append(mu[-1] - half)
+        hi.append(mu[-1] + half)
+    ax.fill_between(cx, lo, hi, color=MEAN_COLOUR, alpha=0.18, linewidth=0)
+    ax.plot(cx, mu, color=MEAN_COLOUR, lw=1, marker="o", ms=3)
+    return len(judges)
+
+
+def _gap_curve_panels(rows, key, xlab, series, colors, labelfn, left_tag, self_pairs=True):
+    """Per-series panel beside the judges-averaged panel, one legend below both."""
+    present = [s for s in series
+               if any(r["_series"] == s and not r["is_self"] and r.get(key) is not None
+                      and r["score"] is not None for r in rows)]
+    # both panels read the same rows, so the mean visibly summarises what is drawn
+    drawn = [r for r in rows if r["_series"] in present]
+    if len(drawn) < len(rows):
+        print(f"    {len(rows) - len(drawn)} runs outside the plotted series, skipped")
+    fig, axs = plt.subplots(1, 2, figsize=(5.5, 3.4), sharex=True, sharey=True)
+    _gap_curve(axs[0], drawn, key, present, colors)
+    if self_pairs:
+        for r in drawn:
+            if r["is_self"] and r["score"] is not None:
+                axs[0].scatter([0], [r["score"]], marker="o", facecolors="none",
+                               edgecolors=colors.get(r["_series"], "#999"),
+                               s=12, linewidths=0.6, zorder=5)
+    n_judges = _judge_mean_band(axs[1], drawn, key)
+    for ax, tag in zip(axs, (left_tag, "judges averaged")):
+        ax.set_xlabel(xlab)
+        ax.set_ylim(0, 1.02)
+        ax.set_yticks([0, 0.5, 1])
+        ax.locator_params(axis="x", nbins=5)
+        ax.set_title(tag, fontsize=7, loc="left", color="#555")
+    axs[0].set_ylabel("judge accuracy")
+    h = [plt.Line2D([], [], color=colors[s], lw=1, label=labelfn(s)) for s in present]
+    if self_pairs:
+        h.append(plt.Line2D([], [], ls="", marker="o", mfc="none", mec="#555", ms=4,
+                            label="self-pairs"))
+    h += [plt.Line2D([], [], ls="--", color="#8a8a86", lw=0.8, label="chance"),
+          plt.Line2D([], [], color=MEAN_COLOUR, lw=1, marker="o", ms=3,
+                     label="mean over judges"),
+          plt.Rectangle((0, 0), 1, 1, color=MEAN_COLOUR, alpha=0.18,
+                        label="95% CI over judges")]
+    fig.legend(handles=h, loc="lower center", ncol=2, frameon=False,
+               handlelength=1.4, columnspacing=1.2, handletextpad=0.5)
+    legend_rows = (len(h) + 1) // 2
+    fig.tight_layout(rect=[0, 0.06 + 0.04 * legend_rows, 1, 1])
+    return fig, n_judges
 
 
 def fig_gap_curves(rows, models, out):
     # 2a by judge (pooled evals), 2a-eval by eval; same pair by release gap (2b)
     specs = [("2a_gap_curve_by_capability", "gap", GAP_LABEL),
-             ("2b_gap_curve_by_release", "rel_gap_months",
-              "release gap (months, + = stronger member newer)")]
+             ("2b_gap_curve_by_release", "rel_gap_months", "release gap (months)")]
     if GAP_AXIS != "eci":
         specs.append(("2a_gap_curve_by_capability_eci", "eci_gap", "capability gap (ECI)"))
     ecis = {}
@@ -238,38 +328,30 @@ def fig_gap_curves(rows, models, out):
     ranked = sorted((j for j, e in ecis.items() if e), key=lambda j: ecis[j])
     jcolors = {j: plt.cm.viridis(i / max(len(ranked) - 1, 1)) for i, j in enumerate(ranked)}
     jcolors |= {j: "#999" for j, e in ecis.items() if not e}
-    for name, key, xlab in specs:
-        for split, series, colors, labelfn, suffix in [
-            ("judge", JUDGE_ORDER, jcolors, lambda j: jlabel(models, j), ""),
-            ("eval", list(EVAL_COLORS), EVAL_COLORS, lambda e: e, "_by_eval"),
-        ]:
-            rs = [dict(r, _series=(r["judge"] if split == "judge" else r["eval"]),
-                       score=(r["score_eci"] if key == "eci_gap" else r["score"])) for r in rows]
-            fig, ax = plt.subplots(figsize=(9, 5.5))
-            _gap_curve(ax, rs, key, series, colors, labelfn, xlab)
-            # self-pair strip at x=0 shown as open markers
-            selfs = [r for r in rs if r["is_self"] and r["score"] is not None]
-            for r in selfs:
-                c = (jcolors if split == "judge" else EVAL_COLORS).get(r["_series"], "#999")
-                ax.scatter([0], [r["score"]], marker="o", facecolors="none",
-                           edgecolors=c, s=30, linewidths=1.2, zorder=5)
-            ax.legend(frameon=False, fontsize=8, loc="lower right", ncol=2)
-            split_lab = "judge" if split == "judge" else "eval"
-            ax.set_title(f"Judge accuracy vs gap, colored by {split_lab} — lines: sigmoid fits ·"
-                         " open circles at 0: self-pairs · dot area ∝ items", fontsize=10)
-            fig.tight_layout()
-            save(fig, out, name + suffix)
+    with plt.rc_context(GAP_CURVE_RC):
+        for name, key, xlab in specs:
+            for split, series, colors, labelfn, suffix in [
+                ("judge", JUDGE_ORDER, jcolors, lambda j: jlabel(models, j), ""),
+                ("eval", list(EVAL_COLORS), EVAL_COLORS, lambda e: e, "_by_eval"),
+            ]:
+                rs = [dict(r, _series=(r["judge"] if split == "judge" else r["eval"]),
+                           score=(r["score_eci"] if key == "eci_gap" else r["score"]))
+                      for r in rows]
+                fig, n_judges = _gap_curve_panels(
+                    rs, key, xlab, series, colors, labelfn,
+                    "per judge" if split == "judge" else "per eval")
+                save(fig, out, name + suffix, dpi=MANUSCRIPT_DPI)
+                print(f"    CI unit = judges, n = {n_judges}")
 
 
 def fig_weak_judge(rows, models, out):
     rs = [dict(r, _series=r["eval"]) for r in rows if r["weak_judge"]]
-    fig, ax = plt.subplots(figsize=(9, 5.5))
-    _gap_curve(ax, rs, "gap", list(EVAL_COLORS), EVAL_COLORS, lambda e: e, GAP_LABEL)
-    ax.set_title("Weak-judge subset (judge below both members) by eval — sigmoid fits, dot area ∝ items",
-                 fontsize=10)
-    ax.legend(frameon=False, fontsize=9, loc="lower right")
-    fig.tight_layout()
-    save(fig, out, "2d_gap_curve_weak_judge_by_eval")
+    with plt.rc_context(GAP_CURVE_RC):
+        fig, n_judges = _gap_curve_panels(rs, "gap", GAP_LABEL, list(EVAL_COLORS),
+                                          EVAL_COLORS, lambda e: e, "per eval",
+                                          self_pairs=False)
+        save(fig, out, "2d_gap_curve_weak_judge_by_eval", dpi=MANUSCRIPT_DPI)
+        print(f"    CI unit = judges, n = {n_judges}")
 
 
 def fig_judge_pair_heatmap(rows, models, out, bench):
@@ -705,6 +787,8 @@ def fig_item_difficulty(models, out):
                 for item, judges in json.load(open(pf)).items():
                     k = solved.get(item, 0)
                     for j, cell in judges.items():
+                        if excluded(j):
+                            continue
                         for o in cell["orders"]:
                             if o and o["picked_major"] is not None:
                                 acc[k][1] += 1
@@ -763,10 +847,11 @@ def main():
     ap.add_argument("--gap", choices=["eci", "acc"], default="eci",
                     help="capability measure for the gap axis and pair orientation")
     ap.add_argument("--exclude-members", nargs="*", default=[],
-                    help="drop members whose name contains any of these "
-                         "(case-insensitive), and every pair they appear in")
+                    help="drop models whose name contains any of these "
+                         "(case-insensitive), as answer models and as judges")
     args = ap.parse_args()
-    EXCLUDE.update(f.lower() for f in args.exclude_members)
+    EXCLUDE.update(f.lower() for f in args.exclude_members if f)
+    JUDGE_ORDER[:] = [j for j in JUDGE_ORDER if not excluded(j)]
     args.out_dir.mkdir(parents=True, exist_ok=True)
     BENCHES = list(dict.fromkeys(series_name(d) for d in args.datasets))
     DIRS = {s: [] for s in BENCHES}
@@ -775,6 +860,7 @@ def main():
     if args.gap == "acc":
         GAP_AXIS, GAP_LABEL = "accuracy", "capability gap (accuracy diff, per bench)"
     rows, models = load()
+    assert_nothing_excluded_plotted(rows)
     print(f"{len(rows)} runs loaded; writing to {args.out_dir}")
     fig_model_accuracy(models, args.out_dir)
     fig_gap_curves(rows, models, args.out_dir)
