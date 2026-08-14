@@ -116,6 +116,12 @@ def main() -> int:
         help="Model argument in KEY=VALUE format (can be specified multiple times).",
         type=kv_pair,
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=8,
+        help="Maximum parallel eval processes (default: 8).",
+    )
     args, extra = parser.parse_known_args()
     eval_extra_args = flag_parse(extra) if extra else {}
 
@@ -139,7 +145,7 @@ def main() -> int:
         for repeat in range(args.epochs)
     ]
 
-    return eval_runner(jobs)
+    return eval_runner(jobs, max_workers=args.jobs)
 
 
 if __name__ == "__main__":

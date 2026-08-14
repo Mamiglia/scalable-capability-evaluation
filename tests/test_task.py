@@ -91,8 +91,8 @@ def test_build_judge_tasks_multi_pair(mock_build_dataset, mock_read_log):
 
     assert len(tasks) == 2
     # Distinct names: same-named tasks in one eval_set write over each other's logs.
-    assert tasks[0].name == "test_task#0"
-    assert tasks[1].name == "test_task#1"
+    assert tasks[0].name == "test_task+0"
+    assert tasks[1].name == "test_task+1"
     assert tasks[0].metadata["truncate_frac"] is None
 
 

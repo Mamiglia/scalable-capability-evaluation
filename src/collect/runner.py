@@ -17,7 +17,7 @@ import inspect_ai._display.core.active as active_display
 from inspect_ai._display.plain.display import PlainDisplay, PlainTaskDisplay
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeRemainingColumn
 
-MAX_WORKERS = 32  # cap parallel evals so we don't overwhelm the machine or the API
+MAX_WORKERS = 8  # cap parallel evals so we don't overwhelm the machine or the API
 
 Job = tuple[Callable[..., int], tuple[Any, ...], str]
 
@@ -119,7 +119,7 @@ def _report(errors: Sequence[tuple[str, str, str]], total: int) -> None:
     print("=" * 60 + "\n")
 
 
-def eval_runner(jobs: Sequence[Job]) -> int:
+def eval_runner(jobs: Sequence[Job], max_workers: int = MAX_WORKERS) -> int:
     """Run ``jobs`` (fn, args, label) in parallel; return 0 if all succeeded, else 1."""
     if not jobs:
         return 0
@@ -128,7 +128,7 @@ def eval_runner(jobs: Sequence[Job]) -> int:
     queue = manager.Queue()
     errors: list[tuple[str, str, str]] = []
 
-    with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
+    with ProcessPoolExecutor(max_workers=max(1, max_workers)) as executor:
         futures = {
             executor.submit(_worker, fn, args, queue, label): label for fn, args, label in jobs
         }

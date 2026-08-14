@@ -85,6 +85,12 @@ def main() -> int:
         default=1,
         help="Number of epochs to run (default: 1).",
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=8,
+        help="Maximum parallel experiment processes (default: 8).",
+    )
 
     args, extra = parser.parse_known_args()
     eval_extra_args = flag_parse(extra) if extra else {}
@@ -130,7 +136,7 @@ def main() -> int:
 
     jobs = [(_run_experiment_worker, (exp,), exp.name) for exp in experiments]
 
-    return eval_runner(jobs)
+    return eval_runner(jobs, max_workers=args.jobs)
 
 
 if __name__ == "__main__":
