@@ -74,3 +74,13 @@ def test_accuracy_to_theta_rejects_fractional_gpqa_counts():
     draws = {"a": np.ones((2, 1)), "b": np.zeros((2, 1)), "floor": np.array([0.25])}
     with pytest.raises(ValueError, match="integer|counts"):
         theta_draws_from_accuracy(7.5, 10, draws, np.random.default_rng(3))
+
+
+@pytest.mark.parametrize("counts", [(7.5, 10), (7, "unknown"), (7, None)])
+def test_catalogue_rejects_present_invalid_gpqa_counts_outside_pools(counts):
+    correct, total = counts
+    values = {"model_id": "m", "gpqa_correct": correct, "gpqa_total": total}
+    if total is None:
+        values.pop("gpqa_total")
+    with pytest.raises(ValueError, match="GPQA|counts"):
+        validate_catalogue(pd.DataFrame([values]))

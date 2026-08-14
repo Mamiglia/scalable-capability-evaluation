@@ -177,6 +177,9 @@ def validate_catalogue(frame: pd.DataFrame) -> None:
         theta = row.get("theta", pd.NA)
         if _present(theta) and not np.isfinite(_number(theta)):
             raise ValueError(f"non-finite theta at row {index}")
+        correct, total = row.get("gpqa_correct", pd.NA), row.get("gpqa_total", pd.NA)
+        if (_present(correct) or _present(total)) and not _valid_counts(correct, total):
+            raise ValueError(f"GPQA correct/total counts must be finite integer values at row {index}")
         for column in ("price_in", "price_out"):
             raw_value = row.get(column, pd.NA)
             value = _number(raw_value)
