@@ -1,0 +1,9 @@
+name: pilot-gpt-oss-120b-gpqa-deepseek-v3.2-vs-sonnet4.5
+judge: !include ../../../models/openai/gpt-oss-120b.yml
+major: !include ../../../models/deepseek/deepseek-v3.2.yml
+minor: !include ../../../models/anthropic/claude-sonnet-4.5.yml
+benchmark: !include ../../../bench/gpqa.yml
+mode: paired
+include_reasoning: false
+system_prompt: assets/system_prompt/mcq.txt
+log_dir: logs/pilot/

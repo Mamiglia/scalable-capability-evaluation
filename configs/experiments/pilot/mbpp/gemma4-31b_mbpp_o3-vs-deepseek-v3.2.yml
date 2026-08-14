@@ -1,0 +1,8 @@
+name: pilot-gemma4-31b-mbpp-o3-vs-deepseek-v3.2
+judge: !include ../../../models/google/gemma4-31b.yml
+major: !include ../../../models/openai/o3.yml
+minor: !include ../../../models/deepseek/deepseek-v3.2.yml
+benchmark: !include ../../../bench/mbpp.yml
+mode: paired
+include_reasoning: false
+log_dir: logs/pilot/

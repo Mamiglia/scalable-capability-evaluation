@@ -1,0 +1,8 @@
+name: pilot-gpt-oss-120b-mbpp-deepseek-v3.2-vs-glm4.6
+judge: !include ../../../models/openai/gpt-oss-120b.yml
+major: !include ../../../models/deepseek/deepseek-v3.2.yml
+minor: !include ../../../models/zai/glm-4.6.yml
+benchmark: !include ../../../bench/mbpp.yml
+mode: paired
+include_reasoning: false
+log_dir: logs/pilot/

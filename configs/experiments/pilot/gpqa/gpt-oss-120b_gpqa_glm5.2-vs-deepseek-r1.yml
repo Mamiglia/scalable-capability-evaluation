@@ -1,0 +1,9 @@
+name: pilot-gpt-oss-120b-gpqa-glm5.2-vs-deepseek-r1
+judge: !include ../../../models/openai/gpt-oss-120b.yml
+major: !include ../../../models/zai/glm-5.2.yml
+minor: !include ../../../models/deepseek/deepseek-r1-0528.yml
+benchmark: !include ../../../bench/gpqa.yml
+mode: paired
+include_reasoning: false
+system_prompt: assets/system_prompt/mcq.txt
+log_dir: logs/pilot/

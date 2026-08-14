@@ -1,0 +1,9 @@
+name: pilot-gpt-oss-120b-gpqa-deepseek-v3.2-vs-qwen3-32b
+judge: !include ../../../models/openai/gpt-oss-120b.yml
+major: !include ../../../models/deepseek/deepseek-v3.2.yml
+minor: !include ../../../models/qwen/qwen3-32b.yml
+benchmark: !include ../../../bench/gpqa.yml
+mode: paired
+include_reasoning: false
+system_prompt: assets/system_prompt/mcq.txt
+log_dir: logs/pilot/

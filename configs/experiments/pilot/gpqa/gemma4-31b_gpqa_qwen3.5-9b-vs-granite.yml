@@ -1,0 +1,9 @@
+name: pilot-gemma4-31b-gpqa-qwen3.5-9b-vs-granite
+judge: !include ../../../models/google/gemma4-31b.yml
+major: !include ../../../models/qwen/qwen3.5-9b.yml
+minor: !include ../../../models/ibm/granite-4.1-8b.yml
+benchmark: !include ../../../bench/gpqa.yml
+mode: paired
+include_reasoning: false
+system_prompt: assets/system_prompt/mcq.txt
+log_dir: logs/pilot/

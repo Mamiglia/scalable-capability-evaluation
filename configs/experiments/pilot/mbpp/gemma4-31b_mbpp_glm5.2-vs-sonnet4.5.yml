@@ -1,0 +1,8 @@
+name: pilot-gemma4-31b-mbpp-glm5.2-vs-sonnet4.5
+judge: !include ../../../models/google/gemma4-31b.yml
+major: !include ../../../models/zai/glm-5.2.yml
+minor: !include ../../../models/anthropic/claude-sonnet-4.5.yml
+benchmark: !include ../../../bench/mbpp.yml
+mode: paired
+include_reasoning: false
+log_dir: logs/pilot/

@@ -1,0 +1,9 @@
+name: pilot-gemma4-31b-gpqa-glm5.2-vs-glm4.6
+judge: !include ../../../models/google/gemma4-31b.yml
+major: !include ../../../models/zai/glm-5.2.yml
+minor: !include ../../../models/zai/glm-4.6.yml
+benchmark: !include ../../../bench/gpqa.yml
+mode: paired
+include_reasoning: false
+system_prompt: assets/system_prompt/mcq.txt
+log_dir: logs/pilot/

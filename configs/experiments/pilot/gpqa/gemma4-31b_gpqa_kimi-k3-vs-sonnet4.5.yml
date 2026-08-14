@@ -1,0 +1,9 @@
+name: pilot-gemma4-31b-gpqa-kimi-k3-vs-sonnet4.5
+judge: !include ../../../models/google/gemma4-31b.yml
+major: !include ../../../models/moonshotai/kimi-k3.yml
+minor: !include ../../../models/anthropic/claude-sonnet-4.5.yml
+benchmark: !include ../../../bench/gpqa.yml
+mode: paired
+include_reasoning: false
+system_prompt: assets/system_prompt/mcq.txt
+log_dir: logs/pilot/

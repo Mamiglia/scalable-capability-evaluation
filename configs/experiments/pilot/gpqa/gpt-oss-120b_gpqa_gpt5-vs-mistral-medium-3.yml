@@ -1,0 +1,9 @@
+name: pilot-gpt-oss-120b-gpqa-gpt5-vs-mistral-medium-3
+judge: !include ../../../models/openai/gpt-oss-120b.yml
+major: !include ../../../models/openai/gpt-5.yml
+minor: !include ../../../models/mistralai/mistral-medium-3.yml
+benchmark: !include ../../../bench/gpqa.yml
+mode: paired
+include_reasoning: false
+system_prompt: assets/system_prompt/mcq.txt
+log_dir: logs/pilot/

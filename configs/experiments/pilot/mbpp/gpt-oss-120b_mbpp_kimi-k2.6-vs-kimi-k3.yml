@@ -1,0 +1,8 @@
+name: pilot-gpt-oss-120b-mbpp-kimi-k2.6-vs-kimi-k3
+judge: !include ../../../models/openai/gpt-oss-120b.yml
+major: !include ../../../models/moonshotai/kimi-k2.6.yml
+minor: !include ../../../models/moonshotai/kimi-k3.yml
+benchmark: !include ../../../bench/mbpp.yml
+mode: paired
+include_reasoning: false
+log_dir: logs/pilot/

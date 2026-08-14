@@ -1,0 +1,8 @@
+name: pilot-gpt-oss-120b-mbpp-glm5.2-vs-gpt5
+judge: !include ../../../models/openai/gpt-oss-120b.yml
+major: !include ../../../models/zai/glm-5.2.yml
+minor: !include ../../../models/openai/gpt-5.yml
+benchmark: !include ../../../bench/mbpp.yml
+mode: paired
+include_reasoning: false
+log_dir: logs/pilot/
