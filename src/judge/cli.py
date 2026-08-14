@@ -18,7 +18,7 @@ def _run_experiment_worker(exp: ExperimentConfig) -> int:
     with Model(exp.judge) as model:
         success, _ = eval_set(
             tasks=tasks,
-            log_dir=exp.log_dir,
+            log_dir=str(exp.log_dir),
             display="plain",
             embed_viewer=False,
             **model.eval_kwargs(),

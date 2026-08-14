@@ -30,7 +30,7 @@ class ExperimentConfig(DraccusConfig):
     truncate_frac: float = 0.0
 
     # Optional[...] breaks draccus on py3.14; empty / zero means unset.
-    log_dir: str = ''
+    log_dir: Path = Path('logs/judge/')
     epochs: int = 0
     limit: int = 0
 
@@ -101,8 +101,7 @@ class ExperimentConfig(DraccusConfig):
             self.minor = ModelConfig.from_cli(self.minor)
         if isinstance(self.benchmark, (str, Path)):
             self.benchmark = TaskConfig.from_cli(self.benchmark)
-        if not self.log_dir:
-            self.log_dir = f"logs/judge/{self.name}"
+        self.log_dir /= self.name
 
     def eval_kwargs(self) -> Dict[str, Any]:
         """Return keyword arguments for inspect_ai.eval."""
