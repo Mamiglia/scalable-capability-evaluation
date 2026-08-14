@@ -1,0 +1,5 @@
+name: cybench
+task: inspect_evals/cybench
+task_args:
+  variant_names: hard
+  sandbox_type: docker

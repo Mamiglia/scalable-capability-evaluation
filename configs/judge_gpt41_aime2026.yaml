@@ -1,0 +1,67 @@
+log_root: logs/data-expansion/aime2026
+transcripts: {gpt-4.1: data/aime2026/44136fa3/gpt-4.1/0/2026-08-09T19-01-00-00-00_aime2026_jn5d9bXFcc78HKV4arSDdv.eval,
+  ling-2.6-flash: data/aime2026/44136fa3/ling-2.6-flash/0/2026-08-08T01-25-39-00-00_aime2026_c6jfhTPUgfAiRRTrucEB6A.eval,
+  qwen3-8b: data/aime2026/44136fa3/qwen3-8b/0/2026-08-08T01-25-39-00-00_aime2026_7tXFYqf3zWjSf8K5VgDsAC.eval,
+  qwen3-vl-30b-a3b-instruct: data/aime2026/44136fa3/qwen3-vl-30b-a3b-instruct/0/2026-08-08T01-25-39-00-00_aime2026_aah9ETT7uymcBgHyjGPiMz.eval}
+comparisons:
+- [openrouter/qwen/qwen3-8b, gpt-4.1, qwen3-vl-30b-a3b-instruct]
+- [openrouter/qwen/qwen3-8b, gpt-4.1, ling-2.6-flash]
+- [openrouter/qwen/qwen3-32b, gpt-4.1, qwen3-8b]
+- [openrouter/qwen/qwen3-32b, gpt-4.1, qwen3-vl-30b-a3b-instruct]
+- [openrouter/qwen/qwen3-32b, gpt-4.1, ling-2.6-flash]
+- [openrouter/qwen/qwen3-vl-30b-a3b-instruct, gpt-4.1, qwen3-8b]
+- [openrouter/qwen/qwen3-vl-30b-a3b-instruct, gpt-4.1, ling-2.6-flash]
+- [openrouter/inclusionai/ling-2.6-flash, gpt-4.1, qwen3-8b]
+- [openrouter/inclusionai/ling-2.6-flash, gpt-4.1, qwen3-vl-30b-a3b-instruct]
+- [openrouter/z-ai/glm-4.6, gpt-4.1, qwen3-8b]
+- [openrouter/z-ai/glm-4.6, gpt-4.1, qwen3-vl-30b-a3b-instruct]
+- [openrouter/z-ai/glm-4.6, gpt-4.1, ling-2.6-flash]
+- [openrouter/google/gemini-3.1-flash-lite, gpt-4.1, qwen3-8b]
+- [openrouter/google/gemini-3.1-flash-lite, gpt-4.1, qwen3-vl-30b-a3b-instruct]
+- [openrouter/google/gemini-3.1-flash-lite, gpt-4.1, ling-2.6-flash]
+- [openrouter/deepseek/deepseek-v4-flash-0731, gpt-4.1, qwen3-8b]
+- [openrouter/deepseek/deepseek-v4-flash-0731, gpt-4.1, qwen3-vl-30b-a3b-instruct]
+- [openrouter/deepseek/deepseek-v4-flash-0731, gpt-4.1, ling-2.6-flash]
+judge_model_args:
+  openrouter/deepseek/deepseek-v4-flash-0731:
+    provider:
+      only: [novita/fp8]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/google/gemini-3.1-flash-lite:
+    provider:
+      only: [google-ai-studio]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/z-ai/glm-4.6:
+    provider:
+      only: [atlas-cloud/fp8]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/inclusionai/ling-2.6-flash:
+    provider:
+      only: [novita]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/qwen/qwen3-32b:
+    provider:
+      only: [siliconflow/fp8]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/qwen/qwen3-8b:
+    provider:
+      only: [alibaba/fp8]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/qwen/qwen3-vl-30b-a3b-instruct:
+    provider:
+      only: [siliconflow/fp8]
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny

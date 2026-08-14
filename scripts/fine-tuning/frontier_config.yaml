@@ -1,0 +1,32 @@
+# Frontier saturation run: 3 strong models on GPQA + LAB-Bench, 2 epochs,
+# answers judged later by the base/fine-tuned judges.
+
+out_jsonl: judge_results/judge_ft/frontier_answers.jsonl
+budget_usd: 40.0                # hard abort when projected spend exceeds this
+epochs: 2
+temperature: 0.7
+max_tokens: 4096
+concurrency: 12
+seed: 0
+
+models:                         # OpenRouter slugs, verified 2026-08-07; all proprietary
+  claude-opus-4-6:   {slug: anthropic/claude-opus-4.6,       reasoning_effort: low}
+  gpt-5.5:           {slug: openai/gpt-5.5,                  reasoning_effort: low}
+  gemini-3.1-pro:    {slug: google/gemini-3.1-pro-preview,   reasoning_effort: low}
+
+pricing_per_m:                  # {input, output} USD per M tokens, for the budget guard
+  claude-opus-4-6:   {input: 5.0, output: 25.0}
+  gpt-5.5:           {input: 5.0, output: 30.0}
+  gemini-3.1-pro:    {input: 2.0, output: 12.0}
+
+gpqa:
+  items_parquet: judge_results/judge_ft/items_ft.parquet
+  n_items: 150
+
+labbench:
+  source: futurehouse/lab-bench
+  text_subtasks: [SeqQA, DbQA, ProtocolQA, CloningScenarios]
+  image_subtasks: [FigQA, TableQA]
+  n_text: 150
+  n_image: 50
+  max_question_chars: 6000      # skip the longest items

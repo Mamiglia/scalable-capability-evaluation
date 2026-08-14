@@ -30,28 +30,38 @@ MODEL_SET = "configs/comparisons/model_set.json"
 COMPARISONS = "configs/comparisons/comparisons.csv"
 BIGGAP_CFG = "configs/judge_biggap_gpqa.yaml"
 
-GRID_MEMBERS = ["qwen3-8b", "qwen3-vl-30b-a3b-instruct", "glm-4.6",
-                "ling-2.6-flash", "deepseek-v4-flash-0731", "gemini-3.1-flash-lite"]
+# collected members are whatever sits in the bench's collection dir
 
-# bench -> (dataset label, collection hash dir, judge log roots, gemini subdir)
+# bench -> (dataset label, collection hash dir, judge log roots, gemini subdir,
+#            include_reasoning in exported transcripts)
 BENCHES = {
     "gpqa": ("Data expansion GPQA", "63793eb6",
              ["logs/data-expansion/gpqa", "logs/data-expansion-biggap/gpqa"],
-             "gemini-3.1-flash-lite-rescored"),  # stock scorer misses gemini's $C$ answers
+             "gemini-3.1-flash-lite-rescored", False),  # stock scorer misses gemini's $C$ answers
     "aime2025": ("Data expansion AIME 2025", "44136fa3",
-                 ["logs/data-expansion/aime2025"], "gemini-3.1-flash-lite"),
+                 ["logs/data-expansion/aime2025"], "gemini-3.1-flash-lite", False),
     "aime2026": ("Data expansion AIME 2026", "44136fa3",
-                 ["logs/data-expansion/aime2026"], "gemini-3.1-flash-lite"),
+                 ["logs/data-expansion/aime2026"], "gemini-3.1-flash-lite", False),
+    "aime2025-ablation": ("AIME 2025 reasoning ablation", "44136fa3",
+                          ["logs/data-expansion-reasoning-ablation/aime2025"],
+                          "gemini-3.1-flash-lite", True),
+    "aime2026-ablation": ("AIME 2026 reasoning ablation", "44136fa3",
+                          ["logs/data-expansion-reasoning-ablation/aime2026"],
+                          "gemini-3.1-flash-lite", True),
 }
 
 SHORT2DISPLAY = {
     "qwen3-8b": "Qwen3 8B", "qwen3-32b": "Qwen3 32B",
     "qwen3-vl-30b-a3b-instruct": "Qwen3 VL 30B A3B Instruct", "glm-4.6": "GLM-4.6",
     "ling-2.6-flash": "Ling-2.6-flash", "deepseek-v4-flash-0731": "DeepSeek V4 Flash",
-    "gemini-3.1-flash-lite": "Gemini 3.1 Flash-Lite",
+    "gemini-3.1-flash-lite": "Gemini 3.1 Flash-Lite", "claude-sonnet-4.5": "Claude Sonnet 4.5",
+    "gpt-4.1": "GPT-4.1", "o4-mini": "o4-mini", "claude-opus-4.7": "Claude Opus 4.7",
+    "deepseek-v4-flash-nothink": "DeepSeek V4 Flash (no think)",
 }
+# ECIs not in model_set.json: the epoch-import members, plus qwen3-32b
 EPOCH_ECI = {"gpt-5.5-low": 159.21, "gemini-3.5-flash": 154.56, "qwen3.6-plus": 149.01,
-             "claude-3-5-sonnet-0620": 130.0, "llama-3.1-70b": 125.2, "gemma-2-27b": 122.09}
+             "claude-3-5-sonnet-0620": 130.0, "llama-3.1-70b": 125.2, "gemma-2-27b": 122.09,
+             "qwen3-32b": 130.0, "deepseek-v4-flash-nothink": 150.22}
 JUDGE_COLORS = {"qwen3-8b": "#2a78d6", "qwen3-32b": "#eb6834",
                 "qwen3-vl-30b-a3b-instruct": "#1baf7a", "ling-2.6-flash": "#eda100",
                 "glm-4.6": "#e87ba4", "deepseek-v4-flash-0731": "#008300"}
@@ -78,15 +88,19 @@ def correct_epochs(log):
     return grouped
 
 
-def export_bench(bench, label, hashdir, judge_roots, gemini_dir, eci, flags):
+def export_bench(bench, label, hashdir, judge_roots, gemini_dir, incl_reasoning, eci, flags):
     out = DATA_ROOT / f"data-expansion-{bench}"
     (out / "transcripts").mkdir(parents=True, exist_ok=True)
     (out / "pairs").mkdir(exist_ok=True)
 
+    members = sorted(d.name for d in Path(f"data/{bench}/{hashdir}").iterdir()
+                     if d.is_dir() and not d.name.endswith("-rescored"))
     grid_logs = {}
-    for m in GRID_MEMBERS:
+    for m in members:
         sub = gemini_dir if m == "gemini-3.1-flash-lite" else m
-        grid_logs[m] = sorted(glob.glob(f"data/{bench}/{hashdir}/{sub}/0/*.eval"))[0]
+        found = sorted(glob.glob(f"data/{bench}/{hashdir}/{sub}/0/*.eval"))
+        if found:
+            grid_logs[m] = found[0]
     logs = dict(grid_logs)
     if bench == "gpqa":
         logs |= yaml.safe_load(open(BIGGAP_CFG))["transcripts"]
@@ -102,9 +116,9 @@ def export_bench(bench, label, hashdir, judge_roots, gemini_dir, eci, flags):
                      "release": (info.get("release") or "")[:7],
                      "arm": "A" if m in grid_logs else "B"}
         groups = correct_epochs(log)
-        json.dump({i: extract_transcript(g[0], include_reasoning=False) for i, g in groups.items()},
+        json.dump({i: extract_transcript(g[0], include_reasoning=incl_reasoning) for i, g in groups.items()},
                   open(out / f"transcripts/{m}.json", "w"))
-        ep1 = {i: extract_transcript(g[1], include_reasoning=False) for i, g in groups.items() if len(g) > 1}
+        ep1 = {i: extract_transcript(g[1], include_reasoning=incl_reasoning) for i, g in groups.items() if len(g) > 1}
         if ep1:
             json.dump(ep1, open(out / f"transcripts/{m}__ep1.json", "w"))
         if m in grid_logs:
@@ -121,25 +135,33 @@ def export_bench(bench, label, hashdir, judge_roots, gemini_dir, eci, flags):
 
     for (judge, pairname, root), paths in bypair.items():
         major, minor = pairname.split("-vs-")
+        # log targets track the config's first-named model, and comparisons.csv
+        # naming is mixed; orient every pair so major = higher-ECI member
+        ea, eb = models[major]["eci"], models[minor]["eci"]
+        flip = major != minor and ea and eb and ea < eb
+        if flip:
+            major, minor = minor, major
+        oriented = f"{major}-vs-{minor}"
         samples = [s for p in paths for s in read_eval_log(p).samples]
         n_c = n_ok = n_bad = slot_a = 0
         perorder = {}
         for s in samples:
             sc = list(s.scores.values())[0] if s.scores else None
             item, order = str(s.id).rsplit("_", 1)
+            tgt = {"1": "2", "2": "1"}[s.target] if flip else s.target
             ans = sc.answer if sc else None
             if ans in ("1", "2"):
                 n_ok += 1
                 slot_a += ans == "1"
-                if sc.value == "C":
+                if ans == tgt:
                     n_c += 1
             else:
                 n_bad += 1
-            picked_major = None if ans not in ("1", "2") else int(ans == s.target)
-            entry = {"slot_of_major": s.target, "pick": ans, "picked_major": picked_major,
+            picked_major = None if ans not in ("1", "2") else int(ans == tgt)
+            entry = {"slot_of_major": tgt, "pick": ans, "picked_major": picked_major,
                      "confidence": (sc.metadata or {}).get("confidence") if sc else None,
                      "explanation": sc.explanation if sc else None}
-            pairs[pairname][item][judge]["orders"][int(order) - 1] = entry
+            pairs[oriented][item][judge]["orders"][int(order) - 1] = entry
             perorder.setdefault(item, {})[order] = picked_major
         lo, hi = wilson(n_c, n_ok)
         disagree = [1 for v in perorder.values()
@@ -159,7 +181,29 @@ def export_bench(bench, label, hashdir, judge_roots, gemini_dir, eci, flags):
             "arm_a": major in grid_logs and minor in grid_logs,
         })
 
+    # Orient stronger-first (by ECI): the raw logs/dirs may name the weaker member
+    # first; the viewer must read score as P(picked the stronger member).
+    def eci_of(m):
+        return models[m].get("eci") or 0
+    for r in runs:
+        if eci_of(r["minor"]) > eci_of(r["major"]):
+            r["major"], r["minor"] = r["minor"], r["major"]
+            if r["score"] is not None:
+                r["score"], r["score_lo"], r["score_hi"] = 1 - r["score"], 1 - r["score_hi"], 1 - r["score_lo"]
+            pairname = f"{r['minor']}-vs-{r['major']}"
+            if pairname in pairs and not pairs[pairname].get("_flipped"):
+                for item, judges in pairs[pairname].items():
+                    for j, cell in judges.items():
+                        for o in cell["orders"]:
+                            if o:
+                                o["slot_of_major"] = "2" if o["slot_of_major"] == "1" else "1"
+                                if o["picked_major"] is not None:
+                                    o["picked_major"] = 1 - o["picked_major"]
+                pairs[f"{r['major']}-vs-{r['minor']}"] = pairs.pop(pairname)
+                pairs[f"{r['major']}-vs-{r['minor']}"]["_flipped"] = True
+
     for pairname, items in pairs.items():
+        items.pop("_flipped", None)
         major, minor = pairname.split("-vs-")
         json.dump(items, open(out / f"pairs/{major}__{minor}__full.json", "w"))
 
@@ -185,8 +229,7 @@ def main():
                 if m in oidx["models"]:
                     meta[f"acc_{ob}"] = oidx["models"][m]["accuracy"]
         json.dump(idx, open(DATA_ROOT / f"data-expansion-{b}/index.json", "w"))
-    listing_path = DATA_ROOT / "datasets.json"
-    listing = json.load(open(listing_path)) if listing_path.exists() else []
+    listing = json.load(open(DATA_ROOT / "datasets.json"))
     listing = entries + [d for d in listing if not d["id"].startswith("data-expansion-")]
     json.dump(listing, open(DATA_ROOT / "datasets.json", "w"))
 

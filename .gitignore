@@ -30,3 +30,16 @@ external_data/**/*.eval
 /judge_results/
 /irt_models_slide.pptx
 /interactive_viewer/data/
+
+/data/
+
+judge-whitebox/out/
+
+/external_data/
+scripts/analyses/direct-judge/fig_capability_curve.png
+scripts/analyses/direct-judge/run_logs/
+
+data/
+
+/model-sampler/cache/
+

@@ -1,0 +1,5 @@
+name: lab_bench_litqa
+task: inspect_evals/lab_bench_litqa
+# NOTE: single-turn multiple-choice literature QA, NOT an agent loop.
+# Measures long-context science-QA cost, not agentic cost. Text-only subset
+# (litqa2), so it's fine for a text-only model.

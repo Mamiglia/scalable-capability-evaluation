@@ -1,0 +1,3 @@
+name: swe_bench_mini
+task: inspect_evals/swe_bench_verified_mini
+# small verified subset; docker sandbox, per-instance images pulled from ghcr.

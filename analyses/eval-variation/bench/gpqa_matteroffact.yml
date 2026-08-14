@@ -1,0 +1,9 @@
+# Neutral-tone standardizer: the counterpart pole to gpqa_confident.yml.
+name: gpqa-matteroffact
+task: analyses/eval-variation/tasks.py@gpqa_instructed
+task_args:
+  instruction: "Explain your reasoning in a plain, matter-of-fact tone. State the steps; no rhetorical flourish, no hedging."
+  cot: true
+  epochs: 2
+  high_level_domain: null
+  subdomain: null

@@ -21,7 +21,8 @@ import yaml
 
 MODELS_DIR = Path("configs/models")
 MODEL_SET = Path("configs/comparisons/model_set.json")
-ECI_EXTRA = {"qwen3-32b": 130.0}  # judge-only in model_set.json
+ECI_EXTRA = {"qwen3-32b": 130.0,  # judge-only in model_set.json
+             "deepseek-v4-flash-nothink": 150.22}  # same model as -0731, thinking off
 
 # CSV display name -> configs/models shortname (also the collect dir name).
 SHORTNAME = {
@@ -36,6 +37,7 @@ SHORTNAME = {
     "Ling-2.6-flash": "ling-2.6-flash",
     "Gemini 3.1 Flash-Lite": "gemini-3.1-flash-lite",
     "DeepSeek V4 Flash": "deepseek-v4-flash-0731",
+    "DeepSeek V4 Flash (no think)": "deepseek-v4-flash-nothink",
 }
 
 
