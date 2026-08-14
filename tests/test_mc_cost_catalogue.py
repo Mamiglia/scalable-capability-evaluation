@@ -26,6 +26,8 @@ def test_catalogue_joins_normalized_names_and_keeps_missing_metadata_visible(tmp
     assert got.loc[got.model_id == "model-a", "release"].item() == "2025-01-02"
     assert got.loc[got.model_id == "model-a", "theta"].item() == 1.2
     assert pd.isna(got.loc[got.model_id == "model-missing", "release"]).item()
+    assert pd.isna(got.loc[got.model_id == "model-missing", "judge_pool"]).item()
+    assert pd.isna(got.loc[got.model_id == "model-missing", "candidate_pool"]).item()
 
 
 def test_accuracy_to_theta_inverts_each_fixed_3pl_draw():
@@ -59,3 +61,16 @@ def test_catalogue_rejects_duplicate_ids_and_bad_reasoning_class():
     ])
     with pytest.raises(ValueError, match="duplicate model_id|reasoning_class"):
         validate_catalogue(frame)
+
+
+@pytest.mark.parametrize("column, value", [("price_in", "unknown"), ("price_out", np.inf), ("price_in", -1.0)])
+def test_catalogue_rejects_present_invalid_prices(column, value):
+    frame = pd.DataFrame([{"model_id": "m", column: value}])
+    with pytest.raises(ValueError, match="price"):
+        validate_catalogue(frame)
+
+
+def test_accuracy_to_theta_rejects_fractional_gpqa_counts():
+    draws = {"a": np.ones((2, 1)), "b": np.zeros((2, 1)), "floor": np.array([0.25])}
+    with pytest.raises(ValueError, match="integer|counts"):
+        theta_draws_from_accuracy(7.5, 10, draws, np.random.default_rng(3))

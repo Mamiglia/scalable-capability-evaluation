@@ -94,8 +94,8 @@ def build_catalogue(
             "release": _first(metadata, "release"),
             "family": _first(metadata, "family", "dev", "organization"),
             "reasoning_class": _reasoning_class(_first(metadata, "reasoning_class", "reasoning")),
-            "judge_pool": _first(metadata, "judge_pool") if metadata else False,
-            "candidate_pool": _first(metadata, "candidate_pool") if metadata else False,
+            "judge_pool": _first(metadata, "judge_pool") if metadata else pd.NA,
+            "candidate_pool": _first(metadata, "candidate_pool") if metadata else pd.NA,
             "observed_judge": _first(metadata, "observed_judge"),
             "observed_candidate": _first(metadata, "observed_candidate"),
             "price_in": _first(metadata, "price_in"),
@@ -141,11 +141,20 @@ def _enabled(value) -> bool:
     return bool(value)
 
 
+def _valid_counts(correct, total) -> bool:
+    correct, total = _number(correct), _number(total)
+    return (
+        np.isfinite(correct) and np.isfinite(total)
+        and correct.is_integer() and total.is_integer()
+        and 0 <= correct <= total and total > 0
+    )
+
+
 def _uncertainty_source(row: pd.Series) -> bool:
     source = str(row.get("theta_source", "")).lower()
-    correct, total = _number(row.get("gpqa_correct")), _number(row.get("gpqa_total"))
-    if np.isfinite(correct) and np.isfinite(total):
-        return 0 <= correct <= total and total > 0
+    correct, total = row.get("gpqa_correct", pd.NA), row.get("gpqa_total", pd.NA)
+    if _present(correct) or _present(total):
+        return _valid_counts(correct, total)
     if source in {"fixed_3pl", "fixed_3pl_posterior"}:
         return True
     p5, p95 = _number(row.get("theta_p5")), _number(row.get("theta_p95"))
@@ -169,8 +178,9 @@ def validate_catalogue(frame: pd.DataFrame) -> None:
         if _present(theta) and not np.isfinite(_number(theta)):
             raise ValueError(f"non-finite theta at row {index}")
         for column in ("price_in", "price_out"):
-            value = _number(row.get(column, pd.NA))
-            if np.isfinite(value) and value < 0:
+            raw_value = row.get(column, pd.NA)
+            value = _number(raw_value)
+            if _present(raw_value) and (not np.isfinite(value) or value < 0):
                 raise ValueError(f"negative {column} at row {index}")
         enabled = any(_enabled(row[column]) for column in ("judge_pool", "candidate_pool") if column in row)
         if enabled and (not _present(release) or not _uncertainty_source(row)):
@@ -178,8 +188,8 @@ def validate_catalogue(frame: pd.DataFrame) -> None:
 
 
 def theta_draws_from_accuracy(correct, total, irt_draws, rng) -> np.ndarray:
-    if not (0 <= correct <= total) or total <= 0:
-        raise ValueError("GPQA correct/total counts must satisfy 0 <= correct <= total")
+    if not _valid_counts(correct, total):
+        raise ValueError("GPQA correct/total counts must be finite integer values satisfying 0 <= correct <= total")
     a = np.asarray(irt_draws["a"], dtype=float)
     b = np.asarray(irt_draws["b"], dtype=float)
     floor = np.asarray(irt_draws["floor"], dtype=float)
@@ -220,7 +230,7 @@ def build_capability_draws(catalogue: pd.DataFrame, irt_draws, rng) -> tuple[lis
         name = normalized_name(row["model_id"])
         if name in posterior_by_name:
             values = theta[:, posterior_by_name[name]]
-        elif _uncertainty_source(row) and np.isfinite(_number(row.get("gpqa_correct"))) and np.isfinite(_number(row.get("gpqa_total"))):
+        elif _valid_counts(row.get("gpqa_correct", pd.NA), row.get("gpqa_total", pd.NA)):
             values = theta_draws_from_accuracy(row["gpqa_correct"], row["gpqa_total"], posterior, rng)
         else:
             p5, p95 = _number(row.get("theta_p5")), _number(row.get("theta_p95"))
