@@ -1,0 +1,152 @@
+import jax.numpy as jnp
+import numpy as np
+import pandas as pd
+from numpyro import handlers
+
+from mc_cost.model import (
+    GLOBAL_FEATURES,
+    JudgmentData,
+    JudgmentSpec,
+    PosteriorArtifact,
+    encode_judgments,
+    fit_judgment_model,
+    judgment_model,
+    left_logits,
+    load_artifact,
+    save_artifact,
+)
+
+
+def tiny_data():
+    return JudgmentData(
+        y=jnp.array([1, 0]), judge=jnp.array([0, 0]), item=jnp.array([0, 0]),
+        left_model=jnp.array([0, 1]), right_model=jnp.array([1, 0]),
+        theta_gap=jnp.array([1.0, -1.0]),
+        global_x=jnp.zeros((2, 9)), length_difference=jnp.array([0.2, -0.2]),
+        judge_covariates=jnp.array([[0.0, 0.0]]), include_length=True,
+        num_judges=1, num_items=1, num_models=2,
+    )
+
+
+def test_judgment_model_declares_pooled_judge_and_model_effects():
+    trace = handlers.trace(handlers.seed(judgment_model, 2)).get_trace(tiny_data(), True)
+    assert trace["judge_effects"]["value"].shape == (1, 2)
+    assert trace["candidate_effects"]["value"].shape == (2,)
+    assert trace["obs"]["value"].shape == (2,)
+
+
+def test_swapping_candidates_negates_content_but_keeps_position_term():
+    posterior = {
+        "judge_effects": np.array([[[0.3, 1.5]]]),
+        "global_beta": np.array([[0.2] + [0.0] * 8]),
+        "length_mean": np.array([0.4]), "length_deviation": np.array([[0.1]]),
+        "candidate_effects": np.array([[0.2, -0.1]]), "item_effects": np.array([[0.0]]),
+    }
+    forward = left_logits(posterior, tiny_data())[0, 0]
+    swapped = left_logits(posterior, tiny_data())[0, 1]
+    assert np.isclose((forward + swapped) / 2, 0.3)
+
+
+def test_baseline_omits_global_and_length_sites():
+    data = tiny_data()._replace(global_x=jnp.zeros((2, 0)), include_length=False)
+    trace = handlers.trace(handlers.seed(judgment_model, 2)).get_trace(data, False)
+    assert "global_beta" not in trace
+    assert "length_mean" not in trace
+    assert "length_scale" not in trace
+    assert "length_raw" not in trace
+    assert "length_deviation" not in trace
+
+
+def test_encode_judgments_uses_declared_features_and_theta_release_judge_covariates():
+    frame = pd.DataFrame([
+        {
+            "chosen_left": 1, "judge": "j2", "item": "i2", "left_model": "b", "right_model": "a",
+            "theta_gap": 4.0, "length_difference": 0.5,
+            "oversight_sd": 1.0, "difficulty_sd": 2.0, "release_gap_days_sd": 99.0,
+        },
+        {
+            "chosen_left": 0, "judge": "j1", "item": "i1", "left_model": "a", "right_model": "b",
+            "theta_gap": -4.0, "length_difference": -0.5,
+            "oversight_sd": -1.0, "difficulty_sd": -2.0, "release_gap_days_sd": -99.0,
+        },
+    ])
+    frame.attrs["training_scales"] = {"oversight": {"mean": 3.0, "scale": 2.0}}
+    frame.attrs["source_hashes"] = {"judgments": "abc"}
+    catalogue = pd.DataFrame([
+        {"model_id": "j1", "theta": -1.0, "release": "2024-01-01"},
+        {"model_id": "j2", "theta": 1.0, "release": "2025-01-01"},
+    ])
+    spec = JudgmentSpec(("difficulty_sd", "oversight_sd"), include_length=False)
+
+    got = encode_judgments(frame, catalogue, spec)
+
+    assert np.asarray(got.global_x).tolist() == [[2.0, 1.0], [-2.0, -1.0]]
+    assert np.asarray(got.theta_gap).tolist() == [4.0, -4.0]
+    assert got.global_features == spec.global_features
+    assert got.category_maps == {
+        "judges": {"j1": 0, "j2": 1},
+        "items": {"i1": 0, "i2": 1},
+        "models": {"a": 0, "b": 1},
+    }
+    assert np.allclose(np.asarray(got.judge_covariates), [[-1.0, -1.0], [1.0, 1.0]])
+    assert got.training_scales == {
+        **frame.attrs["training_scales"],
+        "judge_theta": {"mean": 0.0, "scale": 1.0},
+        "judge_release_days": {"mean": 1644.0, "scale": 183.0},
+    }
+    assert got.training_ranges == {
+        "theta_gap": [-4.0, 4.0], "difficulty_sd": [-2.0, 2.0], "oversight_sd": [-1.0, 1.0],
+        "judge_theta": [-1.0, 1.0], "judge_release_days": [1461.0, 1827.0],
+    }
+    assert got.source_hashes == frame.attrs["source_hashes"]
+
+
+def test_artifact_round_trips_without_pickle(tmp_path):
+    artifact = PosteriorArtifact(
+        posterior={"judge_effects": np.array([[[0.1, 0.2]]]), "labels": np.array(["j"], dtype=str)},
+        metadata={
+            "feature_order": list(GLOBAL_FEATURES),
+            "category_maps": {"judges": {"j": 0}},
+            "training_scales": {"theta_gap": {"mean": 0.0, "scale": 1.0}},
+            "training_ranges": {"theta_gap": [-1.0, 1.0]},
+            "source_hashes": {"judgments": "abc"},
+            "conditional_judges": True,
+        },
+        diagnostics={"divergences": 0, "summary": {"x": {"mean": 0.0}}},
+    )
+    path = tmp_path / "judgment.npz"
+
+    save_artifact(artifact, path)
+    stored = np.load(path, allow_pickle=False)
+    loaded = load_artifact(path)
+
+    assert stored["labels"].tolist() == ["j"]
+    assert loaded.metadata == artifact.metadata
+    assert loaded.diagnostics == artifact.diagnostics
+    assert np.array_equal(loaded.posterior["judge_effects"], artifact.posterior["judge_effects"])
+
+
+def test_tiny_fit_records_configured_diagnostics_and_metadata(tmp_path):
+    data = tiny_data()._replace(
+        global_x=jnp.zeros((2, 0)), include_length=False, global_features=(),
+        category_maps={"judges": {"j": 0}, "items": {"i": 0}, "models": {"a": 0, "b": 1}},
+        training_scales={"theta_gap": {"mean": 0.0, "scale": 1.0}},
+        training_ranges={"theta_gap": [-1.0, 1.0]}, source_hashes={"judgments": "abc"},
+    )
+
+    artifact = fit_judgment_model(data, warmup=4, samples=4, chains=1, seed=3, conditional_judges=False)
+
+    assert artifact.posterior["judge_effects"].shape == (4, 1, 2)
+    assert artifact.metadata == {
+        "feature_order": [],
+        "category_maps": data.category_maps,
+        "training_scales": data.training_scales,
+        "training_ranges": data.training_ranges,
+        "source_hashes": data.source_hashes,
+        "conditional_judges": False,
+    }
+    assert isinstance(artifact.diagnostics["divergences"], int)
+    assert artifact.diagnostics["draws"] == 4
+    assert "summary" in artifact.diagnostics
+    save_artifact(artifact, tmp_path / "fitted.npz")
+    assert load_artifact(tmp_path / "fitted.npz").diagnostics == artifact.diagnostics
