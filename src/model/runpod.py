@@ -16,6 +16,7 @@ from typing import Any
 
 
 LOGGER = logging.getLogger(__name__)
+DURATION = re.compile(r"(\d+(?:\.\d+)?)([smhd])")
 DEFAULTS = {
     "image": "vllm/vllm-openai:latest",
     "cloud_type": "COMMUNITY",
@@ -28,13 +29,17 @@ DEFAULTS = {
     "model_args": {},
     "vllm_args": [],
     "create_args": [],
+    "fallback_gpus": None,  # None = the module default list; [] = never substitute
 }
 
 
 def validate(config: dict[str, Any] | None) -> dict[str, Any]:
+    """Fill in defaults and reject configurations runpodctl would mishandle."""
     if not isinstance(config, dict):
         raise ValueError("runpod must be a mapping")
     result = DEFAULTS | config
+    if result["fallback_gpus"] is None:
+        result["fallback_gpus"] = list(FALLBACK_GPUS)
 
     for field in ("model", "gpu_id"):
         if not isinstance(result.get(field), str) or not result[field]:
@@ -54,6 +59,11 @@ def validate(config: dict[str, Any] | None) -> dict[str, Any]:
             raise ValueError(f"runpod.{field} must be a list of arguments")
         result[field] = [str(item) for item in value]
 
+    if not isinstance(result["fallback_gpus"], list) or not all(
+        isinstance(item, str) for item in result["fallback_gpus"]
+    ):
+        raise ValueError("runpod.fallback_gpus must be a list of GPU names")
+
     for field in ("gpu_count", "container_disk_in_gb", "port"):
         try:
             result[field] = int(result[field])
@@ -64,9 +74,13 @@ def validate(config: dict[str, Any] | None) -> dict[str, Any]:
     except (TypeError, ValueError) as exc:
         raise ValueError("runpod.ready_timeout must be a number") from exc
     try:
-        result["keep_alive"] = float(result.get("keep_alive", 60))
+        result["keep_alive"] = float(result["keep_alive"])
     except (TypeError, ValueError) as exc:
         raise ValueError("runpod.keep_alive must be a number") from exc
+    if not DURATION.fullmatch(str(result["terminate_after"])):
+        raise ValueError(
+            f"runpod.terminate_after must be a duration like '4h', got {result['terminate_after']!r}"
+        )
     if result["gpu_count"] < 1 or result["container_disk_in_gb"] < 1:
         raise ValueError("runpod GPU count and container disk size must be positive")
     if not 1 <= result["port"] <= 65535:
@@ -93,19 +107,11 @@ def is_healthy(base_url: str) -> bool:
 
 
 def _deadline(value: Any) -> str:
-    text = str(value)
-    duration = re.fullmatch(r"(\d+(?:\.\d+)?)([smhd])", text)
+    """Turn a duration like '4h' into the absolute UTC timestamp runpodctl expects."""
+    duration = DURATION.fullmatch(str(value))
     if not duration:
-        return text
-    seconds = (
-        float(duration.group(1))
-        * {
-            "s": 1,
-            "m": 60,
-            "h": 3600,
-            "d": 86400,
-        }[duration.group(2)]
-    )
+        raise ValueError(f"terminate_after must be a duration like '4h', got {value!r}")
+    seconds = float(duration.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[duration.group(2)]
     return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
@@ -121,6 +127,9 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
         raise RuntimeError(f"runpodctl failed: {detail}") from exc
 
 
+# Tried in order when the configured GPU has no capacity. Substituting silently would make
+# runs unreproducible and can change the price, so every fallback is logged loudly and
+# ``fallback_gpus: []`` in the config turns it off.
 FALLBACK_GPUS = [
     "NVIDIA A100-SXM4-80GB",
     "NVIDIA A100 80GB PCIe",
@@ -130,6 +139,9 @@ FALLBACK_GPUS = [
     "NVIDIA RTX A6000",
     "NVIDIA A40",
 ]
+
+# runpodctl reports "no capacity" through several unrelated-looking messages.
+OUT_OF_CAPACITY = ("graphql", "resources", "something went wrong", "failed to create pod")
 
 
 def _create_pod_once(config: dict[str, Any], gpu_id: str) -> str:
@@ -175,21 +187,32 @@ def _create_pod_once(config: dict[str, Any], gpu_id: str) -> str:
 
 
 def create(config: dict[str, Any]) -> str:
-    gpu_candidates = [config["gpu_id"]] + [g for g in FALLBACK_GPUS if g != config["gpu_id"]]
-    last_exc = None
-    for gpu in gpu_candidates:
+    """Create a pod, falling back to another GPU type if the configured one has no capacity."""
+    requested = config["gpu_id"]
+    fallbacks = config.get("fallback_gpus", FALLBACK_GPUS)
+    candidates = [requested] + [gpu for gpu in fallbacks if gpu != requested]
+
+    last_exc: Exception | None = None
+    for gpu in candidates:
         try:
-            return _create_pod_once(config, gpu)
+            pod_id = _create_pod_once(config, gpu)
         except Exception as exc:
-            err_str = str(exc).lower()
-            if "graphql" in err_str or "resources" in err_str or "something went wrong" in err_str or "failed to create pod" in err_str:
-                LOGGER.warning("GPU %s failed for %s (%s), trying next fallback GPU...", gpu, config["model"], exc)
-                last_exc = exc
-                continue
-            raise
-    if last_exc:
-        raise last_exc
-    raise RuntimeError("Failed to create pod with any GPU candidate")
+            if not any(marker in str(exc).lower() for marker in OUT_OF_CAPACITY):
+                raise
+            LOGGER.warning("GPU %s unavailable for %s (%s)", gpu, config["model"], exc)
+            last_exc = exc
+            continue
+        if gpu != requested:
+            LOGGER.warning(
+                "Runpod %s runs %s on %s, not the configured %s — results are not "
+                "comparable to runs pinned to %s",
+                pod_id, config["model"], gpu, requested, requested,
+            )
+        return pod_id
+
+    raise RuntimeError(
+        f"No capacity for {config['model']} on any of {candidates}"
+    ) from last_exc
 
 
 def wait(pod_id: str, port: int, timeout: float) -> str:

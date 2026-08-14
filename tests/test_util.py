@@ -142,12 +142,12 @@ class TestExtractScore:
 
     def test_extract_score_correct(self):
         """Test score extraction when score value is 'C' (Correct)."""
-        sample = SimpleNamespace(score=Score(value="C"))
+        sample = SimpleNamespace(scores={"scorer": Score(value="C")})
         assert extract_score(sample) is True
 
     def test_extract_score_incorrect(self):
         """Test score extraction when score value is 'I' (Incorrect)."""
-        sample = SimpleNamespace(score=Score(value="I"))
+        sample = SimpleNamespace(scores={"scorer": Score(value="I")})
         assert extract_score(sample) is False
 
 

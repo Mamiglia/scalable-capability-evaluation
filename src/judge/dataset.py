@@ -1,9 +1,18 @@
+"""Turn two eval logs into a dataset of pairwise judging prompts.
+
+One sample per question that both models answered correctly, showing their two
+transcripts. With ``include_reverse`` each pair also appears in the opposite order, which
+is what makes position bias visible in the results.
+"""
+
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from inspect_ai.dataset import MemoryDataset, Sample
-from inspect_ai.log import read_eval_log
+from inspect_ai.log import read_eval_log, read_eval_log_samples
 
-from judge.util import extract_transcript, extract_score
+from judge.util import extract_score, extract_transcript
 
 USER_PROMPT = """Input question:
 ---
@@ -29,15 +38,53 @@ OPTIONS_BLOCK = """Multiple choice options as shown to Model {n}:
 """
 
 
-def format_options(sample: Sample, n: int) -> str:
-    """Render a sample's options in the order that model saw them. Empty if it had none."""
-    choices = getattr(sample, "choices", None)
-    if not choices:
+@dataclass
+class Transcript:
+    """All the judge sees of one model's answer to one question."""
+
+    id: str
+    question: Any
+    text: str
+    options: tuple[str, ...] = ()
+    epoch: int = 0
+
+
+def read_transcripts(
+    path: str | Path,
+    require_correct: bool = True,
+    include_reasoning: bool = True,
+) -> dict[str, list[Transcript]]:
+    """Read one eval log into transcripts per question id, ordered by epoch.
+
+    Samples are streamed and reduced to text as they arrive: single logs reach tens of MB
+    compressed, and judging runs many of them in parallel processes.
+    """
+    by_id: dict[str, list[Transcript]] = {}
+    for sample in read_eval_log_samples(str(path), all_samples_required=False):
+        if require_correct and not extract_score(sample):
+            continue
+        record = Transcript(
+            id=str(sample.id),
+            question=sample.input,
+            text=extract_transcript(sample, include_reasoning=include_reasoning),
+            options=tuple(getattr(sample, "choices", None) or ()),
+            epoch=getattr(sample, "epoch", 0) or 0,
+        )
+        by_id.setdefault(record.id, []).append(record)
+
+    for group in by_id.values():
+        group.sort(key=lambda transcript: transcript.epoch)
+    return by_id
+
+
+def format_options(options: tuple[str, ...], n: int) -> str:
+    """Render the options in the order that model saw them. Empty if it had none."""
+    if not options:
         return ""
-    options = "\n".join(
-        f"{chr(ord('A') + i)}) {choice.strip()}" for i, choice in enumerate(choices)
+    rendered = "\n".join(
+        f"{chr(ord('A') + i)}) {option.strip()}" for i, option in enumerate(options)
     )
-    return OPTIONS_BLOCK.format(n=n, options=options)
+    return OPTIONS_BLOCK.format(n=n, options=rendered)
 
 
 def strip_answer(text: str) -> str:
@@ -54,117 +101,94 @@ def truncate_pair(a: str, b: str, frac: float) -> tuple[str, str]:
 
 
 def responses_to_sample(
-    sample_1: Sample,
-    sample_2: Sample,
+    first: Transcript,
+    second: Transcript,
     target: str = '1',
     format_str: str = USER_PROMPT,
     max_len: int = 24000,
-    include_reasoning: bool = True,
     truncate_frac: float | None = None,
 ) -> Sample:
-    """
-    Converts two model samples into a single formatted string representation.
+    """Render two transcripts of the same question as one judging sample.
 
-    Options are shuffled per model, so each transcript is shown with its own
-    option order.
+    Options are shuffled per model, so each transcript is shown with its own option order.
 
     Args:
-        sample_1 (Sample): The sample shown as Transcript 1.
-        sample_2 (Sample): The sample shown as Transcript 2.
-        format_str (str): The format string to use for the output.
-        max_len (int): The maximum length of each model's response.
-        include_reasoning (bool): Whether to include CoT reasoning blocks.
-        truncate_frac (float | None): If set, cut both transcripts to this
-            fraction of the shorter one's length (length-control condition).
-
-    Returns:
-        Sample: A formatted sample representing both model responses.
+        first: shown as Transcript 1.
+        second: shown as Transcript 2.
+        target: which position holds the more capable model ('1' or '2').
+        format_str: prompt template to fill.
+        max_len: maximum characters kept per transcript.
+        truncate_frac: if set, cut both transcripts to this fraction of the shorter one's
+            length and drop their answers (length-control condition).
     """
-    assert sample_1.id == sample_2.id, "Sample IDs must match for comparison."
-    assert sample_1.input == sample_2.input, "Sample inputs must match for comparison."
-    input_text = sample_1.input
+    assert first.id == second.id, "Sample IDs must match for comparison."
+    assert first.question == second.question, "Sample inputs must match for comparison."
 
-    output_1 = extract_transcript(sample_1, include_reasoning=include_reasoning)[:max_len]
-    output_2 = extract_transcript(sample_2, include_reasoning=include_reasoning)[:max_len]
+    text_1, text_2 = first.text[:max_len], second.text[:max_len]
     if truncate_frac is not None:
-        output_1, output_2 = truncate_pair(output_1, output_2, truncate_frac)
+        text_1, text_2 = truncate_pair(text_1, text_2, truncate_frac)
 
-    text = format_str.format(
-        question=input_text,
-        options_1=format_options(sample_1, 1),
-        options_2=format_options(sample_2, 2),
-        transcript_1=output_1,
-        transcript_2=output_2,
-    )
     return Sample(
-        id=f"{sample_1.id}_{target}",
-        input=text,
-        target=target
+        id=f"{first.id}_{target}",
+        input=format_str.format(
+            question=first.question,
+            options_1=format_options(first.options, 1),
+            options_2=format_options(second.options, 2),
+            transcript_1=text_1,
+            transcript_2=text_2,
+        ),
+        target=target,
     )
-    
+
+
 def build_dataset(
     major_path: Path,
     minor_path: Path,
     format_str: str = USER_PROMPT,
     max_len: int = 24000,
     require_both_correct: bool = True,
-include_reverse: bool = True,
+    include_reverse: bool = True,
     include_reasoning: bool = True,
     truncate_frac: float | None = None,
-):
-    """
-    Builds a dataset from two eval logs, comparing the responses of two models.
+) -> MemoryDataset:
+    """Build the judging dataset comparing a major and a minor model's eval log.
 
     Args:
-        major_path (Path): Path to the eval log for the major model.
-        minor_path (Path): Path to the eval log for the minor model.
-        format_str (str): The format string to use for the output.
-        max_len (int): The maximum length of each model's response.
-        include_reasoning (bool): Whether to include CoT reasoning blocks.
-    Returns:
-        Dataset: A dataset containing the formatted comparisons of model responses.
+        major_path: eval log of the model that is expected to be more capable.
+        minor_path: eval log of the other model; the same path runs the self-pair control,
+            which compares two epochs of one model.
+        format_str: prompt template to fill.
+        max_len: maximum characters kept per transcript.
+        require_both_correct: keep only questions both models answered correctly.
+        include_reverse: also add each pair with the transcripts swapped.
+        include_reasoning: include CoT reasoning blocks in the transcripts.
+        truncate_frac: length-control fraction, see ``responses_to_sample``.
     """
-    log_major = read_eval_log(major_path)
-    log_minor = read_eval_log(minor_path)
-
-    def eligible(sample: Sample) -> bool:
-        return hasattr(sample, "id") and (
-            not require_both_correct or extract_score(sample)
-        )
-
-    def samples_by_id(log) -> dict:
-        grouped: dict = {}
-        for s in log.samples:
-            if eligible(s):
-                grouped.setdefault(s.id, []).append(s)
-        for group in grouped.values():
-            group.sort(key=lambda s: getattr(s, "epoch", 0))
-        return grouped
-
     self_pair = Path(major_path) == Path(minor_path)
-    major_samples = samples_by_id(log_major)
-    minor_samples = major_samples if self_pair else samples_by_id(log_minor)
+    major = read_transcripts(major_path, require_both_correct, include_reasoning)
+    minor = major if self_pair else read_transcripts(minor_path, require_both_correct, include_reasoning)
 
     samples = []
-
-    for sample_id in sorted(minor_samples.keys() & major_samples.keys(), key=str):
+    for sample_id in sorted(major.keys() & minor.keys()):
         if self_pair:
-            # For self-pair control, make sure to select two distinct correct epochs of the same model.
-            group = major_samples[sample_id]
-            if len(group) < 2:
+            # Self-pair control: two distinct correct epochs of the same model.
+            if len(major[sample_id]) < 2:
                 continue
-            sample_major, sample_minor = group[0], group[1]
+            first, second = major[sample_id][0], major[sample_id][1]
         else:
-            sample_major = major_samples[sample_id][0]
-            sample_minor = minor_samples[sample_id][0]
+            first, second = major[sample_id][0], minor[sample_id][0]
 
-        samples.append(responses_to_sample(sample_major, sample_minor, target='1', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning, truncate_frac=truncate_frac))
-
+        pair_kwargs = dict(format_str=format_str, max_len=max_len, truncate_frac=truncate_frac)
+        samples.append(responses_to_sample(first, second, target='1', **pair_kwargs))
         if include_reverse:
-            samples.append(responses_to_sample(sample_minor, sample_major, target='2', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning, truncate_frac=truncate_frac))
-        
-    name_major = log_major.eval.model
-    name_minor = log_minor.eval.model
-    benchmark_name = log_major.eval.dataset.name
-    
-    return MemoryDataset(samples=samples, name=f"Comparison of {name_major} and {name_minor} over the {benchmark_name} benchmark")
+            samples.append(responses_to_sample(second, first, target='2', **pair_kwargs))
+
+    header_major = read_eval_log(str(major_path), header_only=True)
+    header_minor = read_eval_log(str(minor_path), header_only=True)
+    return MemoryDataset(
+        samples=samples,
+        name=(
+            f"Comparison of {header_major.eval.model} and {header_minor.eval.model} "
+            f"over the {header_major.eval.dataset.name} benchmark"
+        ),
+    )

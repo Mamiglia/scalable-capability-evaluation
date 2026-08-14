@@ -5,8 +5,8 @@ from pathlib import Path
 
 from inspect_ai import eval_set
 
+from collect.runner import eval_runner
 from configs import ExperimentConfig, flag_parse
-from configs.utils import eval_runner
 from judge.task import build_judge_tasks
 from model import Model
 
@@ -89,9 +89,14 @@ def main() -> int:
     args, extra = parser.parse_known_args()
     eval_extra_args = flag_parse(extra) if extra else {}
 
-    if args.config_path and (args.bench or args.major or args.minor or args.judge):
+    ad_hoc = (args.bench, args.major, args.minor, args.judge)
+    if args.config_path and any(ad_hoc):
         parser.error(
             "Cannot specify both --config_path and any of (-b/--bench, --major, --minor, -j/--judge)."
+        )
+    if not args.config_path and not all(ad_hoc):
+        parser.error(
+            "Specify either --config_path, or all of -b/--bench, --major, --minor and -j/--judge."
         )
 
     if args.config_path:
@@ -100,10 +105,18 @@ def main() -> int:
             for cfg_path in args.config_path
         ]
     else:
+        # Ad-hoc mode compares one <bench, major, minor, judge> tuple per position, so the
+        # four lists have to line up; zip() would silently drop the extras.
+        lengths = {len(values) for values in ad_hoc}
+        if len(lengths) != 1:
+            parser.error(
+                "-b/--bench, --major, --minor and -j/--judge must have the same number of "
+                f"values (got {[len(v) for v in ad_hoc]}); use --config_path for other combinations."
+            )
         experiments = [
             ExperimentConfig.from_cli(
                 {
-                    "name": f"{Path(b).stem}/{Path(j).stem}:{Path(M).stem}|{Path(m).stem}",
+                    "name": f"{b.stem}/{j.stem}:{M.stem}|{m.stem}",
                     "benchmark": b,
                     "major": M,
                     "minor": m,
@@ -121,4 +134,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

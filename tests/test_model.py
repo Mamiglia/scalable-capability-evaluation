@@ -215,3 +215,62 @@ def test_keep_alive_timer(monkeypatch):
     assert terminated == ["timer-pod"]
 
 
+
+def test_validate_rejects_bad_terminate_after():
+    with pytest.raises(ValueError, match="terminate_after"):
+        runpod.validate({"model": "org/model", "gpu_id": "NVIDIA A40", "terminate_after": "soon"})
+
+
+def test_validate_keeps_explicit_keep_alive():
+    config = runpod.validate({"model": "m", "gpu_id": "g", "keep_alive": 30})
+    assert config["keep_alive"] == 30.0
+    assert runpod.validate({"model": "m", "gpu_id": "g"})["keep_alive"] == 0.0
+
+
+def test_gpu_fallback_is_logged_loudly(monkeypatch, caplog):
+    """A substituted GPU changes price and comparability, so it must not pass silently."""
+    attempts = []
+
+    def fake_create(config, gpu_id):
+        attempts.append(gpu_id)
+        if gpu_id == "NVIDIA A40":
+            raise RuntimeError("runpodctl failed: there are no longer any resources")
+        return "pod1"
+
+    monkeypatch.setattr(runpod, "_create_pod_once", fake_create)
+    config = runpod.validate(
+        {"model": "org/model", "gpu_id": "NVIDIA A40", "fallback_gpus": ["NVIDIA L40S"]}
+    )
+
+    with caplog.at_level("WARNING"):
+        assert runpod.create(config) == "pod1"
+
+    assert attempts == ["NVIDIA A40", "NVIDIA L40S"]
+    assert "not the configured NVIDIA A40" in caplog.text
+
+
+def test_gpu_fallback_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(
+        runpod,
+        "_create_pod_once",
+        lambda config, gpu_id: (_ for _ in ()).throw(RuntimeError("failed to create pod")),
+    )
+    config = runpod.validate({"model": "m", "gpu_id": "NVIDIA A40", "fallback_gpus": []})
+
+    with pytest.raises(RuntimeError, match="No capacity"):
+        runpod.create(config)
+
+
+def test_unexpected_create_error_is_not_retried(monkeypatch):
+    calls = []
+
+    def fake_create(config, gpu_id):
+        calls.append(gpu_id)
+        raise RuntimeError("runpodctl is not installed")
+
+    monkeypatch.setattr(runpod, "_create_pod_once", fake_create)
+    config = runpod.validate({"model": "m", "gpu_id": "NVIDIA A40"})
+
+    with pytest.raises(RuntimeError, match="not installed"):
+        runpod.create(config)
+    assert calls == ["NVIDIA A40"]

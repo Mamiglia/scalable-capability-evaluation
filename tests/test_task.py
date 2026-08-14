@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from inspect_ai import Task
 from inspect_ai.dataset import MemoryDataset, Sample
 from judge.task import (
@@ -80,11 +82,66 @@ def test_build_judge_tasks_multi_pair(mock_build_dataset, mock_read_log):
     mock_exp.max_length = 65536
     mock_exp.require_both_correct = True
     mock_exp.include_reverse = True
+    mock_exp.include_reasoning = True
+    mock_exp.truncate_frac = 0.0
     mock_exp.name = "test_exp"
     mock_exp.task_name = "test_task"
 
     tasks = build_judge_tasks(experiment=mock_exp)
 
     assert len(tasks) == 2
-    assert tasks[0].name == "test_task"
-    assert tasks[1].name == "test_task"
+    # Distinct names: same-named tasks in one eval_set write over each other's logs.
+    assert tasks[0].name == "test_task#0"
+    assert tasks[1].name == "test_task#1"
+    assert tasks[0].metadata["truncate_frac"] is None
+
+
+@patch("judge.task.read_eval_log")
+@patch("judge.task.build_dataset")
+def test_build_judge_tasks_single_pair_keeps_plain_name(mock_build_dataset, mock_read_log):
+    log = MagicMock()
+    log.eval.model = "ibm"
+    log.eval.task = "gpqa"
+    mock_read_log.side_effect = [log, log]
+    mock_build_dataset.return_value = MemoryDataset(samples=[Sample(input="test")])
+
+    mock_exp = MagicMock()
+    mock_exp.resolve_pairs.return_value = [(Path("major/0.eval"), Path("minor/0.eval"))]
+    mock_exp.system_prompt = "test prompt"
+    mock_exp.max_length = 65536
+    mock_exp.truncate_frac = 0.0
+    mock_exp.task_name = "test_task"
+
+    tasks = build_judge_tasks(experiment=mock_exp)
+    assert [t.name for t in tasks] == ["test_task"]
+
+
+@patch("judge.task.read_eval_log")
+@patch("judge.task.build_dataset")
+def test_truncation_switches_to_truncated_prompt(mock_build_dataset, mock_read_log):
+    """Truncated runs must tell the judge the transcripts were cut, or it penalises them."""
+    from judge.task import DEFAULT_SYSTEM_PROMPT, TRUNCATED_SYSTEM_PROMPT
+
+    log = MagicMock()
+    log.eval.model = "m"
+    log.eval.task = "gpqa"
+    mock_read_log.side_effect = [log, log]
+    mock_build_dataset.return_value = MemoryDataset(samples=[Sample(input="test")])
+
+    task = judge_task(
+        major_path="a.eval", minor_path="b.eval", truncate_frac=0.5,
+        system_prompt=DEFAULT_SYSTEM_PROMPT,
+    )
+    assert task.metadata["system_prompt"] == TRUNCATED_SYSTEM_PROMPT
+
+
+@patch("judge.task.read_eval_log")
+def test_mismatched_benchmarks_raise(mock_read_log):
+    log_major = MagicMock()
+    log_major.eval.task = "inspect_evals/gpqa_diamond"
+    log_minor = MagicMock()
+    log_minor.eval.task = "inspect_evals/aime2024"
+    mock_read_log.side_effect = [log_major, log_minor]
+
+    with pytest.raises(ValueError, match="same task"):
+        judge_task(major_path="a.eval", minor_path="b.eval")

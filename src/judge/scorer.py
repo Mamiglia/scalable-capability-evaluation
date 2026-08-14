@@ -2,7 +2,7 @@ import re
 
 from inspect_ai.scorer import (
     Score, Target, CORRECT, INCORRECT, NOANSWER,
-    accuracy, stderr, scorer
+    Metric, SampleScore, accuracy, metric, scorer, stderr
 )
 from inspect_ai.solver import TaskState
 
@@ -35,7 +35,24 @@ def parse_judge_output(output_text: str):
 
     return answer, confidence, explanation
 
-@scorer(metrics=[accuracy(), stderr()])
+@metric
+def answer_rate() -> Metric:
+    """Fraction of judgements that stated a parseable verdict.
+
+    Reported separately because ``accuracy`` counts an unparseable answer as a wrong
+    verdict, which would hide a judge that keeps ignoring the reply format.
+    """
+
+    def metric_fn(scores: list[SampleScore]) -> float:
+        if not scores:
+            return 0.0
+        answered = sum(sample.score.value != NOANSWER for sample in scores)
+        return answered / len(scores)
+
+    return metric_fn
+
+
+@scorer(metrics=[accuracy(), stderr(), answer_rate()])
 def judge_scorer():
     async def score(state: TaskState, target: Target):
         output_text = state.output.completion if state.output else ""

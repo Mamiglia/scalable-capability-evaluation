@@ -5,8 +5,9 @@ from pathlib import Path
 
 from inspect_ai import eval_set
 
+from collect.runner import eval_runner
 from configs import ModelConfig, TaskConfig, flag_parse, kv_pair
-from configs.utils import eval_runner, get_eval_path, is_successful_eval
+from configs.paths import get_eval_path, is_successful_eval
 from model import Model
 
 
@@ -14,6 +15,7 @@ def _run_eval_worker(
     bench_path: Path,
     model_path: Path,
     repeat: int,
+    repeats: int,
     use_runpod: bool,
     task_arg: list | None,
     model_arg: list | None,
@@ -28,7 +30,7 @@ def _run_eval_worker(
         model_config.model_args.update(dict(model_arg))
 
     print(
-        f"Running epoch {repeat}/{eval_extra_args.get('epochs', 1)} for benchmark "
+        f"Running repeat {repeat + 1}/{repeats} for benchmark "
         f"'{bench.name}' and model '{model_config.slug}'"
     )
 
@@ -38,7 +40,7 @@ def _run_eval_worker(
         base_dir=eval_extra_args.get("log_dir", "data"),
     ) / f"{repeat}"
     if any(is_successful_eval(path) for path in target_dir.glob("*.eval")):
-        print(f"Skipping completed epoch {repeat + 1}: {target_dir}")
+        print(f"Skipping completed repeat {repeat + 1}: {target_dir}")
         return 0
 
     with Model(model_config, use_runpod=use_runpod) as model:
@@ -86,9 +88,12 @@ def main() -> int:
     parser.add_argument(
         "-n",
         "--epochs",
+        "--repeats",
         type=int,
         default=1,
-        help="Number of epochs to run (default: 1).",
+        dest="epochs",
+        help="Number of repeat runs, each stored in its own <model>/<repeat>/ directory "
+        "(default: 1). Distinct from the task's internal 'epochs' argument.",
     )
     parser.add_argument(
         "--runpod",
@@ -121,12 +126,13 @@ def main() -> int:
                 bench_path,
                 model_path,
                 repeat,
+                args.epochs,
                 args.runpod,
                 args.task_arg,
                 args.model_arg,
                 eval_extra_args,
             ),
-            f"{bench_path.stem}/{model_path.stem} (epoch {repeat})",
+            f"{bench_path.stem}/{model_path.stem} (repeat {repeat})",
         )
         for bench_path in args.bench
         for model_path in args.model
@@ -137,4 +143,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

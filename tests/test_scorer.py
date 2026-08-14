@@ -188,3 +188,19 @@ class TestJudgeScorer:
 
         assert score.value == CORRECT
         assert score.answer == "1"
+
+
+def test_answer_rate_metric():
+    """Unparseable verdicts are wrong for accuracy, so they need their own number."""
+    from inspect_ai.scorer import NOANSWER, CORRECT, INCORRECT, SampleScore, Score
+
+    from judge.scorer import answer_rate
+
+    scores = [
+        SampleScore(score=Score(value=CORRECT)),
+        SampleScore(score=Score(value=INCORRECT)),
+        SampleScore(score=Score(value=NOANSWER)),
+        SampleScore(score=Score(value=NOANSWER)),
+    ]
+    assert answer_rate()(scores) == 0.5
+    assert answer_rate()([]) == 0.0

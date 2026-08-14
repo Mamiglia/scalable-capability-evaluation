@@ -29,18 +29,32 @@ def kv_pair(s: str) -> tuple[str, Any]:
     return key.strip(), coerce_value(val.strip())
 
 
+def _is_flag(token: str) -> bool:
+    """A token is a flag if it starts with '-' and is not a negative number."""
+    if not token.startswith("-"):
+        return False
+    return not token.lstrip("-").replace(".", "", 1).isdigit()
+
+
 def flag_parse(extra: list[str] | str) -> dict[str, Any]:
-    """Parse a list or space-separated string of flags into a dictionary."""
-    is_flag = lambda x: x.startswith("-")
+    """Parse trailing CLI flags into a dictionary.
+
+    Accepts both ``--flag value`` and ``--flag=value``; a flag with no value is True.
+    """
+    vals = extra.split(" ") if isinstance(extra, str) else list(extra)
     res: dict[str, Any] = {}
 
-    vals = extra.split(" ") if isinstance(extra, str) else list(extra)
-    while vals and vals[0].startswith("-"):
-        flag = vals.pop(0)
-        assert is_flag(flag), f"Invalid flag: {flag}"
-        flag = flag.lstrip("-").replace("-", "_")
-        if vals and not is_flag(vals[0]):
+    while vals and _is_flag(vals[0]):
+        flag = vals.pop(0).lstrip("-")
+        if "=" in flag:
+            flag, _, value = flag.partition("=")
+            res[flag.replace("-", "_")] = coerce_value(value)
+            continue
+        flag = flag.replace("-", "_")
+        if vals and not _is_flag(vals[0]):
             res[flag] = coerce_value(vals.pop(0))
         else:
             res[flag] = True
+    if vals:
+        raise ValueError(f"Unparsed CLI arguments: {vals}")
     return res

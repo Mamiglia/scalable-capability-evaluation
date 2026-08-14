@@ -2,6 +2,16 @@ from typing import Any
 from inspect_ai.model import ChatMessage
 from inspect_ai.dataset import Sample
 
+# Content the judge cannot read: shown as a marker so the transcript stays coherent.
+PLACEHOLDER_BLOCKS = {
+    "image": "[Image]",
+    "audio": "[Audio]",
+    "video": "[Video]",
+    "document": "[Document]",
+    "data": "[Data]",
+    "tool_use": "[Tool Use]",
+}
+
 
 def strip_think(text: str) -> str:
     """
@@ -23,6 +33,8 @@ def strip_think(text: str) -> str:
 def format_content(content: Any, include_reasoning: bool = True) -> str:
     """
     Format content blocks (text, reasoning, image, audio, video, etc.) into readable string.
+
+    Non-text modalities become a placeholder: the judge only ever sees text.
     """
     if isinstance(content, str):
         return content if include_reasoning else strip_think(content)
@@ -40,12 +52,9 @@ def format_content(content: Any, include_reasoning: bool = True) -> str:
             if include_reasoning:
                 text_val = getattr(block, "text", "")
                 texts.append(f"<THOUGHT_START>\n {text_val}\n<THOUGHT_END>")
-        elif b_type == "image":
-            texts.append("[Image]") # Right now we don't have a way to display media in the judge model, so we just indicate that an image was present. TODO
-        elif b_type == "audio":
-            texts.append("[Audio]")
-        elif b_type == "video":
-            texts.append("[Video]")
+        elif b_type in PLACEHOLDER_BLOCKS:
+            # No way to show media to the judge, so just record that it was there. TODO
+            texts.append(PLACEHOLDER_BLOCKS[b_type])
         else:
             raise TypeError(f"Unsupported content block type: {b_type!r}")
     return "\n".join(texts)
@@ -92,7 +101,7 @@ def format_message(msg: ChatMessage | list[ChatMessage] | str | Any, include_rea
     """
     if not isinstance(msg, list):
         return format_single_message(msg, include_reasoning=include_reasoning)
-    
+
     formatted_msgs = []
     for m in msg:
         role = getattr(m, "role", "message").capitalize()
@@ -123,7 +132,15 @@ def extract_transcript(sample: Sample, include_reasoning: bool = True) -> str:
 
 def extract_score(sample: Sample) -> bool:
     """
-    Extract the score from the sample's output.
+    Whether the sample was scored correct.
+
+    Uses the first scorer, which is the only one for every benchmark we collect; more
+    than one would need the judge configs to say which counts.
     """
-    score = sample.score
-    return score is not None and score.value == "C"
+    scores = getattr(sample, "scores", None) or {}
+    if len(scores) > 1:
+        raise ValueError(
+            f"sample {getattr(sample, 'id', '?')} has several scores ({sorted(scores)}); "
+            f"cannot tell which one decides correctness"
+        )
+    return any(score.value == "C" for score in scores.values())

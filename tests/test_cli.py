@@ -1,6 +1,8 @@
 """Unit tests for CLI modules (collect and judge)."""
 
+from concurrent.futures import Future
 from unittest.mock import MagicMock
+
 import pytest
 from inspect_ai import Epochs
 
@@ -9,6 +11,8 @@ from judge.cli import main as judge_main
 
 
 class SynchronousExecutor:
+    """Runs each job inline and hands back an already-completed real Future."""
+
     def __init__(self, max_workers=None):
         pass
 
@@ -19,14 +23,17 @@ class SynchronousExecutor:
         pass
 
     def submit(self, fn, *args, **kwargs):
-        mock_fut = MagicMock()
-        mock_fut.result.return_value = fn(*args, **kwargs)
-        return mock_fut
+        future = Future()
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except Exception as exc:  # mirror ProcessPoolExecutor error propagation
+            future.set_exception(exc)
+        return future
 
 
 @pytest.fixture(autouse=True)
 def mock_process_pool(monkeypatch):
-    monkeypatch.setattr("configs.utils.ProcessPoolExecutor", SynchronousExecutor)
+    monkeypatch.setattr("collect.runner.ProcessPoolExecutor", SynchronousExecutor)
 
 
 

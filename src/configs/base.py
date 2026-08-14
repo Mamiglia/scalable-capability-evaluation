@@ -6,11 +6,14 @@ from typing import Any
 
 import draccus
 
+CONFIG_SUFFIXES = (".yml", ".yaml", ".json", ".toml")
+
+
 @dataclass(kw_only=True)
 class DraccusConfig:
     name: str
     _kwargs: dict[str, Any] = draccus.field(default_factory=dict)
-    
+
     @property
     def shortname(self) -> str:
         """Return a short name for the config."""
@@ -19,9 +22,13 @@ class DraccusConfig:
     @classmethod
     def from_cli(cls, spec, *args: Any, **kwargs: Any):
         """Create a config instance from a CLI argument.
-        If spec is a dict, it is used to create the config instance.
-        If spec is a path to a config file, it is parsed and used to create the config instance.
-        If spec is a config instance, it is returned as is.
+
+        ``spec`` may be an instance of ``cls`` (returned as is), a dict (decoded), a path
+        to a config file (parsed), or a bare name such as a model slug. A path that looks
+        like a config file but does not exist raises instead of being treated as a bare
+        name — that mistake silently creates data directories like ``gemma-7b.yml/``.
+
+        Extra keyword arguments override matching fields; the rest land in ``_kwargs``.
         """
         cli_args = kwargs.pop("args", None)
         if isinstance(spec, cls):
@@ -30,13 +37,14 @@ class DraccusConfig:
             cfg = draccus.decode(cls, spec)
         elif isinstance(spec, (str, Path)) and Path(spec).exists():
             cfg = draccus.parse(cls, config_path=Path(spec), args=[] if cli_args is None else cli_args)
-        else:        
+        elif str(spec).endswith(CONFIG_SUFFIXES):
+            raise FileNotFoundError(f"config file not found: {spec}")
+        else:
             cfg = cls(name=str(spec))
-            
-        if kwargs:
-            for k, v in kwargs.items():
-                if hasattr(cfg, k):
-                    setattr(cfg, k, v)
-                else:
-                    cfg._kwargs[k] = v
+
+        for key, value in kwargs.items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+            else:
+                cfg._kwargs[key] = value
         return cfg
