@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from inspect_ai.log import EvalLog, read_eval_log
 from configs import TaskConfig, ModelConfig
-from configs.utils import get_eval_path
+from configs.paths import get_eval_path
 
 
 def get_log_identifier(source_path: Path, log: Optional[EvalLog] = None) -> str:

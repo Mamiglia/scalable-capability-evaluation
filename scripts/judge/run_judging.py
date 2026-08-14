@@ -28,21 +28,16 @@ from pathlib import Path
 
 import yaml
 from inspect_ai import eval_set
-from inspect_ai.log import read_eval_log
 
+from configs.paths import is_successful_eval
 from judge.task import judge_task
 
 DEFAULT_PHASE1_ITEMS = 20
 
 
 def has_success_log(directory: Path) -> bool:
-    for p in directory.glob("*.eval"):
-        try:
-            if read_eval_log(p, header_only=True).status == "success":
-                return True
-        except Exception:
-            continue
-    return False
+    """Whether this phase already produced a finished log, so it can be skipped."""
+    return any(is_successful_eval(path) for path in directory.glob("*.eval"))
 
 
 def main() -> int:
