@@ -41,6 +41,7 @@ def test_prepare_judgments_builds_signed_and_symmetric_features():
     token_row = judge_token_rows(got).iloc[0]
     assert token_row.input_tokens == 300
     assert token_row.ordinary_output_tokens == 30
+    assert token_row.difficulty == 0.7
 
 
 def test_prepare_judgments_names_missing_metadata():
@@ -62,6 +63,7 @@ def test_prepare_judgments_names_missing_metadata():
 def test_judge_tokens_define_reasoning_as_output_subset():
     rows = pd.DataFrame([{
         "judge": "j", "item": "i", "chosen_left": 1, "left_chars": 100, "right_chars": 200,
+        "difficulty": 0.4,
         "judge_input_tokens": 500, "judge_output_tokens": 80,
         "judge_reasoning_tokens": 30, "judge_total_tokens": 580,
     }])
@@ -69,6 +71,7 @@ def test_judge_tokens_define_reasoning_as_output_subset():
     assert got.iloc[0].ordinary_output_tokens == 50
     assert got.iloc[0].output_tokens == 80
     assert got.iloc[0].transcript_chars == 300
+    assert got.iloc[0].difficulty == 0.4
 
 
 def test_candidate_rows_deduplicate_and_exclude_zero_usage(monkeypatch):

@@ -69,10 +69,14 @@ def _reasoning_map(source: Mapping[str, str] | pd.DataFrame | None) -> dict[str,
         required = {"model_id", "reasoning_class"}
         if missing := required - set(source):
             raise ValueError(f"reasoning catalogue lacks columns: {', '.join(sorted(missing))}")
+        if source["model_id"].isna().any():
+            raise ValueError("reasoning catalogue contains null model_id")
         if source["model_id"].astype(str).duplicated().any():
             raise ValueError("duplicate model_id in reasoning catalogue")
         result = dict(zip(source["model_id"].astype(str), source["reasoning_class"]))
     else:
+        if any(pd.isna(model) for model in source):
+            raise ValueError("reasoning catalogue contains null model_id")
         result = {str(model): value for model, value in source.items()}
     invalid = sorted(model for model, value in result.items() if value not in _CLASSES)
     if invalid:
@@ -102,7 +106,7 @@ def _binary(frame: pd.DataFrame, column: str) -> np.ndarray:
 
 
 def _standardized(
-    frame: pd.DataFrame, feature: str, source: str, *, transform: str = "identity",
+    frame: pd.DataFrame, source: str, *, transform: str = "identity",
 ) -> tuple[np.ndarray, dict[str, Any]]:
     values = _numeric(frame, source)
     if transform == "log1p":
@@ -126,6 +130,8 @@ def _prepare_frame(
     if "model" not in frame:
         raise ValueError("token rows lack required column: model")
     result = frame.copy()
+    if result["model"].isna().any():
+        raise ValueError("token rows contain null model")
     result["model"] = result["model"].astype(str)
     if (result["model"].str.strip() == "").any():
         raise ValueError("model IDs must be nonempty")
@@ -149,7 +155,12 @@ def _prepare_frame(
         if "reasoning_class" not in result:
             result["reasoning_class"] = result["model"].map(catalogue)
         elif catalogue:
-            result["reasoning_class"] = result["reasoning_class"].fillna(result["model"].map(catalogue))
+            mapped = result["model"].map(catalogue)
+            conflict = mapped.notna() & result["reasoning_class"].notna() & result["reasoning_class"].ne(mapped)
+            if conflict.any():
+                names = sorted(result.loc[conflict, "model"].unique())
+                raise ValueError(f"candidate reasoning class conflicts with catalogue: {', '.join(names)}")
+            result["reasoning_class"] = result["reasoning_class"].fillna(mapped)
         missing = sorted(result.loc[result["reasoning_class"].isna(), "model"].unique())
         if missing:
             raise ValueError(f"candidate models missing reasoning class: {', '.join(missing)}")
@@ -170,7 +181,7 @@ def _feature_data(
     base_features: list[str] = []
     base_columns: list[np.ndarray] = []
     if role == "candidate" or "difficulty" in frame:
-        values, scales["difficulty_sd"] = _standardized(frame, "difficulty_sd", "difficulty")
+        values, scales["difficulty_sd"] = _standardized(frame, "difficulty")
         base_features.append("difficulty_sd")
         base_columns.append(values)
     if role == "candidate" or "correct" in frame:
@@ -183,7 +194,7 @@ def _feature_data(
     input_columns = list(base_columns)
     if role == "judge":
         values, scales["transcript_chars_log_sd"] = _standardized(
-            frame, "transcript_chars_log_sd", "transcript_chars", transform="log1p",
+            frame, "transcript_chars", transform="log1p",
         )
         input_features.append("transcript_chars_log_sd")
         input_columns.append(values)
@@ -196,7 +207,7 @@ def _feature_data(
             ("theta_sd", "theta"), ("release_day_sd", "release_day"),
             ("difficulty_sd", "difficulty"),
         ):
-            values, scale = _standardized(frame, feature, source)
+            values, scale = _standardized(frame, source)
             scales[feature] = scale
             length_features.append(feature)
             length_columns.append(values)
@@ -279,15 +290,16 @@ def _token_model(data: _TokenData) -> None:
         numpyro.sample("length_obs", dist.Normal(length_mu, length_sigma), obs=data.log_length)
 
 
-def _coverage(actual: np.ndarray, mean: np.ndarray, sigma: np.ndarray) -> float:
-    edge = 1.6448536269514722 * sigma[:, None]
-    lower = np.quantile(mean - edge, 0.05, axis=0)
-    upper = np.quantile(mean + edge, 0.95, axis=0)
+def _coverage(
+    actual: np.ndarray, mean: np.ndarray, sigma: np.ndarray, rng: np.random.Generator,
+) -> float:
+    predictive = mean + rng.normal(size=mean.shape) * sigma[:, None]
+    lower, upper = np.quantile(predictive, [0.05, 0.95], axis=0)
     return float(np.mean((actual >= lower) & (actual <= upper)))
 
 
 def _coverage_90(
-    posterior: dict[str, np.ndarray], data: _TokenData,
+    posterior: dict[str, np.ndarray], data: _TokenData, rng: np.random.Generator,
 ) -> dict[str, float]:
     model = np.asarray(data.model)
     input_mean = posterior["input_mean"][:, model]
@@ -297,14 +309,15 @@ def _coverage_90(
     if data.output_x.shape[1]:
         output_mean += posterior["output_beta"] @ np.asarray(data.output_x).T
     result = {
-        "input": _coverage(np.asarray(data.log_input), input_mean, posterior["input_sigma"]),
-        "output": _coverage(np.asarray(data.log_output), output_mean, posterior["output_sigma"]),
+        "input": _coverage(np.asarray(data.log_input), input_mean, posterior["input_sigma"], rng),
+        "output": _coverage(np.asarray(data.log_output), output_mean, posterior["output_sigma"], rng),
     }
     reasoning_rows = np.asarray(data.reasoning_rows)
     if reasoning_rows.size:
         reasoning_mean = posterior["reasoning_logit"][:, model[reasoning_rows]]
         result["reasoning"] = _coverage(
             np.asarray(data.reasoning_target), reasoning_mean, posterior["reasoning_sigma"],
+            rng,
         )
     if data.has_length:
         length_mean = (
@@ -313,6 +326,7 @@ def _coverage_90(
         )
         result["length"] = _coverage(
             np.asarray(data.log_length), length_mean, posterior["length_sigma"],
+            rng,
         )
     return result
 
@@ -396,7 +410,9 @@ def fit_token_model(
             ]
             for spec in scales.values()
         },
-        "source_hashes": hashes, "coverage_90": _coverage_90(posterior, data),
+        "source_hashes": hashes,
+        "coverage_seed": seed, "coverage_method": "seeded_posterior_predictive",
+        "coverage_90": _coverage_90(posterior, data, np.random.default_rng(seed)),
     }
     return TokenArtifact(posterior, metadata, diagnostics)
 
@@ -426,6 +442,15 @@ def _prediction_rows(rows: pd.DataFrame, metadata: Mapping[str, Any]) -> tuple[l
     missing = {"model", "reasoning_class"} - set(rows)
     if missing:
         raise ValueError(f"prediction rows lack required columns: {', '.join(sorted(missing))}")
+    for column in ("model", "reasoning_class"):
+        if rows[column].isna().any():
+            raise ValueError(f"prediction rows contain null {column}")
+    role = metadata.get("role")
+    if role not in {"candidate", "judge"}:
+        raise ValueError("token artifact role must be candidate or judge")
+    if "role" in rows:
+        if rows["role"].isna().any() or not rows["role"].astype(str).eq(role).all():
+            raise ValueError(f"prediction row role must match {role} artifact")
     models = rows["model"].astype(str).tolist()
     classes = rows["reasoning_class"].astype(str).tolist()
     allowed = list(metadata.get("reasoning_classes", []))
@@ -453,10 +478,10 @@ def _prediction_features(rows: pd.DataFrame, features: list[str], metadata: Mapp
     columns = []
     scales = metadata.get("training_scales", metadata.get("feature_scales", {}))
     for feature in features:
-        if feature in rows:
-            columns.append(_numeric(rows, feature))
-            continue
         if feature not in scales:
+            if feature in rows:
+                columns.append(_numeric(rows, feature))
+                continue
             raise ValueError(f"prediction rows lack required feature: {feature}")
         spec = scales[feature]
         values = _numeric(rows, spec["source"])
@@ -481,6 +506,18 @@ def _latent(
     return float(cache[key])
 
 
+def _trial_cache(latent_cache: dict | None, trial_id: Any) -> tuple[dict, Any]:
+    if latent_cache is None:
+        return {}, trial_id
+    if trial_id is None:
+        raise ValueError("trial_id is required when latent_cache is supplied")
+    try:
+        hash(trial_id)
+    except TypeError:
+        raise ValueError("trial_id must be hashable") from None
+    return latent_cache, trial_id
+
+
 def _count_from_log(values: np.ndarray, label: str) -> np.ndarray:
     if not np.isfinite(values).all():
         raise ValueError(f"non-finite simulated {label}")
@@ -497,7 +534,7 @@ def _count_from_log(values: np.ndarray, label: str) -> np.ndarray:
 def _means(
     posterior: Mapping[str, Any], metadata: Mapping[str, Any], models: list[str],
     classes: list[str], outcome: str, features: np.ndarray, rng: np.random.Generator,
-    posterior_index: int, cache: dict,
+    posterior_index: int, cache: dict, trial_id: Any,
 ) -> np.ndarray:
     known = list(metadata.get("models", []))
     class_names = list(metadata.get("reasoning_classes", []))
@@ -512,7 +549,9 @@ def _means(
             if not class_mean.size:
                 raise ValueError(f"token artifact lacks {outcome} population means for unseen model {model}")
             means[row] = class_mean[class_names.index(cls)] + _latent(
-                cache, ("token", metadata.get("role"), posterior_index, outcome, model), rng, scale,
+                cache,
+                ("token", trial_id, metadata.get("role"), posterior_index, outcome, model),
+                rng, scale,
             )
     beta = _posterior_value(posterior, f"{outcome}_beta", posterior_index, np.zeros(features.shape[1]))
     if beta.shape != (features.shape[1],):
@@ -523,20 +562,21 @@ def _means(
 def draw_token_usage(
     artifact: TokenArtifact | Mapping[str, Any], rows: pd.DataFrame,
     rng: np.random.Generator, posterior_index: int, latent_cache: dict | None = None,
+    *, trial_id: Any = None,
 ) -> pd.DataFrame:
     """Draw billed input/output and the reasoning subset for each request."""
     posterior, metadata = _artifact_parts(artifact)
     models, classes = _prediction_rows(rows, metadata)
-    cache = {} if latent_cache is None else latent_cache
+    cache, trial_id = _trial_cache(latent_cache, trial_id)
     input_features = _prediction_features(rows, list(metadata.get("input_features", [])), metadata)
     output_features = _prediction_features(rows, list(metadata.get("output_features", [])), metadata)
     log_input = _means(
         posterior, metadata, models, classes, "input", input_features,
-        rng, posterior_index, cache,
+        rng, posterior_index, cache, trial_id,
     )
     log_output = _means(
         posterior, metadata, models, classes, "output", output_features,
-        rng, posterior_index, cache,
+        rng, posterior_index, cache, trial_id,
     )
     input_sigma = float(_posterior_value(posterior, "input_sigma", posterior_index))
     output_sigma = float(_posterior_value(posterior, "output_sigma", posterior_index))
@@ -562,12 +602,16 @@ def draw_token_usage(
                 if not class_logit.size:
                     raise ValueError(f"token artifact lacks reasoning population means for unseen model {model}")
                 logits[target] = class_logit[class_names.index(cls)] + _latent(
-                    cache, ("token", metadata.get("role"), posterior_index, "reasoning", model), rng, scale,
+                    cache,
+                    ("token", trial_id, metadata.get("role"), posterior_index, "reasoning", model),
+                    rng, scale,
                 )
         sigma = float(_posterior_value(posterior, "reasoning_sigma", posterior_index, 0.0))
         if not np.isfinite(sigma) or sigma < 0:
             raise ValueError("posterior reasoning sigma must be finite and non-negative")
         logits += rng.normal(0, sigma, reasoning_rows.size)
+        if not np.isfinite(logits).all():
+            raise ValueError("non-finite simulated reasoning logits")
         reasoning_tokens[reasoning_rows] = np.minimum(
             output_tokens[reasoning_rows],
             np.rint(output_tokens[reasoning_rows] * expit(logits)).astype(np.int64),
@@ -582,13 +626,14 @@ def draw_token_usage(
 def draw_transcript_lengths(
     candidate_artifact: TokenArtifact | Mapping[str, Any], rows: pd.DataFrame,
     rng: np.random.Generator, posterior_index: int, latent_cache: dict | None = None,
+    *, trial_id: Any = None,
 ) -> np.ndarray:
     """Draw candidate response lengths, reusing each unseen model effect per trial."""
     posterior, metadata = _artifact_parts(candidate_artifact)
     if metadata.get("role") != "candidate":
         raise ValueError("transcript lengths require a candidate token artifact")
     models, classes = _prediction_rows(rows, metadata)
-    cache = {} if latent_cache is None else latent_cache
+    cache, trial_id = _trial_cache(latent_cache, trial_id)
     features = _prediction_features(rows, list(metadata.get("length_features", [])), metadata)
     known = list(metadata.get("models", []))
     class_names = list(metadata.get("reasoning_classes", []))
@@ -603,7 +648,7 @@ def draw_transcript_lengths(
             if not class_mean.size:
                 raise ValueError(f"token artifact lacks length population means for unseen model {model}")
             means[row] = class_mean[class_names.index(cls)] + _latent(
-                cache, ("length", posterior_index, model), rng, scale,
+                cache, ("length", trial_id, posterior_index, model), rng, scale,
             )
     beta = _posterior_value(posterior, "length_beta", posterior_index, np.zeros(features.shape[1]))
     if beta.shape != (features.shape[1],):

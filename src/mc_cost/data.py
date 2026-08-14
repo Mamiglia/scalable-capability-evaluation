@@ -191,13 +191,16 @@ def judge_token_rows(judgments: pd.DataFrame) -> pd.DataFrame:
     frame = judgments.copy()
     output = pd.to_numeric(frame["judge_output_tokens"], errors="coerce").fillna(0)
     reasoning = pd.to_numeric(frame["judge_reasoning_tokens"], errors="coerce").fillna(0)
-    return pd.DataFrame({
+    columns = {
         "role": "judge", "model": frame["judge"], "judge": frame["judge"], "item": frame["item"],
         "chosen_left": frame["chosen_left"], "transcript_chars": frame["left_chars"] + frame["right_chars"],
         "input_tokens": frame["judge_input_tokens"], "output_tokens": output,
         "reasoning_tokens": reasoning, "ordinary_output_tokens": (output - reasoning).clip(lower=0),
         "total_tokens": frame["judge_total_tokens"],
-    })
+    }
+    if "difficulty" in frame:
+        columns["difficulty"] = frame["difficulty"]
+    return pd.DataFrame(columns)
 
 
 def standardize_judgments(

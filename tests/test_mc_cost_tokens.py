@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mc_cost.tokens import draw_token_usage, draw_transcript_lengths, fit_token_model
+from mc_cost.data import judge_token_rows
+from mc_cost.tokens import _coverage, draw_token_usage, draw_transcript_lengths, fit_token_model
 
 
 def test_reasoning_is_a_subset_of_billed_output():
@@ -54,7 +55,8 @@ def test_unseen_transcript_length_uses_reasoning_class_population():
         "correct": 0, "visible_reasoning": 1,
     }])
     got = draw_transcript_lengths(
-        artifact, rows, np.random.default_rng(4), posterior_index=0, latent_cache={},
+        artifact, rows, np.random.default_rng(4), posterior_index=0,
+        latent_cache={}, trial_id="trial-0",
     )
     assert got.tolist() == [200]
 
@@ -79,7 +81,8 @@ def test_unseen_token_effect_is_reused_within_trial():
     cache = {}
 
     got = draw_token_usage(
-        artifact, rows, np.random.default_rng(5), posterior_index=0, latent_cache=cache,
+        artifact, rows, np.random.default_rng(5), posterior_index=0,
+        latent_cache=cache, trial_id="trial-0",
     )
 
     assert got.iloc[0].tolist() == got.iloc[1].tolist()
@@ -121,11 +124,180 @@ def test_unseen_transcript_effect_is_reused_within_trial():
     cache = {}
 
     got = draw_transcript_lengths(
-        artifact, rows, np.random.default_rng(7), posterior_index=0, latent_cache=cache,
+        artifact, rows, np.random.default_rng(7), posterior_index=0,
+        latent_cache=cache, trial_id="trial-0",
     )
 
     assert got[0] == got[1]
     assert len(cache) == 1
+
+
+def test_external_latent_cache_is_scoped_by_trial_not_posterior_index():
+    artifact = {
+        "role": "candidate", "models": [], "reasoning_classes": ["non_reasoning"],
+        "posterior": {
+            "class_input_mean": np.array([[np.log1p(100)]]),
+            "class_output_mean": np.array([[np.log1p(40)]]),
+            "input_model_scale": np.array([1.5]), "output_model_scale": np.array([1.5]),
+            "input_sigma": np.array([0.0]), "output_sigma": np.array([0.0]),
+        },
+    }
+    rows = pd.DataFrame([{"model": "new", "reasoning_class": "non_reasoning"}])
+    cache, rng = {}, np.random.default_rng(12)
+
+    first = draw_token_usage(
+        artifact, rows, rng, posterior_index=0, latent_cache=cache, trial_id=0,
+    )
+    repeated = draw_token_usage(
+        artifact, rows, rng, posterior_index=0, latent_cache=cache, trial_id=0,
+    )
+    next_trial = draw_token_usage(
+        artifact, rows, rng, posterior_index=0, latent_cache=cache, trial_id=1,
+    )
+
+    assert first.equals(repeated)
+    assert not first.equals(next_trial)
+    assert len(cache) == 4
+
+
+def test_external_latent_cache_requires_explicit_trial_id():
+    artifact = {
+        "role": "candidate", "models": ["seen"], "reasoning_classes": ["non_reasoning"],
+        "posterior": {
+            "input_mean": np.array([[1.0]]), "output_mean": np.array([[1.0]]),
+            "input_sigma": np.array([0.0]), "output_sigma": np.array([0.0]),
+        },
+    }
+    rows = pd.DataFrame([{"model": "seen", "reasoning_class": "non_reasoning"}])
+
+    with pytest.raises(ValueError, match="trial_id"):
+        draw_token_usage(
+            artifact, rows, np.random.default_rng(1), posterior_index=0, latent_cache={},
+        )
+
+
+def test_artifact_scales_raw_sources_instead_of_trusting_foreign_sd_columns():
+    artifact = {
+        "role": "candidate", "models": ["seen"], "reasoning_classes": ["non_reasoning"],
+        "input_features": ["difficulty_sd"], "output_features": [],
+        "training_scales": {
+            "difficulty_sd": {
+                "source": "difficulty", "transform": "identity", "mean": 10.0, "scale": 2.0,
+            },
+        },
+        "posterior": {
+            "input_mean": np.array([[np.log1p(100)]]),
+            "output_mean": np.array([[np.log1p(40)]]),
+            "input_beta": np.array([[1.0]]),
+            "input_sigma": np.array([0.0]), "output_sigma": np.array([0.0]),
+        },
+    }
+    rows = pd.DataFrame([{
+        "model": "seen", "reasoning_class": "non_reasoning",
+        "difficulty": 12.0, "difficulty_sd": 0.0,
+    }])
+
+    got = draw_token_usage(artifact, rows, np.random.default_rng(1), posterior_index=0)
+
+    assert got.input_tokens.tolist() == [274]
+
+
+def test_coverage_uses_seeded_posterior_predictive_draws():
+    actual = np.array([1.6])
+    mean = np.zeros((20, 1))
+    sigma = np.ones(20)
+
+    first = _coverage(actual, mean, sigma, np.random.default_rng(0))
+    repeated = _coverage(actual, mean, sigma, np.random.default_rng(0))
+
+    assert first == repeated == 0.0
+
+
+def test_judge_fit_includes_preserved_difficulty_for_input_and_output():
+    rows = judge_token_rows(pd.DataFrame([
+        {
+            "judge": "j", "item": f"i{index}", "chosen_left": index % 2,
+            "left_chars": 100 + index * 10, "right_chars": 80 + index * 10,
+            "difficulty": difficulty, "judge_input_tokens": 200 + index * 10,
+            "judge_output_tokens": 40 + index, "judge_reasoning_tokens": 10 + index,
+            "judge_total_tokens": 240 + index * 11,
+        }
+        for index, difficulty in enumerate([-1.0, -0.5, 0.5, 1.0])
+    ]))
+
+    artifact = fit_token_model(
+        rows, "judge", reasoning_classes={"j": "reasoning"},
+        source_hashes={"judge_tokens": "abc"}, warmup=4, samples=4, seed=13,
+    )
+
+    assert artifact.metadata["input_features"] == ["difficulty_sd", "transcript_chars_log_sd"]
+    assert artifact.metadata["output_features"] == ["difficulty_sd"]
+
+
+@pytest.mark.parametrize("column", ["model", "reasoning_class"])
+def test_prediction_rejects_null_identity_fields_before_string_conversion(column):
+    artifact = {
+        "role": "candidate", "models": [], "reasoning_classes": ["non_reasoning"],
+        "posterior": {
+            "class_input_mean": np.array([[1.0]]), "class_output_mean": np.array([[1.0]]),
+            "input_model_scale": np.array([0.0]), "output_model_scale": np.array([0.0]),
+            "input_sigma": np.array([0.0]), "output_sigma": np.array([0.0]),
+        },
+    }
+    row = {"model": "m", "reasoning_class": "non_reasoning"}
+    row[column] = None
+
+    with pytest.raises(ValueError, match=f"null {column}"):
+        draw_token_usage(artifact, pd.DataFrame([row]), np.random.default_rng(1), 0)
+
+
+def test_fit_rejects_null_model_before_string_conversion():
+    frame = _candidate_training_rows().iloc[[0]].copy()
+    frame.loc[frame.index[0], "model"] = None
+
+    with pytest.raises(ValueError, match="null model"):
+        fit_token_model(frame, "candidate", source_hashes={"candidate_tokens": "abc"})
+
+
+def test_candidate_reasoning_class_must_agree_with_catalogue_mapping():
+    frame = _candidate_training_rows().iloc[[2]].copy()
+
+    with pytest.raises(ValueError, match="candidate reasoning class conflicts.*think"):
+        fit_token_model(
+            frame, "candidate", reasoning_classes={"think": "non_reasoning"},
+            source_hashes={"candidate_tokens": "abc"}, warmup=1, samples=4,
+        )
+
+
+def test_prediction_row_role_must_match_artifact_role():
+    artifact = {
+        "role": "judge", "models": ["seen"], "reasoning_classes": ["non_reasoning"],
+        "posterior": {
+            "input_mean": np.array([[1.0]]), "output_mean": np.array([[1.0]]),
+            "input_sigma": np.array([0.0]), "output_sigma": np.array([0.0]),
+        },
+    }
+    rows = pd.DataFrame([{
+        "role": "candidate", "model": "seen", "reasoning_class": "non_reasoning",
+    }])
+
+    with pytest.raises(ValueError, match="role.*judge"):
+        draw_token_usage(artifact, rows, np.random.default_rng(1), 0)
+
+
+def test_nonfinite_reasoning_logit_is_rejected():
+    artifact = {
+        "role": "judge", "models": ["seen"], "reasoning_classes": ["reasoning"],
+        "posterior": {
+            "input_mean": np.array([[1.0]]), "output_mean": np.array([[1.0]]),
+            "reasoning_logit": np.array([[np.nan]]),
+            "input_sigma": np.array([0.0]), "output_sigma": np.array([0.0]),
+        },
+    }
+    rows = pd.DataFrame([{"model": "seen", "reasoning_class": "reasoning"}])
+
+    with pytest.raises(ValueError, match="non-finite.*reasoning logits"):
+        draw_token_usage(artifact, rows, np.random.default_rng(1), 0)
 
 
 def test_judge_fit_requires_catalogue_reasoning_class_coverage():
@@ -183,6 +355,8 @@ def test_tiny_candidate_fit_records_hierarchy_provenance_and_coverage():
     assert artifact.metadata["input_features"] == ["difficulty_sd", "correct"]
     assert artifact.metadata["output_features"] == ["difficulty_sd", "correct"]
     assert artifact.metadata["source_hashes"] == {"candidate_tokens": "abc"}
+    assert artifact.metadata["coverage_seed"] == 8
+    assert artifact.metadata["coverage_method"] == "seeded_posterior_predictive"
     assert set(artifact.metadata["coverage_90"]) == {"input", "output", "reasoning", "length"}
     assert all(0.0 <= value <= 1.0 for value in artifact.metadata["coverage_90"].values())
     assert artifact.posterior["input_mean"].shape == (4, 2)
