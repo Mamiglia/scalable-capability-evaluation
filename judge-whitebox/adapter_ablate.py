@@ -30,15 +30,18 @@ def load_unmerged(model_name, adapter, c):
 
 
 def lora_layers(model):
-    """decoder layer index -> its LoRA-wrapped linears: modules carrying lora_A whose name ends
-    in one of adapter_ablate.target_modules, addressed under a `.layers.N.` path segment."""
+    """decoder layer index -> its LoRA-wrapped linears: every module carrying lora_A, addressed
+    under a `.layers.N.` path segment. Must be exhaustive over the adapter's LoRA modules, so
+    raises rather than skipping a module whose name-tail isn't one of adapter_ablate.target_modules
+    or that has no `.layers.N.` segment — either means the adapter reaches somewhere unexpected."""
     kinds = wbconfig.cfg()["adapter_ablate"]["target_modules"]
     layers = {}
     for name, module in model.named_modules():
-        if not hasattr(module, "lora_A") or name.rsplit(".", 1)[-1] not in kinds:
+        if not hasattr(module, "lora_A"):
             continue
+        tail = name.rsplit(".", 1)[-1]
+        assert tail in kinds, f"lora_A module {name!r} not in adapter_ablate.target_modules {kinds}"
         m = re.search(r"\.layers\.(\d+)\.", name)
-        if not m:
-            continue
+        assert m, f"lora_A module {name!r} has no `.layers.N.` path segment"
         layers.setdefault(int(m.group(1)), []).append(module)
     return layers
