@@ -4,15 +4,14 @@ from inspect_ai import Task
 from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
-from configs.experiment import ExperimentConfig, SYSTEM_PROMPT, TRUNCATION_NOTE
+from configs.experiment import ExperimentConfig
 from judge.dataset import build_dataset
 from judge.scorer import judge_scorer
-
 
 def judge_task(
     major_path: str | Path,
     minor_path: str | Path,
-    system_prompt: str = SYSTEM_PROMPT,
+    system_prompt: str = "assets/system_prompt/default.txt",
     max_length: int = 65536,
     require_both_correct: bool = True,
     include_reverse: bool = True,
@@ -34,9 +33,6 @@ def judge_task(
     benchmark_name = log_major.eval.task
 
     name = task_name or f"{benchmark_name}={major_path.stem}|{minor_path.stem}"
-
-    if truncate_frac is not None:
-        system_prompt = system_prompt + TRUNCATION_NOTE
 
     return Task(
         name=name,

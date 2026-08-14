@@ -6,7 +6,6 @@ from inspect_ai.dataset import MemoryDataset, Sample
 from judge.task import (
     judge_task,
     build_judge_tasks,
-    SYSTEM_PROMPT,
 )
 
 
@@ -33,7 +32,7 @@ class TestJudgeTask:
         task = judge_task(
             major_path="data/major/1.eval",
             minor_path="data/minor/1.eval",
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt="test prompt",
             max_length=12000,
         )
 
@@ -77,7 +76,7 @@ def test_build_judge_tasks_multi_pair(mock_build_dataset, mock_read_log):
         (Path("major/0.eval"), Path("minor/0.eval")),
         (Path("major/0.eval"), Path("minor/1.eval")),
     ]
-    mock_exp.system_prompt = SYSTEM_PROMPT
+    mock_exp.system_prompt = "test prompt"
     mock_exp.max_length = 65536
     mock_exp.require_both_correct = True
     mock_exp.include_reverse = True
