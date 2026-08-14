@@ -30,6 +30,9 @@ ablate:
   scale: 0.0
   top_n: 32
 
+adapter_ablate:
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
 before_after:
   min_sim: 0.5
 
