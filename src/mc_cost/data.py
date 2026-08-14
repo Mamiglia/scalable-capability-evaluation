@@ -25,7 +25,7 @@ JUDGMENT_COLUMNS = [
 CONTINUOUS_JUDGMENT_COLUMNS = [
     "theta_gap", "oversight", "release_gap_days", "relative_release_days",
     "difficulty", "theta_gap_x_oversight", "theta_gap_x_difficulty",
-    "length_difference", "same_family_x_theta_gap",
+    "length_difference", "same_family_x_theta_gap", "reasoning_difference",
 ]
 
 

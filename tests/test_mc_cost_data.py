@@ -140,7 +140,9 @@ def test_write_prepared_tables_stores_training_standardization(tmp_path):
     stored = pd.read_parquet(paths["judgments"])
     stats = pd.read_json(paths["judgment_standardization"])
     assert stored.theta_gap.tolist() == [-1.0, 1.0]
+    assert stored.reasoning_difference.tolist() == [-1.0, 1.0]
     assert stats.loc["theta_gap", "mean"] == 1.0
+    assert stats.loc["reasoning_difference", "mean"] == 1.0
     assert paths["candidate_tokens"].exists()
     assert paths["judge_tokens"].exists()
 
@@ -148,6 +150,7 @@ def test_write_prepared_tables_stores_training_standardization(tmp_path):
 def test_write_prepared_tables_uses_only_explicit_training_rows(tmp_path):
     judgments = pd.DataFrame([{column: 0.0 for column in JUDGMENT_COLUMNS} for _ in range(3)])
     judgments["theta_gap"] = [0.0, 2.0, 100.0]
+    judgments["reasoning_difference"] = [0.0, 2.0, 100.0]
     judgments[["judge", "item", "left_model", "right_model"]] = "identity"
 
     paths = write_prepared_tables(
@@ -158,3 +161,5 @@ def test_write_prepared_tables_uses_only_explicit_training_rows(tmp_path):
     stats = pd.read_json(paths["judgment_standardization"])
     assert stats.loc["theta_gap", "mean"] == 1.0
     assert stored.theta_gap.tolist() == [-1.0, 1.0, 99.0]
+    assert stats.loc["reasoning_difference", "mean"] == 1.0
+    assert stored.reasoning_difference.tolist() == [-1.0, 1.0, 99.0]

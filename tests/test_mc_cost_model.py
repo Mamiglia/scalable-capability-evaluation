@@ -1,9 +1,11 @@
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+import pytest
 from numpyro import handlers
 
 from mc_cost.model import (
+    CORE_FEATURES,
     GLOBAL_FEATURES,
     JudgmentData,
     JudgmentSpec,
@@ -15,6 +17,16 @@ from mc_cost.model import (
     load_artifact,
     save_artifact,
 )
+
+
+TRAINING_SCALES = {
+    feature: {"mean": 0.0, "scale": 1.0}
+    for feature in (
+        "theta_gap", "length_difference", "oversight", "difficulty",
+        "theta_gap_x_oversight", "theta_gap_x_difficulty",
+        "same_family_x_theta_gap", "reasoning_difference",
+    )
+}
 
 
 def tiny_data():
@@ -47,6 +59,20 @@ def test_swapping_candidates_negates_content_but_keeps_position_term():
     assert np.isclose((forward + swapped) / 2, 0.3)
 
 
+def test_single_unbatched_draw_keeps_draw_axis_with_length_enabled():
+    posterior = {
+        "judge_effects": np.array([[[0.3, 1.5]]]),
+        "global_beta": np.array([[0.2] + [0.0] * 8]),
+        "length_mean": np.array([0.4]), "length_deviation": np.array([[0.1]]),
+        "candidate_effects": np.array([[0.2, -0.1]]), "item_effects": np.array([[0.0]]),
+    }
+
+    got = left_logits({name: values[0] for name, values in posterior.items()}, tiny_data())
+
+    assert got.shape == (1, 2)
+    assert np.allclose(got, left_logits(posterior, tiny_data()))
+
+
 def test_baseline_omits_global_and_length_sites():
     data = tiny_data()._replace(global_x=jnp.zeros((2, 0)), include_length=False)
     trace = handlers.trace(handlers.seed(judgment_model, 2)).get_trace(data, False)
@@ -57,30 +83,58 @@ def test_baseline_omits_global_and_length_sites():
     assert "length_deviation" not in trace
 
 
+@pytest.mark.parametrize("features, include_length", [
+    ((), False),
+    (CORE_FEATURES, True),
+    (GLOBAL_FEATURES, True),
+])
+def test_judgment_spec_accepts_only_the_three_sanctioned_models(features, include_length):
+    assert JudgmentSpec(features, include_length).global_features == features
+
+
+@pytest.mark.parametrize("features, include_length", [
+    (("oversight_sd",), True),
+    (tuple(reversed(GLOBAL_FEATURES)), True),
+    ((), True),
+    (CORE_FEATURES, False),
+])
+def test_judgment_spec_rejects_arbitrary_subsets_reordering_and_length_settings(features, include_length):
+    with pytest.raises(ValueError, match="sanctioned"):
+        JudgmentSpec(features, include_length)
+
+
 def test_encode_judgments_uses_declared_features_and_theta_release_judge_covariates():
     frame = pd.DataFrame([
         {
             "chosen_left": 1, "judge": "j2", "item": "i2", "left_model": "b", "right_model": "a",
             "theta_gap": 4.0, "length_difference": 0.5,
-            "oversight_sd": 1.0, "difficulty_sd": 2.0, "release_gap_days_sd": 99.0,
+            "oversight": 1.0, "difficulty": 2.0, "theta_gap_x_oversight": 3.0,
+            "theta_gap_x_difficulty": 4.0, "same_family_x_theta_gap": 5.0,
+            "self_comparison": 6.0, "reasoning_difference": 7.0,
         },
         {
             "chosen_left": 0, "judge": "j1", "item": "i1", "left_model": "a", "right_model": "b",
             "theta_gap": -4.0, "length_difference": -0.5,
-            "oversight_sd": -1.0, "difficulty_sd": -2.0, "release_gap_days_sd": -99.0,
+            "oversight": -1.0, "difficulty": -2.0, "theta_gap_x_oversight": -3.0,
+            "theta_gap_x_difficulty": -4.0, "same_family_x_theta_gap": -5.0,
+            "self_comparison": -6.0, "reasoning_difference": -7.0,
         },
     ])
-    frame.attrs["training_scales"] = {"oversight": {"mean": 3.0, "scale": 2.0}}
-    frame.attrs["source_hashes"] = {"judgments": "abc"}
     catalogue = pd.DataFrame([
         {"model_id": "j1", "theta": -1.0, "release": "2024-01-01"},
         {"model_id": "j2", "theta": 1.0, "release": "2025-01-01"},
     ])
-    spec = JudgmentSpec(("difficulty_sd", "oversight_sd"), include_length=False)
+    spec = JudgmentSpec(CORE_FEATURES, include_length=True)
 
-    got = encode_judgments(frame, catalogue, spec)
+    got = encode_judgments(
+        frame, catalogue, spec, training_scales=TRAINING_SCALES,
+        source_hashes={"judgments": "abc", "catalogue": "def"},
+    )
 
-    assert np.asarray(got.global_x).tolist() == [[2.0, 1.0], [-2.0, -1.0]]
+    assert np.asarray(got.global_x).tolist() == [
+        [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+        [-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0],
+    ]
     assert np.asarray(got.theta_gap).tolist() == [4.0, -4.0]
     assert got.global_features == spec.global_features
     assert got.category_maps == {
@@ -90,15 +144,39 @@ def test_encode_judgments_uses_declared_features_and_theta_release_judge_covaria
     }
     assert np.allclose(np.asarray(got.judge_covariates), [[-1.0, -1.0], [1.0, 1.0]])
     assert got.training_scales == {
-        **frame.attrs["training_scales"],
+        **TRAINING_SCALES,
         "judge_theta": {"mean": 0.0, "scale": 1.0},
         "judge_release_days": {"mean": 1644.0, "scale": 183.0},
     }
     assert got.training_ranges == {
-        "theta_gap": [-4.0, 4.0], "difficulty_sd": [-2.0, 2.0], "oversight_sd": [-1.0, 1.0],
+        "theta_gap": [-4.0, 4.0], "oversight_sd": [-1.0, 1.0], "difficulty_sd": [-2.0, 2.0],
+        "theta_gap_x_oversight_sd": [-3.0, 3.0], "theta_gap_x_difficulty_sd": [-4.0, 4.0],
+        "same_family_x_theta_gap_sd": [-5.0, 5.0], "self_comparison": [-6.0, 6.0],
+        "reasoning_difference_sd": [-7.0, 7.0], "length_difference": [-0.5, 0.5],
         "judge_theta": [-1.0, 1.0], "judge_release_days": [1461.0, 1827.0],
     }
-    assert got.source_hashes == frame.attrs["source_hashes"]
+    assert got.source_hashes == {"judgments": "abc", "catalogue": "def"}
+
+
+def test_encode_judgments_rejects_empty_or_incompatible_provenance():
+    frame = pd.DataFrame([{
+        "chosen_left": 1, "judge": "j", "item": "i", "left_model": "a", "right_model": "b",
+        "theta_gap": 0.0,
+    }])
+    catalogue = pd.DataFrame([{"model_id": "j", "theta": 0.0, "release": "2024-01-01"}])
+    spec = JudgmentSpec((), False)
+
+    for invalid_hashes in ({}, {"judgments": ""}, {"judgments": None}):
+        with pytest.raises(ValueError, match="source hashes"):
+            encode_judgments(
+                frame, catalogue, spec, training_scales=TRAINING_SCALES,
+                source_hashes=invalid_hashes,
+            )
+    with pytest.raises(ValueError, match="theta_gap.*scale"):
+        encode_judgments(
+            frame, catalogue, spec, training_scales={"difficulty": {"mean": 0.0, "scale": 1.0}},
+            source_hashes={"judgments": "abc"},
+        )
 
 
 def test_artifact_round_trips_without_pickle(tmp_path):

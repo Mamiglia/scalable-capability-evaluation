@@ -24,6 +24,18 @@ GLOBAL_FEATURES = (
     "difficulty_sd", "theta_gap_x_oversight_sd", "theta_gap_x_difficulty_sd",
     "same_family_x_theta_gap_sd", "self_comparison", "reasoning_difference_sd",
 )
+BASELINE_FEATURES = ()
+CORE_FEATURES = tuple(
+    feature for feature in GLOBAL_FEATURES
+    if feature not in {"release_gap_days_sd", "relative_release_days_sd"}
+)
+CORE_RELEASE_FEATURES = GLOBAL_FEATURES
+FEATURE_COLUMNS = {
+    feature: feature.removesuffix("_sd") for feature in GLOBAL_FEATURES
+}
+_SANCTIONED_SPECS = {
+    (BASELINE_FEATURES, False), (CORE_FEATURES, True), (CORE_RELEASE_FEATURES, True),
+}
 
 
 @dataclass(frozen=True)
@@ -33,11 +45,15 @@ class JudgmentSpec:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "global_features", tuple(self.global_features))
-        unknown = set(self.global_features) - set(GLOBAL_FEATURES)
-        if unknown:
-            raise ValueError(f"unknown global features: {', '.join(sorted(unknown))}")
-        if len(set(self.global_features)) != len(self.global_features):
-            raise ValueError("global features must be unique")
+        if (self.global_features, self.include_length) not in _SANCTIONED_SPECS:
+            raise ValueError("judgment specification is not one of the three sanctioned models")
+
+
+JUDGMENT_SPECS = {
+    "baseline": JudgmentSpec(BASELINE_FEATURES, False),
+    "core": JudgmentSpec(CORE_FEATURES, True),
+    "core_release": JudgmentSpec(CORE_RELEASE_FEATURES, True),
+}
 
 
 class JudgmentData(NamedTuple):
@@ -69,12 +85,10 @@ class PosteriorArtifact:
 
 
 def _column(frame: pd.DataFrame, feature: str) -> str:
-    if feature in frame:
-        return feature
-    unscaled_name = feature.removesuffix("_sd")
-    if feature.endswith("_sd") and unscaled_name in frame:
-        return unscaled_name
-    raise ValueError(f"judgments lack required feature: {feature}")
+    column = FEATURE_COLUMNS[feature]
+    if column not in frame:
+        raise ValueError(f"judgments lack required standardized feature: {feature}")
+    return column
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -97,8 +111,45 @@ def _standardize(values: np.ndarray) -> tuple[np.ndarray, dict[str, float]]:
     return (values - mean) / scale, {"mean": mean, "scale": scale}
 
 
+def _required_scales(global_features: tuple[str, ...], include_length: bool) -> set[str]:
+    required = {"theta_gap"}
+    if include_length:
+        required.add("length_difference")
+    required.update(
+        FEATURE_COLUMNS[feature] for feature in global_features if feature.endswith("_sd")
+    )
+    return required
+
+
+def _validate_provenance(
+    training_scales: Any, source_hashes: Any,
+    global_features: tuple[str, ...], include_length: bool,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    scales = _mapping(training_scales)
+    hashes = _mapping(source_hashes)
+    if not scales:
+        raise ValueError("training scales must be a nonempty mapping")
+    if not hashes or any(
+        not isinstance(key, str) or not key.strip()
+        or not isinstance(value, str) or not value.strip()
+        for key, value in hashes.items()
+    ):
+        raise ValueError("source hashes must be a nonempty mapping")
+    for column in sorted(_required_scales(global_features, include_length)):
+        if column not in scales:
+            raise ValueError(f"{column} scale metadata is required")
+        try:
+            mean, scale = float(scales[column]["mean"]), float(scales[column]["scale"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError(f"{column} scale metadata requires numeric mean/scale") from None
+        if not np.isfinite(mean) or not np.isfinite(scale) or scale <= 0:
+            raise ValueError(f"{column} scale metadata requires finite mean and positive scale")
+    return scales, {str(key): str(value) for key, value in hashes.items()}
+
+
 def encode_judgments(
-    frame: pd.DataFrame, catalogue: pd.DataFrame, spec: JudgmentSpec,
+    frame: pd.DataFrame, catalogue: pd.DataFrame, spec: JudgmentSpec, *,
+    training_scales: pd.DataFrame | dict[str, Any], source_hashes: dict[str, str],
 ) -> JudgmentData:
     """Encode prepared rows, preserving the specification's feature order."""
     required = {"chosen_left", "judge", "item", "left_model", "right_model", "theta_gap"}
@@ -109,6 +160,9 @@ def encode_judgments(
         raise ValueError(f"judgments lack required columns: {', '.join(sorted(missing))}")
     if frame.empty:
         raise ValueError("judgments must contain at least one row")
+    training_scales, source_hashes = _validate_provenance(
+        training_scales, source_hashes, spec.global_features, spec.include_length,
+    )
 
     labels = {
         "judges": sorted(frame["judge"].astype(str).unique()),
@@ -161,7 +215,6 @@ def encode_judgments(
         "judge_release_days": [float(judge_release.min()), float(judge_release.max())],
     })
 
-    training_scales = _mapping(frame.attrs.get("training_scales"))
     training_scales.update({
         "judge_theta": judge_theta_scale, "judge_release_days": judge_release_scale,
     })
@@ -177,7 +230,7 @@ def encode_judgments(
         num_items=len(labels["items"]), num_models=len(labels["models"]),
         global_features=spec.global_features, category_maps=category_maps,
         training_scales=training_scales, training_ranges=ranges,
-        source_hashes=_mapping(frame.attrs.get("source_hashes")),
+        source_hashes=source_hashes,
     )
 
 
@@ -237,15 +290,20 @@ def judgment_model(data: JudgmentData, conditional_judges: bool = True) -> None:
     numpyro.sample("obs", dist.Bernoulli(logits=logits), obs=data.y)
 
 
+def _draw_array(posterior: dict[str, np.ndarray], name: str, event_dims: int) -> np.ndarray:
+    values = np.asarray(posterior[name])
+    if values.ndim == event_dims:
+        values = values[None, ...]
+    if values.ndim != event_dims + 1:
+        raise ValueError(f"{name} has incompatible posterior shape {values.shape}")
+    return values
+
+
 def left_logits(posterior: dict[str, np.ndarray], data: JudgmentData) -> np.ndarray:
     """Return pure-NumPy displayed-left logits with shape ``(draw, row)``."""
-    judge_effects = np.asarray(posterior["judge_effects"])
-    candidate_effects = np.asarray(posterior["candidate_effects"])
-    item_effects = np.asarray(posterior["item_effects"])
-    if judge_effects.ndim == 2:
-        judge_effects = judge_effects[None, ...]
-        candidate_effects = candidate_effects[None, ...]
-        item_effects = item_effects[None, ...]
+    judge_effects = _draw_array(posterior, "judge_effects", 2)
+    candidate_effects = _draw_array(posterior, "candidate_effects", 1)
+    item_effects = _draw_array(posterior, "item_effects", 1)
     judge = np.asarray(data.judge)
     logits = (
         judge_effects[:, judge, 0]
@@ -255,11 +313,11 @@ def left_logits(posterior: dict[str, np.ndarray], data: JudgmentData) -> np.ndar
         + item_effects[:, np.asarray(data.item)]
     )
     if data.global_x.shape[1]:
-        logits = logits + np.asarray(posterior["global_beta"]) @ np.asarray(data.global_x).T
+        logits = logits + _draw_array(posterior, "global_beta", 1) @ np.asarray(data.global_x).T
     if data.include_length:
         length_slope = (
-            np.asarray(posterior["length_mean"])[:, None]
-            + np.asarray(posterior["length_deviation"])[:, judge]
+            _draw_array(posterior, "length_mean", 0)[:, None]
+            + _draw_array(posterior, "length_deviation", 1)[:, judge]
         )
         logits = logits + length_slope * np.asarray(data.length_difference)
     return np.asarray(logits)
@@ -284,6 +342,9 @@ def fit_judgment_model(
     chains: int = 1, seed: int = 0, conditional_judges: bool = True,
 ) -> PosteriorArtifact:
     """Fit with configured NUTS settings and retain reproducibility metadata."""
+    _validate_provenance(
+        data.training_scales, data.source_hashes, data.global_features, data.include_length,
+    )
     mcmc = MCMC(
         NUTS(judgment_model), num_warmup=warmup, num_samples=samples,
         num_chains=chains, progress_bar=False,
