@@ -1,5 +1,6 @@
 # Quantization: Unquantized BF16 (Crusoe)
 name: moonshotai/kimi-k2.6
+release_date: '2026-01-20'
 model_args:
   provider:
     order:

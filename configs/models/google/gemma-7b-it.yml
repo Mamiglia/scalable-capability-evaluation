@@ -1,0 +1,26 @@
+name: google/gemma-7b-it
+slug: vllm/google/gemma-7b-it
+release_date: "2024-02-21"
+runpod:
+  use: true
+  model: google/gemma-7b-it
+  name: small-judge-gemma-7b-it
+  cloud_type: SECURE
+  gpu_id: NVIDIA A40
+  ready_timeout: 900
+  image: vllm/vllm-openai:v0.18.0
+  model_args:
+    stream: false
+  vllm_args:
+    - "--gpu-memory-utilization"
+    - "0.9"
+    - "--max-model-len"
+    - "8192"
+    - "--chat-template"
+    - "{{ bos_token }}{% for message in messages %}{% if message['role'] == 'user' %}{{ '<start_of_turn>user\n' + (message['content'] | trim if message['content'] is string else '') + '<end_of_turn>\n' }}{% elif message['role'] == 'assistant' %}{{ '<start_of_turn>model\n' + (message['content'] | trim if message['content'] is string else '') + '<end_of_turn>\n' }}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ '<start_of_turn>model\n' }}{% endif %}"
+generate_args:
+  max_connections: 10
+  max_retries: 5
+  stop_seqs:
+    - "<end_of_turn>"
+    - "<eos>"

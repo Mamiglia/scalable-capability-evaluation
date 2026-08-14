@@ -1,6 +1,7 @@
 # Quantization: Unquantized BF16 (DeepInfra)
 name: qwen/qwen3.5-9b
 slug: openrouter/qwen/qwen3.5-9b
+release_date: '2026-02-10'
 generate_args:
   temperature: 1.0
   top_p: 0.95

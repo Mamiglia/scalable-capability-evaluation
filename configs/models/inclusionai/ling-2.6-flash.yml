@@ -1,5 +1,6 @@
 # Quantization: Proprietary Direct (Novita)
 name: inclusionai/ling-2.6-flash
+release_date: '2026-04-28'
 model_args:
   provider:
     order:

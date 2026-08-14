@@ -1,5 +1,6 @@
 # All endpoints are Google first-party; pinned to AI Studio to avoid Vertex mixing.
 name: google/gemini-3.1-flash-lite
+release_date: '2026-03-03'
 model_args:
   provider: {only: [google-ai-studio], allow_fallbacks: false, require_parameters: true, data_collection: deny}
 generate_args:

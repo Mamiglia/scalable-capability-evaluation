@@ -1,4 +1,5 @@
 # Pinned to OpenAI first-party (Azure endpoints also serve this slug). Non-reasoning.
 name: openai/gpt-4.1
+release_date: '2025-04-14'
 model_args:
   provider: {only: [openai], allow_fallbacks: false, require_parameters: true, data_collection: deny}

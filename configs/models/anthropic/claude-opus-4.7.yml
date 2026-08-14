@@ -1,7 +1,6 @@
 # Pinned to Anthropic first-party. Adaptive thinking off by default - enabled explicitly.
 name: anthropic/claude-opus-4.7
+release_date: '2026-04-16'
+
 model_args:
-  provider: {only: [anthropic], allow_fallbacks: false, require_parameters: true, data_collection: deny}
-generate_args:
-  extra_body:
-    reasoning: {enabled: true}
+  provider: {}

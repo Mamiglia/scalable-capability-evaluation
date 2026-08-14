@@ -2,3 +2,5 @@ name: openai/o3
 slug: openrouter/openai/o3
 release_date: '2025-04-16'
 
+model_args:
+  provider: {}
