@@ -133,7 +133,7 @@ def _number(value):
         return np.nan
 
 
-def _enabled(value) -> bool:
+def pool_enabled(value) -> bool:
     if not _present(value):
         return False
     if isinstance(value, str):
@@ -185,7 +185,7 @@ def validate_catalogue(frame: pd.DataFrame) -> None:
             value = _number(raw_value)
             if _present(raw_value) and (not np.isfinite(value) or value < 0):
                 raise ValueError(f"negative {column} at row {index}")
-        enabled = any(_enabled(row[column]) for column in ("judge_pool", "candidate_pool") if column in row)
+        enabled = any(pool_enabled(row[column]) for column in ("judge_pool", "candidate_pool") if column in row)
         if enabled and (not _present(release) or not _uncertainty_source(row)):
             raise ValueError(f"pool-enabled row {row.get('model_id', index)} lacks release or capability uncertainty")
 

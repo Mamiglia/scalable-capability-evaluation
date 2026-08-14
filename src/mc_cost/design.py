@@ -1,7 +1,10 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+
+from .catalogue import pool_enabled
 
 
 @dataclass(frozen=True)
@@ -26,21 +29,25 @@ def automatic_comparisons(catalogue: pd.DataFrame, config: AutomaticConfig, rng)
                         ("attempted_items", config.attempted_items), ("presentations", config.presentations)):
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise ValueError(f"{name} must be a positive integer")
+    if type(config.require_stronger) is not bool:
+        raise ValueError("require_stronger must be a bool")
+    selected_judges = config.selected_judges
+    if (not isinstance(selected_judges, Sequence)
+            or isinstance(selected_judges, (str, bytes, bytearray))
+            or any(not isinstance(model, str) or not model for model in selected_judges)):
+        raise ValueError("selected_judges must be a non-string sequence of non-null strings")
+    selected_judges = tuple(selected_judges)
 
     models = catalogue.copy()
     models["release_day"] = pd.to_datetime(models["release"], errors="coerce")
     models["theta_value"] = pd.to_numeric(models["theta"], errors="coerce")
-    models["judge_enabled"] = models["judge_pool"].map(
-        lambda value: value is True or (isinstance(value, str) and value.strip().lower() in {"true", "yes", "1", "on"})
-    )
-    models["candidate_enabled"] = models["candidate_pool"].map(
-        lambda value: value is True or (isinstance(value, str) and value.strip().lower() in {"true", "yes", "1", "on"})
-    )
+    models["judge_enabled"] = models["judge_pool"].map(pool_enabled)
+    models["candidate_enabled"] = models["candidate_pool"].map(pool_enabled)
     valid_judges = models.loc[
         models["judge_enabled"] & models["release_day"].notna() & np.isfinite(models["theta_value"])
     ]
-    if config.selected_judges:
-        selected = list(config.selected_judges)
+    if selected_judges:
+        selected = list(selected_judges)
         if len(selected) != config.j or len(set(selected)) != len(selected):
             raise ValueError(f"requested J={config.j}, selected_judges must contain that many distinct identities")
         valid_ids = set(valid_judges["model_id"])
@@ -96,7 +103,7 @@ def manual_comparisons(catalogue: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.
     models["release_day"] = pd.to_datetime(models.get("release", pd.Series(index=models.index, dtype=object)), errors="coerce")
     models["theta_value"] = pd.to_numeric(models.get("theta", pd.Series(index=models.index, dtype=object)), errors="coerce")
     records, warnings = [], []
-    for source_row, row in rows.iterrows():
+    for output_row, (source_row, row) in enumerate(rows.iterrows()):
         identities = {role: row[role] for role in ("judge", "m1", "m2")}
         unknown = [str(model) for model in identities.values() if pd.isna(model) or model not in models.index]
         if unknown:
@@ -125,7 +132,7 @@ def manual_comparisons(catalogue: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.
         records.append({**identities, **{f"{role}_reasoning_class": classes[role] for role in identities},
                         "predictable": predictable})
         if missing:
-            warnings.append({"code": "missing_prediction_metadata", "row": source_row,
+            warnings.append({"code": "missing_prediction_metadata", "row": output_row, "source_row": source_row,
                              "message": f"missing prediction metadata: {', '.join(missing)}"})
 
         judge, m1, m2 = (models.loc[identities[role]] for role in ("judge", "m1", "m2"))
@@ -137,16 +144,16 @@ def manual_comparisons(catalogue: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.
         if pd.notna(m1.release_day) and pd.notna(m2.release_day) and m2.release_day >= m1.release_day:
             violations.append("m2 is not older than m1")
         if violations:
-            warnings.append({"code": "automatic_rule_violation", "row": source_row, "message": "; ".join(violations)})
+            warnings.append({"code": "automatic_rule_violation", "row": output_row, "source_row": source_row,
+                             "message": "; ".join(violations)})
 
         for role, pool in (("judge", "judge_pool"), ("m1", "candidate_pool")):
             value = models.at[identities[role], pool] if pool in models else pd.NA
-            enabled = value is True or (isinstance(value, str) and value.strip().lower() in {"true", "yes", "1", "on"})
-            if pd.notna(value) and not enabled:
-                warnings.append({"code": "out_of_support", "row": source_row,
+            if pd.notna(value) and not pool_enabled(value):
+                warnings.append({"code": "out_of_support", "row": output_row, "source_row": source_row,
                                  "message": f"{role} is outside the automatic {pool} support"})
     return (
         pd.DataFrame(records, columns=["judge", "m1", "m2", "judge_reasoning_class", "m1_reasoning_class",
                                        "m2_reasoning_class", "predictable"]),
-        pd.DataFrame(warnings, columns=["code", "row", "message"]),
+        pd.DataFrame(warnings, columns=["code", "row", "source_row", "message"]),
     )

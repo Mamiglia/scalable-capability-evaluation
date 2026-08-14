@@ -103,3 +103,64 @@ def test_manual_allows_nullable_pool_flags():
     )
     assert comparisons.loc[0, "predictable"] == True
     assert "out_of_support" not in set(warnings["code"])
+
+
+@pytest.mark.parametrize("judge_pool, candidate_pool", [
+    ([np.bool_(True), np.bool_(False), np.bool_(False), np.bool_(False), np.bool_(False)],
+     [np.bool_(False), np.bool_(False), np.bool_(True), np.bool_(True), np.bool_(True)]),
+    ([1, 0, 0, 0, 0], [0, 0, 1, 1, 1]),
+    (pd.array([True, pd.NA, False, False, False], dtype="boolean"),
+     pd.array([False, pd.NA, True, True, True], dtype="boolean")),
+])
+def test_automatic_uses_catalogue_pool_flag_normalization(judge_pool, candidate_pool):
+    models = catalogue()
+    models["judge_pool"] = judge_pool
+    models["candidate_pool"] = candidate_pool
+    got = automatic_comparisons(
+        models, AutomaticConfig(j=1, m=1, n=1, attempted_items=1, selected_judges=("j1",)),
+        np.random.default_rng(1),
+    )
+    assert got["judge"].tolist() == ["j1"]
+
+
+def test_manual_uses_catalogue_pool_flag_normalization_for_warnings():
+    models = catalogue()
+    models["judge_pool"] = models["judge_pool"].astype(object)
+    models["candidate_pool"] = models["candidate_pool"].astype(object)
+    models.loc[models.model_id == "j1", "judge_pool"] = "false"
+    models.loc[models.model_id == "a", "candidate_pool"] = 0
+    _, warnings = manual_comparisons(models, pd.DataFrame([{"judge": "j1", "m1": "a", "m2": "old-weak"}]))
+    assert (warnings["code"] == "out_of_support").sum() == 2
+
+
+@pytest.mark.parametrize("require_stronger", [1, 0, "false", np.bool_(True), None])
+def test_automatic_rejects_non_boolean_strength_filter(require_stronger):
+    config = AutomaticConfig(j=1, m=1, n=1, attempted_items=1, selected_judges=("j1",),
+                             require_stronger=require_stronger)
+    with pytest.raises(ValueError, match="require_stronger"):
+        automatic_comparisons(catalogue(), config, np.random.default_rng(1))
+
+
+@pytest.mark.parametrize("selected_judges", ["j1", b"j1", None, {"j1"}, np.array(["j1"]), (None,), (1,)])
+def test_automatic_rejects_invalid_selected_judge_containers(selected_judges):
+    config = AutomaticConfig(j=1, m=1, n=1, attempted_items=1, selected_judges=selected_judges)
+    with pytest.raises(ValueError, match="selected_judges"):
+        automatic_comparisons(catalogue(), config, np.random.default_rng(1))
+
+
+def test_automatic_accepts_non_string_selected_judge_sequence_and_keeps_count_checks():
+    config = AutomaticConfig(j=1, m=1, n=1, attempted_items=1, selected_judges=["j1"])
+    assert automatic_comparisons(catalogue(), config, np.random.default_rng(1))["judge"].tolist() == ["j1"]
+    duplicate = AutomaticConfig(j=2, m=1, n=1, attempted_items=1, selected_judges=["j1", "j1"])
+    with pytest.raises(ValueError, match="distinct"):
+        automatic_comparisons(catalogue(), duplicate, np.random.default_rng(1))
+
+
+def test_manual_warning_rows_use_retained_ordinals_for_duplicate_source_indexes():
+    rows = pd.DataFrame(
+        [{"judge": "j2", "m1": "old-weak", "m2": "a"}] * 2,
+        index=["same", "same"],
+    )
+    _, warnings = manual_comparisons(catalogue(), rows)
+    automatic = warnings.loc[warnings.code == "automatic_rule_violation"]
+    assert automatic["row"].tolist() == [0, 1]
