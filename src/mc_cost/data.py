@@ -102,6 +102,8 @@ def prepare_judgments(attempts: pd.DataFrame, catalogue: pd.DataFrame, items: pd
         joined = metadata.reindex(frame[identity_column])
         frame[f"{role}_theta"] = joined["theta"].to_numpy()
         frame[f"{role}_release_day"] = joined["release_day"].to_numpy()
+        if role == "judge" and "reasoning_class" in joined:
+            frame["judge_reasoning_class"] = joined["reasoning_class"].to_numpy()
 
     difficulty = _gpqa_items(items).drop_duplicates(["benchmark", "item"])
     frame = frame.merge(difficulty.drop(columns="benchmark"), on="item", how="left", validate="many_to_one")
@@ -200,6 +202,8 @@ def judge_token_rows(judgments: pd.DataFrame) -> pd.DataFrame:
     }
     if "difficulty" in frame:
         columns["difficulty"] = frame["difficulty"]
+    if "judge_reasoning_class" in frame:
+        columns["reasoning_class"] = frame["judge_reasoning_class"]
     return pd.DataFrame(columns)
 
 

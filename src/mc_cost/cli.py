@@ -645,7 +645,7 @@ def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
     votes = judgments.rename(columns={
         "left_model": "major", "right_model": "minor", "item": "item_id",
         "chosen_left": "picked_major",
-    }).assign(fit="gpqa")
+    }).assign(fit="gpqa").loc[lambda frame: frame["major"].ne(frame["minor"])]
     recovery, recovery_warnings = ranking_recovery(
         votes, catalogue.rename(columns={"model_id": "model", "theta": "score"}),
     )

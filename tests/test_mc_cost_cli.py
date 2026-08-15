@@ -9,12 +9,24 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from inspect_ai.log import (
+    EvalConfig,
+    EvalDataset,
+    EvalLog,
+    EvalSample,
+    EvalSpec,
+    write_eval_log,
+)
+from inspect_ai.model import ChatMessageAssistant, ModelUsage
+from inspect_ai.scorer import Score
 
 import mc_cost.cli as cli
 from mc_cost.cli import main, write_run_config
 from mc_cost.data import JUDGMENT_COLUMNS
+from mc_cost.gpqa import EXTERNAL_CAPABILITY_MODELS
 from mc_cost.model import JUDGMENT_SPECS, PosteriorArtifact, load_artifact, save_artifact
-from mc_cost.simulation import SimulationResult
+from mc_cost.simulation import SimulationResult, validate_dashboard_payload
+from mc_cost.validation import require_decision
 
 
 def config_file(tmp_path, **updates):
@@ -58,6 +70,189 @@ MODEL_FILES = [
     for name in ("baseline", "core", "core_release", "candidate_token", "judge_token")
     for suffix in ("npz", "json")
 ]
+
+
+@pytest.fixture
+def tiny_mc_config(tmp_path):
+    def build(*, seed=9, warmup=1, samples=4, trials=2):
+        models = ["j1", "j2", "ca", "cb", "cc"]
+        canonical = tmp_path / "canonical.md"
+        canonical.write_text("".join(f"- {model}\n" for model in models))
+        pool = tmp_path / "pool.json"
+        pool.write_text(json.dumps([
+            {
+                "name": model, "release": f"{year}-01-01", "reasoning": model.startswith("c"),
+                "judge_pool": model.startswith("j"), "candidate_pool": model.startswith("c"),
+                "observed_judge": model.startswith("j"), "observed_candidate": True,
+                "price_in": 1.0, "price_out": 2.0,
+            }
+            for model, year in zip(models, (2022, 2023, 2024, 2025, 2026))
+        ]))
+        theta = np.array([[-0.7, -0.2, 0.3, 0.8, 1.3], [-0.6, -0.1, 0.4, 0.9, 1.4]])
+        capabilities = tmp_path / "capabilities.csv"
+        pd.DataFrame([
+            {
+                "irt_model": "fixed_3pl", "fit": "gpqa", "model": model,
+                "theta": float(theta[:, index].mean()), "theta_p5": float(theta[:, index].min()),
+                "theta_p95": float(theta[:, index].max()),
+            }
+            for index, model in enumerate(models)
+        ]).to_csv(capabilities, index=False)
+        items = [f"item{index}" for index in range(4)]
+        difficulties = np.array([-0.6, -0.2, 0.2, 0.6])
+        item_path = tmp_path / "items.csv"
+        pd.DataFrame([
+            {
+                "irt_model": "fixed_3pl", "fit": "gpqa", "benchmark": "gpqa",
+                "item": item, "difficulty": float(difficulty),
+            }
+            for item, difficulty in zip(items, difficulties)
+        ]).to_csv(item_path, index=False)
+        posterior = tmp_path / "irt.npz"
+        np.savez_compressed(
+            posterior,
+            fixed_3pl__gpqa__models=np.array(models), fixed_3pl__gpqa__theta=theta,
+            fixed_3pl__gpqa__a=np.full((2, 4), 1.2),
+            fixed_3pl__gpqa__b=np.vstack([difficulties, difficulties + 0.05]),
+            fixed_3pl__gpqa__floor=np.full(4, 0.25),
+            fixed_3pl__gpqa__items=np.array([f"gpqa:{item}" for item in items]),
+        )
+
+        judge_logs = tmp_path / "judge_logs"
+        candidate_logs = tmp_path / "candidate_logs"
+
+        def write_log(path, model, samples_for_log, *, include_reasoning=False):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_eval_log(EvalLog(
+                status="success",
+                eval=EvalSpec(
+                    created="2026-08-15T00:00:00Z", task="gpqa",
+                    dataset=EvalDataset(name="tiny", samples=len(samples_for_log)),
+                    model=f"openrouter/{model}", config=EvalConfig(),
+                    metadata={"include_reasoning": include_reasoning},
+                ),
+                samples=samples_for_log,
+            ), path)
+
+        for model in models:
+            candidate_samples = []
+            reasoning = model.startswith("c")
+            for item_index, item in enumerate(items):
+                output_tokens = 8 + item_index
+                reasoning_tokens = 3 if reasoning else 0
+                candidate_samples.append(EvalSample(
+                    id=f"{item}_1", epoch=1, input="question", target="answer",
+                    messages=[ChatMessageAssistant(content=(
+                        "<think>reasoning</think> answer" if reasoning else "answer"
+                    ))],
+                    scores={"accuracy": Score(value="C")},
+                    model_usage={"candidate": ModelUsage(
+                        input_tokens=12 + item_index, output_tokens=output_tokens,
+                        reasoning_tokens=reasoning_tokens,
+                        total_tokens=12 + item_index + output_tokens,
+                    )},
+                    uuid=f"candidate-{model}-{item}",
+                ))
+            write_log(candidate_logs / f"{model}.eval", model, candidate_samples)
+
+        pairs = (("ca", "cb"), ("ca", "cc"), ("cb", "cc"), ("ca", "ca"))
+        for judge_index, judge in enumerate(("j1", "j2")):
+            for pair_index, (major, minor) in enumerate(pairs):
+                judge_samples = []
+                for row in range(125):
+                    item = items[row % len(items)]
+                    epoch = row // len(items) + 1
+                    major_left = (row + pair_index) % 2 == 0
+                    answer = "A" if (row + judge_index) % 2 == 0 else "B"
+                    left = "L" * (8 + row % 5 + pair_index)
+                    right = "R" * (5 + (row + judge_index) % 7)
+                    judge_samples.append(EvalSample(
+                        id=f"{item}_{epoch}", epoch=epoch,
+                        input=(
+                            f"Transcript A:\n---\n{left}\n---\n"
+                            f"Transcript B:\n---\n{right}\n---\nWhich of"
+                        ),
+                        target="A" if major_left else "B",
+                        messages=[ChatMessageAssistant(content=answer)],
+                        scores={"judge": Score(
+                            value="C", answer=answer, metadata={"confidence": 0.8},
+                        )},
+                        model_usage={"judge": ModelUsage(
+                            input_tokens=30 + row % 3, output_tokens=4,
+                            reasoning_tokens=0, total_tokens=34 + row % 3,
+                        )},
+                        uuid=f"judge-{judge}-{pair_index}-{row}",
+                    ))
+                write_log(
+                    judge_logs / judge / f"{major}-vs-{minor}" / "samples.eval",
+                    judge, judge_samples,
+                )
+
+        judge_models = tmp_path / "judge_models.csv"
+        pd.DataFrame([
+            {"model": model, "accuracy": 0.5 + index / 10}
+            for index, model in enumerate(models)
+        ]).to_csv(judge_models, index=False)
+        responses = tmp_path / "responses.parquet"
+        pd.DataFrame([
+            {"model": model, "correct": 1}
+            for model in EXTERNAL_CAPABILITY_MODELS.values()
+        ]).to_parquet(responses, index=False)
+
+        return config_file(
+            tmp_path,
+            paths={
+                "output": str(tmp_path / "artifacts"), "canonical_models": str(canonical),
+                "model_pool": str(pool), "irt_capabilities": str(capabilities),
+                "irt_items": str(item_path), "irt_posterior": str(posterior),
+                "judge_logs": str(judge_logs), "judge_models": str(judge_models),
+                "epoch_responses": str(responses),
+                "candidate_log_roots": [str(candidate_logs)],
+            },
+            fit={"warmup": warmup, "samples": samples, "chains": 1, "seed": seed},
+            simulation={
+                "trials": trials, "attempted_items": 1, "presentations": 1,
+                "reuse_responses": True, "accuracy_target": "higher_theta", "seed": seed,
+                "judges": 1, "anchors": 1, "comparators": 1, "require_stronger": True,
+            },
+            dashboard={
+                "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+                "attempted_item_counts": [1], "presentation_counts": [1],
+                "strength_filters": [True], "manual_triples": [], "manual_triple_limit": 0,
+                "out": str(tmp_path / "viewer/data/mc_cost.json"),
+            },
+        )
+
+    return build
+
+
+def test_tiny_pipeline_is_seed_reproducible(tmp_path, tiny_mc_config):
+    config = tiny_mc_config(seed=9, warmup=1, samples=4, trials=2)
+    for command in ("catalogue", "prepare", "fit", "validate", "simulate", "export-dashboard"):
+        assert main([command, "--config", str(config)]) == 0
+
+    output = tmp_path / "artifacts"
+    cli._verify_generation(output, "catalogue.manifest.json", CATALOGUE_FILES, "catalogue", "catalogue")
+    cli._verify_generation(output, "prepare.manifest.json", PREPARE_FILES, "prepare", "prepared-data")
+    cli._verify_generation(output, "model/manifest.json", MODEL_FILES, "fit", "model")
+    cli._verify_generation(
+        output, "validation/manifest.json", ["validation/decision.json"], "validate", "validation",
+    )
+    hashes = current_data_hashes(output)
+    require_decision(output / "validation/decision.json", hashes)
+    for name in ("baseline", "core", "core_release", "candidate_token", "judge_token"):
+        assert load_artifact(output / f"model/{name}").metadata["source_hashes"] == hashes
+    run = next((output / "runs").iterdir())
+    cli._verify_generation(
+        run, "manifest.json", ["trials.parquet", "summary.csv", "warnings.csv", "config.json"],
+        "simulate", "simulation",
+    )
+
+    dashboard = tmp_path / "viewer/data/mc_cost.json"
+    first = dashboard.read_bytes()
+    validate_dashboard_payload(json.loads(first))
+    assert main(["export-dashboard", "--config", str(config)]) == 0
+    assert dashboard.read_bytes() == first
 
 
 def current_data_hashes(output):
