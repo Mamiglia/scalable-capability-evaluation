@@ -1,0 +1,18 @@
+# Hand-curated style lexicon for feature_rates (style_features.py).
+# One key per category, terms matched as whole words/phrases, case-insensitive
+# except the standalone pronoun "I".
+#
+# Changed from the starter lexicon after spot-validation on real transcripts
+# (judge_results/rewrites/originals.jsonl, see task-4b-report.md): "clearly"
+# dropped from confidence - see that category below for why.
+personal_pronouns: [I, me, my, we, our, us]
+hedging: [perhaps, possibly, might, may, seems, appears, likely, presumably, arguably, I think, I believe, could be]
+backtracking: [wait, actually, on second thought, let me reconsider, oh wait, scratch that, correction, I made a mistake]
+uncertainty: [unsure, not sure, uncertain, unclear, ambiguous, guess, hard to say]
+# "clearly" removed: 66 corpus hits, 54 (82%) from one GPQA item whose own
+# question text reads "we want to clearly distinguish these two energy
+# levels" - nearly every model answering it echoes "clearly resolve/
+# distinguish" as the resolution-criterion term of art, not as a confidence
+# marker. That one item drove 88% of the category's pre-trim hit volume.
+confidence: [obviously, certainly, definitely, undoubtedly, of course]
+questions: ["?"]
