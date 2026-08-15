@@ -62,7 +62,7 @@ def write_generation(root, manifest, names):
 CATALOGUE_FILES = ["catalogue.csv", "capability_draws.npz"]
 PREPARE_FILES = [
     "judgments.parquet", "token_candidate.parquet", "token_judge.parquet",
-    "judgment_standardization.json", "scales.json",
+    "judgment_standardization.json", "scales.json", "prepare_accounting.json",
 ]
 MODEL_FILES = [
     f"model/{name}.{suffix}"
@@ -426,14 +426,31 @@ def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monke
         "judge_input_tokens": 20, "judge_output_tokens": 4,
         "judge_reasoning_tokens": 0, "judge_total_tokens": 24,
     }])
+    judgment_exclusion = {
+        "source": "judgment", "source_log": "bad.eval", "judge": "j", "model": "a|b",
+        "item": "bad", "reason": "invalid_answer", "missing_fields": [], "count": 2,
+    }
+    attempts.attrs["exclusions"] = [judgment_exclusion]
+    judgment_counts = pd.DataFrame({"attempts_kept": [1], "attempts_skipped_invalid_answer": [2]}, index=["j"])
+    judgment_eligibility = pd.DataFrame({
+        "pairs": [1], "samples": [1], "eligible": [True],
+    }, index=["j"])
+    candidate_exclusion = {
+        "source": "candidate", "source_log": "candidate.eval", "judge": None,
+        "model": "missing", "item": None, "reason": "unknown_model",
+        "missing_fields": ["catalogue"], "count": 3,
+    }
+    candidates = pd.DataFrame()
+    candidates.attrs["accounting"] = {"zero_usage_or_error": 0, "missing_catalogue_metadata": 3}
+    candidates.attrs["exclusions"] = [candidate_exclusion]
     calls = []
 
     def fake_prepare(*args, **kwargs):
         calls.append((args, kwargs))
-        return attempts, pd.DataFrame(), pd.DataFrame()
+        return attempts, judgment_counts, judgment_eligibility
 
     monkeypatch.setattr(cli, "prepare_mc_gpqa", fake_prepare)
-    monkeypatch.setattr(cli, "candidate_token_rows", lambda *_, **__: pd.DataFrame())
+    monkeypatch.setattr(cli, "candidate_token_rows", lambda *_, **__: candidates)
     config = config_file(tmp_path, paths={
         "output": str(output), "irt_items": str(items), "judge_logs": str(logs),
         "candidate_log_roots": [],
@@ -448,6 +465,17 @@ def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monke
     assert (output / "token_judge.parquet").is_file()
     assert (output / "scales.json").is_file()
     assert (output / "judgment_standardization.json").is_file()
+    assert json.loads((output / "prepare_accounting.json").read_text()) == {
+        "schema_version": 1,
+        "judgment_counts": [{
+            "judge": "j", "attempts_kept": 1, "attempts_skipped_invalid_answer": 2,
+        }],
+        "judgment_eligibility": [{"judge": "j", "pairs": 1, "samples": 1, "eligible": True}],
+        "candidate_counts": {"missing_catalogue_metadata": 3, "zero_usage_or_error": 0},
+        "exclusions": [judgment_exclusion, candidate_exclusion],
+    }
+    manifest = json.loads((output / "prepare.manifest.json").read_text())
+    assert set(manifest["files"]) == set(PREPARE_FILES)
 
 
 def test_prepare_rejects_missing_configured_candidate_root_before_raw_loading(
@@ -491,6 +519,7 @@ def test_fit_writes_three_judgment_and_two_token_artifacts(tmp_path, monkeypatch
     })
     (output / "scales.json").write_text(scale_payload)
     (output / "judgment_standardization.json").write_text(scale_payload)
+    (output / "prepare_accounting.json").write_text("{}\n")
     (output / "capability_draws.npz").write_bytes(b"draws")
     write_generation(output, "catalogue.manifest.json", CATALOGUE_FILES)
     write_generation(output, "prepare.manifest.json", PREPARE_FILES)
@@ -579,6 +608,7 @@ def pipeline_artifacts(tmp_path, *, dashboard=None):
     })
     (output / "scales.json").write_text(scales)
     (output / "judgment_standardization.json").write_text(scales)
+    (output / "prepare_accounting.json").write_text("{}\n")
     irt = tmp_path / "irt.npz"
     np.savez_compressed(
         irt, fixed_3pl__gpqa__a=np.ones((2, 1)), fixed_3pl__gpqa__b=np.zeros((2, 1)),

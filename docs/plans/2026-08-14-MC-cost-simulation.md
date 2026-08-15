@@ -38,7 +38,7 @@ uv run mc-cost catalogue --config configs/mc_cost/default.json
 uv run mc-cost prepare --config configs/mc_cost/default.json
 uv run mc-cost fit --config configs/mc_cost/default.json
 uv run mc-cost validate --config configs/mc_cost/default.json
-uv run mc-cost simulate --config configs/mc_cost/default.json --judges 4 --anchors 8 --comparators 4 --items 100
+uv run mc-cost simulate --config configs/mc_cost/default.json --judges 3 --anchors 8 --comparators 4 --items 100
 uv run mc-cost export-dashboard --config configs/mc_cost/default.json
 uv run python -m http.server 8000 -d interactive_viewer
 ```
@@ -85,7 +85,9 @@ instead of receiving an average-model substitution.
 
 `prepare` scans every Inspect archive under both configured candidate roots and
 can take several minutes; it publishes its generation atomically only after the
-scan completes. The Task 11 production preflight completed catalogue and
-judgment preparation and checked representative candidate archives from both
-roots, rather than running the complete candidate-token scan or any production
-fit.
+scan completes. Its manifest-bound `analysis/mc_cost/prepare_accounting.json`
+records per-judge extraction counts and eligibility plus named, aggregated
+judgment/candidate exclusions; inspect this file before fitting. The Task 11
+production preflight completed catalogue and judgment preparation and checked
+representative candidate archives from both roots, rather than running the
+complete candidate-token scan or any production fit.

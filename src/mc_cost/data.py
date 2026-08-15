@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from collections import Counter, defaultdict
 from pathlib import Path
-from collections import defaultdict
 
 import numpy as np
 import pandas as pd
@@ -133,6 +134,14 @@ def _benchmark(task: str) -> str:
     return "gpqa" if name == "gpqa_diamond" else name
 
 
+def _exclude(exclusions: Counter, *, count: int = 1, **details) -> None:
+    exclusions[json.dumps(details, sort_keys=True, separators=(",", ":"))] += count
+
+
+def _exclusion_rows(exclusions: Counter) -> list[dict]:
+    return [{**json.loads(key), "count": count} for key, count in sorted(exclusions.items())]
+
+
 def candidate_token_rows(
     log_roots, catalogue: pd.DataFrame, items: pd.DataFrame, *, skip_incomplete: bool = False,
 ) -> pd.DataFrame:
@@ -143,6 +152,8 @@ def candidate_token_rows(
     rows, seen_logs, seen_samples = [], set(), set()
     excluded_zero_or_error = 0
     excluded_incomplete = 0
+    excluded_duplicates = 0
+    exclusions = Counter()
     for root in log_roots:
         for info in list_eval_logs(str(root)):
             if info.name in seen_logs:
@@ -157,16 +168,38 @@ def candidate_token_rows(
             if model is None:
                 if skip_incomplete:
                     excluded_incomplete += len(log.samples)
+                    _exclude(
+                        exclusions, count=len(log.samples), source="candidate",
+                        source_log=str(info.name), judge=None, model=raw_model, item=None,
+                        reason="unknown_model", missing_fields=["catalogue"],
+                    )
                     continue
                 raise ValueError(f"model {raw_model} missing from catalogue")
             for sample in log.samples:
+                item = _candidate_item_id(sample)
                 tokens = _sample_tokens(sample)
-                if getattr(sample, "error", None) or tokens["total"] == 0:
+                if getattr(sample, "error", None):
                     excluded_zero_or_error += 1
+                    _exclude(
+                        exclusions, source="candidate", source_log=str(info.name), judge=None,
+                        model=model, item=item, reason="sample_error", missing_fields=[],
+                    )
                     continue
-                item, epoch = _candidate_item_id(sample), getattr(sample, "epoch", None)
+                if tokens["total"] == 0:
+                    excluded_zero_or_error += 1
+                    _exclude(
+                        exclusions, source="candidate", source_log=str(info.name), judge=None,
+                        model=model, item=item, reason="zero_usage", missing_fields=[],
+                    )
+                    continue
+                epoch = getattr(sample, "epoch", None)
                 key = benchmark, model, item, epoch
                 if key in seen_samples:
+                    excluded_duplicates += 1
+                    _exclude(
+                        exclusions, source="candidate", source_log=str(info.name), judge=None,
+                        model=model, item=item, reason="duplicate_sample", missing_fields=[],
+                    )
                     continue
                 seen_samples.add(key)
                 model_data = metadata.loc[model] if model in metadata.index else None
@@ -181,6 +214,11 @@ def candidate_token_rows(
                 if missing:
                     if skip_incomplete:
                         excluded_incomplete += 1
+                        _exclude(
+                            exclusions, source="candidate", source_log=str(info.name), judge=None,
+                            model=model, item=item, reason="missing_metadata",
+                            missing_fields=sorted(missing),
+                        )
                         continue
                     details = []
                     model_fields = [field for field in missing if field != "difficulty"]
@@ -206,7 +244,9 @@ def candidate_token_rows(
     result.attrs["accounting"] = {
         "zero_usage_or_error": excluded_zero_or_error,
         "missing_catalogue_metadata": excluded_incomplete,
+        "duplicate_samples": excluded_duplicates,
     }
+    result.attrs["exclusions"] = _exclusion_rows(exclusions)
     return result
 
 

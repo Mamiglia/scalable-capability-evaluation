@@ -68,6 +68,40 @@ def test_catalogue_unions_fitted_models_and_applies_explicit_overrides(tmp_path)
     validate_catalogue(got)
 
 
+def test_catalogue_requires_pool_name_to_disambiguate_distinct_normalized_matches(tmp_path):
+    canonical = tmp_path / "canonical.md"
+    canonical.write_text("- Shared Model\n")
+    pool = tmp_path / "pool.json"
+    pool.write_text(json.dumps([
+        {"name": "Shared Model", "release": "2024-01-01"},
+        {"name": "Other", "or_id": "provider/shared-model", "release": "2025-01-01"},
+    ]))
+    capabilities = pd.DataFrame([{
+        "irt_model": "fixed_3pl", "fit": "gpqa", "model": "shared-model", "theta": 0.0,
+    }])
+
+    with pytest.raises(ValueError, match=r"Shared Model.*sharedmodel.*pool_name"):
+        build_catalogue(canonical, pool, capabilities)
+
+    overrides = [{"model_id": "Shared Model", "pool_name": "Other"}]
+    got = build_catalogue(canonical, pool, capabilities, overrides)
+    assert got.loc[0, "release"] == "2025-01-01"
+
+
+def test_catalogue_allows_duplicate_aliases_from_one_pool_record(tmp_path):
+    canonical = tmp_path / "canonical.md"
+    canonical.write_text("- Same\n")
+    pool = tmp_path / "pool.json"
+    pool.write_text(json.dumps([{
+        "name": "Same", "model": "provider/same", "or_id": "same", "release": "2024-01-01",
+    }]))
+    capabilities = pd.DataFrame([{
+        "irt_model": "fixed_3pl", "fit": "gpqa", "model": "same", "theta": 0.0,
+    }])
+
+    assert build_catalogue(canonical, pool, capabilities).loc[0, "release"] == "2024-01-01"
+
+
 def test_default_catalogue_resolves_observed_logs_and_has_explicit_eligible_pools():
     config = json.loads(Path("configs/mc_cost/default.json").read_text())
     paths = config["paths"]

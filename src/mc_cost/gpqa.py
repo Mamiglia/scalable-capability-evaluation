@@ -109,12 +109,21 @@ def token_usage(sample: dict) -> dict[str, int]:
     }
 
 
+def _exclude(exclusions: Counter, *, count: int = 1, **details) -> None:
+    exclusions[json.dumps(details, sort_keys=True, separators=(",", ":"))] += count
+
+
+def _exclusion_rows(exclusions: Counter) -> list[dict]:
+    return [{**json.loads(key), "count": count} for key, count in sorted(exclusions.items())]
+
+
 def extract_attempts(
     log_root: Path, capabilities: Mapping[str, float] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows = []
     seen_samples = set()
     accounting = defaultdict(Counter)
+    exclusions = Counter()
     for path in sorted(log_root.rglob("*.eval")):
         judge, pair, condition = log_identity(path, log_root)
         accounting[judge]["eval_files_found"] += 1
@@ -142,13 +151,26 @@ def extract_attempts(
                     if sample_key in seen_samples:
                         accounting[judge]["duplicate_attempts_skipped"] += 1
                         continue
+                    item = str(sample.get("id", "")).rsplit("_", 1)[0]
                     answer, confidence = judge_answer(sample)
                     if answer is None:
+                        accounting[judge]["attempts_skipped_invalid_answer"] += 1
+                        _exclude(
+                            exclusions, source="judgment", source_log=str(path), judge=judge,
+                            model="|".join(sorted((major, minor))), item=item,
+                            reason="invalid_answer", missing_fields=[],
+                        )
+                        seen_samples.add(sample_key)
                         continue
                     try:
                         left_text, right_text = transcript_text(sample)
                     except ValueError:
                         accounting[judge]["attempts_skipped_unparseable_transcript"] += 1
+                        _exclude(
+                            exclusions, source="judgment", source_log=str(path), judge=judge,
+                            model="|".join(sorted((major, minor))), item=item,
+                            reason="unparseable_transcript", missing_fields=[],
+                        )
                         seen_samples.add(sample_key)
                         continue
                     major_left = major_is_left(sample)
@@ -156,7 +178,7 @@ def extract_attempts(
                     usage = token_usage(sample)
                     row = {
                         "chosen_left": int(answer == "A"), "judge": judge,
-                        "item": str(sample.get("id", "")).rsplit("_", 1)[0],
+                        "item": item,
                         "model_pair": "|".join(sorted((major, minor))),
                         "left_model": left_model, "right_model": right_model,
                         "transcript_condition": condition,
@@ -198,14 +220,22 @@ def extract_attempts(
                     accounting[judge]["attempts_kept"] += 1
         except (OSError, KeyError, ValueError, zipfile.BadZipFile) as error:
             raise ValueError(f"Failed to extract {path}: {error}") from error
-    return pd.DataFrame(rows), pd.DataFrame.from_dict(accounting, orient="index").fillna(0).astype(int)
+    result = pd.DataFrame(rows)
+    result.attrs["exclusions"] = _exclusion_rows(exclusions)
+    return result, pd.DataFrame.from_dict(accounting, orient="index").fillna(0).astype(int)
 
 
 def _eligible(
     data: pd.DataFrame, accounting: pd.DataFrame, *, min_pairs: int, min_samples: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     eligibility = data.groupby("judge").agg(pairs=("model_pair", "nunique"), samples=("judge", "size"))
-    judges = eligibility[(eligibility["pairs"] > min_pairs) & (eligibility["samples"] >= min_samples)].index
+    eligibility = eligibility.reindex(
+        eligibility.index.union(accounting.index, sort=False), fill_value=0,
+    )
+    eligibility["eligible"] = (
+        (eligibility["pairs"] > min_pairs) & (eligibility["samples"] >= min_samples)
+    )
+    judges = eligibility.index[eligibility["eligible"]]
     data = data[data["judge"].isin(judges)].copy()
     if data.empty:
         raise ValueError("No judges meet the pair and sample thresholds")
@@ -217,6 +247,7 @@ def prepare_for_mc(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Prepare MC attempts on the catalogue's IRT scale, never raw accuracy."""
     data, accounting = extract_attempts(log_root)
+    exclusions = list(data.attrs.get("exclusions", []))
     aliases = catalogue_aliases(catalogue)
     identity_columns = ("judge", "left_model", "right_model")
     unresolved = sorted({
@@ -232,10 +263,30 @@ def prepare_for_mc(
 
     metadata = catalogue.set_index("model_id")
     complete = pd.Series(True, index=data.index)
+    missing_by_row = defaultdict(list)
+    models_by_row = defaultdict(set)
     for column in identity_columns:
         rows = metadata.reindex(data[column])
-        complete &= pd.to_numeric(rows["theta"], errors="coerce").notna().to_numpy()
-        complete &= pd.to_datetime(rows["release"], errors="coerce").notna().to_numpy()
+        theta_present = pd.to_numeric(rows["theta"], errors="coerce").notna().to_numpy()
+        release_present = pd.to_datetime(rows["release"], errors="coerce").notna().to_numpy()
+        for index in data.index[~theta_present]:
+            missing_by_row[index].append(f"{column}.theta")
+            models_by_row[index].add(str(data.at[index, column]))
+        for index in data.index[~release_present]:
+            missing_by_row[index].append(f"{column}.release")
+            models_by_row[index].add(str(data.at[index, column]))
+        complete &= theta_present
+        complete &= release_present
+    metadata_exclusions = Counter()
+    for index in data.index[~complete]:
+        row = data.loc[index]
+        _exclude(
+            metadata_exclusions, source="judgment", source_log=str(row.get("log_file", "")),
+            judge=str(row["judge"]), model="|".join(sorted(models_by_row[index])),
+            item=str(row.get("item", "")), reason="missing_catalogue_metadata",
+            missing_fields=sorted(missing_by_row[index]),
+        )
+    exclusions.extend(_exclusion_rows(metadata_exclusions))
     skipped = data.loc[~complete, "judge"].value_counts()
     if not skipped.empty:
         accounting["attempts_skipped_missing_catalogue_metadata"] = skipped.reindex(
@@ -246,11 +297,11 @@ def prepare_for_mc(
         data, accounting, min_pairs=min_pairs, min_samples=min_samples,
     )
     standardise(data, ("length_difference",))
-    return (
-        data.sort_values(["judge", "model_pair", "item", "transcript_condition"]).reset_index(drop=True),
-        accounting,
-        eligibility,
+    result = data.sort_values(["judge", "model_pair", "item", "transcript_condition"]).reset_index(drop=True)
+    result.attrs["exclusions"] = sorted(
+        exclusions, key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")),
     )
+    return result, accounting, eligibility
 
 
 def prepare(

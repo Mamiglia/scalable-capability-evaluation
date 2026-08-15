@@ -122,6 +122,14 @@ def test_candidate_rows_deduplicate_and_exclude_zero_usage(monkeypatch):
     assert row.difficulty == 0.4
     assert row.ordinary_output_tokens == 15
     assert got.attrs["accounting"]["zero_usage_or_error"] == 1
+    assert got.attrs["accounting"]["duplicate_samples"] == 1
+    assert {
+        entry["reason"]: entry for entry in got.attrs["exclusions"]
+    }["duplicate_sample"] == {
+        "source": "candidate", "source_log": "one", "judge": None,
+        "model": "candidate", "item": "i", "reason": "duplicate_sample",
+        "missing_fields": [], "count": 1,
+    }
 
 
 def test_candidate_rows_reject_missing_fitting_metadata(monkeypatch):
@@ -148,7 +156,7 @@ def test_mc_candidate_rows_account_for_incomplete_logs(monkeypatch):
 
     sample = SimpleNamespace(id="i_1", epoch=1)
     log = SimpleNamespace(
-        eval=SimpleNamespace(task="gpqa", model="openrouter/not-fitted"), samples=[sample],
+        eval=SimpleNamespace(task="gpqa", model="openrouter/not-fitted"), samples=[sample, sample],
     )
     monkeypatch.setattr(data, "list_eval_logs", lambda _: [SimpleNamespace(name="one")])
     monkeypatch.setattr(data, "read_eval_log", lambda _: log)
@@ -159,7 +167,55 @@ def test_mc_candidate_rows_account_for_incomplete_logs(monkeypatch):
     )
 
     assert got.empty
-    assert got.attrs["accounting"]["missing_catalogue_metadata"] == 1
+    assert got.attrs["accounting"]["missing_catalogue_metadata"] == 2
+    assert got.attrs["exclusions"] == [{
+        "source": "candidate", "source_log": "one", "judge": None,
+        "model": "not-fitted", "item": None, "reason": "unknown_model",
+        "missing_fields": ["catalogue"], "count": 2,
+    }]
+
+
+def test_mc_candidate_rows_name_error_zero_and_missing_metadata_exclusions(monkeypatch):
+    import mc_cost.data as data
+
+    usage = SimpleNamespace(input_tokens=1, output_tokens=1, reasoning_tokens=0, total_tokens=2)
+    samples = [
+        SimpleNamespace(id="error_1", epoch=1, error="boom", model_usage={"m": usage}),
+        SimpleNamespace(
+            id="zero_1", epoch=1, error=None,
+            model_usage={"m": SimpleNamespace(
+                input_tokens=0, output_tokens=0, reasoning_tokens=0, total_tokens=0,
+            )},
+        ),
+        SimpleNamespace(id="missing_1", epoch=1, error=None, model_usage={"m": usage}),
+    ]
+    log = SimpleNamespace(
+        eval=SimpleNamespace(task="gpqa", model="openrouter/candidate"), samples=samples,
+    )
+    monkeypatch.setattr(data, "list_eval_logs", lambda _: [SimpleNamespace(name="one")])
+    monkeypatch.setattr(data, "read_eval_log", lambda _: log)
+    catalogue = pd.DataFrame([{"model_id": "candidate", "theta": None, "release": None}])
+
+    got = candidate_token_rows(["unused"], catalogue, pd.DataFrame(), skip_incomplete=True)
+
+    exclusions = {row["reason"]: row for row in got.attrs["exclusions"]}
+    assert exclusions == {
+        "sample_error": {
+            "source": "candidate", "source_log": "one", "judge": None,
+            "model": "candidate", "item": "error", "reason": "sample_error",
+            "missing_fields": [], "count": 1,
+        },
+        "zero_usage": {
+            "source": "candidate", "source_log": "one", "judge": None,
+            "model": "candidate", "item": "zero", "reason": "zero_usage",
+            "missing_fields": [], "count": 1,
+        },
+        "missing_metadata": {
+            "source": "candidate", "source_log": "one", "judge": None,
+            "model": "candidate", "item": "missing", "reason": "missing_metadata",
+            "missing_fields": ["difficulty", "release", "theta"], "count": 1,
+        },
+    }
 
 
 def test_write_prepared_tables_stores_training_standardization(tmp_path):

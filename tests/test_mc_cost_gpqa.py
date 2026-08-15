@@ -1,6 +1,9 @@
 import json
 import zipfile
 
+import pandas as pd
+
+import mc_cost.gpqa as gpqa
 from mc_cost.gpqa import extract_attempts, judge_answer, major_is_left, transcript_text
 
 
@@ -33,8 +36,67 @@ def test_extractor_accounts_for_truncated_prompt_instead_of_aborting_file(tmp_pa
             "target": 1,
             "scores": {"judge_scorer": {"answer": "1", "metadata": {"confidence": 4}}},
         }))
+        archive.writestr("samples/two.json", json.dumps({
+            "id": "item_2", "uuid": "two", "input": "unused", "target": 1,
+            "scores": {"judge_scorer": {"answer": "invalid", "metadata": {}}},
+        }))
 
     attempts, accounting = extract_attempts(tmp_path)
 
     assert attempts.empty
     assert accounting.loc["judge", "attempts_skipped_unparseable_transcript"] == 1
+    assert accounting.loc["judge", "attempts_skipped_invalid_answer"] == 1
+    assert attempts.attrs["exclusions"] == [
+        {
+            "source": "judgment", "source_log": str(path), "judge": "judge",
+            "model": "a|b", "item": "item", "reason": "invalid_answer",
+            "missing_fields": [], "count": 1,
+        },
+        {
+            "source": "judgment", "source_log": str(path), "judge": "judge",
+            "model": "a|b", "item": "item", "reason": "unparseable_transcript",
+            "missing_fields": [], "count": 1,
+        },
+    ]
+
+
+def test_mc_prepare_names_dropped_catalogue_metadata_identity(monkeypatch):
+    rows = pd.DataFrame([
+        {
+            "judge": "j", "left_model": "a", "right_model": "b", "model_pair": "a|b",
+            "item": "i1", "length_difference": 0.0, "transcript_condition": "raw",
+            "log_file": "kept.eval",
+        },
+        {
+            "judge": "j", "left_model": "b", "right_model": "a", "model_pair": "a|b",
+            "item": "i2", "length_difference": 1.0, "transcript_condition": "raw",
+            "log_file": "kept.eval",
+        },
+        {
+            "judge": "j", "left_model": "a", "right_model": "c", "model_pair": "a|c",
+            "item": "i3", "length_difference": 2.0, "transcript_condition": "raw",
+            "log_file": "missing.eval",
+        },
+    ])
+    accounting = pd.DataFrame({"attempts_kept": [3, 1]}, index=["j", "dropped"])
+    monkeypatch.setattr(gpqa, "extract_attempts", lambda _: (rows, accounting))
+    catalogue = pd.DataFrame([
+        {"model_id": "j", "theta": 0.0, "release": "2024-01-01"},
+        {"model_id": "a", "theta": 1.0, "release": "2025-01-01"},
+        {"model_id": "b", "theta": -1.0, "release": "2023-01-01"},
+        {"model_id": "c", "theta": 0.5, "release": None},
+    ])
+
+    attempts, got_accounting, eligibility = gpqa.prepare_for_mc(
+        None, catalogue, min_pairs=0, min_samples=1,
+    )
+
+    assert len(attempts) == 2
+    assert got_accounting.loc["j", "attempts_skipped_missing_catalogue_metadata"] == 1
+    assert eligibility.loc["j", "eligible"]
+    assert eligibility.loc["dropped"].to_dict() == {"pairs": 0, "samples": 0, "eligible": False}
+    assert attempts.attrs["exclusions"] == [{
+        "source": "judgment", "source_log": "missing.eval", "judge": "j",
+        "model": "c", "item": "i3", "reason": "missing_catalogue_metadata",
+        "missing_fields": ["right_model.release"], "count": 1,
+    }]

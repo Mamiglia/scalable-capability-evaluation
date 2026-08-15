@@ -67,7 +67,7 @@ _MANUAL_COLUMNS = (
 _CATALOGUE_FILES = ("catalogue.csv", "capability_draws.npz")
 _PREPARE_FILES = (
     "judgments.parquet", "token_candidate.parquet", "token_judge.parquet",
-    "judgment_standardization.json", "scales.json",
+    "judgment_standardization.json", "scales.json", "prepare_accounting.json",
 )
 _MODEL_FILES = tuple(
     f"model/{name}.{suffix}"
@@ -292,16 +292,31 @@ def _prepare(args: argparse.Namespace, config: dict[str, Any]) -> None:
             raise CliError(f"configured candidate log root does not exist: {root}")
     catalogue = pd.read_csv(output / "catalogue.csv")
     items = pd.read_csv(items_path)
-    attempts, _, _ = prepare_mc_gpqa(logs, catalogue)
+    attempts, judgment_counts, judgment_eligibility = prepare_mc_gpqa(logs, catalogue)
+    judgment_exclusions = list(attempts.attrs.get("exclusions", []))
     judgments = prepare_judgments(attempts, catalogue, items)
     candidates = candidate_token_rows(root_paths, catalogue, items, skip_incomplete=True)
+    candidate_counts = dict(candidates.attrs.get("accounting", {}))
+    candidate_exclusions = list(candidates.attrs.get("exclusions", []))
     judges = judge_token_rows(judgments)
+    accounting = {
+        "schema_version": 1,
+        "judgment_counts": json.loads(
+            judgment_counts.rename_axis("judge").reset_index().to_json(orient="records")
+        ),
+        "judgment_eligibility": json.loads(
+            judgment_eligibility.rename_axis("judge").reset_index().to_json(orient="records")
+        ),
+        "candidate_counts": candidate_counts,
+        "exclusions": judgment_exclusions + candidate_exclusions,
+    }
     with _temporary_directory(output.parent) as directory:
         stage = Path(directory)
         paths = write_prepared_tables(
             stage, judgments, candidates, judges, training_rows=np.ones(len(judgments), dtype=bool),
         )
         shutil.copyfile(paths["judgment_standardization"], stage / "scales.json")
+        _write_json(stage / "prepare_accounting.json", accounting)
         _publish(stage, output, list(_PREPARE_FILES))
         _write_manifest(output, "prepare.manifest.json", _PREPARE_FILES)
 

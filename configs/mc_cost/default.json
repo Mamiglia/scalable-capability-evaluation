@@ -20,7 +20,7 @@
     "seed": 0
   },
   "dashboard": {
-    "judge_counts": [1, 2, 4, 8],
+    "judge_counts": [1, 2, 3],
     "anchor_counts": [1, 2, 4, 8],
     "comparator_counts": [1, 2, 4, 8],
     "attempted_item_counts": [10, 25, 50, 100, 198],

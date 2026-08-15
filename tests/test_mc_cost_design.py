@@ -1,7 +1,11 @@
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
+from mc_cost.catalogue import build_catalogue, pool_enabled
 from mc_cost.design import AutomaticConfig, automatic_comparisons, manual_comparisons
 
 
@@ -164,3 +168,23 @@ def test_manual_warning_rows_use_retained_ordinals_for_duplicate_source_indexes(
     _, warnings = manual_comparisons(catalogue(), rows)
     automatic = warnings.loc[warnings.code == "automatic_rule_violation"]
     assert automatic["row"].tolist() == [0, 1]
+
+
+def test_default_dashboard_grid_and_advertised_scenario_fit_real_explicit_pools():
+    config = json.loads(Path("configs/mc_cost/default.json").read_text())
+    paths = config["paths"]
+    models = build_catalogue(
+        paths["canonical_models"], paths["model_pool"], paths["irt_capabilities"],
+        paths["model_overrides"],
+    )
+    eligible_judges = models.loc[models["judge_pool"].map(pool_enabled), "model_id"].tolist()
+
+    assert config["dashboard"]["judge_counts"] == list(range(1, len(eligible_judges) + 1))
+    comparisons = automatic_comparisons(
+        models,
+        AutomaticConfig(j=3, m=8, n=4, attempted_items=1),
+        np.random.default_rng(0),
+    )
+    assert comparisons["judge"].nunique() == 3
+    assert comparisons["m1"].nunique() == 8
+    assert len(comparisons) == 3 * 8 * 4
