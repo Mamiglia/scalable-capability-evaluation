@@ -6,6 +6,10 @@ A model's answer to an item appears in many pairs; the rewrite unit is the
 transcript, so each (model, item) is extracted exactly once here, not once per
 pair slot.
 
+Reruns (e.g. the subset changing) only append rows for newly required keys.
+Existing rows are never rewritten or dropped, even if the subset no longer
+needs them - a rewrite campaign may already be reading the file.
+
 Usage:
   uv run python scripts/analyses/rewrites/extract_transcripts.py
 """
@@ -49,18 +53,26 @@ def extract_row(sample, model: str, item_id: str) -> dict:
     }
 
 
+def load_existing(path: Path) -> dict[tuple[str, str], dict]:
+    if not path.exists():
+        return {}
+    rows = (json.loads(line) for line in path.read_text().splitlines() if line)
+    return {(r["model"], r["item_id"]): r for r in rows}
+
+
 def main() -> None:
     cfg = yaml.safe_load(SUBSET_CONFIG.read_text())
     assert cfg["include_reasoning"] is False, "subset must be final-text-only"
 
     keys = unique_keys(cfg["comparisons"], cfg["sample_ids"])
     n_slots = sum(len(v) for v in cfg["sample_ids"].values()) * 2  # x2: both models in each pair
+    existing = load_existing(OUT_PATH)
 
     items_by_model: dict[str, list[str]] = {}
     for model, item_id in keys:
         items_by_model.setdefault(model, []).append(item_id)
 
-    rows = []
+    fresh: dict[tuple[str, str], dict] = {}
     for model, item_ids in sorted(items_by_model.items()):
         log = read_eval_log(str(ROOT / cfg["transcripts"][model]))
         correct = first_correct_by_id(log)  # id -> correct samples, earliest epoch first
@@ -68,14 +80,31 @@ def main() -> None:
             group = correct.get(item_id)
             if not group:
                 raise ValueError(f"no correct epoch for {model}/{item_id} in {cfg['transcripts'][model]}")
-            rows.append(extract_row(group[0], model, item_id))
+            fresh[(model, item_id)] = extract_row(group[0], model, item_id)
+
+    # each key is extracted exactly once - if this fails, some (model, item) got
+    # written twice (or dropped), which breaks the within-item comparison design
+    assert len(fresh) == len(keys), f"{len(fresh)} rows but {len(keys)} unique keys"
+
+    # a key already on disk must extract to the same transcript every time - if
+    # not, something upstream moved and must not be papered over by silently
+    # rewriting a row a live rewrite campaign may already be reading
+    for key, row in fresh.items():
+        old = existing.get(key)
+        if old is not None and old["transcript"] != row["transcript"]:
+            raise ValueError(f"transcript changed for {key} since the last extraction - stopping")
+
+    new_rows = [row for key, row in fresh.items() if key not in existing]
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with OUT_PATH.open("w") as f:
-        for row in rows:
+    with OUT_PATH.open("a") as f:
+        for row in new_rows:
             f.write(json.dumps(row) + "\n")
 
-    print(f"{n_slots} pair-model-item slots -> {len(rows)} unique transcripts")
+    n_surplus = len(existing) - len(existing.keys() & keys)
+    print(f"{n_slots} pair-model-item slots -> {len(keys)} unique transcripts needed")
+    print(f"{len(new_rows)} new rows appended; {len(existing)} rows already on disk"
+          f" ({n_surplus} no longer in the subset, left in place)")
     print(f"wrote {OUT_PATH}")
 
 
