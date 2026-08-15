@@ -24,7 +24,7 @@ TRIAL_METRICS = (
 )
 _TRIAL_COLUMNS = [
     "trial", "configuration", "mode", "comparison_id", "judge", "m1", "m2",
-    "model", "role", "metric", "value", "warning_state",
+    "model", "reasoning_class", "role", "metric", "value", "warning_state",
 ]
 _WARNING_COLUMNS = ["code", "trial", "row", "source_row", "model", "message"]
 
@@ -113,14 +113,12 @@ def cost_rows(usage: pd.DataFrame, catalogue: pd.DataFrame) -> tuple[pd.DataFram
     result = result.merge(prices, on="model", how="left", validate="many_to_one", sort=False)
     for column in ("price_in", "price_out"):
         result[column] = pd.to_numeric(result[column], errors="coerce")
-    used = result[["calls", "input_tokens", "output_tokens"]].gt(0).any(axis=1)
-    missing_price = result[["price_in", "price_out"]].isna().any(axis=1) & used
+    missing_price = result[["price_in", "price_out"]].isna().any(axis=1)
     result["cost"] = (
         result["input_tokens"] * result["price_in"]
         + result["output_tokens"] * result["price_out"]
     ) / 1_000_000
     result.loc[missing_price, "cost"] = np.nan
-    result.loc[~used, "cost"] = 0.0
     models = result.loc[missing_price, "model"].astype(str).drop_duplicates().tolist()
     warnings = pd.DataFrame([
         {"code": "missing_price", "model": model, "message": f"missing input or output price for {model}"}
@@ -281,7 +279,9 @@ def _resolve_classes(comparisons: pd.DataFrame, metadata: pd.DataFrame) -> pd.Da
     return result
 
 
-def _observed_groups(observed_cells: pd.DataFrame) -> dict[tuple[str, str], pd.DataFrame]:
+def _observed_groups(
+    observed_cells: pd.DataFrame, metadata: pd.DataFrame,
+) -> dict[tuple[str, str, str], pd.DataFrame]:
     required = {"model", "item", "correct"}
     if missing := required - set(observed_cells):
         raise ValueError(f"observed cells lack required columns: {', '.join(sorted(missing))}")
@@ -290,16 +290,28 @@ def _observed_groups(observed_cells: pd.DataFrame) -> dict[tuple[str, str], pd.D
         raise ValueError("observed model, item, and correctness values must be non-null")
     cells["model"] = cells["model"].astype(str)
     cells["item"] = cells["item"].map(_canonical_item)
+    fallback = cells["model"].map(metadata["reasoning_class"])
+    cells["reasoning_class"] = (
+        cells["reasoning_class"].where(cells["reasoning_class"].notna(), fallback)
+        if "reasoning_class" in cells else fallback
+    )
+    if not cells["reasoning_class"].isin({"reasoning", "non_reasoning"}).all():
+        raise ValueError("observed reasoning_class must be reasoning or non_reasoning")
     correct = pd.to_numeric(cells["correct"], errors="raise")
     if not correct.isin([0, 1]).all():
         raise ValueError("observed correctness must contain only 0/1 values")
     cells["correct"] = correct.astype(int)
-    return {(model, item): rows for (model, item), rows in cells.groupby(["model", "item"], sort=False)}
+    return {
+        (model, reasoning_class, item): rows
+        for (model, reasoning_class, item), rows in cells.groupby(
+            ["model", "reasoning_class", "item"], sort=False,
+        )
+    }
 
 
 def _candidate_cells(
     comparisons: pd.DataFrame, attempted: Sequence[str], metadata: pd.DataFrame,
-    observed: dict[tuple[str, str], pd.DataFrame], capability: dict[str, float],
+    observed: dict[tuple[str, str, str], pd.DataFrame], capability: dict[str, float],
     irt: dict[str, np.ndarray], posterior_index: int, rng: np.random.Generator,
     candidate_artifact: Any, cache: LatentCache, trial: int,
 ) -> pd.DataFrame:
@@ -324,8 +336,7 @@ def _candidate_cells(
             if item not in lookup:
                 raise ValueError(f"IRT posterior lacks attempted item: {item}")
             item_index = lookup[item]
-            exact_observed_configuration = metadata.at[ref.model, "reasoning_class"] == ref.reasoning_class
-            source = observed.get((ref.model, item)) if exact_observed_configuration else None
+            source = observed.get((ref.model, ref.reasoning_class, item))
             sampled = None if source is None else source.iloc[int(rng.integers(len(source)))]
             if sampled is None:
                 probability = floor[item_index] + (1 - floor[item_index]) * expit(
@@ -404,14 +415,17 @@ def _scenario_left_probabilities(
     observed_models = maps.get("models", {})
     observed_items = {_canonical_item(item): index for item, index in maps.get("items", {}).items()}
 
-    judges = list(pd.unique(presented["judge"]))
-    models = list(pd.unique(pd.concat([presented["left_model"], presented["right_model"]], ignore_index=True)))
+    judges = list(dict.fromkeys(zip(presented["judge"], presented["judge_reasoning_class"])))
+    models = list(dict.fromkeys([
+        *zip(presented["left_model"], presented["left_reasoning_class"]),
+        *zip(presented["right_model"], presented["right_reasoning_class"]),
+    ]))
     items = list(pd.unique(presented["item"]))
     judge_effects = []
     length_deviations = []
     include_length = "length_mean" in draw
-    for judge in judges:
-        if judge in observed_judges:
+    for judge, reasoning_class in judges:
+        if judge in observed_judges and metadata.at[judge, "reasoning_class"] == reasoning_class:
             judge_effects.append(np.asarray(draw["judge_effects"])[observed_judges[judge]])
             if include_length:
                 length_deviations.append(float(np.asarray(draw["length_deviation"])[observed_judges[judge]]))
@@ -430,20 +444,25 @@ def _scenario_left_probabilities(
             ])
         if population.shape[1] != len(design):
             raise ValueError("judge population shape does not match conditional metadata")
-        raw = np.array([cache.normal((trial, "judge_raw", judge, axis)) for axis in range(2)])
+        raw = np.array([
+            cache.normal((trial, "judge_raw", judge, reasoning_class, axis))
+            for axis in range(2)
+        ])
         judge_effects.append(population @ np.asarray(design) + (raw @ corr.T) * scales)
         if include_length:
             length_deviations.append(cache.normal(
-                (trial, "judge_length", judge), 0.0, float(draw.get("length_scale", 0.0)),
+                (trial, "judge_length", judge, reasoning_class),
+                0.0, float(draw.get("length_scale", 0.0)),
             ))
 
     candidate_effects = []
-    for model in models:
-        if model in observed_models:
+    for model, reasoning_class in models:
+        if model in observed_models and metadata.at[model, "reasoning_class"] == reasoning_class:
             candidate_effects.append(float(np.asarray(draw["candidate_effects"])[observed_models[model]]))
         else:
             candidate_effects.append(cache.normal(
-                (trial, "candidate", model), 0.0, float(draw.get("candidate_scale", 0.0)),
+                (trial, "candidate", model, reasoning_class),
+                0.0, float(draw.get("candidate_scale", 0.0)),
             ))
     item_effects = []
     for item in items:
@@ -509,10 +528,18 @@ def _scenario_left_probabilities(
     item_map = {name: index for index, name in enumerate(items)}
     data = JudgmentData(
         y=np.zeros(len(presented), dtype=int),
-        judge=presented["judge"].map(judge_map).to_numpy(dtype=int),
+        judge=np.array([
+            judge_map[key] for key in zip(presented["judge"], presented["judge_reasoning_class"])
+        ], dtype=int),
         item=presented["item"].map(item_map).to_numpy(dtype=int),
-        left_model=presented["left_model"].map(model_map).to_numpy(dtype=int),
-        right_model=presented["right_model"].map(model_map).to_numpy(dtype=int),
+        left_model=np.array([
+            model_map[key]
+            for key in zip(presented["left_model"], presented["left_reasoning_class"])
+        ], dtype=int),
+        right_model=np.array([
+            model_map[key]
+            for key in zip(presented["right_model"], presented["right_reasoning_class"])
+        ], dtype=int),
         theta_gap=_standardized(artifact_metadata, "theta_gap", theta_gap),
         global_x=global_x, length_difference=length_difference,
         judge_covariates=np.zeros((len(judges), 2)), include_length=include_length,
@@ -566,7 +593,9 @@ def _usage_rows(
             latent_cache=cache, trial_id=trial,
         )
         parts.append(pd.concat([
-            requests[["model"]].assign(trial=trial, role="candidate", calls=1),
+            requests[["model", "reasoning_class"]].assign(
+                trial=trial, role="candidate", calls=1,
+            ),
             usage.reset_index(drop=True),
         ], axis=1))
     if not presented.empty:
@@ -582,12 +611,16 @@ def _usage_rows(
             latent_cache=cache, trial_id=trial,
         )
         parts.append(pd.concat([
-            requests[["model"]].assign(trial=trial, role="judge", calls=1),
+            requests[["model", "reasoning_class"]].assign(
+                trial=trial, role="judge", calls=1,
+            ),
             usage.reset_index(drop=True),
         ], axis=1))
     planned = pd.concat([
-        cells[["model"]].drop_duplicates().assign(role="candidate"),
-        comparisons[["judge"]].rename(columns={"judge": "model"}).drop_duplicates().assign(role="judge"),
+        cells[["model", "reasoning_class"]].drop_duplicates().assign(role="candidate"),
+        comparisons[["judge", "judge_reasoning_class"]].rename(columns={
+            "judge": "model", "judge_reasoning_class": "reasoning_class",
+        }).drop_duplicates().assign(role="judge"),
     ], ignore_index=True).drop_duplicates()
     if not planned.empty:
         parts.append(planned.assign(
@@ -595,13 +628,13 @@ def _usage_rows(
             reasoning_tokens=0, ordinary_output_tokens=0,
         ))
     columns = [
-        "trial", "role", "model", "calls", "input_tokens", "output_tokens",
+        "trial", "role", "model", "reasoning_class", "calls", "input_tokens", "output_tokens",
         "reasoning_tokens", "ordinary_output_tokens",
     ]
     if not parts:
         return pd.DataFrame(columns=columns)
     return pd.concat(parts, ignore_index=True).groupby(
-        ["trial", "role", "model"], as_index=False, sort=False,
+        ["trial", "role", "model", "reasoning_class"], as_index=False, sort=False,
     )[["calls", "input_tokens", "output_tokens", "reasoning_tokens", "ordinary_output_tokens"]].sum()
 
 
@@ -612,7 +645,7 @@ def _trial_rows(
     base = {
         "trial": trial, "configuration": config.configuration, "mode": config.mode,
         "comparison_id": pd.NA, "judge": pd.NA, "m1": pd.NA, "m2": pd.NA,
-        "model": pd.NA, "role": pd.NA, "warning_state": "ok",
+        "model": pd.NA, "reasoning_class": pd.NA, "role": pd.NA, "warning_state": "ok",
     }
     rows: list[dict[str, Any]] = []
 
@@ -665,13 +698,17 @@ def _trial_rows(
         role_usage = usage.loc[usage["role"].eq(role)]
         for record in role_usage.to_dict("records"):
             for column, template in token_columns.items():
-                add(template.format(role=role), record[column], model=record["model"], role=role)
+                add(
+                    template.format(role=role), record[column], model=record["model"],
+                    reasoning_class=record["reasoning_class"], role=role,
+                )
         for column, template in token_columns.items():
             add(template.format(role=role), role_usage[column].sum() if column in role_usage else 0,
                 model="__total__", role=role)
     for record in priced.to_dict("records"):
         add(
             "cost", record["cost"], model=record["model"], role=record["role"],
+            reasoning_class=record["reasoning_class"],
             warning_state="missing_price" if record["model"] in missing_prices else "ok",
         )
     total_cost = priced["cost"].sum() if len(priced) and not priced["cost"].isna().any() else (0.0 if priced.empty else np.nan)
@@ -710,7 +747,7 @@ def simulate(
 
     irt_parts = _irt_parts(irt)
     metadata = _price_metadata(catalogue)
-    observed = _observed_groups(observed_cells)
+    observed = _observed_groups(observed_cells, metadata)
     posterior_draws = min(
         len(draws), _posterior_count(judgment_artifact),
         _posterior_count(candidate_token_artifact), _posterior_count(judge_token_artifact),

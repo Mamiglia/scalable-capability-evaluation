@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -300,6 +302,56 @@ def test_reasoning_override_uses_population_configuration_not_fitted_identity_or
     assert metric(got, "judge_input_tokens", model="j", role="judge") == [104.0]
 
 
+def test_configurations_of_one_model_keep_separate_observed_judgment_usage_and_cost_identity():
+    judgment = judgment_artifact()
+    judgment["posterior"]["candidate_effects"] = np.array([[3.0]])
+    got = simulate(
+        pd.DataFrame([
+            {"judge": "j", "m1": "a", "m2": "b"},
+            {"judge": "j", "m1": "a", "m2": "b", "m1_reasoning_class": "reasoning"},
+        ]),
+        SimulationConfig(trials=1, attempted_items=1, presentations=2, mode="manual",
+                         reuse_responses=False),
+        item_ids=["i1"], observed_cells=observed_cells(),
+        capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+        irt=irt(), judgment_artifact=judgment,
+        candidate_token_artifact=candidate_artifact_with_override_population(),
+        judge_token_artifact=judge_token_artifact(), catalogue=catalogue(), seed=4,
+    )
+    usage = got.trials.query(
+        "metric == 'candidate_input_tokens' and model == 'a' and role == 'candidate'"
+    )
+    assert dict(zip(usage["reasoning_class"], usage["value"])) == {
+        "non_reasoning": 10.0, "reasoning": 30.0,
+    }
+    costs = got.trials.query("metric == 'cost' and model == 'a' and role == 'candidate'")
+    assert dict(zip(costs["reasoning_class"], costs["value"])) == {
+        "non_reasoning": 50 / 1_000_000, "reasoning": 138 / 1_000_000,
+    }
+    assert np.isclose(metric(got, "p_choose_m1", comparison_id=1)[0], expit(1.0))
+
+
+def test_observed_cells_are_sampled_by_exact_reasoning_configuration():
+    observed = observed_cells().assign(reasoning_class="non_reasoning")
+    observed = pd.concat([observed, pd.DataFrame([{
+        "model": "a", "item": "i1", "reasoning_class": "reasoning",
+        "correct": 0, "response_chars": 99, "visible_reasoning": 1,
+    }])], ignore_index=True)
+    got = simulate(
+        pd.DataFrame([{
+            "judge": "j", "m1": "a", "m2": "b", "m1_reasoning_class": "reasoning",
+        }]),
+        SimulationConfig(trials=1, attempted_items=1, presentations=2, mode="manual"),
+        item_ids=["i1"], observed_cells=observed,
+        capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+        irt=irt(), judgment_artifact=judgment_artifact(),
+        candidate_token_artifact=candidate_artifact_with_override_population(),
+        judge_token_artifact=judge_token_artifact(), catalogue=catalogue(), seed=4,
+    )
+    assert metric(got, "usable_items", comparison_id=0) == [0.0]
+    assert np.isnan(metric(got, "p_choose_m1", comparison_id=0)[0])
+
+
 def test_manual_rows_keep_raw_probability_and_ties_out_of_accuracy():
     got = run_simulation()
     assert np.isclose(metric(got, "p_choose_m1", comparison_id=0)[0], expit(1.0))
@@ -391,6 +443,49 @@ def test_one_cache_reuses_unseen_judge_within_trial_and_redraws_across_cycled_po
     assert probabilities.loc[0, 0] != probabilities.loc[1, 0]
 
 
+def test_posterior_draws_cycle_zero_one_zero_and_same_seed_repeats():
+    def with_two_draws(artifact):
+        result = copy.deepcopy(artifact)
+        result["posterior"] = {
+            name: np.repeat(np.asarray(values), 2, axis=0)
+            for name, values in result["posterior"].items()
+        }
+        return result
+
+    judgment = with_two_draws(judgment_artifact())
+    judgment["posterior"]["judge_effects"][1, 0, 1] = 2.0
+    candidate = with_two_draws(candidate_artifact())
+    candidate["posterior"]["input_mean"][1, 0] = np.log1p(11)
+    judge_tokens = with_two_draws(judge_token_artifact())
+    judge_tokens["posterior"]["output_mean"][1, 0] = np.log1p(12)
+    irt_draws = copy.deepcopy(irt())
+    irt_draws["a"] = np.repeat(irt_draws["a"], 2, axis=0)
+    irt_draws["b"] = np.repeat(irt_draws["b"], 2, axis=0)
+    irt_draws["a"][1] = [90.0, 90.0]
+
+    def run():
+        return simulate(
+            pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+            SimulationConfig(trials=3, attempted_items=1, presentations=2, mode="manual"),
+            item_ids=["i1"], observed_cells=observed_cells(),
+            capability_models=["j", "a", "b"],
+            capability_draws=np.array([[0.0, 1.0, 0.0], [0.0, 2.0, 0.0]]),
+            irt=irt_draws, judgment_artifact=judgment,
+            candidate_token_artifact=candidate, judge_token_artifact=judge_tokens,
+            catalogue=catalogue(), seed=5,
+        )
+
+    first = run()
+    assert np.allclose(
+        metric(first, "p_choose_m1", comparison_id=0),
+        [expit(1.0), expit(4.0), expit(1.0)],
+    )
+    second = run()
+    pd.testing.assert_frame_equal(first.trials, second.trials)
+    pd.testing.assert_frame_equal(first.summary, second.summary)
+    pd.testing.assert_frame_equal(first.warnings, second.warnings)
+
+
 def test_shared_graph_counts_unique_candidate_generation_and_seed_is_deterministic():
     comparisons = pd.DataFrame([
         {"judge": "j", "m1": "a", "m2": "b"},
@@ -417,6 +512,25 @@ def test_missing_constituent_price_propagates_to_total_cost():
         candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
         catalogue=prices, seed=4,
     )
+    assert np.isnan(metric(got, "cost", model="__total__", role="all")[0])
+    assert got.warnings.query("code == 'missing_price'")["model"].tolist() == ["b"]
+
+
+def test_zero_use_unpriced_planned_configuration_stays_nan_and_suppresses_total():
+    prices = catalogue()
+    prices.loc[prices.model_id == "b", ["price_in", "price_out"]] = np.nan
+    got = simulate(
+        pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+        SimulationConfig(trials=1, attempted_items=1, presentations=2, mode="manual"),
+        item_ids=["i2"], observed_cells=observed_cells().assign(correct=0),
+        capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+        irt=irt(), judgment_artifact=judgment_artifact(),
+        candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+        catalogue=prices, seed=2,
+    )
+    assert np.isnan(metric(
+        got, "cost", model="b", role="candidate", reasoning_class="non_reasoning",
+    )[0])
     assert np.isnan(metric(got, "cost", model="__total__", role="all")[0])
     assert got.warnings.query("code == 'missing_price'")["model"].tolist() == ["b"]
 
