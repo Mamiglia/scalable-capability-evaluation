@@ -189,3 +189,22 @@ def test_toggle_single_layer_active_is_base_plus_that_layers_delta():
 
     assert torch.allclose(out, expected, atol=1e-4)
     assert lora1.scaling["default"] == original_scale1  # restored
+
+
+def test_toggle_rejects_unknown_layer_index():
+    model, _ = _toy_peft_model_with_base(n_layers=2)
+    with pytest.raises(AssertionError, match="5"):
+        with adapter_ablate.toggle(model, active_layers={5}):
+            pass
+
+
+def test_toggle_restores_scaling_even_if_block_raises():
+    model, _ = _toy_peft_model_with_base(n_layers=2)
+    originals = {(m, name): v for mods in adapter_ablate.lora_layers(model).values()
+                 for m in mods for name, v in m.scaling.items()}
+
+    with pytest.raises(ValueError):
+        with adapter_ablate.toggle(model, active_layers=set()):
+            raise ValueError("boom")
+
+    assert all(m.scaling[name] == v for (m, name), v in originals.items())  # restored

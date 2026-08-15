@@ -53,9 +53,13 @@ def toggle(model, active_layers: set[int]):
     """Context manager: for the duration of the block, layers outside `active_layers` are forced
     base-only by zeroing their LoRA modules' `.scaling` (the trained alpha/r multiplier on the
     B(Ax) branch); layers in `active_layers` keep their trained scaling. Restores the original
-    scaling on exit, regardless of exceptions inside the block."""
+    scaling on exit, regardless of exceptions inside the block. Not nesting-safe: an outer
+    toggle's zeroing can't be undone by an inner toggle's active set."""
+    layers = lora_layers(model)
+    unknown = active_layers - layers.keys()
+    assert not unknown, f"active_layers {unknown} not in model's layers {set(layers)}"
     saved = []  # (module, adapter_name, original_scale)
-    for idx, modules in lora_layers(model).items():
+    for idx, modules in layers.items():
         if idx in active_layers:
             continue
         for module in modules:
