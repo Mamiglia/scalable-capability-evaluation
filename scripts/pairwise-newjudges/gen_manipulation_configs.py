@@ -31,6 +31,7 @@ N_PAIRS = 50
 ITEMS_PER_PAIR = 15
 # How the 50 pairs split across the three ECI-gap bins (must sum to N_PAIRS).
 GAP_BIN_TARGETS = {"small": 17, "medium": 17, "large": 16}
+assert sum(GAP_BIN_TARGETS.values()) == N_PAIRS, "GAP_BIN_TARGETS must sum to N_PAIRS"
 BASELINE_CONDITION = "a_baseline"
 MAX_LENGTH = 65536
 # Only used to check baseline coverage - never written into a config, so
@@ -68,8 +69,8 @@ def gap_bins(comparisons: list, eci: dict) -> tuple[dict, tuple[float, float]]:
 
 
 def covered_items(verdicts: pd.DataFrame, major: str, minor: str) -> list[str]:
-    """Items with a baseline row for every (judge, order) combination."""
-    rows = verdicts[(verdicts.major == major) & (verdicts.minor == minor)]
+    """Items with a successfully-parsed baseline row for every (judge, order) combination."""
+    rows = verdicts[(verdicts.major == major) & (verdicts.minor == minor) & verdicts.parse_ok]
     needed = {(j, o) for j in COVERAGE_JUDGES for o in (1, 2)}
     covered = []
     for item_id, group in rows.groupby("item_id"):
