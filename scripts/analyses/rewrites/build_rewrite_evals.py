@@ -42,6 +42,7 @@ from inspect_ai.scorer import choice
 from inspect_ai.solver import multiple_choice
 
 from normalise_prefix import strip_role_prefix
+from qc_rewrites import similarity
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts/fine-tuning"))  # prep_pairs pair-construction helpers
@@ -52,10 +53,13 @@ from judge.util import extract_score, first_correct_by_id  # noqa: E402
 # any manipulations config names the same fixed 50-pair x 15-item subset
 SUBSET_CONFIG = ROOT / "scripts/pairwise-newjudges/configs/manipulations/trunc_first_10.yaml"
 EXCLUDED = ROOT / "judge_results/rewrites/excluded.json"
+# The corpora produced under the current rewrite_instruction.md. The unsuffixed files are
+# the earlier corpus, kept as the record of what the previous instruction produced.
 REWRITE_FILES = {
-    "haiku": ROOT / "judge_results/rewrites/paraphrase_haiku.jsonl",
-    "gpt": ROOT / "judge_results/rewrites/paraphrase_gpt.jsonl",
+    "haiku": ROOT / "judge_results/rewrites/paraphrase_haiku_v2.jsonl",
+    "gpt": ROOT / "judge_results/rewrites/paraphrase_gpt_v2.jsonl",
 }
+ORIGINALS = ROOT / "judge_results/rewrites/originals.jsonl"
 SOURCE_DIR = ROOT / "external_data/epoch-gpqa"
 STORE_ROOT = ROOT / "data/rewrites"
 MANIP_DIR = ROOT / "scripts/pairwise-newjudges/configs/manipulations"
@@ -188,7 +192,8 @@ def write_config(cfg: dict, condition: str, models: list[str], sample_ids: dict)
 
 
 def write_pairs_parquet(cfg: dict, condition: str, models: list[str],
-                         sample_ids: dict, store_dir: Path) -> tuple[Path, pd.DataFrame]:
+                         sample_ids: dict, store_dir: Path,
+                         sims: dict | None = None) -> tuple[Path, pd.DataFrame]:
     """Both-correct guard here is load_model_log's own extract_score filter
     (prep_pairs.py) - the same check src/judge/dataset.py's build_dataset
     applies via eligible(). That filter only drops what inspect's own
@@ -221,6 +226,11 @@ def write_pairs_parquet(cfg: dict, condition: str, models: list[str],
               f"in the built store (e.g. {skipped[:3]})")
 
     pairs = pd.DataFrame(rows)
+    if sims is not None:
+        # per-row covariate: how much each transcript actually changed. Carried rather than
+        # filtered on, so the analysis can ask whether judge accuracy varies with it.
+        pairs["sim_1"] = [sims.get((r.model_1, r.item)) for r in pairs.itertuples()]
+        pairs["sim_2"] = [sims.get((r.model_2, r.item)) for r in pairs.itertuples()]
     pairs["split"] = condition  # required by the reference schema; value unverified, no consumer yet
     check_counterbalance(pairs)
     out_path = PARQUET_DIR / f"pairs_gpqa_{condition}.parquet"
@@ -256,6 +266,8 @@ def main() -> int:
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rewriter", choices=sorted(REWRITE_FILES))
     ap.add_argument("--self-check", action="store_true")
+    ap.add_argument("--drops-out", help="write cells dropped for a bad answer letter here, as json")
+    ap.add_argument("--also-exclude", help="json list of extra cells to exclude (reconciliation)")
     args = ap.parse_args()
     if args.self_check:
         _self_check()
@@ -270,6 +282,10 @@ def main() -> int:
 
     subset = subset_keys(cfg)
     excluded = excluded_keys(EXCLUDED)
+    if args.also_exclude:
+        extra = {(c["model"], c["item_id"]) for c in json.loads(Path(args.also_exclude).read_text())}
+        print(f"reconciliation: {len(extra & subset)} extra cell(s) excluded so both rewriters match")
+        excluded |= extra
     covered = subset - excluded
     print(f"{len(subset)} subset cells - {len(excluded & subset)} excluded = {len(covered)} to build")
 
@@ -303,12 +319,25 @@ def main() -> int:
         covered -= {(c["model"], c["item"]) for c in all_bad}
     assert n_built == len(covered), f"built {n_built} sample-slots, expected {len(covered)}"
 
+    if args.drops_out:
+        Path(args.drops_out).write_text(json.dumps(
+            [{"model": c["model"], "item_id": c["item"], "reason": c["reason"]} for c in all_bad],
+            indent=2) + "\n")
+        print(f"wrote {len(all_bad)} answer-letter drop(s) to {args.drops_out}")
+
     models = sorted({m for m, _ in covered})
     sids = filtered_sample_ids(cfg, covered)
     cfg_path = write_config(cfg, condition, models, sids)
     print(f"wrote {cfg_path}")
 
-    parquet_path, pairs = write_pairs_parquet(cfg, condition, models, sids, out_dir)
+    originals = {(r["model"], r["item_id"]): r["transcript"]
+                 for r in map(json.loads, ORIGINALS.read_text().splitlines()) if r}
+    sims = {k: round(similarity(originals[k], rewrites[k]), 4) for k in covered}
+    sim_path = PARQUET_DIR / f"similarity_{condition}.json"
+    sim_path.write_text(json.dumps({f"{m}|{i}": v for (m, i), v in sorted(sims.items())}, indent=2) + "\n")
+    print(f"wrote {sim_path} ({len(sims)} cells)")
+
+    parquet_path, pairs = write_pairs_parquet(cfg, condition, models, sids, out_dir, sims)
     print(f"wrote {parquet_path}: {pairs.pair_uid.nunique()} pairs, {len(pairs)} rows")
     return 0
 
