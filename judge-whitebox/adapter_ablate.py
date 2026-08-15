@@ -1,8 +1,11 @@
 """Unmerged-adapter loader: attaches a LoRA adapter without merging it into the base weights, so
 individual LoRA modules stay addressable for causal ablation."""
+import argparse
 import contextlib
+import pathlib
 import re
 
+import numpy as np
 import pandas as pd
 import torch
 from peft import PeftModel
@@ -10,6 +13,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import verdicts
 import wbconfig
+import wbpairs
 import wbprompts
 
 
@@ -156,3 +160,35 @@ def run_ablation(model, tokenizer, df, groups: dict[str, set[int]], c):
                               necessity=necessity, interaction=necessity - sufficiency))
     return pd.DataFrame(rows, columns=["group", "metric", "base", "group_only", "full", "full_minus",
                                         "sufficiency", "necessity", "interaction"])
+
+
+def layer_groups(model, names: list[str]) -> dict[str, set[int]]:
+    """Names, in order, split the model's own sorted LoRA layer indices into len(names)
+    contiguous near-equal chunks (extra layers go to the earliest chunks). Group names come
+    from config; the index sets come from the loaded model, so they're right for any depth."""
+    indices = sorted(lora_layers(model))
+    return {name: set(int(i) for i in chunk)
+            for name, chunk in zip(names, np.array_split(indices, len(names)))}
+
+
+def main():
+    c = wbconfig.cfg()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", required=True, help="name key into models.hf_ids")
+    parser.add_argument("--adapter", required=True, help="LoRA adapter path")
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--out", required=True)
+    args = parser.parse_args()
+
+    model, tokenizer, device = load_unmerged(args.model, args.adapter, c)
+    df = wbpairs.load_pairs(c, split=c["verdicts"]["eval_split"], limit=args.limit)
+    groups = layer_groups(model, c["adapter_ablate"]["groups"])
+    out = run_ablation(model, tokenizer, df, groups, c)
+
+    out_path = pathlib.Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(out_path, index=False)
+
+
+if __name__ == "__main__":
+    main()

@@ -32,6 +32,7 @@ ablate:
 
 adapter_ablate:
   target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  groups: [early, mid, late]
 
 before_after:
   min_sim: 0.5

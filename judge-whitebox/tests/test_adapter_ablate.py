@@ -1,4 +1,5 @@
 import copy
+import sys
 
 import pandas as pd
 import peft
@@ -8,6 +9,7 @@ import torch.nn as nn
 
 import adapter_ablate
 import wbconfig
+import wbpairs
 
 
 class ToyLayer(nn.Module):
@@ -384,3 +386,60 @@ def test_run_ablation_hoists_base_and_full_across_groups(monkeypatch):
     assert calls.count(frozenset({1, 2})) == 1  # g1 full_minus
     assert calls.count(frozenset({0, 2})) == 1  # g2 full_minus
     assert len(calls) == 6  # 2 hoisted + 2 groups x 2 per-group conditions
+
+
+def test_layer_groups_splits_into_named_contiguous_chunks():
+    model = _toy_peft_model(n_layers=6)
+    groups = adapter_ablate.layer_groups(model, ["early", "mid", "late"])
+    assert set(groups) == {"early", "mid", "late"}
+    assert groups["early"] == {0, 1}
+    assert groups["mid"] == {2, 3}
+    assert groups["late"] == {4, 5}
+    covered = set().union(*groups.values())
+    assert covered == {0, 1, 2, 3, 4, 5}  # every layer covered
+    assert sum(len(v) for v in groups.values()) == 6  # and covered exactly once
+
+
+def test_layer_groups_handles_count_not_divisible_by_group_count():
+    model = _toy_peft_model(n_layers=5)
+    groups = adapter_ablate.layer_groups(model, ["early", "mid", "late"])
+    assert [len(groups[name]) for name in ["early", "mid", "late"]] == [2, 2, 1]
+    assert groups["early"] == {0, 1}
+    assert groups["mid"] == {2, 3}
+    assert groups["late"] == {4}
+
+
+def test_main_writes_nonempty_csv_with_expected_columns(tmp_path, monkeypatch):
+    model = _toy_peft_model(n_layers=3)
+    monkeypatch.setattr(adapter_ablate, "load_unmerged",
+                        lambda model_name, adapter, c: (model, "tok", "cpu"))
+    monkeypatch.setattr(wbpairs, "load_pairs",
+                        lambda c, split=None, limit=None: pd.DataFrame({"pair_uid": ["p1", "p2"]}))
+    stub_out = pd.DataFrame([
+        dict(group="early", metric="acc", base=0.1, group_only=0.2, full=0.3, full_minus=0.4,
+             sufficiency=0.1, necessity=-0.1, interaction=-0.2),
+    ])
+    run_calls = []
+
+    def stub_run_ablation(model_arg, tokenizer_arg, df_arg, groups, c_arg):
+        run_calls.append((df_arg, groups))
+        return stub_out
+    monkeypatch.setattr(adapter_ablate, "run_ablation", stub_run_ablation)
+
+    cfg = {"verdicts": {"eval_split": "eval_mm"},
+           "adapter_ablate": {"groups": ["early", "mid", "late"], "target_modules": ["q_proj"]}}
+    monkeypatch.setattr(wbconfig, "cfg", lambda path=None: cfg)
+    out_path = tmp_path / "sub" / "out.csv"
+    monkeypatch.setattr(sys, "argv", ["adapter_ablate.py", "--model", "dev", "--adapter", "a/path",
+                                      "--limit", "2", "--out", str(out_path)])
+
+    adapter_ablate.main()
+
+    assert len(run_calls) == 1
+    assert set(run_calls[0][1]) == {"early", "mid", "late"}  # groups derived from the toy model
+
+    assert out_path.exists()
+    df = pd.read_csv(out_path)
+    assert len(df) > 0
+    assert set(df.columns) == {"group", "metric", "base", "group_only", "full", "full_minus",
+                                "sufficiency", "necessity", "interaction"}
