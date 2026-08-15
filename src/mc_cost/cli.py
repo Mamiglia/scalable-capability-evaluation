@@ -6,7 +6,6 @@ import argparse
 import csv
 import hashlib
 import json
-import runpy
 import shutil
 import sys
 import tempfile
@@ -19,7 +18,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import expit
 
-from mc_cost.catalogue import build_capability_draws, build_catalogue, validate_catalogue
+from mc_cost.catalogue import build_capability_draws, build_catalogue, pool_enabled, validate_catalogue
 from mc_cost.data import (
     RELEASE_EPOCH,
     candidate_token_rows,
@@ -29,6 +28,7 @@ from mc_cost.data import (
     write_prepared_tables,
 )
 from mc_cost.design import AutomaticConfig, automatic_comparisons, manual_comparisons
+from mc_cost.gpqa import prepare as prepare_gpqa
 from mc_cost.model import (
     FEATURE_COLUMNS,
     JUDGMENT_SPECS,
@@ -59,15 +59,20 @@ _COMMANDS = ("catalogue", "prepare", "fit", "validate", "simulate", "export-dash
 _MANUAL_COLUMNS = (
     "judge", "m1", "m2", "judge_reasoning_class", "m1_reasoning_class", "m2_reasoning_class",
 )
+_CATALOGUE_FILES = ("catalogue.csv", "capability_draws.npz")
+_PREPARE_FILES = (
+    "judgments.parquet", "token_candidate.parquet", "token_judge.parquet",
+    "judgment_standardization.json", "scales.json",
+)
+_MODEL_FILES = tuple(
+    f"model/{name}.{suffix}"
+    for name in (*JUDGMENT_SPECS, "candidate_token", "judge_token")
+    for suffix in ("npz", "json")
+)
 
 
 class CliError(ValueError):
     pass
-
-
-def prepare_gpqa(*args, **kwargs):
-    source = Path(__file__).resolve().parents[2] / "scripts/hibayes/prepare_gpqa.py"
-    return runpy.run_path(str(source))["prepare"](*args, **kwargs)
 
 
 def _positive(value: str) -> int:
@@ -174,7 +179,12 @@ def _require(path: Path, command: str) -> None:
 def _require_source(config: dict[str, Any], name: str) -> Path:
     path = _configured_path(config, name)
     if not path.exists():
-        raise CliError(f"configured source does not exist: {path}")
+        guidance = (
+            "; run `uv run python scripts/irt_proxy/run.py` first"
+            if name in {"irt_capabilities", "irt_items", "irt_posterior"}
+            else ""
+        )
+        raise CliError(f"configured source does not exist: {path}{guidance}")
     return path
 
 
@@ -192,6 +202,37 @@ def _publish(stage: Path, output: Path, names: list[str]) -> None:
         source, target = stage / name, output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         source.replace(target)
+
+
+def _write_manifest(output: Path, manifest: str, names) -> None:
+    _write_json(output / manifest, {
+        "schema_version": 1,
+        "files": {name: _hash_file(output / name) for name in names},
+    })
+
+
+def _verify_generation(
+    output: Path, manifest: str, required, command: str, label: str,
+) -> None:
+    path = output / manifest
+    _require(path, command)
+    try:
+        payload = json.loads(path.read_text())
+        files = payload["files"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        raise CliError(f"invalid {label} generation manifest; rerun `mc-cost {command}`") from None
+    if not isinstance(files, dict) or not set(required) <= set(files):
+        raise CliError(f"incomplete {label} generation manifest; rerun `mc-cost {command}`")
+    for name, expected in files.items():
+        relative = Path(name)
+        if (
+            not isinstance(name, str) or not isinstance(expected, str)
+            or relative.is_absolute() or ".." in relative.parts
+        ):
+            raise CliError(f"invalid {label} generation manifest; rerun `mc-cost {command}`")
+        artifact = output / relative
+        if not artifact.is_file() or _hash_file(artifact) != expected:
+            raise CliError(f"{label} generation hash mismatch for {name}; rerun `mc-cost {command}`")
 
 
 def _temporary_directory(parent: Path):
@@ -222,12 +263,16 @@ def _catalogue(args: argparse.Namespace, config: dict[str, Any]) -> None:
             seed=np.asarray(seed), source_names=np.asarray(list(hashes), dtype=str),
             source_hashes=np.asarray(list(hashes.values()), dtype=str),
         )
-        _publish(stage, output, ["catalogue.csv", "capability_draws.npz"])
+        _publish(stage, output, list(_CATALOGUE_FILES))
+        _write_manifest(output, "catalogue.manifest.json", _CATALOGUE_FILES)
 
 
 def _prepare(args: argparse.Namespace, config: dict[str, Any]) -> None:
     output = _output(config)
     _require(output / "catalogue.csv", "catalogue")
+    _verify_generation(
+        output, "catalogue.manifest.json", _CATALOGUE_FILES, "catalogue", "catalogue",
+    )
     items_path = _require_source(config, "irt_items")
     logs = _require_source(config, "judge_logs")
     models = _require_source(config, "judge_models")
@@ -235,11 +280,15 @@ def _prepare(args: argparse.Namespace, config: dict[str, Any]) -> None:
     roots = config["paths"].get("candidate_log_roots", [])
     if not isinstance(roots, list) or any(not isinstance(root, str) for root in roots):
         raise CliError("configuration paths.candidate_log_roots must be a list of paths")
+    root_paths = [Path(root) for root in roots]
+    for root in root_paths:
+        if not root.is_dir():
+            raise CliError(f"configured candidate log root does not exist: {root}")
     catalogue = pd.read_csv(output / "catalogue.csv")
     items = pd.read_csv(items_path)
     attempts, _, _ = prepare_gpqa(logs, models, responses)
     judgments = prepare_judgments(attempts, catalogue, items)
-    candidates = candidate_token_rows([Path(root) for root in roots], catalogue, items)
+    candidates = candidate_token_rows(root_paths, catalogue, items)
     judges = judge_token_rows(judgments)
     with _temporary_directory(output.parent) as directory:
         stage = Path(directory)
@@ -247,10 +296,8 @@ def _prepare(args: argparse.Namespace, config: dict[str, Any]) -> None:
             stage, judgments, candidates, judges, training_rows=np.ones(len(judgments), dtype=bool),
         )
         shutil.copyfile(paths["judgment_standardization"], stage / "scales.json")
-        _publish(stage, output, [
-            "judgments.parquet", "token_candidate.parquet", "token_judge.parquet",
-            "judgment_standardization.json", "scales.json",
-        ])
+        _publish(stage, output, list(_PREPARE_FILES))
+        _write_manifest(output, "prepare.manifest.json", _PREPARE_FILES)
 
 
 def _scales_path(output: Path) -> Path:
@@ -276,7 +323,27 @@ def _fit_sources(output: Path) -> dict[str, Path]:
     }
     for path in sources.values():
         _require(path, "prepare" if path.name not in {"catalogue.csv", "capability_draws.npz"} else "catalogue")
+    _verify_generation(
+        output, "catalogue.manifest.json", _CATALOGUE_FILES, "catalogue", "catalogue",
+    )
+    _verify_generation(output, "prepare.manifest.json", _PREPARE_FILES, "prepare", "prepared-data")
     return sources
+
+
+def _tag_judgment_artifact(
+    artifact: PosteriorArtifact, spec, source_hashes: dict[str, str], conditional_judges: bool,
+) -> PosteriorArtifact:
+    return PosteriorArtifact(
+        artifact.posterior,
+        {
+            **artifact.metadata,
+            "feature_order": list(spec.global_features),
+            "include_length": spec.include_length,
+            "source_hashes": source_hashes,
+            "conditional_judges": conditional_judges,
+        },
+        artifact.diagnostics,
+    )
 
 
 def _fit(args: argparse.Namespace, config: dict[str, Any]) -> None:
@@ -299,17 +366,17 @@ def _fit(args: argparse.Namespace, config: dict[str, Any]) -> None:
             data = encode_judgments(
                 judgments, catalogue, spec, training_scales=scales, source_hashes=hashes,
             )
-            save_artifact(fit_judgment_model(data, **settings), stage / name)
+            artifact = _tag_judgment_artifact(
+                fit_judgment_model(data, **settings), spec, hashes, True,
+            )
+            save_artifact(artifact, stage / name)
         for role, frame in (("candidate", candidate_tokens), ("judge", judge_tokens)):
             artifact = fit_token_model(
                 frame, role, reasoning_classes=catalogue, source_hashes=hashes, **settings,
             )
             save_artifact(artifact, stage / f"{role}_token")
-        _publish(Path(directory), output, [
-            f"model/{name}.{suffix}"
-            for name in (*JUDGMENT_SPECS, "candidate_token", "judge_token")
-            for suffix in ("npz", "json")
-        ])
+        _publish(Path(directory), output, list(_MODEL_FILES))
+        _write_manifest(output, "model/manifest.json", _MODEL_FILES)
 
 
 def _fit_settings(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, int]:
@@ -389,7 +456,7 @@ def _held_out_judgment_probabilities(
             local[name] = posterior[name]
     if length_deviation is not None:
         local["length_deviation"] = length_deviation
-    return expit(left_logits(local, held_out)).mean(axis=0)
+    return expit(left_logits(local, held_out))
 
 
 def _judgment_validator(
@@ -409,8 +476,10 @@ def _judgment_validator(
         artifact = fit_judgment_model(
             training, conditional_judges=conditional_judges, **child_settings,
         )
+        held_out_rows = standardized.iloc[len(train):].copy()
+        held_out_rows["chosen_left"] = 0  # Predictor encoding never consumes this dummy outcome.
         held_out = encode_judgments(
-            standardized.iloc[len(train):], catalogue, spec,
+            held_out_rows, catalogue, spec,
             training_scales=scale_map, source_hashes=hashes,
         )
         return _held_out_judgment_probabilities(artifact, training, held_out, catalogue, rng)
@@ -455,13 +524,37 @@ def _token_validator(
     return fit_predict
 
 
+def _fitted_artifacts(output: Path, hashes: dict[str, str]) -> dict[str, PosteriorArtifact]:
+    _verify_generation(output, "model/manifest.json", _MODEL_FILES, "fit", "model")
+    artifacts = {
+        name: load_artifact(output / f"model/{name}")
+        for name in (*JUDGMENT_SPECS, "candidate_token", "judge_token")
+    }
+    for name, artifact in artifacts.items():
+        if artifact.metadata.get("source_hashes") != hashes:
+            raise CliError(f"{name} artifact source hash mismatch; rerun `mc-cost fit`")
+    for name, role in (("candidate_token", "candidate"), ("judge_token", "judge")):
+        if artifacts[name].metadata.get("role") != role:
+            raise CliError(f"{name} artifact role mismatch; rerun `mc-cost fit`")
+    return artifacts
+
+
+def _selected_artifact_matches(
+    artifact: PosteriorArtifact, selected: str, conditional_judges: bool,
+) -> bool:
+    spec = JUDGMENT_SPECS[selected]
+    return (
+        artifact.metadata.get("feature_order") == list(spec.global_features)
+        and artifact.metadata.get("include_length") is spec.include_length
+        and artifact.metadata.get("conditional_judges") is conditional_judges
+    )
+
+
 def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
     output = _output(config)
     sources = _fit_sources(output)
-    for name in (*JUDGMENT_SPECS, "candidate_token", "judge_token"):
-        for suffix in ("npz", "json"):
-            _require(output / f"model/{name}.{suffix}", "fit")
     hashes = {name: _hash_file(path) for name, path in sources.items()}
+    fitted_artifacts = _fitted_artifacts(output, hashes)
     catalogue = pd.read_csv(sources["catalogue"])
     judgments = pd.read_parquet(sources["judgments"])
     candidates = pd.read_parquet(sources["candidate_tokens"])
@@ -504,17 +597,24 @@ def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
     )
     payload["validation_config"] = settings
     expected_conditional = bool(judge_gate["enabled"])
-    selected_path = output / f"model/{selected['selected']}"
-    selected_artifact = load_artifact(selected_path)
+    selected_artifact = fitted_artifacts[selected["selected"]]
     refitted_artifact = None
-    if selected_artifact.metadata.get("conditional_judges") is not expected_conditional:
+    if not _selected_artifact_matches(
+        selected_artifact, selected["selected"], expected_conditional,
+    ):
         full_data = encode_judgments(
             judgments, catalogue, spec,
             training_scales=_load_scales(sources["scales"]), source_hashes=hashes,
         )
-        refitted_artifact = fit_judgment_model(
-            full_data, conditional_judges=expected_conditional, **settings,
+        refitted_artifact = _tag_judgment_artifact(
+            fit_judgment_model(
+                full_data, conditional_judges=expected_conditional, **settings,
+            ),
+            spec, hashes, expected_conditional,
         )
+        selected_artifact = refitted_artifact
+    if not _selected_artifact_matches(selected_artifact, selected["selected"], expected_conditional):
+        raise CliError("selected full-data judgment artifact does not match the validated specification")
 
     replay_predictions = judgment_predictions.loc[
         judgment_predictions["spec"].eq(selected["selected"])
@@ -522,21 +622,20 @@ def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
         & judgment_predictions["validation"].eq("judge")
     ].copy()
     observed = judgments.reset_index(names="source_row")
-    replay_predictions = replay_predictions.merge(observed, on="source_row", how="left", validate="one_to_one")
+    replay_predictions = replay_predictions.merge(observed, on="source_row", how="left", validate="many_to_one")
     replay_rows = []
-    for row in replay_predictions.to_dict("records"):
-        for draw in range(max(2, settings["samples"])):
-            replay_rows.append({
-                "row_id": row["source_row"], "draw": draw,
-                "observed_choice": row["chosen_left"],
-                "predicted_choice": int(rng.binomial(1, row["probability"])),
-                **{name: row[name] for name in (
-                    "judge", "theta_gap", "oversight", "difficulty",
-                    "release_gap_days", "length_difference", "correct", "visible_reasoning",
-                ) if name in row},
-                **({"m1_is_left": row["major_is_left"]} if "major_is_left" in row else {}),
-                "probability": row["probability"],
-            })
+    for position, row in enumerate(replay_predictions.to_dict("records")):
+        replay_rows.append({
+            "row_id": row["source_row"], "draw": int(row.get("draw", position)),
+            "observed_choice": row["chosen_left"],
+            "predicted_choice": int(rng.binomial(1, row["probability"])),
+            **{name: row[name] for name in (
+                "judge", "theta_gap", "oversight", "difficulty",
+                "release_gap_days", "length_difference", "correct", "visible_reasoning",
+            ) if name in row},
+            **({"m1_is_left": row["major_is_left"]} if "major_is_left" in row else {}),
+            "probability": row["probability"],
+        })
     replay = posterior_predictive_replay(pd.DataFrame(replay_rows))
     votes = judgments.rename(columns={
         "left_model": "major", "right_model": "minor", "item": "item_id",
@@ -574,6 +673,59 @@ def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
         _publish(Path(directory), output, [
             *extra, *(f"validation/{name}" for name in names), "validation/decision.json",
         ])
+        if extra:
+            _write_manifest(output, "model/manifest.json", _MODEL_FILES)
+        _write_manifest(
+            output, "validation/manifest.json",
+            [*(f"validation/{name}" for name in names), "validation/decision.json"],
+        )
+
+
+def _semantic_decision_hash(decision: dict[str, Any]) -> str:
+    semantic = {key: value for key, value in decision.items() if key != "validation_timestamp"}
+    encoded = json.dumps(semantic, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _capability_inputs(
+    config: dict[str, Any], path: Path, catalogue: pd.DataFrame, irt: dict[str, np.ndarray],
+) -> tuple[list[str], np.ndarray]:
+    with np.load(path, allow_pickle=False) as stored:
+        required = {"models", "draws", "source_names", "source_hashes"}
+        if missing := required - set(stored.files):
+            raise CliError(f"capability draws lack provenance arrays: {', '.join(sorted(missing))}")
+        models = stored["models"].astype(str).tolist()
+        draws = np.asarray(stored["draws"], dtype=float)
+        source_names = stored["source_names"].astype(str).tolist()
+        source_values = stored["source_hashes"].astype(str).tolist()
+    expected_names = {"canonical_models", "model_pool", "irt_capabilities", "irt_posterior"}
+    if (
+        len(source_names) != len(source_values) or len(source_names) != len(set(source_names))
+        or set(source_names) != expected_names
+    ):
+        raise CliError("capability draws contain invalid source_names/source_hashes provenance")
+    embedded = dict(zip(source_names, source_values))
+    for name in sorted(expected_names):
+        current = _hash_file(_require_source(config, name))
+        if embedded[name] != current:
+            label = "IRT posterior" if name == "irt_posterior" else name
+            raise CliError(f"capability draws {label} hash mismatch; rerun `mc-cost catalogue`")
+
+    catalogue_ids = set(catalogue["model_id"].astype(str))
+    required_models = set()
+    for column in ("judge_pool", "candidate_pool"):
+        if column in catalogue:
+            required_models.update(catalogue.loc[catalogue[column].map(pool_enabled), "model_id"].astype(str))
+    if (
+        len(models) != len(set(models)) or draws.ndim != 2 or draws.shape[1] != len(models)
+        or not np.isfinite(draws).all() or not len(draws)
+        or not set(models) <= catalogue_ids or not required_models <= set(models)
+    ):
+        raise CliError("capability model alignment does not match the current catalogue")
+    a_key = "fixed_3pl__gpqa__a" if "fixed_3pl__gpqa__a" in irt else "a"
+    if a_key not in irt or len(np.asarray(irt[a_key])) != len(draws):
+        raise CliError("capability and IRT posterior draw counts are not aligned")
+    return models, draws
 
 
 def _simulation_inputs(config: dict[str, Any]) -> dict[str, Any]:
@@ -581,48 +733,61 @@ def _simulation_inputs(config: dict[str, Any]) -> dict[str, Any]:
     sources = _fit_sources(output)
     hashes = {name: _hash_file(path) for name, path in sources.items()}
     decision_path = output / "validation/decision.json"
-    _require(decision_path, "validate")
+    _verify_generation(
+        output, "validation/manifest.json", ["validation/decision.json"],
+        "validate", "validation",
+    )
     decision = require_decision(decision_path, hashes)
     selected = decision.get("selected_judgment_spec")
     if selected not in JUDGMENT_SPECS:
         raise CliError("decision.json does not select a sanctioned judgment specification")
-    artifact_paths = {
-        "judgment": output / f"model/{selected}",
-        "candidate_token": output / "model/candidate_token",
-        "judge_token": output / "model/judge_token",
+    selected_spec = JUDGMENT_SPECS[selected]
+    expected_spec = {
+        "global_features": list(selected_spec.global_features),
+        "include_length": selected_spec.include_length,
     }
-    for path in artifact_paths.values():
-        for suffix in (".npz", ".json"):
-            _require(path.with_suffix(suffix), "fit")
-    artifacts = {name: load_artifact(path) for name, path in artifact_paths.items()}
-    for name, artifact in artifacts.items():
-        if artifact.metadata.get("source_hashes") != hashes:
-            raise CliError(f"{name} artifact source hash mismatch; rerun `mc-cost fit` and `mc-cost validate`")
+    if decision.get("judgment_spec") != expected_spec:
+        raise CliError("decision judgment specification does not match the sanctioned selection")
+    fitted = _fitted_artifacts(output, hashes)
+    artifacts = {
+        "judgment": fitted[selected],
+        "candidate_token": fitted["candidate_token"],
+        "judge_token": fitted["judge_token"],
+    }
     gate = decision.get("judge_covariate_gate", {}).get("enabled")
     if type(gate) is not bool:
         raise CliError("decision.json lacks a boolean judge-covariate gate")
-    if artifacts["judgment"].metadata.get("conditional_judges") is not gate:
-        raise CliError("judgment artifact disagrees with the validated judge-covariate gate; rerun `mc-cost validate`")
+    if not _selected_artifact_matches(artifacts["judgment"], selected, gate):
+        raise CliError(
+            "selected judgment specification or judge-covariate gate disagrees with its artifact; "
+            "rerun `mc-cost validate`"
+        )
 
     irt_path = _require_source(config, "irt_posterior")
-    with np.load(sources["capability_draws"], allow_pickle=False) as stored:
-        capability_models = stored["models"].astype(str).tolist()
-        capability_draws = stored["draws"].copy()
     with np.load(irt_path, allow_pickle=False) as stored:
         irt = {name: stored[name].copy() for name in stored.files}
+    catalogue = pd.read_csv(sources["catalogue"])
+    capability_models, capability_draws = _capability_inputs(
+        config, sources["capability_draws"], catalogue, irt,
+    )
     item_key = "fixed_3pl__gpqa__items" if "fixed_3pl__gpqa__items" in irt else "items"
     if item_key not in irt:
         raise CliError("IRT posterior lacks fixed_3pl GPQA item labels")
     source_hashes = {
         **hashes,
-        "decision": _hash_file(decision_path),
+        "decision": _semantic_decision_hash(decision),
         "irt_posterior": _hash_file(irt_path),
+    }
+    artifact_paths = {
+        "judgment": output / f"model/{selected}",
+        "candidate_token": output / "model/candidate_token",
+        "judge_token": output / "model/judge_token",
     }
     for name, path in artifact_paths.items():
         source_hashes[f"{name}_posterior"] = _hash_file(path.with_suffix(".npz"))
         source_hashes[f"{name}_metadata"] = _hash_file(path.with_suffix(".json"))
     return {
-        "output": output, "catalogue": pd.read_csv(sources["catalogue"]),
+        "output": output, "catalogue": catalogue,
         "observed_cells": pd.read_parquet(sources["candidate_tokens"]),
         "capability_models": capability_models, "capability_draws": capability_draws,
         "irt": irt, "item_ids": irt[item_key].astype(str).tolist(),
@@ -714,23 +879,6 @@ def _call_simulation(comparisons, resolved: dict[str, Any], inputs: dict[str, An
     )
 
 
-def _replace_directory(source: Path, target: Path) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    backup = target.with_name(f".{target.name}.previous")
-    if backup.exists():
-        shutil.rmtree(backup)
-    if target.exists():
-        target.replace(backup)
-    try:
-        source.replace(target)
-    except Exception:
-        if backup.exists():
-            backup.replace(target)
-        raise
-    if backup.exists():
-        shutil.rmtree(backup)
-
-
 def _simulate_command(args: argparse.Namespace, config: dict[str, Any]) -> None:
     inputs = _simulation_inputs(config)
     resolved = _resolved_simulation(args, config, "manual" if args.manual is not None else "automatic")
@@ -752,7 +900,10 @@ def _simulate_command(args: argparse.Namespace, config: dict[str, Any]) -> None:
         result.summary.to_csv(stage / "summary.csv", index=False)
         result.warnings.to_csv(stage / "warnings.csv", index=False)
         write_run_config(stage / "config.json", resolved, inputs["source_hashes"])
-        _replace_directory(stage, runs / run_id)
+        target = runs / run_id
+        run_files = ("trials.parquet", "summary.csv", "warnings.csv", "config.json")
+        _publish(stage, target, list(run_files))
+        _write_manifest(target, "manifest.json", run_files)
 
 
 def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
@@ -771,12 +922,17 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
         "judge_counts", "anchor_counts", "comparator_counts",
         "attempted_item_counts", "presentation_counts",
     )
-    grid = []
-    for key in keys:
+    labels = ("judges", "anchors", "comparators", "items", "presentations")
+    grid, grid_config = [], {}
+    for key, label in zip(keys, labels):
         values = dashboard.get(key)
-        if not isinstance(values, list) or not values:
-            raise CliError(f"dashboard.{key} must be a nonempty list")
+        if (
+            not isinstance(values, list) or not values
+            or any(not isinstance(value, int) or isinstance(value, bool) or value < 1 for value in values)
+        ):
+            raise CliError(f"dashboard.{key} must be a nonempty list of positive integers")
         grid.append(values)
+        grid_config[label] = list(values)
 
     scenarios, warnings = [], []
     for judges, anchors, comparators, items, presentations in product(*grid):
@@ -810,11 +966,17 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
     manual_triples = dashboard.get("manual_triples", [])
     if not isinstance(manual_triples, list):
         raise CliError("dashboard.manual_triples must be a list")
+    manual_triples = _records(pd.DataFrame(manual_triples)) if manual_triples else []
+    manual_config = {
+        "items": int(defaults.get("attempted_items")),
+        "presentations": int(defaults.get("presentations", 2)),
+        "triples": manual_triples,
+    }
     if manual_triples:
         resolved = {
             "mode": "manual", "trials": trials,
-            "items": int(defaults.get("attempted_items")),
-            "presentations": int(defaults.get("presentations", 2)),
+            "items": manual_config["items"],
+            "presentations": manual_config["presentations"],
             "reuse_responses": bool(defaults.get("reuse_responses", True)),
             "accuracy_target": defaults.get("accuracy_target", "higher_theta"), "seed": seed,
         }
@@ -829,7 +991,16 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
     _write_json(target, {
         "schema_version": 1,
         "generated_at": inputs["decision"].get("validation_timestamp"),
-        "config": {"seed": seed, "trials": trials},
+        "config": {
+            "accuracy_target": defaults.get("accuracy_target", "higher_theta"),
+            "grid": grid_config,
+            "manual": manual_config,
+            "require_stronger": bool(defaults.get("require_stronger", True)),
+            "reuse_responses": bool(defaults.get("reuse_responses", True)),
+            "seed": seed,
+            "selected_judges": list(defaults.get("selected_judges", ())),
+            "trials": trials,
+        },
         "source_hashes": inputs["source_hashes"],
         "manual_triples": manual_triples,
         "scenarios": scenarios,

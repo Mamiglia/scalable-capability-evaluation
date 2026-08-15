@@ -1,12 +1,11 @@
+import importlib.util
 import numpy as np
 import pandas as pd
 import pytest
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 from mc_cost.model import JUDGMENT_SPECS
+from mc_cost.ranking import lomo_predictions as packaged_lomo_predictions
 from mc_cost.validation import (
     choose_judge_gate,
     choose_judgment_spec,
@@ -25,20 +24,14 @@ from mc_cost.validation import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_lomo_helper_imports_without_untracked_scores_module(tmp_path):
-    isolated = tmp_path / "irt_proxy"
-    isolated.mkdir()
-    shutil.copy2(ROOT / "scripts" / "irt_proxy" / "metrics.py", isolated / "metrics.py")
-
-    imported = subprocess.run(
-        [sys.executable, "-c", "from metrics import lomo_predictions"],
-        cwd=tmp_path,
-        env={"PYTHONPATH": str(isolated)},
-        capture_output=True,
-        text=True,
+def test_irt_metrics_reexports_packaged_lomo_implementation():
+    spec = importlib.util.spec_from_file_location(
+        "irt_proxy_metrics", ROOT / "scripts/irt_proxy/metrics.py",
     )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
 
-    assert imported.returncode == 0, imported.stderr
+    assert module.lomo_predictions is packaged_lomo_predictions
 
 
 def test_judge_covariates_require_improvement_beyond_one_se():
@@ -158,6 +151,25 @@ def test_cross_validation_holds_out_judges_and_candidate_configurations():
             set(test["left_model"]) | set(test["right_model"])
         ) - (set(train["left_model"]) | set(train["right_model"]))
         assert len(held_models) == 1
+
+
+def test_cross_validation_retains_each_posterior_probability_draw():
+    frame = pd.DataFrame([
+        {"judge": "j1", "left_model": "a", "right_model": "b", "chosen_left": 1},
+        {"judge": "j2", "left_model": "a", "right_model": "b", "chosen_left": 0},
+    ])
+
+    def fit_predict(_train, test, _spec, _conditional_judges):
+        return np.vstack([np.full(len(test), 0.2), np.full(len(test), 0.8)])
+
+    predictions, folds = cross_validate_judgments(frame, fit_predict)
+
+    assert set(predictions["draw"]) == {0, 1}
+    assert set(predictions["probability"]) == {0.2, 0.8}
+    assert predictions.groupby([
+        "spec", "validation", "population", "fold", "source_row",
+    ])["draw"].nunique().eq(2).all()
+    assert np.allclose(folds["log_loss"], -np.log(0.5))
 
 
 def test_token_validation_holds_exact_configuration_and_reports_length_strata():

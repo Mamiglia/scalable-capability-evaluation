@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from itertools import product
@@ -16,15 +15,7 @@ from scipy.spatial.distance import cdist
 from scipy.stats import kendalltau
 
 from mc_cost.model import JUDGMENT_SPECS, JudgmentSpec
-
-
-ROOT = Path(__file__).resolve().parents[2]
-ELO_DIR = ROOT / "scripts" / "analyses" / "judge-elo"
-IRT_PROXY_DIR = ROOT / "scripts" / "irt_proxy"
-sys.path.insert(0, str(ELO_DIR))
-sys.path.insert(0, str(IRT_PROXY_DIR))
-from elo import collect_pair_wins, components, fit_bt  # noqa: E402
-from metrics import lomo_predictions  # noqa: E402
+from mc_cost.ranking import collect_pair_wins, components, fit_bt, lomo_predictions
 
 
 _SPEC_ORDER = tuple(JUDGMENT_SPECS)
@@ -109,8 +100,13 @@ def _probabilities(values: Any, size: int) -> np.ndarray:
             raise ValueError("judgment fit callable must return a probability column")
         values = values["probability"]
     probabilities = np.asarray(values, dtype=float)
-    if probabilities.shape != (size,) or not np.isfinite(probabilities).all():
-        raise ValueError("judgment probabilities must be one finite value per held-out row")
+    if probabilities.shape == (size,):
+        probabilities = probabilities[None, :]
+    if (
+        probabilities.ndim != 2 or probabilities.shape[1] != size
+        or not len(probabilities) or not np.isfinite(probabilities).all()
+    ):
+        raise ValueError("judgment probabilities must be finite draw-by-held-out-row values")
     if ((probabilities < 0) | (probabilities > 1)).any():
         raise ValueError("judgment probabilities must be between zero and one")
     return probabilities
@@ -134,29 +130,32 @@ def _judgment_fold(
     fit_predict: Callable[[pd.DataFrame, pd.DataFrame, JudgmentSpec, bool], Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     train, test = frame.loc[train_mask].copy(), frame.loc[~train_mask].copy()
-    probabilities = _probabilities(
+    draw_probabilities = _probabilities(
         fit_predict(
             train, test.drop(columns="chosen_left"), spec, population == "conditional",
         ),
         len(test),
     )
     observed = _binary(test, "chosen_left")
+    probabilities = draw_probabilities.mean(axis=0)
     clipped = np.clip(probabilities, 1e-12, 1 - 1e-12)
     fold = f"{validation}:{held_out}"
     predictions = []
-    for (source_row, held_row), actual, probability in zip(
-        test.iterrows(), observed, probabilities,
-    ):
-        context = {
-            column: held_row[column]
-            for column in ("length_difference", "difficulty", "correct", "visible_reasoning")
-            if column in test
-        }
-        predictions.append({
-            "spec": spec_name, "validation": validation, "population": population,
-            "fold": fold, "held_out": held_out, "source_row": source_row,
-            "observed": int(actual), "probability": float(probability), **context,
-        })
+    for draw, draw_values in enumerate(draw_probabilities):
+        for (source_row, held_row), actual, probability in zip(
+            test.iterrows(), observed, draw_values,
+        ):
+            context = {
+                column: held_row[column]
+                for column in ("length_difference", "difficulty", "correct", "visible_reasoning")
+                if column in test
+            }
+            predictions.append({
+                "spec": spec_name, "validation": validation, "population": population,
+                "fold": fold, "held_out": held_out, "source_row": source_row,
+                "draw": draw, "observed": int(actual),
+                "probability": float(probability), **context,
+            })
     metrics = {
         "spec": spec_name, "validation": validation, "population": population,
         "fold": fold, "held_out": held_out, "n_rows": len(test),
@@ -619,10 +618,9 @@ def _calibration_groups(
     frame: pd.DataFrame, check: str, grouping: Sequence[str],
 ) -> list[dict[str, Any]]:
     rows = []
-    unique = frame.drop_duplicates("row_id")
-    for values, group in unique.groupby(list(grouping), sort=True, dropna=False):
+    for values, group in frame.groupby(list(grouping), sort=True, dropna=False):
         values = values if isinstance(values, tuple) else (values,)
-        observed = float(group["observed_choice"].mean())
+        observed = float(group.drop_duplicates("row_id")["observed_choice"].mean())
         predicted = float(group["probability"].mean())
         rows.append({
             "check": check,
@@ -630,7 +628,7 @@ def _calibration_groups(
             "observed_choice_rate": observed, "predicted_mean": predicted,
             "p5": np.nan, "p50": np.nan, "p95": np.nan,
             "calibration_error": observed - predicted,
-            "n_observations": len(group), "n_draws": 0,
+            "n_observations": group["row_id"].nunique(), "n_draws": group["draw"].nunique(),
             "valid": True, "passed": True, "reason": "",
             "reference": "fitted_posterior",
         })
@@ -653,8 +651,8 @@ def posterior_predictive_replay(frame: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("observed_choice must be constant within row_id")
     if "probability" in rows:
         probability = pd.to_numeric(rows["probability"], errors="raise")
-        if not probability.between(0, 1).all() or rows.groupby("row_id")["probability"].nunique().gt(1).any():
-            raise ValueError("probability must be one finite value in [0, 1] per row_id")
+        if not probability.between(0, 1).all():
+            raise ValueError("probability must be finite and in [0, 1] for every row_id/draw")
         rows["probability"] = probability
     output = _replay_groups(rows, "aggregate_choice_rate", ())
 

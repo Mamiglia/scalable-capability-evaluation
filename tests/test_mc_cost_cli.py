@@ -1,5 +1,8 @@
 import json
 import hashlib
+import os
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -10,7 +13,7 @@ import pytest
 import mc_cost.cli as cli
 from mc_cost.cli import main, write_run_config
 from mc_cost.data import JUDGMENT_COLUMNS
-from mc_cost.model import PosteriorArtifact, load_artifact, save_artifact
+from mc_cost.model import JUDGMENT_SPECS, PosteriorArtifact, load_artifact, save_artifact
 from mc_cost.simulation import SimulationResult
 
 
@@ -33,6 +36,70 @@ def config_file(tmp_path, **updates):
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config))
     return path
+
+
+def write_generation(root, manifest, names):
+    files = {
+        name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+        for name in names
+    }
+    path = root / manifest
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema_version": 1, "files": files}, sort_keys=True))
+
+
+CATALOGUE_FILES = ["catalogue.csv", "capability_draws.npz"]
+PREPARE_FILES = [
+    "judgments.parquet", "token_candidate.parquet", "token_judge.parquet",
+    "judgment_standardization.json", "scales.json",
+]
+MODEL_FILES = [
+    f"model/{name}.{suffix}"
+    for name in ("baseline", "core", "core_release", "candidate_token", "judge_token")
+    for suffix in ("npz", "json")
+]
+
+
+def current_data_hashes(output):
+    paths = {
+        "catalogue": output / "catalogue.csv",
+        "capability_draws": output / "capability_draws.npz",
+        "judgments": output / "judgments.parquet",
+        "candidate_tokens": output / "token_candidate.parquet",
+        "judge_tokens": output / "token_judge.parquet",
+        "scales": output / "scales.json",
+    }
+    return {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}
+
+
+def refresh_artifact_provenance(output):
+    hashes = current_data_hashes(output)
+    for name in ("baseline", "core", "core_release", "candidate_token", "judge_token"):
+        artifact = load_artifact(output / f"model/{name}")
+        save_artifact(
+            PosteriorArtifact(
+                artifact.posterior, {**artifact.metadata, "source_hashes": hashes}, artifact.diagnostics,
+            ),
+            output / f"model/{name}",
+        )
+    write_generation(output, "model/manifest.json", MODEL_FILES)
+    return hashes
+
+
+def write_valid_decision(output, hashes, *, selected="baseline", gate=False):
+    validation = output / "validation"
+    validation.mkdir(exist_ok=True)
+    (validation / "decision.json").write_text(json.dumps({
+        "selected_judgment_spec": selected,
+        "judgment_spec": {
+            "global_features": list(JUDGMENT_SPECS[selected].global_features),
+            "include_length": JUDGMENT_SPECS[selected].include_length,
+        },
+        "data_hashes": hashes,
+        "judge_covariate_gate": {"enabled": gate},
+        "validation_timestamp": "2026-08-15T00:00:00Z",
+    }))
+    write_generation(output, "validation/manifest.json", ["validation/decision.json"])
 
 
 def test_cli_exposes_six_commands(capsys):
@@ -77,6 +144,24 @@ def test_missing_prerequisite_names_the_producing_command(tmp_path, capsys):
     assert "mc-cost catalogue" in capsys.readouterr().err
 
 
+def test_missing_irt_product_names_the_irt_proxy_producer(tmp_path, capsys):
+    canonical = tmp_path / "canonical.md"
+    canonical.write_text("- model\n")
+    pool = tmp_path / "pool.json"
+    pool.write_text("[]\n")
+    capabilities = tmp_path / "capabilities.csv"
+    capabilities.write_text("model,theta\n")
+    config = config_file(tmp_path, paths={
+        "output": str(tmp_path / "artifacts"),
+        "canonical_models": str(canonical), "model_pool": str(pool),
+        "irt_capabilities": str(capabilities),
+        "irt_posterior": str(tmp_path / "missing-irt.npz"),
+    })
+
+    assert main(["catalogue", "--config", str(config)]) == 2
+    assert "scripts/irt_proxy/run.py" in capsys.readouterr().err
+
+
 def test_catalogue_builds_validated_table_and_aligned_draws_atomically(tmp_path):
     canonical = tmp_path / "canonical.md"
     canonical.write_text("- fitted\n")
@@ -113,6 +198,8 @@ def test_catalogue_builds_validated_table_and_aligned_draws_atomically(tmp_path)
     with np.load(tmp_path / "artifacts/capability_draws.npz", allow_pickle=False) as draws:
         assert draws["models"].tolist() == ["fitted"]
         assert draws["draws"].tolist() == [[0.4], [0.6]]
+    manifest = json.loads((tmp_path / "artifacts/catalogue.manifest.json").read_text())
+    assert set(manifest["files"]) == set(CATALOGUE_FILES)
 
 
 def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monkeypatch):
@@ -124,6 +211,8 @@ def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monke
         {"model_id": "b", "theta": -1.0, "release": "2023-01-01"},
     ])
     catalogue.to_csv(output / "catalogue.csv", index=False)
+    (output / "capability_draws.npz").write_bytes(b"draws")
+    write_generation(output, "catalogue.manifest.json", CATALOGUE_FILES)
     items = tmp_path / "items.csv"
     pd.DataFrame([{
         "irt_model": "fixed_3pl", "fit": "gpqa", "benchmark": "gpqa",
@@ -166,6 +255,35 @@ def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monke
     assert (output / "judgment_standardization.json").is_file()
 
 
+def test_prepare_rejects_missing_configured_candidate_root_before_raw_loading(
+    tmp_path, monkeypatch, capsys,
+):
+    output = tmp_path / "artifacts"
+    output.mkdir()
+    pd.DataFrame([{"model_id": "m"}]).to_csv(output / "catalogue.csv", index=False)
+    (output / "capability_draws.npz").write_bytes(b"draws")
+    write_generation(output, "catalogue.manifest.json", CATALOGUE_FILES)
+    items = tmp_path / "items.csv"
+    items.write_text("irt_model,fit,benchmark,item,difficulty\n")
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    models, responses = tmp_path / "models.csv", tmp_path / "responses.parquet"
+    models.touch()
+    responses.touch()
+    missing = tmp_path / "missing-candidate-logs"
+    monkeypatch.setattr(cli, "prepare_gpqa", lambda *_: pytest.fail("raw preparation ran"))
+    config = config_file(tmp_path, paths={
+        "output": str(output), "irt_items": str(items), "judge_logs": str(logs),
+        "judge_models": str(models), "epoch_responses": str(responses),
+        "candidate_log_roots": [str(missing)],
+    })
+
+    assert main(["prepare", "--config", str(config)]) == 2
+    error = capsys.readouterr().err
+    assert "candidate log root" in error
+    assert str(missing) in error
+
+
 def test_fit_writes_three_judgment_and_two_token_artifacts(tmp_path, monkeypatch):
     output = tmp_path / "artifacts"
     output.mkdir()
@@ -177,10 +295,14 @@ def test_fit_writes_three_judgment_and_two_token_artifacts(tmp_path, monkeypatch
     )
     pd.DataFrame([{"model": "m"}]).to_parquet(output / "token_candidate.parquet", index=False)
     pd.DataFrame([{"model": "m"}]).to_parquet(output / "token_judge.parquet", index=False)
-    (output / "scales.json").write_text(json.dumps({
+    scale_payload = json.dumps({
         "mean": {"theta_gap": 0}, "scale": {"theta_gap": 1},
-    }))
+    })
+    (output / "scales.json").write_text(scale_payload)
+    (output / "judgment_standardization.json").write_text(scale_payload)
     (output / "capability_draws.npz").write_bytes(b"draws")
+    write_generation(output, "catalogue.manifest.json", CATALOGUE_FILES)
+    write_generation(output, "prepare.manifest.json", PREPARE_FILES)
     encoded = []
     fit_calls = []
 
@@ -256,22 +378,38 @@ def pipeline_artifacts(tmp_path, *, dashboard=None):
     tokens.assign(role="judge", model="j", transcript_chars=20).drop(columns="response_chars").to_parquet(
         output / "token_judge.parquet", index=False,
     )
-    (output / "scales.json").write_text(json.dumps({
+    scales = json.dumps({
         column: {"mean": 0.0, "scale": 1.0}
         for column in (
             "theta_gap", "oversight", "difficulty", "theta_gap_x_oversight",
             "theta_gap_x_difficulty", "same_family_x_theta_gap", "reasoning_difference",
             "release_gap_days", "relative_release_days", "length_difference",
         )
-    }))
-    np.savez_compressed(
-        output / "capability_draws.npz", models=np.array(["j", "a", "b"]),
-        draws=np.array([[0.0, 1.0, -1.0], [0.1, 1.1, -0.9]]),
-    )
+    })
+    (output / "scales.json").write_text(scales)
+    (output / "judgment_standardization.json").write_text(scales)
     irt = tmp_path / "irt.npz"
     np.savez_compressed(
         irt, fixed_3pl__gpqa__a=np.ones((2, 1)), fixed_3pl__gpqa__b=np.zeros((2, 1)),
         fixed_3pl__gpqa__floor=np.array([0.25]), fixed_3pl__gpqa__items=np.array(["gpqa:i"]),
+    )
+    upstream = {
+        "canonical_models": tmp_path / "canonical.md",
+        "model_pool": tmp_path / "pool.json",
+        "irt_capabilities": tmp_path / "capabilities.csv",
+        "irt_posterior": irt,
+    }
+    upstream["canonical_models"].write_text("- j\n- a\n- b\n")
+    upstream["model_pool"].write_text("[]\n")
+    upstream["irt_capabilities"].write_text("model,theta\n")
+    upstream_hashes = {
+        name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in upstream.items()
+    }
+    np.savez_compressed(
+        output / "capability_draws.npz", models=np.array(["j", "a", "b"]),
+        draws=np.array([[0.0, 1.0, -1.0], [0.1, 1.1, -0.9]]),
+        source_names=np.array(list(upstream_hashes)),
+        source_hashes=np.array(list(upstream_hashes.values())),
     )
     names = {
         "catalogue": output / "catalogue.csv", "capability_draws": output / "capability_draws.npz",
@@ -282,16 +420,25 @@ def pipeline_artifacts(tmp_path, *, dashboard=None):
         name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in names.items()
     }
     for name in ("baseline", "core", "core_release", "candidate_token", "judge_token"):
+        metadata = {"source_hashes": hashes}
+        if name in JUDGMENT_SPECS:
+            metadata.update({
+                "feature_order": list(JUDGMENT_SPECS[name].global_features),
+                "include_length": JUDGMENT_SPECS[name].include_length,
+                "conditional_judges": False,
+            })
+        else:
+            metadata["role"] = name.removesuffix("_token")
         save_artifact(
-            PosteriorArtifact(
-                {"draw": np.array([1.0])},
-                {"source_hashes": hashes, "conditional_judges": False}, {},
-            ),
+            PosteriorArtifact({"draw": np.array([1.0])}, metadata, {}),
             output / f"model/{name}",
         )
+    write_generation(output, "catalogue.manifest.json", CATALOGUE_FILES)
+    write_generation(output, "prepare.manifest.json", PREPARE_FILES)
+    write_generation(output, "model/manifest.json", MODEL_FILES)
     config = config_file(
         tmp_path,
-        paths={"output": str(output), "irt_posterior": str(irt)},
+        paths={"output": str(output), **{name: str(path) for name, path in upstream.items()}},
         simulation={
             "trials": 2, "attempted_items": 1, "presentations": 1,
             "reuse_responses": True, "accuracy_target": "higher_theta", "seed": 3,
@@ -321,10 +468,11 @@ def test_validate_writes_held_out_tables_and_hash_bound_decision(tmp_path, monke
             {
                 "spec": spec, "population": population, "validation": "judge",
                 "fold": "judge:j", "held_out": "j", "source_row": 0,
-                "observed": 0, "probability": 0.5,
+                "draw": draw, "observed": 0, "probability": probability,
             }
             for spec in ("baseline", "core", "core_release")
             for population in ("conditional", "pooled")
+            for draw, probability in enumerate((0.2, 0.8))
         ]), folds
 
     def fake_tokens(frame, role, callback):
@@ -350,7 +498,10 @@ def test_validate_writes_held_out_tables_and_hash_bound_decision(tmp_path, monke
     assert decision["selected_judgment_spec"] == "core"
     assert decision["judge_covariate_gate"]["enabled"] is True
     assert decision["data_hashes"] == hashes
-    assert load_artifact(output / "model/core").metadata["conditional_judges"] is True
+    selected_artifact = load_artifact(output / "model/core")
+    assert selected_artifact.metadata["conditional_judges"] is True
+    assert selected_artifact.metadata["feature_order"] == list(JUDGMENT_SPECS["core"].global_features)
+    assert selected_artifact.metadata["include_length"] is True
     assert calls == ["judgments", "candidate", "judge"]
     for name in (
         "judgment_predictions.csv", "judgment_folds.csv", "token_candidate_predictions.csv",
@@ -359,6 +510,81 @@ def test_validate_writes_held_out_tables_and_hash_bound_decision(tmp_path, monke
         assert (output / f"validation/{name}").is_file()
     replay = pd.read_csv(output / "validation/posterior_predictive_replay.csv")
     assert replay.loc[replay["check"].eq("position_effect"), "valid"].all()
+    assert replay.loc[replay["check"].eq("aggregate_choice_rate"), "n_draws"].tolist() == [2]
+
+
+def test_validate_refuses_stale_full_token_artifact_before_decision(tmp_path, monkeypatch, capsys):
+    config, output, _hashes = pipeline_artifacts(tmp_path)
+    artifact = load_artifact(output / "model/candidate_token")
+    save_artifact(
+        PosteriorArtifact(
+            artifact.posterior, {**artifact.metadata, "source_hashes": {"stale": "hash"}},
+            artifact.diagnostics,
+        ),
+        output / "model/candidate_token",
+    )
+    write_generation(output, "model/manifest.json", MODEL_FILES)
+    monkeypatch.setattr(
+        cli, "cross_validate_judgments", lambda *_: pytest.fail("validation ran on stale artifacts"),
+    )
+
+    assert main(["validate", "--config", str(config)]) == 2
+    assert "source hash mismatch" in capsys.readouterr().err
+    assert not (output / "validation/decision.json").exists()
+
+
+def test_real_judgment_callback_encodes_target_free_held_out_rows(monkeypatch):
+    catalogue = pd.DataFrame([
+        {"model_id": "j1", "theta": 0.0, "release": "2024-01-01"},
+        {"model_id": "j2", "theta": 0.1, "release": "2024-02-01"},
+        {"model_id": "a", "theta": 1.0, "release": "2025-01-01"},
+        {"model_id": "b", "theta": -1.0, "release": "2023-01-01"},
+    ])
+    rows = pd.DataFrame([{column: 0 for column in JUDGMENT_COLUMNS} for _ in range(2)])
+    rows[["judge", "item", "left_model", "right_model"]] = ["j1", "i", "a", "b"]
+    rows.loc[1, "judge"] = "j2"
+    rows.loc[1, [
+        "theta_gap", "oversight", "release_gap_days", "relative_release_days",
+        "difficulty", "theta_gap_x_oversight", "theta_gap_x_difficulty",
+        "length_difference", "same_family_x_theta_gap", "reasoning_difference",
+    ]] = 1.0
+
+    def cheap_fit(data, **kwargs):
+        draws = 2
+        posterior = {
+            "judge_effects": np.zeros((draws, data.num_judges, 2)),
+            "judge_population": np.zeros((draws, 2, 1)),
+            "judge_corr": np.tile(np.eye(2), (draws, 1, 1)),
+            "judge_scales": np.zeros((draws, 2)),
+            "candidate_effects": np.zeros((draws, data.num_models)),
+            "candidate_scale": np.zeros(draws),
+            "item_effects": np.zeros((draws, data.num_items)),
+            "item_scale": np.zeros(draws),
+        }
+        return PosteriorArtifact(
+            posterior,
+            {
+                "training_scales": data.training_scales,
+                "source_hashes": data.source_hashes,
+                "conditional_judges": kwargs["conditional_judges"],
+            },
+            {},
+        )
+
+    monkeypatch.setattr(cli, "fit_judgment_model", cheap_fit)
+    callback = cli._judgment_validator(
+        catalogue, {"judgments": "hash"},
+        {"warmup": 1, "samples": 2, "chains": 1, "seed": 1},
+        np.random.default_rng(1),
+    )
+
+    probabilities = callback(
+        rows.iloc[:1], rows.iloc[1:].drop(columns="chosen_left"),
+        JUDGMENT_SPECS["baseline"], False,
+    )
+
+    assert probabilities.shape == (2, 1)
+    assert np.allclose(probabilities, 0.5)
 
 
 def fake_result(configuration="test"):
@@ -376,12 +602,7 @@ def fake_result(configuration="test"):
 def test_simulate_validates_hashes_and_publishes_deterministic_run(tmp_path, monkeypatch):
     config, output, hashes = pipeline_artifacts(tmp_path)
     validation = output / "validation"
-    validation.mkdir()
-    (validation / "decision.json").write_text(json.dumps({
-        "selected_judgment_spec": "baseline", "data_hashes": hashes,
-        "judge_covariate_gate": {"enabled": False},
-        "validation_timestamp": "2026-08-15T00:00:00Z",
-    }))
+    write_valid_decision(output, hashes)
     seen = []
 
     def fake_simulate(comparisons, resolved, **kwargs):
@@ -396,6 +617,19 @@ def test_simulate_validates_hashes_and_publishes_deterministic_run(tmp_path, mon
     ]
 
     assert main(command) == 0
+    existing_run = next((output / "runs").iterdir())
+    original_replace = Path.replace
+
+    def keep_existing_directory(source, target):
+        if source == existing_run and Path(target).name == f".{existing_run.name}.previous":
+            pytest.fail("existing deterministic run directory was temporarily removed")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", keep_existing_directory)
+    decision = json.loads((validation / "decision.json").read_text())
+    decision["validation_timestamp"] = "2026-08-16T00:00:00Z"
+    (validation / "decision.json").write_text(json.dumps(decision))
+    write_generation(output, "validation/manifest.json", ["validation/decision.json"])
     assert main(command) == 0
 
     runs = list((output / "runs").iterdir())
@@ -411,17 +645,85 @@ def test_simulate_validates_hashes_and_publishes_deterministic_run(tmp_path, mon
     assert (runs[0] / "trials.parquet").is_file()
     assert (runs[0] / "summary.csv").is_file()
     assert (runs[0] / "warnings.csv").is_file()
+    assert (runs[0] / "manifest.json").is_file()
     assert len(seen) == 2
+
+
+def test_simulate_refuses_mixed_model_generation(tmp_path, monkeypatch, capsys):
+    config, output, hashes = pipeline_artifacts(tmp_path)
+    write_valid_decision(output, hashes)
+    with (output / "model/candidate_token.npz").open("ab") as handle:
+        handle.write(b"mixed-generation")
+    monkeypatch.setattr(cli, "simulate", lambda *_args, **_kwargs: pytest.fail("simulation ran"))
+
+    assert main(["simulate", "--config", str(config)]) == 2
+    assert "model generation" in capsys.readouterr().err
+
+
+def test_simulate_enforces_selected_artifact_spec_metadata(tmp_path, monkeypatch, capsys):
+    config, output, hashes = pipeline_artifacts(tmp_path)
+    artifact = load_artifact(output / "model/baseline")
+    save_artifact(
+        PosteriorArtifact(
+            artifact.posterior, {**artifact.metadata, "feature_order": ["oversight_sd"]},
+            artifact.diagnostics,
+        ),
+        output / "model/baseline",
+    )
+    write_generation(output, "model/manifest.json", MODEL_FILES)
+    write_valid_decision(output, hashes)
+    monkeypatch.setattr(cli, "simulate", lambda *_args, **_kwargs: pytest.fail("simulation ran"))
+
+    assert main(["simulate", "--config", str(config)]) == 2
+    assert "selected judgment specification" in capsys.readouterr().err
+
+
+def test_simulate_rejects_decision_with_tampered_selected_spec(tmp_path, monkeypatch, capsys):
+    config, output, hashes = pipeline_artifacts(tmp_path)
+    write_valid_decision(output, hashes)
+    decision_path = output / "validation/decision.json"
+    decision = json.loads(decision_path.read_text())
+    decision["judgment_spec"]["global_features"] = ["oversight_sd"]
+    decision_path.write_text(json.dumps(decision))
+    write_generation(output, "validation/manifest.json", ["validation/decision.json"])
+    monkeypatch.setattr(cli, "simulate", lambda *_args, **_kwargs: pytest.fail("simulation ran"))
+
+    assert main(["simulate", "--config", str(config)]) == 2
+    assert "decision judgment specification" in capsys.readouterr().err
+
+
+def test_simulate_rejects_capability_draws_from_changed_irt(tmp_path, monkeypatch, capsys):
+    config, output, hashes = pipeline_artifacts(tmp_path)
+    write_valid_decision(output, hashes)
+    irt = Path(json.loads(Path(config).read_text())["paths"]["irt_posterior"])
+    with irt.open("ab") as handle:
+        handle.write(b"new-irt-generation")
+    monkeypatch.setattr(cli, "simulate", lambda *_args, **_kwargs: pytest.fail("simulation ran"))
+
+    assert main(["simulate", "--config", str(config)]) == 2
+    assert "IRT posterior hash" in capsys.readouterr().err
+
+
+def test_simulate_rejects_misaligned_capability_models(tmp_path, monkeypatch, capsys):
+    config, output, _hashes = pipeline_artifacts(tmp_path)
+    with np.load(output / "capability_draws.npz", allow_pickle=False) as stored:
+        sources = {name: stored[name].copy() for name in ("source_names", "source_hashes")}
+    np.savez_compressed(
+        output / "capability_draws.npz", models=np.array(["j", "a", "unknown"]),
+        draws=np.array([[0.0, 1.0, -1.0], [0.1, 1.1, -0.9]]), **sources,
+    )
+    write_generation(output, "catalogue.manifest.json", CATALOGUE_FILES)
+    hashes = refresh_artifact_provenance(output)
+    write_valid_decision(output, hashes)
+    monkeypatch.setattr(cli, "simulate", lambda *_args, **_kwargs: pytest.fail("simulation ran"))
+
+    assert main(["simulate", "--config", str(config)]) == 2
+    assert "capability model alignment" in capsys.readouterr().err
 
 
 def test_simulate_refuses_stale_decision_before_calling_engine(tmp_path, monkeypatch, capsys):
     config, output, hashes = pipeline_artifacts(tmp_path)
-    validation = output / "validation"
-    validation.mkdir()
-    (validation / "decision.json").write_text(json.dumps({
-        "selected_judgment_spec": "baseline", "data_hashes": hashes,
-        "judge_covariate_gate": {"enabled": False},
-    }))
+    write_valid_decision(output, hashes)
     with (output / "judgments.parquet").open("ab") as handle:
         handle.write(b"stale")
     monkeypatch.setattr(cli, "simulate", lambda *args, **kwargs: pytest.fail("simulation ran"))
@@ -432,12 +734,7 @@ def test_simulate_refuses_stale_decision_before_calling_engine(tmp_path, monkeyp
 
 def test_manual_run_config_keeps_exact_rows(tmp_path, monkeypatch):
     config, output, hashes = pipeline_artifacts(tmp_path)
-    validation = output / "validation"
-    validation.mkdir()
-    (validation / "decision.json").write_text(json.dumps({
-        "selected_judgment_spec": "baseline", "data_hashes": hashes,
-        "judge_covariate_gate": {"enabled": False},
-    }))
+    write_valid_decision(output, hashes)
     monkeypatch.setattr(cli, "simulate", lambda *args, **kwargs: fake_result())
     manual = tmp_path / "manual.csv"
     manual.write_text("judge,m1,m2\nj,a,b\nj,a,b\n")
@@ -454,12 +751,7 @@ def test_manual_run_config_keeps_exact_rows(tmp_path, monkeypatch):
 
 def test_simulate_rejects_artifact_that_disagrees_with_judge_gate(tmp_path, monkeypatch, capsys):
     config, output, hashes = pipeline_artifacts(tmp_path)
-    validation = output / "validation"
-    validation.mkdir()
-    (validation / "decision.json").write_text(json.dumps({
-        "selected_judgment_spec": "baseline", "data_hashes": hashes,
-        "judge_covariate_gate": {"enabled": True},
-    }))
+    write_valid_decision(output, hashes, gate=True)
     monkeypatch.setattr(cli, "simulate", lambda *args, **kwargs: pytest.fail("simulation ran"))
 
     assert main(["simulate", "--config", str(config)]) == 2
@@ -473,13 +765,7 @@ def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path,
         "manual_triples": [{"judge": "j", "m1": "a", "m2": "b"}],
     }
     config, output, hashes = pipeline_artifacts(tmp_path, dashboard=dashboard)
-    validation = output / "validation"
-    validation.mkdir()
-    (validation / "decision.json").write_text(json.dumps({
-        "selected_judgment_spec": "baseline", "data_hashes": hashes,
-        "judge_covariate_gate": {"enabled": False},
-        "validation_timestamp": "2026-08-15T00:00:00Z",
-    }))
+    write_valid_decision(output, hashes)
     calls = []
 
     def fake_simulate(comparisons, resolved, **kwargs):
@@ -501,8 +787,61 @@ def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path,
     assert calls == ["automatic", "manual"]
     assert {row["mode"] for row in payload["scenarios"]} == {"automatic", "manual"}
     assert payload["source_hashes"]["decision"]
+    assert payload["config"] == {
+        "accuracy_target": "higher_theta",
+        "grid": {
+            "anchors": [1], "comparators": [1], "items": [1],
+            "judges": [1], "presentations": [1],
+        },
+        "manual": {
+            "items": 1, "presentations": 1,
+            "triples": [{"judge": "j", "m1": "a", "m2": "b"}],
+        },
+        "require_stronger": True,
+        "reuse_responses": True,
+        "seed": 19,
+        "selected_judges": [],
+        "trials": 3,
+    }
 
 
 def test_project_registers_mc_cost_entry_point():
     project = tomllib.loads(Path("pyproject.toml").read_text())
     assert project["project"]["scripts"]["mc-cost"] == "mc_cost.cli:main"
+
+
+def test_built_wheel_is_self_contained_outside_checkout(tmp_path):
+    wheel_directory = tmp_path / "dist"
+    built = subprocess.run(
+        [
+            "uv", "build", "--wheel", "--no-build-isolation",
+            "--out-dir", str(wheel_directory),
+        ],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
+    )
+    assert built.returncode == 0, built.stderr
+    wheel = next(wheel_directory.glob("*.whl"))
+    installed_tree = tmp_path / "installed"
+    installed = subprocess.run(
+        ["uv", "pip", "install", "--target", str(installed_tree), "--no-deps", str(wheel)],
+        capture_output=True, text=True,
+    )
+    assert installed.returncode == 0, installed.stderr
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    clean_env = {**os.environ, "PYTHONPATH": str(installed_tree)}
+    imported = subprocess.run(
+        [
+            sys.executable, "-c",
+            "from mc_cost.cli import main; from mc_cost.gpqa import prepare; "
+            "from mc_cost.ranking import collect_pair_wins, components, fit_bt, lomo_predictions",
+        ],
+        cwd=outside, env=clean_env, capture_output=True, text=True,
+    )
+    assert imported.returncode == 0, imported.stderr
+    help_result = subprocess.run(
+        [str(installed_tree / "bin/mc-cost"), "--help"],
+        cwd=outside, env=clean_env, capture_output=True, text=True,
+    )
+    assert help_result.returncode == 0, help_result.stderr
+    assert all(command in help_result.stdout for command in cli._COMMANDS)

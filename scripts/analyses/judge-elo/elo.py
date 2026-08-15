@@ -27,9 +27,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
-from scipy.optimize import minimize
-from scipy.special import expit
 from scipy.stats import kendalltau, pearsonr, spearmanr, t as t_dist
+
+from mc_cost.ranking import collect_pair_wins, components, fit_bt
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent.parent.parent
@@ -77,101 +77,6 @@ def item_half(item_id):
 @functools.lru_cache(maxsize=None)
 def load_config(bench):
     return yaml.safe_load((HERE / "configs" / f"{bench}.yaml").read_text())
-
-
-def fit_bt(pair_wins, l2=1e-3):
-    """Bradley-Terry strengths from {(a, b): [wins_a, n]}. Returns model -> strength.
-
-    Fractional wins allowed (ties = 0.5). l2 is a fixed Gaussian prior on the
-    strengths: negligible against real pick counts, it only keeps models with
-    all-win or all-loss records finite. Strengths are shifted to mean 0.
-    """
-    models = sorted({m for ab in pair_wins for m in ab})
-    idx = {m: i for i, m in enumerate(models)}
-    ia = np.array([idx[a] for a, _ in pair_wins])
-    ib = np.array([idx[b] for _, b in pair_wins])
-    w = np.array([v[0] for v in pair_wins.values()], dtype=float)
-    n = np.array([v[1] for v in pair_wins.values()], dtype=float)
-
-    def nll(theta):
-        d = theta[ia] - theta[ib]
-        # -log p = softplus(-d), -log(1-p) = softplus(d)
-        loss = (w * np.logaddexp(0, -d) + (n - w) * np.logaddexp(0, d)).sum() \
-            + l2 * (theta ** 2).sum()
-        resid = w - n * expit(d)
-        grad = 2 * l2 * theta
-        np.subtract.at(grad, ia, resid)
-        np.add.at(grad, ib, resid)
-        return loss, grad
-
-    res = minimize(nll, np.zeros(len(models)), jac=True, method="L-BFGS-B")
-    if not res.success:
-        raise RuntimeError(f"Bradley-Terry fit failed: {res.message}")
-    theta = res.x - res.x.mean()
-    return dict(zip(models, theta))
-
-
-def components(pairs):
-    """Connected components of the comparison graph, largest first.
-
-    Strengths are only comparable within a component; tau and figures use the
-    largest one when the graph is disconnected.
-    """
-    adj = defaultdict(set)
-    for a, b in pairs:
-        adj[a].add(b)
-        adj[b].add(a)
-    seen, comps = set(), []
-    for start in adj:
-        if start in seen:
-            continue
-        comp, stack = set(), [start]
-        while stack:
-            m = stack.pop()
-            if m in seen:
-                continue
-            seen.add(m)
-            comp.add(m)
-            stack.extend(adj[m] - seen)
-        comps.append(comp)
-    return sorted(comps, key=len, reverse=True)
-
-
-def collect_pair_wins(rows, group_cols, ties="half"):
-    """rows -> {group: {(major, minor): [wins_major, n]}}.
-
-    picked_major is a float in the induced picks (ties 0.5) and True/False in
-    the pairwise verdicts. ties: "half" counts a tie as half a win (evidence
-    of equal strength), "drop" discards it (no evidence) as a sensitivity.
-
-    Position is counterbalanced first: the two presentation orders of each item
-    are averaged into one item vote before aggregation, so position bias
-    cancels and a single parse-failed order can't inject an unbalanced vote
-    (matches scripts/analyses/stats.py). Induced picks have one row per item,
-    so this is a no-op for them.
-    """
-    as_win = {"True": 1.0, "False": 0.0}
-    per_item = defaultdict(lambda: [0.0, 0])
-    for r in rows:
-        if r["major"] == r["minor"]:
-            raise ValueError(f"self-comparison row: {r}")
-        v = r["picked_major"]
-        v = as_win[v] if v in as_win else float(v)
-        if v not in (0.0, 0.5, 1.0):
-            raise ValueError(f"bad picked_major in row: {r}")
-        gk = tuple(r[c] for c in group_cols)
-        pi = per_item[(gk, r["major"], r["minor"], r["item_id"])]
-        pi[0] += v
-        pi[1] += 1
-    groups = defaultdict(lambda: defaultdict(lambda: [0.0, 0]))
-    for (gk, major, minor, _item), (s, n) in per_item.items():
-        v = s / n
-        if v == 0.5 and ties == "drop":
-            continue
-        pw = groups[gk][(major, minor)]
-        pw[0] += v
-        pw[1] += 1
-    return groups
 
 
 def read_rows(path):

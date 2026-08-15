@@ -11,45 +11,9 @@ import numpy as np
 import pandas as pd
 from scipy.stats import kendalltau
 
+from mc_cost.ranking import _coverage_fields, _metric_keys, lomo_predictions
+
 BOOTSTRAP_RESAMPLES = 5000
-
-
-def _metric_keys(table: pd.DataFrame) -> list[str]:
-    """Return the columns that identify one independent comparison problem."""
-    candidates = [
-        "analysis",
-        "irt_model",
-        "fit",
-        "bank",
-        "partition",
-        "predictor_bin",
-        "target_bin",
-        "direction",
-        "target_quartile",
-        "judge",
-        "component",
-    ]
-    return [column for column in candidates if column in table]
-
-
-def _coverage_fields(group: pd.DataFrame) -> dict:
-    """Carry constant provenance fields into each derived endpoint row."""
-    candidates = [
-        "n_response_models",
-        "n_graph_models",
-        "n_component_models",
-        "component_models",
-        "n_rounds",
-        "n_calls",
-        "n_unique_items",
-        "n_judges",
-        "n_matched_models",
-    ]
-    return {
-        column: group[column].iloc[0]
-        for column in candidates
-        if column in group
-    }
 
 
 def model_bootstrap_intervals(
@@ -150,98 +114,6 @@ def rank_metrics(frame: pd.DataFrame) -> pd.DataFrame:
                 "n_models": n_models,
                 "reason": reason,
             })
-    return pd.DataFrame(rows)
-
-
-def _linear_predict(x_train, y_train, x_test) -> float:
-    """Least-squares line with the probability-scale prediction clipped."""
-    design = np.column_stack([np.ones(len(x_train)), np.asarray(x_train, float)])
-    intercept, slope = np.linalg.lstsq(
-        design,
-        np.asarray(y_train, float),
-        rcond=None,
-    )[0]
-    prediction = np.clip(intercept + slope * x_test, 0.0, 1.0)
-    return round(float(prediction), 12)
-
-
-def lomo_predictions(frame: pd.DataFrame) -> pd.DataFrame:
-    """Calibrate Elo and easy accuracy without seeing the held-out hard target.
-
-    The IRT split itself is fixed; "leave one model out" applies only to the
-    scalar calibration line. Mean and identity rows are diagnostics, not
-    alternative learned models.
-    """
-    rows = []
-    keys = _metric_keys(frame)
-    methods = ("elo", "easy_accuracy", "mean", "identity")
-    for values, group in frame.groupby(keys, dropna=False, sort=True):
-        values = values if isinstance(values, tuple) else (values,)
-        identity = dict(zip(keys, values))
-        matched = group.dropna(
-            subset=["elo", "easy_accuracy", "hard_accuracy"],
-        ).drop_duplicates("model").reset_index(drop=True)
-        coverage = _coverage_fields(group)
-        n_models = len(matched)
-        exploratory = identity.get("fit") == "aime"
-
-        if n_models < 4:
-            # LOMO needs at least three training models after holding one out.
-            # Emit explicit rows so small components remain visible in reports.
-            for method in methods:
-                rows.append({
-                    **identity,
-                    **coverage,
-                    "model": "",
-                    "method": method,
-                    "predictor": np.nan,
-                    "prediction": np.nan,
-                    "observed": np.nan,
-                    "n_models": n_models,
-                    "exploratory": exploratory,
-                    "reason": "fewer than 4 matched models",
-                })
-            continue
-
-        for held_index, held_out in matched.iterrows():
-            # Drop the whole held-out row before either calibration is fitted;
-            # its hard accuracy is never available to the regression.
-            training = matched.drop(index=held_index)
-            predictions = {
-                "elo": _linear_predict(
-                    training["elo"],
-                    training["hard_accuracy"],
-                    held_out["elo"],
-                ),
-                "easy_accuracy": _linear_predict(
-                    training["easy_accuracy"],
-                    training["hard_accuracy"],
-                    held_out["easy_accuracy"],
-                ),
-                # These two simple references make it easier to tell whether a
-                # fitted line is helping in a five-model component.
-                "mean": round(float(training["hard_accuracy"].mean()), 12),
-                "identity": float(np.clip(held_out["easy_accuracy"], 0.0, 1.0)),
-            }
-            predictor_values = {
-                "elo": held_out["elo"],
-                "easy_accuracy": held_out["easy_accuracy"],
-                "mean": np.nan,
-                "identity": held_out["easy_accuracy"],
-            }
-            for method, prediction in predictions.items():
-                rows.append({
-                    **identity,
-                    **coverage,
-                    "model": held_out["model"],
-                    "method": method,
-                    "predictor": predictor_values[method],
-                    "prediction": prediction,
-                    "observed": held_out["hard_accuracy"],
-                    "n_models": n_models,
-                    "exploratory": exploratory,
-                    "reason": "",
-                })
     return pd.DataFrame(rows)
 
 
