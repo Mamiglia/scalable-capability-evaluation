@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from inspect_ai.log import read_eval_log
-from judge.util import extract_score, extract_transcript
+from judge.util import extract_transcript, first_correct_by_id
 from judge.scorer import parse_judge_output
 
 FIELDS = ["bench", "condition", "judge", "major", "minor", "item_id", "order",
@@ -36,17 +36,17 @@ def _load_config(bench):
 
 
 @functools.lru_cache(maxsize=None)
-def _transcript_lengths(log_path, include_reasoning, max_length):
-    """item -> length of its first correct epoch, the epoch the judge saw."""
-    log = read_eval_log(str(ROOT / log_path))
-    grouped = {}
-    for s in log.samples:
-        if extract_score(s):
-            grouped.setdefault(s.id, []).append(s)
-    for group in grouped.values():
-        group.sort(key=lambda s: getattr(s, "epoch", 0))
-    return {item_id: len(extract_transcript(group[0], include_reasoning=include_reasoning)[:max_length])
-            for item_id, group in grouped.items()}
+def _transcript_lengths(log_path, include_reasoning, max_length, epoch_slot=0):
+    """item -> length of the transcript the judge saw.
+
+    epoch_slot picks which correct epoch, as build_dataset does: 0 for both sides
+    of a normal pair, 1 for the minor side of a self-pair. Items without that many
+    correct epochs are absent, matching the pairs build_dataset skips.
+    """
+    groups = first_correct_by_id(read_eval_log(str(ROOT / log_path)))
+    return {item_id: len(extract_transcript(group[epoch_slot],
+                                            include_reasoning=include_reasoning)[:max_length])
+            for item_id, group in groups.items() if len(group) > epoch_slot}
 
 
 def rows_from_pair_dir(pair_dir, bench, judge, cfg):
@@ -59,8 +59,10 @@ def rows_from_pair_dir(pair_dir, bench, judge, cfg):
     invert = bool(cfg.get("invert_at_analysis"))
     len_major = _transcript_lengths(cfg["transcripts"][major],
                                     cfg["include_reasoning"], cfg["max_length"])
+    # a self-pair judges one model's two earliest correct epochs against each other
     len_minor = _transcript_lengths(cfg["transcripts"][minor],
-                                    cfg["include_reasoning"], cfg["max_length"])
+                                    cfg["include_reasoning"], cfg["max_length"],
+                                    1 if minor == major else 0)
     for s in log.samples:
         if not s.scores:
             continue  # errored sample, no verdict

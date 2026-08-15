@@ -127,3 +127,19 @@ def extract_score(sample: Sample) -> bool:
     """
     score = sample.score
     return score is not None and score.value == "C"
+
+
+def first_correct_by_id(log) -> dict:
+    """
+    id -> that item's correct samples, earliest epoch first.
+
+    The epoch order build_dataset judges: it takes [0] for each side of a pair,
+    and [0] and [1] for the two sides of a self-pair.
+    """
+    grouped: dict = {}
+    for s in log.samples:
+        if extract_score(s):
+            grouped.setdefault(s.id, []).append(s)
+    for group in grouped.values():
+        group.sort(key=lambda s: getattr(s, "epoch", 0))
+    return grouped

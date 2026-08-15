@@ -17,7 +17,7 @@ import yaml
 from inspect_ai.log import read_eval_log
 
 from analyze import ROOT, OUT_DIR, FIELDS, summarize
-from judge.util import extract_score, extract_transcript
+from judge.util import extract_transcript, first_correct_by_id
 
 # ECIs per configs/comparisons/model_set.json (qwen3-32b from the epoch import)
 ECI = {"qwen3-8b": 127.9, "qwen3-32b": 130.0, "qwen3-vl-30b-a3b-instruct": 131.27,
@@ -35,17 +35,17 @@ MAX_LENGTH = 65536
 
 
 @functools.lru_cache(maxsize=None)
-def _lengths(log_path, include_reasoning):
-    """item -> length of its first correct epoch, the epoch the judge saw."""
-    log = read_eval_log(str(ROOT / log_path))
-    grouped = {}
-    for s in log.samples:
-        if extract_score(s):
-            grouped.setdefault(s.id, []).append(s)
-    for group in grouped.values():
-        group.sort(key=lambda s: getattr(s, "epoch", 0))
-    return {item_id: len(extract_transcript(group[0], include_reasoning=include_reasoning)[:MAX_LENGTH])
-            for item_id, group in grouped.items()}
+def _lengths(log_path, include_reasoning, epoch_slot=0):
+    """item -> length of the transcript the judge saw.
+
+    epoch_slot picks which correct epoch, as build_dataset does: 0 for both sides
+    of a normal pair, 1 for the minor side of a self-pair. Items without that many
+    correct epochs are absent, matching the pairs build_dataset skips.
+    """
+    groups = first_correct_by_id(read_eval_log(str(ROOT / log_path)))
+    return {item_id: len(extract_transcript(group[epoch_slot],
+                                            include_reasoning=include_reasoning)[:MAX_LENGTH])
+            for item_id, group in groups.items() if len(group) > epoch_slot}
 
 
 def success_samples(pair_dir):
@@ -70,7 +70,8 @@ def pair_rows(pair_dir, bench, condition, judge, transcripts, include_reasoning)
     flipped = ECI[second] > ECI[first]
     major, minor = (second, first) if flipped else (first, second)
     len_major = _lengths(transcripts[major], include_reasoning)
-    len_minor = _lengths(transcripts[minor], include_reasoning)
+    # a self-pair judges one model's two earliest correct epochs against each other
+    len_minor = _lengths(transcripts[minor], include_reasoning, 1 if minor == major else 0)
     for s in success_samples(pair_dir):
         item_id, target = s.id.rsplit("_", 1)
         sc = list(s.scores.values())[0]

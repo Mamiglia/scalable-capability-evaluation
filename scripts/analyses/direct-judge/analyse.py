@@ -22,7 +22,7 @@ import yaml
 from inspect_ai.log import read_eval_log
 from scipy.stats import kendalltau
 
-from judge.util import extract_score, extract_transcript
+from judge.util import extract_transcript, first_correct_by_id
 from score_task import parse_score_output
 
 HERE = Path(__file__).parent
@@ -44,16 +44,10 @@ def _load_config(bench):
 
 @functools.lru_cache(maxsize=None)
 def _transcript_lengths(log_path, include_reasoning, max_length):
-    """item -> length of its first correct epoch, the epoch the judge saw."""
-    log = read_eval_log(str(ROOT / log_path))
-    grouped = {}
-    for s in log.samples:
-        if extract_score(s):
-            grouped.setdefault(s.id, []).append(s)
-    for group in grouped.values():
-        group.sort(key=lambda s: getattr(s, "epoch", 0))
+    """item -> length of its first correct epoch, the epoch the judge scored."""
+    groups = first_correct_by_id(read_eval_log(str(ROOT / log_path)))
     return {item_id: len(extract_transcript(group[0], include_reasoning=include_reasoning)[:max_length])
-            for item_id, group in grouped.items()}
+            for item_id, group in groups.items()}
 
 
 def rows_from_model_dir(model_dir, bench, judge, cfg):

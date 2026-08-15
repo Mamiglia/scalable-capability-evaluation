@@ -15,7 +15,8 @@ from inspect_ai.model import (
 from inspect_ai.tool import ToolCall, ToolCallError
 from inspect_ai.scorer import Score
 
-from util import format_message, extract_transcript, extract_score, format_content, strip_think
+from util import (format_message, extract_transcript, extract_score, format_content,
+                  strip_think, first_correct_by_id)
 
 
 class TestFormatMessage:
@@ -149,6 +150,55 @@ class TestExtractScore:
         """Test score extraction when score value is 'I' (Incorrect)."""
         sample = SimpleNamespace(score=Score(value="I"))
         assert extract_score(sample) is False
+
+
+class TestFirstCorrectById:
+    """Epoch selection must match build_dataset: earliest CORRECT epoch first."""
+
+    @staticmethod
+    def _log(*samples):
+        return SimpleNamespace(samples=list(samples))
+
+    @staticmethod
+    def _sample(item, epoch, correct, text):
+        return SimpleNamespace(id=item, epoch=epoch, score=Score(value="C" if correct else "I"),
+                               messages=[ChatMessageAssistant(content=text)])
+
+    def test_earliest_correct_epoch_wins_over_later_epochs(self):
+        """Later epochs must not overwrite the first correct one (the original bug)."""
+        log = self._log(
+            self._sample("q1", 1, True, "first correct"),
+            self._sample("q1", 2, True, "second correct"),
+            self._sample("q1", 3, True, "last epoch"),
+        )
+        groups = first_correct_by_id(log)
+        assert extract_transcript(groups["q1"][0]).endswith("first correct")
+        # a drift back to last-epoch selection would put "last epoch" here
+        assert extract_transcript(groups["q1"][1]).endswith("second correct")
+
+    def test_incorrect_epochs_are_skipped(self):
+        """The first correct epoch is neither the first nor the last epoch here."""
+        log = self._log(
+            self._sample("q1", 1, False, "wrong early"),
+            self._sample("q1", 2, True, "right"),
+            self._sample("q1", 3, False, "wrong late"),
+        )
+        groups = first_correct_by_id(log)
+        assert len(groups["q1"]) == 1
+        assert extract_transcript(groups["q1"][0]).endswith("right")
+
+    def test_out_of_order_samples_are_sorted_by_epoch(self):
+        """Log order must not decide the winner; epoch does."""
+        log = self._log(
+            self._sample("q1", 1, True, "epoch one"),
+            self._sample("q1", 3, True, "epoch three"),
+            self._sample("q1", 2, True, "epoch two"),
+        )
+        assert extract_transcript(first_correct_by_id(log)["q1"][0]).endswith("epoch one")
+
+    def test_item_with_no_correct_epoch_is_absent(self):
+        log = self._log(self._sample("q1", 1, False, "wrong"))
+        assert "q1" not in first_correct_by_id(log)
 
 
 class TestStripThink:
