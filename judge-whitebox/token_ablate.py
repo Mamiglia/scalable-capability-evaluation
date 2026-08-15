@@ -146,10 +146,14 @@ def lora_at_positions(model, holder):
             x = inputs[0]
             inc = None
             for name in mod.active_adapters:
-                term = mod.lora_B[name](mod.lora_A[name](x)) * mod.scaling[name]
+                lora_a = mod.lora_A[name]
+                # peft keeps LoRA in fp32 on CUDA even under a bf16 base; cast x to the LoRA
+                # weight dtype for the matmul, then back to the output dtype before combining.
+                term = mod.lora_B[name](lora_a(x.to(lora_a.weight.dtype))) * mod.scaling[name]
                 inc = term if inc is None else inc + term
             if inc is None:
                 return output
+            inc = inc.to(output.dtype)
             keep = torch.zeros(output.shape[1], device=output.device, dtype=output.dtype)
             keep[list(holder.positions)] = 1.0
             return output - inc * (1.0 - keep)[None, :, None]
