@@ -336,8 +336,8 @@ def test_run_ablation_four_conditions_and_derived_metrics(monkeypatch):
 
     out = adapter_ablate.run_ablation(model, None, pd.DataFrame(), groups={"g1": group}, c={})
 
-    # base, group_only, full, full_minus, in that order, called sequentially (never nested)
-    assert calls == [frozenset(), frozenset({0}), all_layers, frozenset({1})]
+    # base, full hoisted before the group loop; group_only, full_minus inside it; never nested
+    assert calls == [frozenset(), all_layers, frozenset({0}), frozenset({1})]
 
     assert len(out) == 5  # one row per metric
     assert set(out["group"]) == {"g1"}
@@ -357,3 +357,30 @@ def test_run_ablation_four_conditions_and_derived_metrics(monkeypatch):
         assert row["sufficiency"] == pytest.approx(group_only - base)
         assert row["necessity"] == pytest.approx(full - full_minus)
         assert row["interaction"] == pytest.approx((full - full_minus) - (group_only - base))
+
+
+def test_run_ablation_hoists_base_and_full_across_groups(monkeypatch):
+    """base (active_layers=∅) and full (all layers) don't depend on the group, so with N groups
+    each must still be called exactly once — not once per group — while group_only/full_minus
+    are called once per group."""
+    model = _toy_peft_model(n_layers=3)
+    all_layers = frozenset({0, 1, 2})
+    groups = {"g1": {0}, "g2": {1}}
+    calls = []
+
+    def stub_verdicts_under(model_arg, tokenizer_arg, df_arg, active_layers, c_arg):
+        calls.append(frozenset(active_layers))
+        return frozenset(active_layers)
+    monkeypatch.setattr(adapter_ablate, "verdicts_under", stub_verdicts_under)
+    flat_metrics = dict(acc=0.0, pos_term=0.0, order_even=0.0, order_odd=0.0, pick_weaker_acc=0.0)
+    monkeypatch.setattr(adapter_ablate, "metrics", lambda key: flat_metrics)
+
+    adapter_ablate.run_ablation(model, None, pd.DataFrame(), groups=groups, c={})
+
+    assert calls.count(frozenset()) == 1  # base: once total, not once per group
+    assert calls.count(all_layers) == 1  # full: once total, not once per group
+    assert calls.count(frozenset({0})) == 1  # g1 group_only
+    assert calls.count(frozenset({1})) == 1  # g2 group_only
+    assert calls.count(frozenset({1, 2})) == 1  # g1 full_minus
+    assert calls.count(frozenset({0, 2})) == 1  # g2 full_minus
+    assert len(calls) == 6  # 2 hoisted + 2 groups x 2 per-group conditions

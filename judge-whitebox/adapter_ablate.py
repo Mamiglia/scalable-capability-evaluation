@@ -136,21 +136,19 @@ def run_ablation(model, tokenizer, df, groups: dict[str, set[int]], c):
     """Four-condition LoRA ablation per named group (base/group_only/full/full_minus), each a
     sequential verdicts_under + metrics call (never nested), plus derived sufficiency
     (group_only - base), necessity (full - full_minus) and interaction (necessity - sufficiency).
+    base and full don't depend on the group, so each runs once and is reused across all groups.
     One row per (group, metric)."""
     all_layers = set(lora_layers(model))
+    base_m = metrics(verdicts_under(model, tokenizer, df, set(), c))
+    full_m = metrics(verdicts_under(model, tokenizer, df, all_layers, c))
+
     rows = []
     for group_name, group in groups.items():
-        conditions = {
-            "base": set(),
-            "group_only": group,
-            "full": all_layers,
-            "full_minus": all_layers - group,
-        }
-        results = {cond: metrics(verdicts_under(model, tokenizer, df, active_layers, c))
-                   for cond, active_layers in conditions.items()}
-        for metric_name in results["base"]:
-            base, group_only, full, full_minus = (results[cond][metric_name] for cond in
-                                                    ("base", "group_only", "full", "full_minus"))
+        group_only_m = metrics(verdicts_under(model, tokenizer, df, group, c))
+        full_minus_m = metrics(verdicts_under(model, tokenizer, df, all_layers - group, c))
+        for metric_name in base_m:
+            base, group_only, full, full_minus = (base_m[metric_name], group_only_m[metric_name],
+                                                    full_m[metric_name], full_minus_m[metric_name])
             sufficiency = group_only - base
             necessity = full - full_minus
             rows.append(dict(group=group_name, metric=metric_name, base=base, group_only=group_only,
