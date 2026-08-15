@@ -44,6 +44,8 @@ STYLE_PATTERNS = {
     "self_reference": r"\b(I|we|my|our|us)\b",
 }
 ANSWER_LINE_RE = re.compile(r"\bANSWER\s*:|\bFinal Answer\s*:", re.IGNORECASE)
+# Batch markers from the rewriter prompt. None may survive into a stored rewrite.
+DELIMITER_RE = re.compile(r"<<<\s*(?:REWRITE|END|TRANSCRIPT)?\s*\d*\s*>>>|<<<|>>>")
 
 
 def answer_value(line: str) -> str:
@@ -91,18 +93,30 @@ def feature_rates(texts: list[str]) -> dict[str, float]:
     return {k: 1000 * v / words for k, v in feature_counts(texts).items()}
 
 
+def write_atomic(path: Path, text: str) -> None:
+    """Write via a temp file and rename, so a concurrent reader never sees a half file."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+
+
 def check(original: dict, rewrite: str, min_ratio: float, max_ratio: float) -> str | None:
     """Reason this rewrite fails, or None."""
     if not rewrite.strip():
         return "empty"
+    if DELIMITER_RE.search(rewrite):
+        # batch markers in the text mean the reply was mis-parsed and the row may carry
+        # another transcript's content, so its answer cannot be trusted
+        return f"delimiter_leak({DELIMITER_RE.search(rewrite).group(0)!r})"
     ratio = len(rewrite.split()) / max(original["n_words"], 1)
     if not min_ratio <= ratio <= max_ratio:
         return f"word_ratio={ratio:.2f}"
     want = final_answer_line(original["transcript"])
     if want is None:
         return None  # original has no answer line to preserve
-    if want in rewrite:
-        return None
+    # Always compare the rewrite's own final answer line. Testing whether the wanted line
+    # appears anywhere passes rows that carry the right answer mid-text and a different
+    # one at the end, which is exactly how a leaked second transcript slips through.
     got = final_answer_line(rewrite)
     if got is None:
         return "answer_line_missing"
@@ -111,7 +125,7 @@ def check(original: dict, rewrite: str, min_ratio: float, max_ratio: float) -> s
     return f"answer_changed({answer_value(want)!r}->{answer_value(got)!r})"
 
 
-def main() -> None:
+def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("rewriter", choices=["haiku", "gpt"])
     ap.add_argument("--min-ratio", type=float, default=MIN_WORD_RATIO)
@@ -153,6 +167,7 @@ def main() -> None:
     for reason, n in sorted(by_reason.items(), key=lambda kv: -kv[1]):
         print(f"  fail {reason}: {n}")
 
+    style_failed = False
     if ok_pairs:
         orig_texts = [o["transcript"] for o, _ in ok_pairs]
         new_texts = [r["rewritten"] for _, r in ok_pairs]
@@ -178,6 +193,7 @@ def main() -> None:
                 print(f"  {name:20s} {top}")
         if bad:
             print(f"\nFAIL: {bad} rose in both rate and count - redo the batch")
+            style_failed = True
         elif rose:
             print(f"\nnote: rose but not hedging/backtracking: {rose}")
         else:
@@ -186,11 +202,25 @@ def main() -> None:
     if args.drop_failures and failures:
         keep = {k for k, _, _ in failures}
         kept = [r for r in rewrites if (r["model"], r["item_id"]) not in keep]
-        path.write_text("".join(json.dumps(r) + "\n" for r in kept))
+        write_atomic(path, "".join(json.dumps(r) + "\n" for r in kept))
         print(f"\ndropped {len(rewrites) - len(kept)} failing rows from {path.name}; re-run to redo")
 
     if args.write_exclusions:
-        EXCLUDED.write_text(json.dumps({
+        # Merge, never replace: each rewriter contributes its own failures and the union is
+        # excluded from every condition. Overwriting here would silently discard the other
+        # rewriter's exclusions.
+        cells = {}
+        if EXCLUDED.exists():
+            for cell in json.loads(EXCLUDED.read_text()).get("cells", []):
+                if cell.get("rewriter") != args.rewriter:
+                    cells[(cell["model"], cell["item_id"], cell.get("rewriter"))] = cell
+        for k, reason, ratio in failures:
+            cells[(k[0], k[1], args.rewriter)] = {
+                "model": k[0], "item_id": k[1], "rewriter": args.rewriter,
+                "word_ratio": round(ratio, 3), "reason": reason,
+            }
+        merged = [cells[k] for k in sorted(cells)]
+        write_atomic(EXCLUDED, json.dumps({
             "why": (
                 "Cells excluded from the judging campaign. These rewrites fall outside the "
                 "word-ratio bounds, and below the lower bound is where rewrites stop "
@@ -206,12 +236,16 @@ def main() -> None:
                       "the surviving corpus is not a uniform sample of the original one",
             "min_word_ratio": args.min_ratio,
             "max_word_ratio": args.max_ratio,
-            "rewriter": args.rewriter,
-            "n_excluded": len(failures),
-            "cells": [{"model": k[0], "item_id": k[1], "word_ratio": round(ratio, 3),
-                       "reason": reason} for k, reason, ratio in sorted(failures)],
+            "n_excluded": len(merged),
+            "n_excluded_by_rewriter": {r: sum(1 for c in merged if c["rewriter"] == r)
+                                       for r in sorted({c["rewriter"] for c in merged})},
+            "excluded_cells": sorted({(c["model"], c["item_id"]) for c in merged}).__len__(),
+            "cells": merged,
         }, indent=2) + "\n")
-        print(f"\nwrote {len(failures)} excluded cells to {EXCLUDED.name}; no transcript file changed")
+        print(f"\nwrote {len(merged)} excluded rows ({args.rewriter}: {len(failures)}) to "
+              f"{EXCLUDED.name}; no transcript file changed")
+
+    return 1 if style_failed else 0
 
 
 def _self_check() -> None:
@@ -229,6 +263,11 @@ def _self_check() -> None:
     assert check(bold, "a b c d e f g h", 0.4, 1.05) == "answer_line_missing"
     latex = {"n_words": 10, "transcript": "x\n\\[ \\text{ANSWER: B} \\]"}
     assert check(latex, "a b c d e f g h\nANSWER: B", 0.4, 1.05) is None
+    leak = {"n_words": 10, "transcript": "x\nANSWER: B"}
+    assert check(leak, "a b c\nANSWER: B\n<<<END 4>>>\n<<<REWRITE 4>>>\nother\nANSWER: C",
+                 0.4, 1.05).startswith("delimiter_leak")
+    # the wanted line appearing mid-text must not excuse a different final answer
+    assert check(leak, "a b c\nANSWER: B\nmore text\nANSWER: C", 0.4, 1.05).startswith("answer_changed")
     sci = {"n_words": 10, "transcript": "q\nANSWER: A) 6.3x10^-7 M"}
     assert check(sci, "a b c d e f\nANSWER: A) 6.3\u00d710^-7 M", 0.4, 1.05) is None
     gem = {"n_words": 10, "transcript": "x\nFinal Answer: C"}
@@ -247,4 +286,4 @@ if __name__ == "__main__":
     if "--self-check" in sys.argv:
         _self_check()
     else:
-        main()
+        sys.exit(main())

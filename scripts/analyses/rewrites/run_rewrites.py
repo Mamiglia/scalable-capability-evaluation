@@ -45,6 +45,7 @@ CLI_TIMEOUT_S = 900
 BATCH_ATTEMPTS = 2  # one retry per batch before its rows are left for a later resume
 
 BLOCK_RE = re.compile(r"<<<REWRITE (\d+)>>>\n(.*?)\n?<<<END \1>>>", re.DOTALL)
+MARKER_RE = re.compile(r"<<<|>>>")  # no marker may survive inside a stored rewrite
 # codex prints e.g. "tokens used: 12,345"
 TOKENS_RE = re.compile(r"tokens used[:\s]+([\d,]+)", re.IGNORECASE)
 
@@ -98,8 +99,15 @@ CALLERS = {"haiku": call_haiku, "gpt": call_codex}
 
 
 def parse_blocks(response: str, batch: list[dict]) -> list[dict]:
-    """Rows for the transcripts whose block came back; missing ones are left for a resume."""
+    """Rows for the transcripts whose block came back; missing ones are left for a resume.
+
+    A block still holding a marker is discarded: when the model misnumbers a closing marker
+    the back-reference pairs one block's opener with a later block's closer and swallows
+    everything between, which would store two transcripts (and the wrong answer) in one row.
+    Dropping it leaves the transcript for the next resume.
+    """
     found = {int(n): text.strip() for n, text in BLOCK_RE.findall(response)}
+    found = {i: t for i, t in found.items() if not MARKER_RE.search(t)}
     return [
         {"model": row["model"], "item_id": row["item_id"], "rewritten": found[i]}
         for i, row in enumerate(batch, start=1)
@@ -211,5 +219,34 @@ def main() -> None:
               f"= {stats['tokens'] / max(stats['rows'], 1):.0f}/transcript", flush=True)
 
 
+def _self_check() -> None:
+    batch = [{"model": "m", "item_id": f"i{n}", "transcript": "t", "n_words": 1} for n in range(1, 5)]
+
+    ok = "<<<REWRITE 1>>>\nAAA\n<<<END 1>>>\n<<<REWRITE 2>>>\nB\nB\n<<<END 2>>>"
+    assert [r["rewritten"] for r in parse_blocks(ok, batch)] == ["AAA", "B\nB"]
+
+    # a block missing from the reply is skipped, not shifted onto the wrong transcript
+    only2 = "<<<REWRITE 2>>>\nX\n<<<END 2>>>"
+    assert parse_blocks(only2, batch) == [{"model": "m", "item_id": "i2", "rewritten": "X"}]
+
+    # the real failure: a misnumbered closing marker makes block 3's opener pair with a
+    # stray <<<END 3>>> after block 4, swallowing block 4 whole. That block must be dropped.
+    mislabelled = ("<<<REWRITE 3>>>\nfirst\nANSWER: D\n<<<END 4>>>\n\n"
+                   "<<<REWRITE 4>>>\nsecond\nANSWER: B\n<<<END 3>>>")
+    rows = parse_blocks(mislabelled, batch)
+    assert rows == [], rows
+    assert all("<<<" not in r["rewritten"] for r in rows)
+
+    # unterminated block yields nothing rather than running to end of reply
+    assert parse_blocks("<<<REWRITE 1>>>\nno terminator here", batch) == []
+
+    assert [len(b) for b in make_batches([{"n_words": w} for w in [100] * 6 + [5000, 50, 50]],
+                                         5, 2500)] == [5, 1, 1, 2]
+    print("self-check OK")
+
+
 if __name__ == "__main__":
-    main()
+    if "--self-check" in sys.argv:
+        _self_check()
+    else:
+        main()
