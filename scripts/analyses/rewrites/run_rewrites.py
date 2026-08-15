@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import hashlib
 import threading
 from functools import partial
 import time
@@ -29,15 +30,25 @@ OUT_PATHS = {
     "gpt": ROOT / "judge_results/rewrites/paraphrase_gpt.jsonl",
 }
 
-# Used verbatim for both rewriters. Do not edit.
-INSTRUCTION = (
-    "Paraphrase the following answer transcript. Preserve every step of the reasoning "
-    "and all technical content exactly — do not fix, improve, complete, or reorder the "
-    "reasoning, and do not add anything. Remove stylistic tendencies: idiosyncratic word "
-    "choices, tone, hedging habits, formatting quirks. Write in plain neutral prose. The "
-    "paraphrase must not be longer than the original. Keep the final line starting with "
-    '"ANSWER:" exactly as it is.'
-)
+INSTRUCTION_PATH = Path(__file__).resolve().parent / "rewrite_instruction.md"
+
+
+def load_instruction(path: Path = INSTRUCTION_PATH) -> tuple[str, str]:
+    """The prompt below the horizontal rule, plus a hash of the whole file.
+
+    The instruction is an experiment input the user edits directly, so it lives in a file
+    rather than in code, and both rewriters read the same one so they cannot drift apart.
+    The hash is logged with every batch: two corpora now exist under different instructions
+    and each has to be traceable to the one that produced it.
+    """
+    text = path.read_text()
+    if "\n---\n" not in text:
+        raise ValueError(f"{path.name} has no '---' rule separating notes from the prompt")
+    prompt = text.split("\n---\n", 1)[1].strip()
+    if not prompt:
+        raise ValueError(f"{path.name} has no prompt below the rule")
+    return prompt, hashlib.sha256(text.encode()).hexdigest()[:12]
+
 
 BATCH_SIZE = 5
 MAX_BATCH_WORDS = 2500  # transcripts run to ~5k words; a batch of 5 long ones truncates the reply
@@ -51,10 +62,10 @@ MARKER_RE = re.compile(r"<<<|>>>")  # no marker may survive inside a stored rewr
 TOKENS_RE = re.compile(r"tokens used[:\s]+([\d,]+)", re.IGNORECASE)
 
 
-def build_prompt(batch: list[dict]) -> str:
+def build_prompt(batch: list[dict], instruction: str) -> str:
     """Instruction verbatim, then the batch between numbered markers."""
     parts = [
-        INSTRUCTION,
+        instruction,
         "",
         f"You are given {len(batch)} transcripts. Apply the instruction above to each one "
         "independently. Output every paraphrase in the same order, each between its marker "
@@ -163,6 +174,9 @@ def main() -> None:
     if args.reasoning_effort:
         call = partial(call, reasoning_effort=args.reasoning_effort)
 
+    instruction, instruction_hash = load_instruction()
+    print(f"instruction {INSTRUCTION_PATH.name} sha256:{instruction_hash}", flush=True)
+
     originals = [json.loads(l) for l in ORIGINALS.read_text().splitlines() if l.strip()]
     done = done_keys(out_path)
     todo = [r for r in originals if (r["model"], r["item_id"]) not in done]
@@ -187,7 +201,7 @@ def main() -> None:
                 if not queue:
                     return
                 idx, batch = queue.pop(0)
-            prompt = build_prompt(batch)
+            prompt = build_prompt(batch, instruction)
             for attempt in range(1, args.attempts + 1):
                 start = time.time()
                 try:
@@ -209,7 +223,8 @@ def main() -> None:
                     stats["tokens"] += tokens
                     stats["seconds"] += elapsed
                     print(f"  batch {idx}: {len(rows)}/{len(batch)} rows in {elapsed:.0f}s "
-                          f"(total {stats['rows']} rows, {stats['batches']} batches)", flush=True)
+                          f"(total {stats['rows']} rows, {stats['batches']} batches) "
+                          f"[instr {instruction_hash}]", flush=True)
                 break
             else:
                 with lock:
@@ -232,6 +247,11 @@ def main() -> None:
 
 def _self_check() -> None:
     batch = [{"model": "m", "item_id": f"i{n}", "transcript": "t", "n_words": 1} for n in range(1, 5)]
+
+    prompt, h = load_instruction()
+    assert prompt and len(h) == 12, (prompt[:40], h)
+    assert "---" not in prompt.splitlines()[0], "notes leaked into the prompt"
+    assert build_prompt(batch[:1], prompt).startswith(prompt)
 
     ok = "<<<REWRITE 1>>>\nAAA\n<<<END 1>>>\n<<<REWRITE 2>>>\nB\nB\n<<<END 2>>>"
     assert [r["rewritten"] for r in parse_blocks(ok, batch)] == ["AAA", "B\nB"]

@@ -19,6 +19,7 @@ import json
 import re
 import statistics
 from collections import Counter
+from difflib import SequenceMatcher
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -28,7 +29,8 @@ EXCLUDED = REWRITE_DIR / "excluded.json"
 
 MIN_WORD_RATIO = 0.4
 MAX_WORD_RATIO = 1.05  # slack for tokenisation noise when measuring against the original
-MAX_EXPANSION_RATIO = 1.0  # the instruction is compression only: never longer than the original
+MAX_EXPANSION_RATIO = 1.0  # a rewrite must never be longer than its original
+MAX_SIMILARITY = 0.95  # above this a "rewrite" is a copy - see the report for the calibration
 
 # Minimal per-category style lexicon, counted as hits per 1000 words. A shared
 # style-feature module is owned elsewhere; this stands in until it exists.
@@ -44,9 +46,24 @@ STYLE_PATTERNS = {
     "formatting_quirks": r"(^\s*[-*•]\s|^\s*#{1,6}\s|^\s*\d+[.)]\s|\\\[|\\\(|\\frac|\$\$)",
     "self_reference": r"\b(I|we|my|our|us)\b",
 }
+WORD_RE = re.compile(r"\w+")
 ANSWER_LINE_RE = re.compile(r"\bANSWER\s*:|\bFinal Answer\s*:", re.IGNORECASE)
 # Batch markers from the rewriter prompt. None may survive into a stored rewrite.
 DELIMITER_RE = re.compile(r"<<<\s*(?:REWRITE|END|TRANSCRIPT)?\s*\d*\s*>>>|<<<|>>>")
+
+
+def similarity(original: str, rewrite: str) -> float:
+    """Token-sequence similarity, 1.0 for a verbatim copy.
+
+    Order-sensitive on purpose. Technical content forces high token-*set* overlap even in a
+    genuine paraphrase - the numbers, formulae and names all have to survive - so set measures
+    like Jaccard cannot tell copying from rewording. Sequence similarity can: it separates
+    "same words in the same order" from "same facts, different phrasing".
+    """
+    a, b = WORD_RE.findall(original.lower()), WORD_RE.findall(rewrite.lower())
+    if not a or not b:
+        return 0.0
+    return SequenceMatcher(None, a, b, autojunk=False).ratio()
 
 
 def answer_value(line: str) -> str:
@@ -123,7 +140,8 @@ def merge_exclusions(previous: dict, failures: list, rewriter: str) -> list[dict
 
 
 def check(original: dict, rewrite: str, min_ratio: float, max_ratio: float,
-          max_expansion: float = MAX_EXPANSION_RATIO) -> str | None:
+          max_expansion: float = MAX_EXPANSION_RATIO,
+          max_similarity: float = MAX_SIMILARITY) -> str | None:
     """Reason this rewrite fails, or None."""
     if not rewrite.strip():
         return "empty"
@@ -131,6 +149,11 @@ def check(original: dict, rewrite: str, min_ratio: float, max_ratio: float,
         # batch markers in the text mean the reply was mis-parsed and the row may carry
         # another transcript's content, so its answer cannot be trusted
         return f"delimiter_leak({DELIMITER_RE.search(rewrite).group(0)!r})"
+    sim = similarity(original["transcript"], rewrite)
+    if sim > max_similarity:
+        # Near-verbatim: the rewriter copied instead of rewriting, so no style was stripped.
+        # Every other check passes on a copy, which is why this one exists.
+        return f"too_similar={sim:.3f}"
     ratio = len(rewrite.split()) / max(original["n_words"], 1)
     if ratio > max_expansion:
         # Reported apart from a ratio miss: expansion is the direction that can mask a weak
@@ -159,6 +182,7 @@ def main() -> int:
     ap.add_argument("--min-ratio", type=float, default=MIN_WORD_RATIO)
     ap.add_argument("--max-ratio", type=float, default=MAX_WORD_RATIO)
     ap.add_argument("--max-expansion", type=float, default=MAX_EXPANSION_RATIO)
+    ap.add_argument("--max-similarity", type=float, default=MAX_SIMILARITY)
     ap.add_argument("--drop-failures", action="store_true",
                     help="rewrite the paraphrase file without failing rows, so a re-run redoes them")
     ap.add_argument("--write-exclusions", action="store_true",
@@ -174,7 +198,8 @@ def main() -> int:
     for row in rewrites:
         key = (row["model"], row["item_id"])
         orig = originals[key]
-        reason = check(orig, row["rewritten"], args.min_ratio, args.max_ratio, args.max_expansion)
+        reason = check(orig, row["rewritten"], args.min_ratio, args.max_ratio,
+                       args.max_expansion, args.max_similarity)
         if reason:
             failures.append((key, reason, len(row["rewritten"].split()) / max(orig["n_words"], 1)))
         else:
@@ -298,6 +323,13 @@ def _self_check() -> None:
     again = merge_exclusions(new, [], "gpt")
     assert [(c["model"], c["rewriter"]) for c in again] == [("m", "haiku")], again
     assert merge_exclusions({}, [], "haiku") == []
+
+    # a copy is caught even though every other check passes on it
+    body = "the formation constant is very large so the complex dissociates only slightly here"
+    copied = {"n_words": len(body.split()) + 2, "transcript": body + "\nANSWER: B"}
+    assert check(copied, body + "\nANSWER: B", 0.4, 1.05).startswith("too_similar")
+    assert similarity("a b c d e f", "a b c d e f") == 1.0
+    assert similarity("a b c d e f g h", "totally different words entirely here now ok") < 0.5
 
     leak = {"n_words": 10, "transcript": "x\nANSWER: B"}
     assert check(leak, "a b c\nANSWER: B\n<<<END 4>>>\n<<<REWRITE 4>>>\nother\nANSWER: C",
