@@ -187,12 +187,28 @@ def _decoder_layers(model):
     raise AttributeError("could not locate decoder layers")
 
 
+def _causal_mean(hs, pos):
+    """Replace the residual at each ablated position `pos` with the mean over KEPT positions
+    strictly EARLIER than it, so no future-token content leaks into an earlier position (a plain
+    mean over ALL other positions would, artefactually inflating later-span responsibility).
+    Positions with no earlier kept position are left unchanged. hs: [1, T, H]; returns a new tensor."""
+    hs = hs.clone()
+    keep = torch.ones(hs.shape[1], dtype=torch.bool, device=hs.device)
+    keep[pos] = False
+    kept_idx = keep.nonzero(as_tuple=True)[0]
+    for p in pos:  # kept positions are never in pos, so reads stay on original values
+        earlier = kept_idx[kept_idx < p]
+        if len(earlier):
+            hs[:, p, :] = hs[:, earlier, :].mean(dim=1).to(hs.dtype)
+    return hs
+
+
 @contextlib.contextmanager
 def mean_ablate(model, holder, baseline="mean"):
     """BASE probe. Forward-hook on every decoder block replaces the residual at holder.positions,
-    at every layer, with either the mean over the OTHER (kept) positions of that sequence
-    (baseline='mean', on-manifold) or zeros (baseline='zero', off-manifold). holder.positions set
-    per row by the caller; None or empty = no-op. Batch-1."""
+    at every layer, with either the causal mean over the OTHER (earlier, kept) positions of that
+    sequence (baseline='mean', on-manifold) or zeros (baseline='zero', off-manifold).
+    holder.positions set per row by the caller; None or empty = no-op. Batch-1."""
     handles = []
 
     def hook(mod, inputs, output):
@@ -200,20 +216,11 @@ def mean_ablate(model, holder, baseline="mean"):
             return output
         hs = output[0] if isinstance(output, tuple) else output
         pos = list(holder.positions)
-        hs = hs.clone()
         if baseline == "zero":
+            hs = hs.clone()
             hs[:, pos, :] = 0.0
         else:
-            # causal mean: replace each ablated position with the mean over KEPT positions strictly
-            # EARLIER than it. Meaning over all kept positions (incl. later) would inject
-            # future-token content into earlier positions and inflate later-span responsibility.
-            keep = torch.ones(hs.shape[1], dtype=torch.bool, device=hs.device)
-            keep[pos] = False
-            kept_idx = keep.nonzero(as_tuple=True)[0]
-            for p in pos:  # kept positions are never in pos, so reads stay on original values
-                earlier = kept_idx[kept_idx < p]
-                if len(earlier):
-                    hs[:, p, :] = hs[:, earlier, :].mean(dim=1).to(hs.dtype)
+            hs = _causal_mean(hs, pos)
         return (hs,) + tuple(output[1:]) if isinstance(output, tuple) else hs
 
     for layer in _decoder_layers(model):

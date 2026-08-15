@@ -101,3 +101,20 @@ def test_no_marker_hit_for_text_without_lexicon_words(tokenizer, c):
     assert groups["connective"] == []
     assert groups["hedge"] == []
     assert groups["backtrack"] == []
+
+
+def test_causal_mean_uses_only_earlier_kept_positions():
+    """_causal_mean replaces each ablated position with the mean over KEPT positions strictly
+    earlier than it, never leaking future-token content backwards."""
+    torch = pytest.importorskip("torch")
+    hs = torch.arange(5.0).view(1, 5, 1)          # value == position index
+    out = token_ablate._causal_mean(hs, [2, 4])   # ablate 2 and 4; kept = {0,1,3}
+    assert abs(out[0, 2, 0].item() - 0.5) < 1e-6      # mean{0,1}
+    assert abs(out[0, 4, 0].item() - 4 / 3) < 1e-6    # mean{0,1,3}
+    for p in (0, 1, 3):                                # kept positions unchanged
+        assert out[0, p, 0].item() == p
+    # future-leak guard: changing later positions must not move an earlier ablated position
+    hs2 = hs.clone(); hs2[0, 3, 0] = 99; hs2[0, 4, 0] = 99
+    assert abs(token_ablate._causal_mean(hs2, [2, 4])[0, 2, 0].item() - 0.5) < 1e-6
+    # first position has no earlier kept position -> left unchanged
+    assert token_ablate._causal_mean(hs.clone(), [0])[0, 0, 0].item() == 0
