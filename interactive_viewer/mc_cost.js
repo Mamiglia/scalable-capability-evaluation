@@ -210,7 +210,7 @@ function renderSummary(rows, manualGroups) {
     summaryItem("Judgment calls", metric(rows, "judgment_calls", (row) => row.comparison_id === null)),
     summaryItem("Maximum calls", metric(rows, "judgment_call_upper_bound"), true),
     summaryItem("Candidate calls", metric(rows, "candidate_calls")),
-    summaryItem("Total cost", metric(rows, "cost", (row) => row.model === "__total__"), false, true),
+    summaryItem("Total cost", metric(rows, "cost", (row) => row.model === "__total__" && row.role === "all"), false, true),
   );
 }
 
@@ -221,7 +221,7 @@ function renderBadges(autoRows, manualGroups) {
     ? autoRows.slice(0, 1)
     : manualGroups.flatMap((group) => group.rows.slice(0, 1));
   const statuses = unique(scenarioRows, "scenario_prediction_status");
-  for (const status of statuses.length ? statuses : ["predicted"]) {
+  for (const status of statuses) {
     const badge = document.createElement("span");
     badge.className = `badge ${status === "observed" ? "good" : ""}`;
     badge.textContent = status === "observed" ? "Observed configuration" : "Posterior prediction";

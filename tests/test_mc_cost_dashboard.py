@@ -241,3 +241,29 @@ def test_dashboard_assets_keep_existing_viewer_separate_and_support_dark_mode():
     assert "<th>Judge calls</th>" in (ROOT / "interactive_viewer/mc_cost.html").read_text()
     assert "@media (prefers-color-scheme: dark)" in styles
     assert "@media (max-width:" in styles
+
+
+def test_dashboard_badges_never_invent_support_for_a_missing_scenario():
+    script = (ROOT / "interactive_viewer/mc_cost.js").read_text()
+
+    assert 'for (const status of statuses)' in script
+    assert 'statuses.length ? statuses : ["predicted"]' not in script
+
+
+def test_dashboard_headline_total_cost_requires_the_all_role():
+    rows = [
+        {"metric": "cost", "model": "__total__", "role": "candidate", "p50": 1.0},
+        {"metric": "cost", "model": "__total__", "role": "judge", "p50": 2.0},
+        {"metric": "cost", "model": "__total__", "role": "all", "p50": 3.0},
+    ]
+    script = (ROOT / "interactive_viewer/mc_cost.js").read_text()
+
+    expected = next(
+        row for row in rows
+        if row["metric"] == "cost" and row["model"] == "__total__" and row["role"] == "all"
+    )
+    assert expected["p50"] == 3.0
+    assert (
+        'summaryItem("Total cost", metric(rows, "cost", '
+        '(row) => row.model === "__total__" && row.role === "all"), false, true)'
+    ) in script
