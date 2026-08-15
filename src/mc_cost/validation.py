@@ -421,7 +421,11 @@ def ranking_recovery(
                     "easy_accuracy": float(ref.at[model, "easy_accuracy"]) if "easy_accuracy" in ref else score,
                     "hard_accuracy": float(ref.at[model, "hard_accuracy"]) if "hard_accuracy" in ref else score,
                 })
-            lomo = lomo_predictions(pd.DataFrame(analysis_rows))
+            lomo = (
+                lomo_predictions(pd.DataFrame(analysis_rows))
+                if analysis_rows
+                else pd.DataFrame(columns=["method", "prediction", "observed", "reason"])
+            )
             elo_lomo = lomo.loc[lomo["method"].eq("elo")]
             valid_lomo = elo_lomo.dropna(subset=["prediction", "observed"])
             lomo_reason = "" if not valid_lomo.empty else (

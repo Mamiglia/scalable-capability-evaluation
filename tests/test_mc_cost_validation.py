@@ -73,6 +73,20 @@ def test_ranking_recovery_returns_component_results_and_warning():
     assert "isolated_reference_model" in set(warnings["code"])
 
 
+def test_ranking_recovery_retains_reference_when_no_component_matches():
+    votes = pd.DataFrame([
+        {"fit": "gpqa", "major": "a", "minor": "b", "item_id": "i1", "picked_major": 1},
+    ])
+    reference = pd.DataFrame({"model": ["e"], "score": [0.0]})
+
+    results, warnings = ranking_recovery(votes, reference)
+
+    isolated = results[results["component_models"].eq("e")].iloc[0]
+    assert not isolated["valid"]
+    assert isolated["reason"] == "reference model has no comparison edge"
+    assert warnings.loc[warnings["code"].eq("isolated_reference_model"), "fit"].tolist() == ["gpqa"]
+
+
 def test_judgment_spec_uses_paired_one_se_and_simplest_order():
     folds = pd.DataFrame([
         {"spec": "baseline", "fold": "a", "log_loss": 0.50},
