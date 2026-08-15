@@ -312,3 +312,48 @@ def test_verdicts_under_calls_toggle_with_the_given_active_layers(monkeypatch):
     assert (out["gap"] == out["l1"] - out["l2"]).all()
     assert (out["pick"] == out.apply(lambda r: 1 if r["l1"] > r["l2"] else 2, axis=1)).all()
     assert all(m.scaling[name] == v for (m, name), v in originals.items())  # toggle restored
+
+
+def test_run_ablation_four_conditions_and_derived_metrics(monkeypatch):
+    """Stub verdicts_under/metrics keyed by active_layers, so the runner's condition wiring and
+    sufficiency/necessity/interaction arithmetic can be checked with no real forward pass."""
+    model = _toy_peft_model(n_layers=2)
+    all_layers = frozenset({0, 1})
+    group = {0}
+    known = {
+        frozenset(): dict(acc=0.1, pos_term=0.2, order_even=0.3, order_odd=0.4, pick_weaker_acc=0.5),
+        frozenset({0}): dict(acc=0.6, pos_term=0.5, order_even=0.4, order_odd=0.3, pick_weaker_acc=0.2),
+        all_layers: dict(acc=0.9, pos_term=0.8, order_even=0.7, order_odd=0.6, pick_weaker_acc=0.5),
+        frozenset({1}): dict(acc=0.3, pos_term=0.3, order_even=0.3, order_odd=0.3, pick_weaker_acc=0.3),
+    }
+    calls = []
+
+    def stub_verdicts_under(model_arg, tokenizer_arg, df_arg, active_layers, c_arg):
+        calls.append(frozenset(active_layers))
+        return frozenset(active_layers)  # sentinel: metrics stub reads it straight back
+    monkeypatch.setattr(adapter_ablate, "verdicts_under", stub_verdicts_under)
+    monkeypatch.setattr(adapter_ablate, "metrics", lambda key: known[key])
+
+    out = adapter_ablate.run_ablation(model, None, pd.DataFrame(), groups={"g1": group}, c={})
+
+    # base, group_only, full, full_minus, in that order, called sequentially (never nested)
+    assert calls == [frozenset(), frozenset({0}), all_layers, frozenset({1})]
+
+    assert len(out) == 5  # one row per metric
+    assert set(out["group"]) == {"g1"}
+    assert set(out["metric"]) == set(known[frozenset()])
+
+    by_metric = out.set_index("metric")
+    for metric_name in known[frozenset()]:
+        row = by_metric.loc[metric_name]
+        base = known[frozenset()][metric_name]
+        group_only = known[frozenset({0})][metric_name]
+        full = known[all_layers][metric_name]
+        full_minus = known[frozenset({1})][metric_name]
+        assert row["base"] == base
+        assert row["group_only"] == group_only
+        assert row["full"] == full
+        assert row["full_minus"] == full_minus
+        assert row["sufficiency"] == pytest.approx(group_only - base)
+        assert row["necessity"] == pytest.approx(full - full_minus)
+        assert row["interaction"] == pytest.approx((full - full_minus) - (group_only - base))
