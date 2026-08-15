@@ -100,6 +100,27 @@ def write_atomic(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
+def merge_exclusions(previous: dict, failures: list, rewriter: str) -> list[dict]:
+    """Union this rewriter's failures with the other rewriters' already on file.
+
+    Replacing rather than merging would discard the other rewriter's exclusions. An older
+    file named the rewriter once at the top level instead of per cell, so those cells are
+    attributed to it rather than left with no rewriter to sort on.
+    """
+    was = previous.get("rewriter") or ""
+    cells = {}
+    for cell in previous.get("cells", []):
+        cell = {**cell, "rewriter": cell.get("rewriter") or was}
+        if cell["rewriter"] != rewriter:
+            cells[(cell["model"], cell["item_id"], cell["rewriter"])] = cell
+    for k, reason, ratio in failures:
+        cells[(k[0], k[1], rewriter)] = {
+            "model": k[0], "item_id": k[1], "rewriter": rewriter,
+            "word_ratio": round(ratio, 3), "reason": reason,
+        }
+    return [cells[k] for k in sorted(cells)]
+
+
 def check(original: dict, rewrite: str, min_ratio: float, max_ratio: float) -> str | None:
     """Reason this rewrite fails, or None."""
     if not rewrite.strip():
@@ -209,17 +230,8 @@ def main() -> int:
         # Merge, never replace: each rewriter contributes its own failures and the union is
         # excluded from every condition. Overwriting here would silently discard the other
         # rewriter's exclusions.
-        cells = {}
-        if EXCLUDED.exists():
-            for cell in json.loads(EXCLUDED.read_text()).get("cells", []):
-                if cell.get("rewriter") != args.rewriter:
-                    cells[(cell["model"], cell["item_id"], cell.get("rewriter"))] = cell
-        for k, reason, ratio in failures:
-            cells[(k[0], k[1], args.rewriter)] = {
-                "model": k[0], "item_id": k[1], "rewriter": args.rewriter,
-                "word_ratio": round(ratio, 3), "reason": reason,
-            }
-        merged = [cells[k] for k in sorted(cells)]
+        previous = json.loads(EXCLUDED.read_text()) if EXCLUDED.exists() else {}
+        merged = merge_exclusions(previous, failures, args.rewriter)
         write_atomic(EXCLUDED, json.dumps({
             "why": (
                 "Cells excluded from the judging campaign. These rewrites fall outside the "
@@ -263,6 +275,17 @@ def _self_check() -> None:
     assert check(bold, "a b c d e f g h", 0.4, 1.05) == "answer_line_missing"
     latex = {"n_words": 10, "transcript": "x\n\\[ \\text{ANSWER: B} \\]"}
     assert check(latex, "a b c d e f g h\nANSWER: B", 0.4, 1.05) is None
+    # old schema: rewriter named once at the top level, absent from each cell
+    old = {"rewriter": "haiku", "cells": [{"model": "m", "item_id": "i", "word_ratio": 0.3,
+                                           "reason": "word_ratio=0.30"}]}
+    merged = merge_exclusions(old, [(("m", "j"), "word_ratio=0.36", 0.36)], "gpt")
+    assert [c["rewriter"] for c in merged] == ["haiku", "gpt"], merged
+    # a rewriter's own rows are replaced by its fresh run, other rewriters' are kept
+    new = {"cells": merged}
+    again = merge_exclusions(new, [], "gpt")
+    assert [(c["model"], c["rewriter"]) for c in again] == [("m", "haiku")], again
+    assert merge_exclusions({}, [], "haiku") == []
+
     leak = {"n_words": 10, "transcript": "x\nANSWER: B"}
     assert check(leak, "a b c\nANSWER: B\n<<<END 4>>>\n<<<REWRITE 4>>>\nother\nANSWER: C",
                  0.4, 1.05).startswith("delimiter_leak")
