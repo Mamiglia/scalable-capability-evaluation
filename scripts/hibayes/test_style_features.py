@@ -17,8 +17,46 @@ def test_normalises_per_1000_words():
 
 def test_capital_i_matches_only_standalone_capitalised_i():
     # capital standalone "I" counts twice; lowercase "i" and "Illinois" don't.
-    text = "I know that i is not the same as I, nor as Illinois."
+    text = "I know that i is not important, and I agree, unlike Illinois."
     rates = feature_rates(text, {"personal_pronouns": ["I", "we"]})
+    n_words = len(text.split())
+    assert rates["personal_pronouns"] == 1000 * 2 / n_words
+
+
+def test_capital_i_not_counted_before_symbol_notation():
+    # Tightened after Step 3 validation on real transcripts (task-4b-report.md):
+    # this corpus uses bare "I" for the identity matrix, moment of inertia, and
+    # integral variables. A genuine first-person "I" is always followed by a
+    # verb; a symbol reference is followed by "=", ")", ",", or similar - so
+    # require a lowercase word (or contraction) right after "I".
+    # Real corpus case that used to be a false positive and now isn't
+    # (Yi-34B-Chat, item recOYsaYs6RmtlTDy): "I = (Mx + My) * R^2" - moment of
+    # inertia, not the model speaking.
+    text = "The moment of inertia of the molecule: I = (Mx + My) * R^2."
+    rates = feature_rates(text, {"personal_pronouns": ["I"]})
+    assert rates["personal_pronouns"] == 0.0
+
+    # Genuine pronoun use in the same shape of sentence still counts.
+    text = "First I calculate the moment of inertia of the molecule."
+    rates = feature_rates(text, {"personal_pronouns": ["I"]})
+    n_words = len(text.split())
+    assert rates["personal_pronouns"] == 1000 * 1 / n_words
+
+
+def test_capital_i_not_counted_when_followed_by_is():
+    # "I is" is never valid English for the pronoun ("I am" is), but is
+    # exactly how this corpus introduces a symbol definition. Real corpus
+    # case (Yi-34B-Chat, item recOYsaYs6RmtlTDy): "I is the moment of
+    # inertia of the molecule" - a false positive under the plain
+    # followed-by-lowercase-word rule, since "is" is itself lowercase.
+    text = "I is the moment of inertia of the molecule."
+    rates = feature_rates(text, {"personal_pronouns": ["I"]})
+    assert rates["personal_pronouns"] == 0.0
+
+
+def test_capital_i_contractions_still_count():
+    text = "I'll check this. I'm not sure yet."
+    rates = feature_rates(text, {"personal_pronouns": ["I"]})
     n_words = len(text.split())
     assert rates["personal_pronouns"] == 1000 * 2 / n_words
 

@@ -16,6 +16,18 @@ WORDS_PER_RATE = 1000  # rates are hits per this many words
 # case-insensitively against the lowercased text.
 STANDALONE_CAPITAL_I = "I"
 
+# Standalone "I" also collides with single-letter symbol notation in this
+# corpus's maths/physics/chemistry content: the identity matrix/operator
+# ("det(P - lambda I)", "W^2 = I"), moment of inertia ("I = mu R^2"),
+# definite-integral variables, the element iodine, and spectroscopic
+# notation ("H I", "He I"). Tuned against judge_results/rewrites/originals.jsonl
+# (task-4b-report.md): require "I" to be followed by a lowercase word or a
+# contraction ("I need", "I'll") - a real first-person "I" is always followed
+# by a verb, a symbol reference never is. Also exclude "I is", since "I is"
+# is never valid English for the pronoun ("I am" is) but is exactly how these
+# transcripts introduce a symbol ("...where I is the moment of inertia").
+STANDALONE_I_RE = re.compile(r"\bI(?=(?:'[a-z])|(?:\s+[a-z]))(?!\s+is\b)")
+
 
 def load_lexicon(path) -> dict[str, list[str]]:
     """Load a style lexicon from a YAML file: category -> list of terms."""
@@ -41,7 +53,7 @@ def _count_category(text: str, terms: list[str]) -> int:
     """
     count = 0
     if STANDALONE_CAPITAL_I in terms:
-        count += len(re.findall(r"\bI\b", text))
+        count += len(STANDALONE_I_RE.findall(text))
     other_terms = [t for t in terms if t != STANDALONE_CAPITAL_I]
     if other_terms:
         ordered = sorted(other_terms, key=len, reverse=True)
