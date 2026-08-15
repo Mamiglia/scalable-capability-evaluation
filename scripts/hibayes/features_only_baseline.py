@@ -324,8 +324,13 @@ def figure(results: pd.DataFrame, path: Path, threshold: float, baselines: list[
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=CONFIG)
+    parser.add_argument("--frame", help="Frame to score instead of the config's")
+    parser.add_argument("--out-csv", help="Where to write the results instead of the config's")
+    parser.add_argument("--out-figure", help="Figure stem to write instead of the config's")
     args = parser.parse_args()
     config = yaml.safe_load(args.config.read_text())
+    for key in ("frame", "out_csv", "out_figure"):
+        config[key] = getattr(args, key) or config[key]
 
     frame = pd.read_csv(ROOT / config["frame"])
     print(f"Read {len(frame):,} rows from {config['frame']}")

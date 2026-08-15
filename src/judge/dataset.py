@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from pathlib import Path
 
 from inspect_ai.dataset import MemoryDataset, Sample
@@ -44,6 +45,21 @@ def strip_answer(text: str) -> str:
     """Drop the trailing ANSWER line."""
     idx = text.rfind("ANSWER:")
     return text[:idx].rstrip() if idx != -1 else text
+
+
+def has_reasoning(text: str, min_chars: int) -> bool:
+    """False for answer-only transcripts: nothing left after the ANSWER line."""
+    return len(strip_answer(text)) >= min_chars
+
+
+def is_effort_variant(model: str, suffixes: Sequence[str]) -> bool:
+    """True for a reasoning-effort variant, e.g. gpt-5-high given ("low", "high").
+
+    Suffix match after a - or _, so a model whose name merely contains the word
+    is left alone.
+    """
+    name = model.lower()
+    return any(name.endswith(f"-{s}") or name.endswith(f"_{s}") for s in map(str.lower, suffixes))
 
 
 def truncate_pair(a: str, b: str, frac: float, keep: str = "first") -> tuple[str, str]:

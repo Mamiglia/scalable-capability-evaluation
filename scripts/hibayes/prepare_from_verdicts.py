@@ -15,16 +15,19 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from judge.dataset import is_effort_variant
 from prepare_gpqa import model_family, standardise
 
 LEFT_POSITION = 1
 STANDARDISED = ("length_difference", "capability_difference")
 # Columns of the style-rates file that are not lexicon categories.
-STYLE_KEYS = ("model", "item", "n_chars")
+STYLE_KEYS = ("model", "item", "n_chars", "reasoning_chars")
+REASONING_MODES = ("none", "per_transcript", "per_model")
 # Defaults are resolved against the repo root: a stale pre-length-fix copy of
 # verdicts.csv sits under another script's directory, and a CWD-relative default
 # would silently read it.
 ROOT = Path(__file__).resolve().parents[2]
+REASONING_CONFIG = ROOT / "configs" / "reasoning_filter.yaml"
 VERDICTS = ROOT / "judge_results" / "judging_variations" / "verdicts.csv"
 CAPABILITY_CONFIG = ROOT / "scripts" / "analyses" / "judge-elo" / "configs" / "gpqa.yaml"
 CONDITION_CONFIGS = ROOT / "analyses" / "judge-variation" / "configs"
@@ -98,6 +101,51 @@ def add_style_differences(frame: pd.DataFrame, style_rates: pd.DataFrame) -> lis
     return differences
 
 
+def keep_reasoning(
+    frame: pd.DataFrame,
+    style_rates: pd.DataFrame,
+    mode: str,
+    min_chars: int,
+    effort_suffixes: Sequence[str],
+) -> tuple[pd.Series, list[str], dict[str, int]]:
+    """Row mask keeping comparisons whose two transcripts both show real work.
+
+    per_transcript drops single transcripts under the floor. per_model drops an
+    answer model whose median transcript is under it, keeping its models whole:
+    no within-model selection, so the surviving transcripts of a weak model are
+    still its typical ones. Effort variants go under either mode, so the pool
+    holds one entry per model rather than one per effort setting.
+    """
+    if mode not in REASONING_MODES:
+        raise ValueError(f"Unknown reasoning filter {mode}, have {list(REASONING_MODES)}")
+    models = sorted(set(frame["left_model"]) | set(frame["right_model"]))
+    missing = sorted(set(models) - set(style_rates["model"]))
+    if missing:
+        raise ValueError(f"No transcript lengths for {missing}; cannot judge their reasoning")
+
+    dropped = {model for model in models if is_effort_variant(model, effort_suffixes)}
+    counts = {"dropped_effort_variants": len(dropped)}
+    if mode == "per_model":
+        median = style_rates.groupby("model")["reasoning_chars"].median()
+        dropped |= {model for model in models if median[model] < min_chars}
+    counts["dropped_models"] = len(dropped)
+    keep = ~(frame["left_model"].isin(dropped) | frame["right_model"].isin(dropped))
+
+    if mode == "per_transcript":
+        chars = style_rates.set_index(["model", "item"])["reasoning_chars"]
+        thin = np.zeros(len(frame), dtype=bool)
+        for side in ("left", "right"):
+            keys = pd.MultiIndex.from_arrays([frame[f"{side}_model"], frame["item"]])
+            side_chars = chars.reindex(keys)
+            if side_chars.isna().any():
+                raise ValueError(f"No transcript length for {int(side_chars.isna().sum())} {side} transcripts")
+            thin |= side_chars.to_numpy() < min_chars
+        keep &= ~thin
+        counts["dropped_rows_thin_transcript"] = int(thin.sum())
+    counts["dropped_rows_reasoning_filter"] = int((~keep).sum())
+    return keep, sorted(dropped), counts
+
+
 def build(
     verdicts: pd.DataFrame,
     capabilities: dict[str, float],
@@ -105,7 +153,10 @@ def build(
     conditions: Sequence[str],
     condition_configs: Path = CONDITION_CONFIGS,
     style_rates: pd.DataFrame | None = None,
-) -> tuple[pd.DataFrame, dict[str, int]]:
+    reasoning_mode: str = "none",
+    min_reasoning_chars: int = 0,
+    effort_suffixes: Sequence[str] = (),
+) -> tuple[pd.DataFrame, dict[str, int | list[str]]]:
     """Verdict rows -> one model row per parsed verdict, with the GLM columns."""
     check_conditions(bench, conditions, condition_configs)
     data = verdicts[(verdicts["bench"] == bench) & (verdicts["condition"].isin(conditions))].copy()
@@ -165,6 +216,19 @@ def build(
             "self_comparison": (left_model == right_model).astype(int),
         }
     )
+    # Before standardising: the scales must come from the rows the model is fit on.
+    if reasoning_mode != "none" or effort_suffixes:
+        if style_rates is None:
+            raise ValueError("The reasoning filter needs style rates for transcript lengths")
+        keep, dropped, filter_counts = keep_reasoning(
+            frame, style_rates, reasoning_mode, min_reasoning_chars, effort_suffixes
+        )
+        counts |= filter_counts
+        counts["dropped_model_names"] = dropped
+        frame = frame[keep].reset_index(drop=True)
+        if frame.empty:
+            raise ValueError("The reasoning filter removed every comparison")
+
     columns = list(STANDARDISED)
     if style_rates is not None:
         columns += add_style_differences(frame, style_rates)
@@ -189,9 +253,21 @@ def main() -> None:
     parser.add_argument("--conditions", nargs="+", default=["a_baseline"])
     parser.add_argument("--style-rates", type=Path, default=STYLE_RATES,
                         help="Per-transcript style rates from style_rates.py")
+    parser.add_argument("--reasoning-config", type=Path, default=REASONING_CONFIG,
+                        help="Defaults for the transcript filter")
+    parser.add_argument("--reasoning-filter", choices=REASONING_MODES,
+                        help="Drop transcripts, or whole answer models, that show no work")
+    parser.add_argument("--min-reasoning-chars", type=int,
+                        help="Characters after the ANSWER line a transcript needs")
     parser.add_argument("--out", type=Path, default=ROOT / "analysis" / "hibayes" / "gpqa_glm.csv")
     args = parser.parse_args()
+    filter_config = yaml.safe_load(args.reasoning_config.read_text())
+    mode = args.reasoning_filter or filter_config["mode"]
+    min_chars = args.min_reasoning_chars if args.min_reasoning_chars is not None \
+        else filter_config["min_reasoning_chars"]
+    suffixes = filter_config["effort_suffixes"] if filter_config["exclude_effort_variants"] else ()
     print(f"Reading {args.verdicts}")
+    print(f"Reasoning filter: {mode}, floor {min_chars} chars, effort suffixes {list(suffixes) or 'none'}")
 
     frame, counts = build(
         pd.read_csv(args.verdicts),
@@ -200,12 +276,18 @@ def main() -> None:
         args.conditions,
         args.condition_configs,
         pd.read_csv(args.style_rates),
+        mode,
+        min_chars,
+        suffixes,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)
     print(f"Wrote {len(frame):,} rows to {args.out}")
+    names = counts.pop("dropped_model_names", [])
     for name, value in counts.items():
         print(f"  {name}: {value:,}")
+    if names:
+        print(f"  dropped answer models: {', '.join(names)}")
     print(
         f"  judges: {frame['judge'].nunique()}, items: {frame['item'].nunique()}, "
         f"pairs: {frame['model_pair'].nunique()}, conditions: {frame['transcript_condition'].nunique()}"

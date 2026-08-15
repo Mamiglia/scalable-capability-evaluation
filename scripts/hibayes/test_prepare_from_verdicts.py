@@ -164,3 +164,113 @@ def test_style_rates_without_categories_are_rejected():
     rates = style_rates().drop(columns=["hedging"])
     with pytest.raises(ValueError, match="no category columns"):
         built_with_style(rates, verdicts())
+
+
+# --- reasoning filter ----------------------------------------------------
+
+
+def filter_rows():
+    """Five comparisons, enough spread that any one of them can be dropped."""
+    return pd.concat(
+        [
+            verdicts(item_id="i1", major="strong", minor="weak", len_major=100, len_minor=400),
+            verdicts(item_id="i2", major="strong", minor="mid", len_major=120, len_minor=300),
+            verdicts(item_id="i3", major="mid", minor="strong", len_major=260, len_minor=140),
+            verdicts(item_id="i4", major="weak", minor="strong", len_major=380, len_minor=110),
+            verdicts(item_id="ballast", major="mid", minor="weak", len_major=250, len_minor=150),
+        ],
+        ignore_index=True,
+    )
+
+
+FAT = 500  # a transcript comfortably over any floor the tests use
+
+
+def filter_rates(**overrides):
+    """Style rates for every transcript filter_rows() names, all of them fat."""
+    lengths = {
+        ("strong", "i1"): 100, ("weak", "i1"): 400,
+        ("strong", "i2"): 120, ("mid", "i2"): 300,
+        ("mid", "i3"): 260, ("strong", "i3"): 140,
+        ("weak", "i4"): 380, ("strong", "i4"): 110,
+        ("mid", "ballast"): 250, ("weak", "ballast"): 150,
+    }
+    rows = [
+        dict(model=model, item=item, n_chars=n, reasoning_chars=FAT, hedging=n / 50)
+        for (model, item), n in lengths.items()
+    ]
+    return pd.DataFrame([row | overrides.get(row["model"] + row["item"], {}) for row in rows])
+
+
+def built_filtered(rates, mode, min_chars=100, suffixes=(), rows=None, capabilities=None):
+    frame, counts = build(
+        filter_rows() if rows is None else rows,
+        CAPABILITIES if capabilities is None else capabilities,
+        "gpqa",
+        ["a_baseline"],
+        style_rates=rates,
+        reasoning_mode=mode,
+        min_reasoning_chars=min_chars,
+        effort_suffixes=suffixes,
+    )
+    return frame.set_index("item"), counts
+
+
+def test_no_filter_keeps_every_comparison():
+    frame, _ = built_filtered(filter_rates(), "none")
+    assert sorted(frame.index) == ["ballast", "i1", "i2", "i3", "i4"]
+
+
+def test_per_transcript_drops_the_thin_comparison_only():
+    """One thin transcript takes its own comparison, not its model's others."""
+    frame, counts = built_filtered(filter_rates(weaki1={"reasoning_chars": 10}), "per_transcript")
+    assert sorted(frame.index) == ["ballast", "i2", "i3", "i4"]
+    assert counts["dropped_rows_thin_transcript"] == 1
+    assert "weak" in set(frame["left_model"]) | set(frame["right_model"])
+
+
+def test_per_model_keeps_a_model_whose_median_clears_the_floor():
+    """The same thin transcript, judged by the model's median, changes nothing."""
+    frame, counts = built_filtered(filter_rates(weaki1={"reasoning_chars": 10}), "per_model")
+    assert sorted(frame.index) == ["ballast", "i1", "i2", "i3", "i4"]
+    assert counts["dropped_models"] == 0
+
+
+def test_per_model_drops_every_comparison_of_a_terse_model():
+    thin = {"reasoning_chars": 10}
+    frame, counts = built_filtered(
+        filter_rates(weaki1=thin, weaki4=thin, weakballast=thin), "per_model"
+    )
+    assert sorted(frame.index) == ["i2", "i3"]
+    assert counts["dropped_models"] == 1
+    assert counts["dropped_model_names"] == ["weak"]
+
+
+def test_effort_variants_go_under_any_mode():
+    rows = filter_rows().replace({"major": {"mid": "mid-high"}, "minor": {"mid": "mid-high"}})
+    rates = filter_rates().replace({"model": {"mid": "mid-high"}})
+    frame, counts = built_filtered(
+        rates, "none", suffixes=("low", "high"), rows=rows,
+        capabilities=CAPABILITIES | {"mid-high": 130.0},
+    )
+    assert sorted(frame.index) == ["i1", "i4"]
+    assert counts["dropped_effort_variants"] == 1
+
+
+def test_standardising_uses_only_the_surviving_rows():
+    """Filtering after standardising would leave the scales set by dropped rows."""
+    frame, _ = built_filtered(filter_rates(weaki1={"reasoning_chars": 10}), "per_transcript")
+    for column in ("length_difference_sd", "capability_difference_sd", "hedging_difference_sd"):
+        assert frame[column].mean() == pytest.approx(0.0, abs=1e-6)
+        assert frame[column].std() == pytest.approx(1.0)
+
+
+def test_unknown_mode_is_rejected():
+    with pytest.raises(ValueError, match="Unknown reasoning filter"):
+        built_filtered(filter_rates(), "per_item")
+
+
+def test_a_model_without_transcript_lengths_is_rejected():
+    rates = filter_rates()
+    with pytest.raises(ValueError, match="No transcript lengths"):
+        built_filtered(rates[rates["model"] != "weak"], "per_model")

@@ -4,7 +4,8 @@
 Re-extracts the same transcript the judge saw - first correct epoch, final text
 only - from the eval logs the condition's config names, and writes one row of
 per-1,000-word category rates per (model, item). n_chars travels with each row
-so the frame builder can check the rates describe the text the judge was shown.
+so the frame builder can check the rates describe the text the judge was shown,
+and reasoning_chars so it can filter on how much work the transcript holds.
 
 Split from prepare_from_verdicts.py because this reads gigabytes of eval logs
 and that reads a CSV.
@@ -22,6 +23,7 @@ except ImportError:
 import yaml
 from inspect_ai.log import read_eval_log
 
+from judge.dataset import strip_answer
 from judge.util import extract_transcript, first_correct_by_id
 from style_features import feature_rates, load_lexicon
 
@@ -38,7 +40,13 @@ def rates_for_log(log_path: Path, model: str, lexicon: dict) -> list[dict]:
     for item_id, samples in first_correct_by_id(log).items():
         transcript = extract_transcript(samples[0], include_reasoning=False)
         rows.append(
-            {"model": model, "item": item_id, "n_chars": len(transcript)}
+            {
+                "model": model,
+                "item": item_id,
+                "n_chars": len(transcript),
+                # what is left once the answer line is gone: the work a judge can assess
+                "reasoning_chars": len(strip_answer(transcript)),
+            }
             | feature_rates(transcript, lexicon)
         )
     return rows

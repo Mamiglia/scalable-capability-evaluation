@@ -16,7 +16,7 @@ import pandas as pd
 import yaml
 
 import prompts
-from judge.dataset import strip_answer
+from judge.dataset import has_reasoning, strip_answer  # noqa: F401  re-exported
 
 SUFFIX_RE = re.compile(r"(_\d+K|_high|_low|_medium|_minimal|_none|_xhigh)+$")
 
@@ -24,11 +24,6 @@ SUFFIX_RE = re.compile(r"(_\d+K|_high|_low|_medium|_minimal|_none|_xhigh)+$")
 def base_group(model: str) -> str:
     """Strip trailing budget/effort suffixes so budget variants group together."""
     return SUFFIX_RE.sub("", model)
-
-
-def has_reasoning(text: str, min_chars: int) -> bool:
-    """False for answer-only transcripts: nothing left after the ANSWER line."""
-    return len(strip_answer(text)) >= min_chars
 
 
 def render_choices(choices) -> str:

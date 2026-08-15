@@ -7,6 +7,10 @@ Exported scores are P(pick first-named); load() reorients every pair so score
 = P(pick the gap-axis-stronger member). Truncation runs are skipped.
 --exclude-members drops answer models by name fragment (the deepseek family has
 a terse-answer artefact, so its pairs get their own figure set).
+--reasoning-filter drops transcripts a judge cannot assess because they show no
+work: per_transcript one at a time, per_model whole models by their median.
+Reasoning-effort variants of a model go with either, so the pool holds one entry
+per model. Defaults come from configs/reasoning_filter.yaml.
 
 Usage:
   uv run python scripts/judge/figures_expansion.py --out-dir judge_results/multi-eval-pilot/figures
@@ -21,16 +25,23 @@ import csv
 import glob
 import json
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
+from statistics import median
 
 import matplotlib.pyplot as plt
 import numpy as np
+import yaml
 from scipy.optimize import curve_fit
 from scipy.stats import beta as beta_dist
 from scipy.stats import t as t_dist
 
+from judge.dataset import is_effort_variant, strip_answer
+
 DATA = Path("interactive_viewer/data")
 MODEL_SET_CSV = Path("configs/comparisons/model_set.csv")
+REASONING_CONFIG = Path("configs/reasoning_filter.yaml")
+REASONING_MODES = ("none", "per_transcript", "per_model")
 EXPANSION_DATASETS = ["data-expansion-gpqa", "data-expansion-aime2025", "data-expansion-aime2026"]
 EVAL_COLORS = {"gpqa": "#2a78d6", "aime": "#eb6834", "aime (reasoning shown)": "#1baf7a"}
 
@@ -41,11 +52,47 @@ GAP_AXIS = "eci"   # model-meta key the gap and pair orientation use
 GAP_LABEL = "capability gap (ECI)"
 EXCLUDE = set()    # lowercased name fragments; matching models are dropped from
                    # every role, as answer models and as judges
+EXCLUDE_EXACT = set()  # whole lowercased names the reasoning filter dropped
+REASONING_MODE = "none"
+MIN_REASONING_CHARS = 0
 
 
 def excluded(model):
-    """True if the model name contains any --exclude-members fragment."""
-    return any(frag in model.lower() for frag in EXCLUDE)
+    """True if the model was dropped by name fragment or by the reasoning filter."""
+    name = model.lower()
+    return name in EXCLUDE_EXACT or any(frag in name for frag in EXCLUDE)
+
+
+@lru_cache(maxsize=None)
+def transcript_chars(d):
+    """(model, item) -> characters of work, one viewer dataset."""
+    chars = {}
+    for f in glob.glob(str(d / "transcripts/*.json")):
+        model = Path(f).stem
+        if model.endswith("__ep1"):  # epoch-1 copies, not in the model table
+            continue
+        for item, text in json.load(open(f)).items():
+            chars[(model, item)] = len(strip_answer(text))
+    return chars
+
+
+def reasoning_ok(d, model, item):
+    """True if this transcript clears the floor; unknown transcripts are kept."""
+    chars = transcript_chars(d).get((model, item))
+    return chars is None or chars >= MIN_REASONING_CHARS
+
+
+def models_without_reasoning(dirs, suffixes):
+    """Answer models the filter drops whole: effort variants, and under per_model
+    those whose median transcript shows less work than the floor."""
+    lengths = defaultdict(list)
+    for d in dirs:
+        for (model, _), chars in transcript_chars(d).items():
+            lengths[model].append(chars)
+    dropped = {m for m in lengths if is_effort_variant(m, suffixes)}
+    if REASONING_MODE == "per_model":
+        dropped |= {m for m, L in lengths.items() if median(L) < MIN_REASONING_CHARS}
+    return dropped
 
 
 def series_name(dataset):
@@ -59,6 +106,40 @@ JUDGE_ORDER = ["qwen3-8b", "qwen3-32b", "qwen3-vl-30b-a3b-instruct",
                "ling-2.6-flash", "glm-4.6", "deepseek-v4-flash-0731", "gemini-3.1-flash-lite"]
 JUDGE_COLORS = dict(zip(JUDGE_ORDER, ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
                                       "#e87ba4", "#008300", "#8250c4"]))
+
+
+@lru_cache(maxsize=None)
+def refit_runs(d):
+    """Per-run verdict stats over the items whose two transcripts both show work.
+
+    The exported run stats are over every item, so per-transcript filtering has to
+    re-tally them from the item-level verdicts. Keys are (judge, major, minor) with
+    major and minor as the pair file names them, before any reorientation.
+    """
+    stats = {}
+    for pf in glob.glob(str(d / "pairs/*__full.json")):
+        major, minor, _ = Path(pf).stem.split("__")
+        tally = defaultdict(lambda: [0, 0, 0, 0])  # picked major, picked slot 1, parsed, items
+        for item, judges in json.load(open(pf)).items():
+            if not (reasoning_ok(d, major, item) and reasoning_ok(d, minor, item)):
+                continue
+            for j, cell in judges.items():
+                tally[j][3] += 1
+                for o in cell["orders"]:
+                    if o and o["pick"] in ("1", "2"):
+                        tally[j][2] += 1
+                        tally[j][0] += o["picked_major"]
+                        tally[j][1] += o["pick"] == "1"
+        for j, (picked_major, slot_1, parsed, items) in tally.items():
+            if not parsed:
+                continue
+            lo, hi = wilson(picked_major, parsed)
+            stats[(j, major, minor)] = {
+                "score": picked_major / parsed, "score_lo": lo, "score_hi": hi,
+                "n_items": items, "slot_a": slot_1 / parsed,
+                "noanswer_rate": 1 - parsed / (2 * items),
+            }
+    return stats
 
 
 def load():
@@ -78,6 +159,11 @@ def load():
             if excluded(r["major"]) or excluded(r["minor"]) or excluded(r["judge"]):
                 continue
             r = dict(r)
+            if REASONING_MODE == "per_transcript":
+                refit = refit_runs(d).get((r["judge"], r["major"], r["minor"]))
+                if refit is None:  # nothing left of this pair once the thin items go
+                    continue
+                r.update(refit)
             M, N = idx["models"][r["major"]], idx["models"][r["minor"]]
             a, b = M.get(GAP_AXIS), N.get(GAP_AXIS)
             # exported score is P(pick first-named) and pair-name orientation is
@@ -680,6 +766,8 @@ def _pick_longer_rate(bench):
             if major == minor or excluded(major) or excluded(minor):
                 continue
             for item, judges in json.load(open(pf)).items():
+                if not (reasoning_ok(d, major, item) and reasoning_ok(d, minor, item)):
+                    continue
                 for j, cell in judges.items():
                     for o in cell["orders"]:
                         if not o or o["pick"] not in ("1", "2"):
@@ -785,6 +873,8 @@ def fig_item_difficulty(models, out):
                     continue
                 flip = ca < cb  # picked_major tracks the first-named, not the stronger
                 for item, judges in json.load(open(pf)).items():
+                    if not (reasoning_ok(d, major, item) and reasoning_ok(d, minor, item)):
+                        continue
                     k = solved.get(item, 0)
                     for j, cell in judges.items():
                         if excluded(j):
@@ -839,7 +929,7 @@ def fig_fill_plan(rows, models, out):
 
 
 def main():
-    global BENCHES, DIRS, GAP_AXIS, GAP_LABEL
+    global BENCHES, DIRS, GAP_AXIS, GAP_LABEL, REASONING_MODE, MIN_REASONING_CHARS
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--datasets", nargs="+", default=EXPANSION_DATASETS,
@@ -849,9 +939,14 @@ def main():
     ap.add_argument("--exclude-members", nargs="*", default=[],
                     help="drop models whose name contains any of these "
                          "(case-insensitive), as answer models and as judges")
+    ap.add_argument("--reasoning-config", type=Path, default=REASONING_CONFIG,
+                    help="defaults for the transcript filter")
+    ap.add_argument("--reasoning-filter", choices=REASONING_MODES,
+                    help="drop transcripts, or whole answer models, that show no work")
+    ap.add_argument("--min-reasoning-chars", type=int,
+                    help="characters after the ANSWER line a transcript needs")
     args = ap.parse_args()
     EXCLUDE.update(f.lower() for f in args.exclude_members if f)
-    JUDGE_ORDER[:] = [j for j in JUDGE_ORDER if not excluded(j)]
     args.out_dir.mkdir(parents=True, exist_ok=True)
     BENCHES = list(dict.fromkeys(series_name(d) for d in args.datasets))
     DIRS = {s: [] for s in BENCHES}
@@ -859,6 +954,19 @@ def main():
         DIRS[series_name(d)].append(DATA / d)
     if args.gap == "acc":
         GAP_AXIS, GAP_LABEL = "accuracy", "capability gap (accuracy diff, per bench)"
+
+    filter_config = yaml.safe_load(args.reasoning_config.read_text())
+    REASONING_MODE = args.reasoning_filter or filter_config["mode"]
+    MIN_REASONING_CHARS = (args.min_reasoning_chars if args.min_reasoning_chars is not None
+                           else filter_config["min_reasoning_chars"])
+    suffixes = filter_config["effort_suffixes"] if filter_config["exclude_effort_variants"] else ()
+    thin = models_without_reasoning([d for ds in DIRS.values() for d in ds], suffixes)
+    EXCLUDE_EXACT.update(m.lower() for m in thin)
+    print(f"reasoning filter: {REASONING_MODE}, floor {MIN_REASONING_CHARS} chars, "
+          f"effort suffixes {list(suffixes) or 'none'}")
+    print(f"dropped whole: {', '.join(sorted(thin)) or 'none'}")
+
+    JUDGE_ORDER[:] = [j for j in JUDGE_ORDER if not excluded(j)]
     rows, models = load()
     assert_nothing_excluded_plotted(rows)
     print(f"{len(rows)} runs loaded; writing to {args.out_dir}")

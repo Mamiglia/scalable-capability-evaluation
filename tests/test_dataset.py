@@ -256,3 +256,23 @@ class TestBuildDataset:
         assert len(dataset.samples) == 2  # q1 with target 1 and target 2
         assert dataset.samples[0].id == "q1_1"
         assert dataset.samples[1].id == "q1_2"
+
+
+def test_has_reasoning_needs_work_past_the_answer_line():
+    from dataset import has_reasoning
+    assert not has_reasoning("ANSWER: C", 100)
+    assert not has_reasoning("short\nANSWER: C", 100)
+    assert has_reasoning("x" * 100 + "\nANSWER: C", 100)
+
+
+def test_is_effort_variant_matches_only_a_suffix():
+    from dataset import is_effort_variant
+    suffixes = ("low", "high")
+    assert is_effort_variant("gpt-5-high", suffixes)
+    assert is_effort_variant("gpt-5-nano-2025-08-07_low", suffixes)
+    assert is_effort_variant("GPT-5-HIGH", suffixes)
+    # the word is present but is not the effort suffix
+    assert not is_effort_variant("highlight-7b", suffixes)
+    assert not is_effort_variant("gpt-5-high-mini", suffixes)
+    assert not is_effort_variant("gemini-3.1-flash-lite", suffixes)
+    assert not is_effort_variant("gpt-5-medium", suffixes)
