@@ -56,3 +56,9 @@ resid:
 
 transcript_geometry:
   rsa_min_items: 5
+
+token_ablate:
+  markers:
+    connective: [since, therefore, thus, because, hence, so]
+    hedge: [maybe, perhaps, might, possibly, "i think"]
+    backtrack: [wait, actually, hmm, "no"]
