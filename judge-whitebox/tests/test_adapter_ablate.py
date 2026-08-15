@@ -1,5 +1,6 @@
 import copy
 
+import pandas as pd
 import peft
 import pytest
 import torch
@@ -208,3 +209,94 @@ def test_toggle_restores_scaling_even_if_block_raises():
             raise ValueError("boom")
 
     assert all(m.scaling[name] == v for (m, name), v in originals.items())  # restored
+
+
+def test_metrics_order_even_odd_hand_computed(capsys):
+    """Two pair_uids with both orders, plus a third with only order 0 (excluded, printed)."""
+    rows = [
+        dict(pair_uid="p1", order=0, l1=3.0, l2=1.0, pick=1, label=1),
+        dict(pair_uid="p1", order=1, l1=1.0, l2=4.0, pick=2, label=1),
+        dict(pair_uid="p2", order=0, l1=0.5, l2=2.5, pick=2, label=2),
+        dict(pair_uid="p2", order=1, l1=2.0, l2=1.0, pick=1, label=2),
+        dict(pair_uid="p3", order=0, l1=5.0, l2=0.0, pick=1, label=2),
+    ]
+    df = pd.DataFrame(rows)
+    df["gap"] = df["l1"] - df["l2"]
+
+    out = adapter_ablate.metrics(df)
+
+    # hand-computed: p1 gaps (2.0, -3.0), p2 gaps (-2.0, 1.0); p3 excluded (no order 1)
+    assert out["order_even"] == pytest.approx(((2.0 + -3.0) / 2 + (-2.0 + 1.0) / 2) / 2)
+    assert out["order_odd"] == pytest.approx(((2.0 - -3.0) / 2 + (-2.0 - 1.0) / 2) / 2)
+    assert out["acc"] == pytest.approx((df["pick"] == df["label"]).mean())
+    assert out["pos_term"] == pytest.approx(2 * (df["pick"] == 1).mean() - 1)
+    assert out["pick_weaker_acc"] == pytest.approx((df["pick"] == 3 - df["label"]).mean())
+    assert "1" in capsys.readouterr().out  # p3 excluded, count printed
+
+
+class ToyCausalModel(nn.Module):
+    """HF-causal-LM-shaped wrapper around a peft-wrapped ToyModel: forward(input_ids) ->
+    object with .logits, so verdicts_under's batched-forward pattern runs with no real
+    model/tokenizer download."""
+
+    def __init__(self, peft_toy, vocab=50, d=4):
+        super().__init__()
+        self.peft_toy = peft_toy
+        self.embed = nn.Embedding(vocab, d)
+        self.readout_proj = nn.Linear(d, vocab, bias=False)
+
+    def forward(self, input_ids, attention_mask=None):
+        x = self.embed(input_ids)
+        h = self.peft_toy.base_model.model(x)  # matches toggle tests: bypasses PeftModel.forward
+        logits = self.readout_proj(h)
+
+        class Out:
+            pass
+        out = Out()
+        out.logits = logits
+        return out
+
+
+class _FakeBatch(dict):
+    def to(self, device):
+        return self
+
+
+class ToyVerdictsTokenizer:
+    """Minimal render/pad surface verdicts_under needs; "1"/"2" map to ids 11/22, as in
+    test_verdicts.py's stub."""
+
+    def apply_chat_template(self, msgs, tokenize, add_generation_prompt, **kw):
+        return "PROMPT"
+
+    def __call__(self, text):
+        return {"input_ids": [1, 2, 3]}
+
+    def pad(self, encs, return_tensors):
+        return _FakeBatch(input_ids=torch.tensor([e["input_ids"] for e in encs]))
+
+    def encode(self, text, add_special_tokens=False):
+        return {"1": [11], "2": [22]}[text]
+
+
+def test_verdicts_under_runs_under_toggle_and_returns_expected_columns():
+    peft_toy, _ = _toy_peft_model_with_base(n_layers=2)
+    model = ToyCausalModel(peft_toy)
+    tokenizer = ToyVerdictsTokenizer()
+    df = pd.DataFrame([
+        dict(pair_uid="p1", order=0, label=1, question="Q", options_1="", options_2="",
+             text_1="t1", text_2="t2"),
+        dict(pair_uid="p1", order=1, label=1, question="Q", options_1="", options_2="",
+             text_1="t1", text_2="t2"),
+    ])
+    c = {"verdicts": {"max_input_tokens": 100, "batch_size": 2}}
+    originals = {(m, name): v for mods in adapter_ablate.lora_layers(model).values()
+                 for m in mods for name, v in m.scaling.items()}
+
+    out = adapter_ablate.verdicts_under(model, tokenizer, df, active_layers={0}, c=c)
+
+    assert set(out.columns) == {"pair_uid", "order", "l1", "l2", "gap", "pick", "label"}
+    assert len(out) == 2
+    assert (out["gap"] == out["l1"] - out["l2"]).all()
+    assert (out["pick"] == out.apply(lambda r: 1 if r["l1"] > r["l2"] else 2, axis=1)).all()
+    assert all(m.scaling[name] == v for (m, name), v in originals.items())  # toggle restored

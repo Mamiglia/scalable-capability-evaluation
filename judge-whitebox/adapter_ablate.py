@@ -3,12 +3,14 @@ individual LoRA modules stay addressable for causal ablation."""
 import contextlib
 import re
 
+import pandas as pd
 import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import verdicts
 import wbconfig
+import wbprompts
 
 
 def load_unmerged(model_name, adapter, c):
@@ -71,3 +73,60 @@ def toggle(model, active_layers: set[int]):
     finally:
         for module, name, scale in saved:
             module.scaling[name] = scale
+
+
+def verdicts_under(model, tokenizer, df, active_layers, c, invert=False):
+    """Verdict readout with only `active_layers`' LoRA active (single `toggle` for the whole
+    batched forward). Mirrors verdicts.run's rendering/padding/readout, returns a DataFrame
+    instead of writing jsonl. Columns: pair_uid, order, l1, l2, gap, pick, label."""
+    device = next(model.parameters()).device
+    max_tokens = c["verdicts"]["max_input_tokens"]
+    batch_size = c["verdicts"]["batch_size"]
+
+    rows, encs = [], []
+    n_skipped = 0
+    for _, row in df.iterrows():
+        prompt = wbprompts.render_verdict_prompt(row, tokenizer, invert=invert)
+        enc = tokenizer(prompt)
+        if len(enc["input_ids"]) > max_tokens:
+            n_skipped += 1
+            continue
+        rows.append(row)
+        encs.append(enc)
+    if n_skipped:
+        print(f"skipped {n_skipped} rows over {max_tokens} tokens")
+
+    out = []
+    with toggle(model, active_layers):
+        for i in range(0, len(encs), batch_size):
+            batch_rows = rows[i:i + batch_size]
+            batch = tokenizer.pad(encs[i:i + batch_size], return_tensors="pt").to(device)
+            with torch.no_grad():
+                logits = model(**batch).logits[:, -1, :]
+            for row, row_logits in zip(batch_rows, logits):
+                l1, l2 = verdicts.readout(row_logits, tokenizer)
+                pick = 1 if l1 > l2 else 2
+                out.append(dict(pair_uid=row["pair_uid"], order=int(row["order"]),
+                                 l1=l1, l2=l2, gap=l1 - l2, pick=pick, label=int(row["label"])))
+    return pd.DataFrame(out, columns=["pair_uid", "order", "l1", "l2", "gap", "pick", "label"])
+
+
+def metrics(df):
+    """Verdict metrics from a verdicts_under-shaped df. order_even/order_odd average and
+    anti-average the two orders' gap per pair_uid; pairs missing an order are excluded, with
+    the excluded count printed. pick_weaker_acc is the meaningful number when df came from an
+    invert=True run, but is always returned."""
+    acc = (df["pick"] == df["label"]).mean()
+    pos_term = 2 * (df["pick"] == 1).mean() - 1
+    pick_weaker_acc = (df["pick"] == 3 - df["label"]).mean()
+
+    by_order = df.groupby(["pair_uid", "order"])["gap"].mean().unstack("order").reindex(columns=[0, 1])
+    both = by_order.dropna()
+    n_excluded = len(by_order) - len(both)
+    if n_excluded:
+        print(f"excluded {n_excluded} pair_uid(s) missing an order from order_even/odd")
+    order_even = ((both[0] + both[1]) / 2).mean()
+    order_odd = ((both[0] - both[1]) / 2).mean()
+
+    return dict(acc=acc, pos_term=pos_term, order_even=order_even, order_odd=order_odd,
+                pick_weaker_acc=pick_weaker_acc)
