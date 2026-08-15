@@ -22,8 +22,7 @@ from mc_cost.data import RELEASE_EPOCH
 GLOBAL_FEATURES = (
     "oversight_sd", "difficulty_sd", "theta_gap_x_oversight_sd",
     "theta_gap_x_difficulty_sd", "same_family_x_theta_gap_sd",
-    "self_comparison", "reasoning_difference_sd", "release_gap_days_sd",
-    "relative_release_days_sd",
+    "release_gap_days_sd", "relative_release_days_sd",
 )
 BASELINE_FEATURES = ()
 CORE_FEATURES = tuple(
@@ -76,6 +75,7 @@ class JudgmentData(NamedTuple):
     training_scales: dict[str, Any] | None = None
     training_ranges: dict[str, list[float]] | None = None
     source_hashes: dict[str, str] | None = None
+    presentation_include_reasoning: bool = False
 
 
 @dataclass(frozen=True)
@@ -153,7 +153,10 @@ def encode_judgments(
     training_scales: pd.DataFrame | dict[str, Any], source_hashes: dict[str, str],
 ) -> JudgmentData:
     """Encode prepared rows, preserving the specification's feature order."""
-    required = {"chosen_left", "judge", "item", "left_model", "right_model", "theta_gap"}
+    required = {
+        "chosen_left", "judge", "item", "left_model", "right_model", "theta_gap",
+        "include_reasoning",
+    }
     if spec.include_length:
         required.add("length_difference")
     missing = required - set(frame)
@@ -161,6 +164,13 @@ def encode_judgments(
         raise ValueError(f"judgments lack required columns: {', '.join(sorted(missing))}")
     if frame.empty:
         raise ValueError("judgments must contain at least one row")
+    presentation = frame["include_reasoning"]
+    if (
+        presentation.isna().any()
+        or not presentation.map(lambda value: isinstance(value, (bool, np.bool_))).all()
+        or presentation.astype(bool).any()
+    ):
+        raise ValueError("judgment fitting currently supports only include_reasoning=false")
     training_scales, source_hashes = _validate_provenance(
         training_scales, source_hashes, spec.global_features, spec.include_length,
     )
@@ -231,7 +241,7 @@ def encode_judgments(
         num_items=len(labels["items"]), num_models=len(labels["models"]),
         global_features=spec.global_features, category_maps=category_maps,
         training_scales=training_scales, training_ranges=ranges,
-        source_hashes=source_hashes,
+        source_hashes=source_hashes, presentation_include_reasoning=False,
     )
 
 
@@ -366,6 +376,7 @@ def fit_judgment_model(
         "training_ranges": data.training_ranges or {},
         "source_hashes": data.source_hashes or {},
         "conditional_judges": conditional_judges,
+        "presentation_include_reasoning": data.presentation_include_reasoning,
     }
     return PosteriorArtifact(posterior, metadata, diagnostics)
 

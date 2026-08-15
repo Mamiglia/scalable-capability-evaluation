@@ -311,7 +311,6 @@ def prepare_for_mc(
     data, accounting, eligibility = _eligible(
         data, accounting, min_pairs=min_pairs, min_samples=min_samples,
     )
-    standardise(data, ("length_difference",))
     result = data.sort_values(["judge", "model_pair", "item", "transcript_condition"]).reset_index(drop=True)
     result.attrs["exclusions"] = sorted(
         exclusions, key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")),

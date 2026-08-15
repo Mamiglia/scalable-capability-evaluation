@@ -39,13 +39,11 @@ def test_judgment_spec_declares_exact_sanctioned_feature_order():
         "core": ((
             "oversight_sd", "difficulty_sd", "theta_gap_x_oversight_sd",
             "theta_gap_x_difficulty_sd", "same_family_x_theta_gap_sd",
-            "self_comparison", "reasoning_difference_sd",
         ), True),
         "core_release": ((
             "oversight_sd", "difficulty_sd", "theta_gap_x_oversight_sd",
             "theta_gap_x_difficulty_sd", "same_family_x_theta_gap_sd",
-            "self_comparison", "reasoning_difference_sd", "release_gap_days_sd",
-            "relative_release_days_sd",
+            "release_gap_days_sd", "relative_release_days_sd",
         ), True),
     }
 
@@ -55,7 +53,7 @@ def tiny_data():
         y=jnp.array([1, 0]), judge=jnp.array([0, 0]), item=jnp.array([0, 0]),
         left_model=jnp.array([0, 1]), right_model=jnp.array([1, 0]),
         theta_gap=jnp.array([1.0, -1.0]),
-        global_x=jnp.zeros((2, 9)), length_difference=jnp.array([0.2, -0.2]),
+        global_x=jnp.zeros((2, 7)), length_difference=jnp.array([0.2, -0.2]),
         judge_covariates=jnp.array([[0.0, 0.0]]), include_length=True,
         num_judges=1, num_items=1, num_models=2,
     )
@@ -71,7 +69,7 @@ def test_judgment_model_declares_pooled_judge_and_model_effects():
 def test_swapping_candidates_negates_content_but_keeps_position_term():
     posterior = {
         "judge_effects": np.array([[[0.3, 1.5]]]),
-        "global_beta": np.array([[0.2] + [0.0] * 8]),
+        "global_beta": np.array([[0.2] + [0.0] * 6]),
         "length_mean": np.array([0.4]), "length_deviation": np.array([[0.1]]),
         "candidate_effects": np.array([[0.2, -0.1]]), "item_effects": np.array([[0.0]]),
     }
@@ -83,7 +81,7 @@ def test_swapping_candidates_negates_content_but_keeps_position_term():
 def test_single_unbatched_draw_keeps_draw_axis_with_length_enabled():
     posterior = {
         "judge_effects": np.array([[[0.3, 1.5]]]),
-        "global_beta": np.array([[0.2] + [0.0] * 8]),
+        "global_beta": np.array([[0.2] + [0.0] * 6]),
         "length_mean": np.array([0.4]), "length_deviation": np.array([[0.1]]),
         "candidate_effects": np.array([[0.2, -0.1]]), "item_effects": np.array([[0.0]]),
     }
@@ -131,14 +129,16 @@ def test_encode_judgments_uses_declared_features_and_theta_release_judge_covaria
             "theta_gap": 4.0, "length_difference": 0.5,
             "oversight": 1.0, "difficulty": 2.0, "theta_gap_x_oversight": 3.0,
             "theta_gap_x_difficulty": 4.0, "same_family_x_theta_gap": 5.0,
-            "self_comparison": 6.0, "reasoning_difference": 7.0,
+            "self_comparison": 0.0, "reasoning_difference": 0.0,
+            "include_reasoning": False,
         },
         {
             "chosen_left": 0, "judge": "j1", "item": "i1", "left_model": "a", "right_model": "b",
             "theta_gap": -4.0, "length_difference": -0.5,
             "oversight": -1.0, "difficulty": -2.0, "theta_gap_x_oversight": -3.0,
             "theta_gap_x_difficulty": -4.0, "same_family_x_theta_gap": -5.0,
-            "self_comparison": -6.0, "reasoning_difference": -7.0,
+            "self_comparison": 0.0, "reasoning_difference": 0.0,
+            "include_reasoning": False,
         },
     ])
     catalogue = pd.DataFrame([
@@ -153,8 +153,8 @@ def test_encode_judgments_uses_declared_features_and_theta_release_judge_covaria
     )
 
     assert np.asarray(got.global_x).tolist() == [
-        [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
-        [-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0],
+        [1.0, 2.0, 3.0, 4.0, 5.0],
+        [-1.0, -2.0, -3.0, -4.0, -5.0],
     ]
     assert np.asarray(got.theta_gap).tolist() == [4.0, -4.0]
     assert got.global_features == spec.global_features
@@ -172,17 +172,32 @@ def test_encode_judgments_uses_declared_features_and_theta_release_judge_covaria
     assert got.training_ranges == {
         "theta_gap": [-4.0, 4.0], "oversight_sd": [-1.0, 1.0], "difficulty_sd": [-2.0, 2.0],
         "theta_gap_x_oversight_sd": [-3.0, 3.0], "theta_gap_x_difficulty_sd": [-4.0, 4.0],
-        "same_family_x_theta_gap_sd": [-5.0, 5.0], "self_comparison": [-6.0, 6.0],
-        "reasoning_difference_sd": [-7.0, 7.0], "length_difference": [-0.5, 0.5],
+        "same_family_x_theta_gap_sd": [-5.0, 5.0], "length_difference": [-0.5, 0.5],
         "judge_theta": [-1.0, 1.0], "judge_release_days": [1461.0, 1827.0],
     }
     assert got.source_hashes == {"judgments": "abc", "catalogue": "def"}
+    assert got.presentation_include_reasoning is False
+
+
+@pytest.mark.parametrize("condition", [True, None, "false"])
+def test_encode_judgments_rejects_unsupported_or_undeclared_presentation(condition):
+    frame = pd.DataFrame([{
+        "chosen_left": 1, "judge": "j", "item": "i", "left_model": "a", "right_model": "b",
+        "theta_gap": 0.0, "include_reasoning": condition,
+    }])
+    catalogue = pd.DataFrame([{"model_id": "j", "theta": 0.0, "release": "2024-01-01"}])
+
+    with pytest.raises(ValueError, match="include_reasoning=false"):
+        encode_judgments(
+            frame, catalogue, JudgmentSpec((), False), training_scales=TRAINING_SCALES,
+            source_hashes={"judgments": "abc"},
+        )
 
 
 def test_encode_judgments_rejects_empty_or_incompatible_provenance():
     frame = pd.DataFrame([{
         "chosen_left": 1, "judge": "j", "item": "i", "left_model": "a", "right_model": "b",
-        "theta_gap": 0.0,
+        "theta_gap": 0.0, "include_reasoning": False,
     }])
     catalogue = pd.DataFrame([{"model_id": "j", "theta": 0.0, "release": "2024-01-01"}])
     spec = JudgmentSpec((), False)
@@ -243,6 +258,7 @@ def test_tiny_fit_records_configured_diagnostics_and_metadata(tmp_path):
         "training_ranges": data.training_ranges,
         "source_hashes": data.source_hashes,
         "conditional_judges": False,
+        "presentation_include_reasoning": False,
     }
     assert isinstance(artifact.diagnostics["divergences"], int)
     assert artifact.diagnostics["draws"] == 4

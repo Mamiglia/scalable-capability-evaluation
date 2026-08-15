@@ -163,6 +163,16 @@ def manual_comparisons(catalogue: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.
         if violations:
             warnings.append({"code": "automatic_rule_violation", "row": output_row, "source_row": source_row,
                              "message": "; ".join(violations)})
+        if identities["m1"] == identities["m2"]:
+            warnings.append({
+                "code": "unsupported_self_comparison", "row": output_row, "source_row": source_row,
+                "message": "self comparisons are outside current judgment training support",
+            })
+        if pd.notna(classes["m1"]) and pd.notna(classes["m2"]) and classes["m1"] != classes["m2"]:
+            warnings.append({
+                "code": "unsupported_reasoning_difference", "row": output_row, "source_row": source_row,
+                "message": "reasoning-class contrasts are outside current final-only judgment training support",
+            })
 
         for role, pool in (("judge", "judge_pool"), ("m1", "candidate_pool")):
             value = models.at[identities[role], pool] if pool in models else pd.NA

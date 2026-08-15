@@ -411,9 +411,9 @@ def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monke
     output = tmp_path / "artifacts"
     output.mkdir()
     catalogue = pd.DataFrame([
-        {"model_id": "j", "theta": 0.0, "release": "2024-01-01"},
-        {"model_id": "a", "theta": 1.0, "release": "2025-01-01"},
-        {"model_id": "b", "theta": -1.0, "release": "2023-01-01"},
+        {"model_id": "j", "theta": 0.0, "release": "2024-01-01", "family": "j"},
+        {"model_id": "a", "theta": 1.0, "release": "2025-01-01", "family": "a"},
+        {"model_id": "b", "theta": -1.0, "release": "2023-01-01", "family": "b"},
     ])
     catalogue.to_csv(output / "catalogue.csv", index=False)
     (output / "capability_draws.npz").write_bytes(b"draws")
@@ -429,6 +429,7 @@ def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monke
         "chosen_left": 1, "judge": "j", "item": "i", "left_model": "a", "right_model": "b",
         "length_difference": 0.2, "same_model_family": 0, "self_comparison": 0,
         "reasoning_difference": 0, "left_chars": 10, "right_chars": 8,
+        "include_reasoning": False,
         "judge_input_tokens": 20, "judge_output_tokens": 4,
         "judge_reasoning_tokens": 0, "judge_total_tokens": 24,
     }])
@@ -585,6 +586,7 @@ def pipeline_artifacts(tmp_path, *, dashboard=None):
     judgments = pd.DataFrame([{column: 0 for column in JUDGMENT_COLUMNS} for _ in range(2)])
     judgments[["judge", "item", "left_model", "right_model"]] = ["j", "i", "a", "b"]
     judgments["chosen_left"] = [0, 1]
+    judgments["include_reasoning"] = False
     judgments["major_is_left"] = [False, True]
     judgments.loc[1, [
         "theta_gap", "oversight", "release_gap_days", "relative_release_days", "difficulty",
@@ -653,6 +655,7 @@ def pipeline_artifacts(tmp_path, *, dashboard=None):
                 "feature_order": list(JUDGMENT_SPECS[name].global_features),
                 "include_length": JUDGMENT_SPECS[name].include_length,
                 "conditional_judges": False,
+                "presentation_include_reasoning": False,
             })
         else:
             metadata["role"] = name.removesuffix("_token")
@@ -768,6 +771,7 @@ def test_real_judgment_callback_encodes_target_free_held_out_rows(monkeypatch):
         {"model_id": "b", "theta": -1.0, "release": "2023-01-01"},
     ])
     rows = pd.DataFrame([{column: 0 for column in JUDGMENT_COLUMNS} for _ in range(2)])
+    rows["include_reasoning"] = False
     rows[["judge", "item", "left_model", "right_model"]] = ["j1", "i", "a", "b"]
     rows.loc[1, "judge"] = "j2"
     rows.loc[1, [

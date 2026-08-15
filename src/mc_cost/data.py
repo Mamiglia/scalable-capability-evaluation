@@ -27,7 +27,7 @@ JUDGMENT_COLUMNS = [
 CONTINUOUS_JUDGMENT_COLUMNS = [
     "theta_gap", "oversight", "release_gap_days", "relative_release_days",
     "difficulty", "theta_gap_x_oversight", "theta_gap_x_difficulty",
-    "length_difference", "same_family_x_theta_gap", "reasoning_difference",
+    "length_difference", "same_family_x_theta_gap",
 ]
 
 
@@ -72,7 +72,7 @@ def _release_days(values: pd.Series) -> pd.Series:
 
 
 def _catalogue_metadata(catalogue: pd.DataFrame) -> pd.DataFrame:
-    required = {"model_id", "theta", "release"}
+    required = {"model_id", "theta", "release", "family"}
     missing = required - set(catalogue)
     if missing:
         raise ValueError(f"catalogue lacks required columns: {', '.join(sorted(missing))}")
@@ -81,6 +81,9 @@ def _catalogue_metadata(catalogue: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("duplicate model_id in catalogue")
     frame["theta"] = pd.to_numeric(frame["theta"], errors="coerce")
     frame["release_day"] = _release_days(frame["release"])
+    frame["family"] = frame["family"].map(
+        lambda value: value.strip() if isinstance(value, str) and value.strip() else pd.NA
+    )
     return frame.set_index("model_id", drop=False)
 
 
@@ -88,7 +91,10 @@ def _missing_judgment_metadata(frame: pd.DataFrame) -> list[str]:
     missing = []
     for role in ("judge", "left", "right"):
         identity = frame[f"{role}_model"] if role != "judge" else frame["judge"]
-        for column, label in ((f"{role}_theta", "theta"), (f"{role}_release_day", "release")):
+        for column, label in (
+            (f"{role}_theta", "theta"), (f"{role}_release_day", "release"),
+            (f"{role}_family", "family"),
+        ):
             for value in identity[frame[column].isna()].astype(str).unique():
                 missing.append(f"{role} {value} missing {label}")
     for value in frame.loc[frame["difficulty"].isna(), "item"].astype(str).unique():
@@ -104,6 +110,7 @@ def prepare_judgments(attempts: pd.DataFrame, catalogue: pd.DataFrame, items: pd
         joined = metadata.reindex(frame[identity_column])
         frame[f"{role}_theta"] = joined["theta"].to_numpy()
         frame[f"{role}_release_day"] = joined["release_day"].to_numpy()
+        frame[f"{role}_family"] = joined["family"].to_numpy()
         if role == "judge" and "reasoning_class" in joined:
             frame["judge_reasoning_class"] = joined["reasoning_class"].to_numpy()
 
@@ -121,6 +128,10 @@ def prepare_judgments(attempts: pd.DataFrame, catalogue: pd.DataFrame, items: pd
     )
     frame["theta_gap_x_oversight"] = frame["theta_gap"] * frame["oversight"]
     frame["theta_gap_x_difficulty"] = frame["theta_gap"] * frame["difficulty"]
+    frame["same_model_family"] = (
+        frame["left_model"].ne(frame["right_model"])
+        & frame["left_family"].eq(frame["right_family"])
+    ).astype(int)
     frame["same_family_x_theta_gap"] = frame["same_model_family"] * frame["theta_gap"]
     return frame.reindex(columns=JUDGMENT_COLUMNS + [column for column in frame if column not in JUDGMENT_COLUMNS])
 
@@ -227,14 +238,18 @@ def candidate_token_rows(
                     if "difficulty" in missing:
                         details.append(f"item {item} missing difficulty")
                     raise ValueError("; ".join(details))
-                transcript = extract_transcript(sample, include_reasoning=True)
+                final_transcript = extract_transcript(sample, include_reasoning=False)
+                full_transcript = extract_transcript(sample, include_reasoning=True)
                 reasoning_tokens = tokens["reasoning"]
                 rows.append({
                     "role": "candidate", "benchmark": benchmark, "model": model, "item": item, "epoch": epoch,
-                    "response_chars": len(transcript), "correct": _sample_correct(sample),
+                    "response_chars": len(final_transcript),
+                    "full_response_chars": len(full_transcript),
+                    "generated_reasoning": int(full_transcript != final_transcript),
+                    "correct": _sample_correct(sample),
                     "theta": model_data["theta"], "release_day": model_data["release_day"],
                     "difficulty": item_difficulty,
-                    "visible_reasoning": int("<THOUGHT_START>" in transcript or "<think>" in transcript),
+                    "visible_reasoning": 0,
                     "reasoning_class": model_data.get("reasoning_class", pd.NA),
                     "input_tokens": tokens["input"], "output_tokens": tokens["output"],
                     "reasoning_tokens": reasoning_tokens, "ordinary_output_tokens": max(tokens["output"] - reasoning_tokens, 0),

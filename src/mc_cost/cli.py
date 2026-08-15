@@ -362,6 +362,7 @@ def _tag_judgment_artifact(
             "include_length": spec.include_length,
             "source_hashes": source_hashes,
             "conditional_judges": conditional_judges,
+            "presentation_include_reasoning": False,
         },
         artifact.diagnostics,
     )
@@ -568,6 +569,7 @@ def _selected_artifact_matches(
         artifact.metadata.get("feature_order") == list(spec.global_features)
         and artifact.metadata.get("include_length") is spec.include_length
         and artifact.metadata.get("conditional_judges") is conditional_judges
+        and artifact.metadata.get("presentation_include_reasoning") is False
     )
 
 

@@ -67,6 +67,20 @@ def test_manual_retains_duplicates_and_warns_without_blocking():
     assert set(warnings["row"]) == {0, 1}
 
 
+def test_manual_names_current_self_and_reasoning_contrast_support_ceiling():
+    rows = pd.DataFrame([{
+        "judge": "j1", "m1": "a", "m2": "a",
+        "m2_reasoning_class": "non_reasoning",
+    }])
+
+    comparisons, warnings = manual_comparisons(catalogue(), rows)
+
+    assert len(comparisons) == 1
+    assert {"unsupported_self_comparison", "unsupported_reasoning_difference"} <= set(
+        warnings["code"]
+    )
+
+
 def test_manual_keeps_known_identity_with_missing_prediction_metadata():
     models = pd.concat([catalogue(), pd.DataFrame([{
         "model_id": "undated", "theta": np.nan, "release": None,

@@ -428,12 +428,14 @@ def _artifact_parts(artifact: PosteriorArtifact | Mapping[str, Any]) -> tuple[di
     return dict(artifact["posterior"]), {key: value for key, value in artifact.items() if key != "posterior"}
 
 
-def _posterior_count(artifact: PosteriorArtifact | Mapping[str, Any]) -> int:
+def _posterior_count(artifact: PosteriorArtifact | Mapping[str, Any], label: str) -> int:
     posterior, _ = _artifact_parts(artifact)
     counts = [np.asarray(value).shape[0] for value in posterior.values() if np.asarray(value).ndim]
     if not counts or min(counts) < 1:
-        raise ValueError("artifact has no posterior draws")
-    return min(counts)
+        raise ValueError(f"{label} artifact has no posterior draws")
+    if len(set(counts)) != 1:
+        raise ValueError(f"{label} artifact posterior arrays must have aligned draw counts")
+    return counts[0]
 
 
 def _token_prediction_rows(
@@ -562,8 +564,8 @@ def _observed_groups(
 def _candidate_cells(
     comparisons: pd.DataFrame, attempted: Sequence[str], metadata: pd.DataFrame,
     observed: dict[tuple[str, str, str], pd.DataFrame], capability: dict[str, float],
-    irt: dict[str, np.ndarray], posterior_index: int, rng: np.random.Generator,
-    candidate_artifact: Any, cache: LatentCache, trial: int,
+    irt: dict[str, np.ndarray], irt_index: int, rng: np.random.Generator,
+    candidate_artifact: Any, candidate_index: int, cache: LatentCache, trial: int,
 ) -> pd.DataFrame:
     refs = pd.concat([
         comparisons[["m1", "m1_reasoning_class"]].rename(
@@ -575,10 +577,10 @@ def _candidate_cells(
     ], ignore_index=True).drop_duplicates()
     rows = []
     lookup = _item_lookup(irt["items"])
-    a = _draw_value(irt["a"], posterior_index, "IRT discrimination")
-    b = _draw_value(irt["b"], posterior_index, "IRT difficulty")
+    a = _draw_value(irt["a"], irt_index, "IRT discrimination")
+    b = _draw_value(irt["b"], irt_index, "IRT difficulty")
     floor_values = np.asarray(irt["floor"])
-    floor = _draw_value(floor_values, posterior_index, "IRT floor") if floor_values.ndim == 2 else floor_values
+    floor = _draw_value(floor_values, irt_index, "IRT floor") if floor_values.ndim == 2 else floor_values
     for ref in refs.itertuples(index=False):
         if ref.model not in capability:
             raise ValueError(f"capability draws lack model: {ref.model}")
@@ -594,15 +596,12 @@ def _candidate_cells(
                 )
                 correct = int(rng.binomial(1, probability))
                 response_chars = np.nan
-                visible = int(ref.reasoning_class == "reasoning")
             else:
                 correct = int(sampled["correct"])
                 response_chars = pd.to_numeric(pd.Series([sampled.get("response_chars", np.nan)]), errors="coerce").iloc[0]
-                visible_value = sampled.get("visible_reasoning", ref.reasoning_class == "reasoning")
-                visible = int(bool(visible_value)) if not pd.isna(visible_value) else int(ref.reasoning_class == "reasoning")
             rows.append({
                 "model": ref.model, "item": item, "reasoning_class": ref.reasoning_class,
-                "correct": correct, "response_chars": response_chars, "visible_reasoning": visible,
+                "correct": correct, "response_chars": response_chars, "visible_reasoning": 0,
                 "theta": capability[ref.model], "release_day": metadata.at[ref.model, "release_day"],
                 "difficulty": float(b[item_index]),
             })
@@ -617,7 +616,7 @@ def _candidate_cells(
     if missing_length.any():
         prediction_rows = _token_prediction_rows(candidate_artifact, cells.loc[missing_length])
         cells.loc[missing_length, "response_chars"] = draw_transcript_lengths(
-            candidate_artifact, prediction_rows, rng, posterior_index,
+            candidate_artifact, prediction_rows, rng, candidate_index,
             latent_cache=cache, trial_id=trial,
         )
     cells["response_chars"] = pd.to_numeric(cells["response_chars"], errors="raise")
@@ -659,6 +658,10 @@ def _scenario_left_probabilities(
     if presented.empty:
         return np.empty(0)
     posterior, artifact_metadata = _artifact_parts(artifact)
+    if artifact_metadata.get("presentation_include_reasoning") is not False:
+        raise ValueError(
+            "judgment artifact must declare the supported final-only include_reasoning=false presentation"
+        )
     draw = {name: _draw_value(values, posterior_index, name) for name, values in posterior.items()}
     maps = artifact_metadata.get("category_maps", {})
     observed_judges = maps.get("judges", {})
@@ -750,13 +753,6 @@ def _scenario_left_probabilities(
         "same_family_x_theta_gap": (
             left_family.eq(right_family) & presented["left_model"].ne(presented["right_model"])
         ).astype(float) * theta_gap,
-        "self_comparison": (
-            presented["left_model"].eq(presented["right_model"])
-        ).astype(float).to_numpy(),
-        "reasoning_difference": (
-            presented["left_visible_reasoning"].to_numpy(dtype=float)
-            - presented["right_visible_reasoning"].to_numpy(dtype=float)
-        ),
     }
     columns = []
     for feature in feature_order:
@@ -831,7 +827,7 @@ def _presentation_metadata(presented: pd.DataFrame, cells: pd.DataFrame, metadat
 
 def _usage_rows(
     comparisons: pd.DataFrame, cells: pd.DataFrame, presented: pd.DataFrame, candidate_artifact: Any,
-    judge_artifact: Any, rng: np.random.Generator, posterior_index: int,
+    judge_artifact: Any, rng: np.random.Generator, candidate_index: int, judge_index: int,
     cache: LatentCache, trial: int, reuse_responses: bool,
 ) -> pd.DataFrame:
     parts = []
@@ -839,7 +835,7 @@ def _usage_rows(
         requests = cells.drop_duplicates(["model", "item", "reasoning_class"]).reset_index(drop=True)
         prediction_rows = _token_prediction_rows(candidate_artifact, requests)
         usage = draw_token_usage(
-            candidate_artifact, prediction_rows, rng, posterior_index,
+            candidate_artifact, prediction_rows, rng, candidate_index,
             latent_cache=cache, trial_id=trial,
         )
         parts.append(pd.concat([
@@ -857,7 +853,7 @@ def _usage_rows(
         })
         prediction_rows = _token_prediction_rows(judge_artifact, requests)
         usage = draw_token_usage(
-            judge_artifact, prediction_rows, rng, posterior_index,
+            judge_artifact, prediction_rows, rng, judge_index,
             latent_cache=cache, trial_id=trial,
         )
         parts.append(pd.concat([
@@ -1019,10 +1015,21 @@ def simulate(
     irt_parts = _irt_parts(irt)
     metadata = _price_metadata(catalogue)
     observed = _observed_groups(observed_cells, metadata)
-    posterior_draws = min(
-        len(draws), _posterior_count(judgment_artifact),
-        _posterior_count(candidate_token_artifact), _posterior_count(judge_token_artifact),
-        len(np.asarray(irt_parts["a"])),
+    aligned_counts = [len(draws), len(np.asarray(irt_parts["a"])), len(np.asarray(irt_parts["b"]))]
+    if np.asarray(irt_parts["floor"]).ndim == 2:
+        aligned_counts.append(len(np.asarray(irt_parts["floor"])))
+    if len(set(aligned_counts)) != 1:
+        raise ValueError("capability and IRT posterior draw counts must be aligned")
+    schedule_rngs = [np.random.default_rng(child) for child in np.random.SeedSequence(seed).spawn(4)]
+    capability_schedule = schedule_rngs[0].integers(len(draws), size=config.trials)
+    judgment_schedule = schedule_rngs[1].integers(
+        _posterior_count(judgment_artifact, "judgment"), size=config.trials,
+    )
+    candidate_schedule = schedule_rngs[2].integers(
+        _posterior_count(candidate_token_artifact, "candidate token"), size=config.trials,
+    )
+    judge_schedule = schedule_rngs[3].integers(
+        _posterior_count(judge_token_artifact, "judge token"), size=config.trials,
     )
     rng = np.random.default_rng(seed)
     cache = LatentCache(rng)
@@ -1031,7 +1038,10 @@ def simulate(
     comparison_count: int | None = None
 
     for trial in range(config.trials):
-        posterior_index = trial % posterior_draws
+        capability_index = int(capability_schedule[trial])
+        judgment_index = int(judgment_schedule[trial])
+        candidate_index = int(candidate_schedule[trial])
+        judge_index = int(judge_schedule[trial])
         selected, design_warnings = _comparison_frame(comparisons, rng)
         selected = _resolve_classes(selected, metadata)
         if comparison_count is None:
@@ -1049,16 +1059,16 @@ def simulate(
         required_models = set(predictable[["judge", "m1", "m2"]].to_numpy().ravel())
         if missing := sorted(required_models - set(models)):
             raise ValueError(f"capability draws lack models: {', '.join(missing)}")
-        capability = dict(zip(models, draws[posterior_index]))
+        capability = dict(zip(models, draws[capability_index]))
         attempted = rng.choice(np.asarray(items), config.attempted_items, replace=False).tolist()
         cells = _candidate_cells(
             predictable, attempted, metadata, observed, capability, irt_parts,
-            posterior_index, rng, candidate_token_artifact, cache, trial,
+            capability_index, rng, candidate_token_artifact, candidate_index, cache, trial,
         )
         usable = _usable_rows(predictable, attempted, cells)
         presented = _presentation_metadata(counterbalance(usable, config.presentations, rng), cells, metadata)
         probabilities = _scenario_left_probabilities(
-            judgment_artifact, presented, metadata, capability, posterior_index, cache, trial,
+            judgment_artifact, presented, metadata, capability, judgment_index, cache, trial,
         )
         presented["p_choose_left"] = probabilities
         presented["chose_left"] = rng.binomial(1, probabilities).astype(int)
@@ -1072,7 +1082,7 @@ def simulate(
         presented["m2_theta"] = presented["m2"].map(capability)
         usage = _usage_rows(
             predictable, cells, presented, candidate_token_artifact, judge_token_artifact, rng,
-            posterior_index, cache, trial, config.reuse_responses,
+            candidate_index, judge_index, cache, trial, config.reuse_responses,
         )
         priced, price_warnings = cost_rows(usage, catalogue)
         if not price_warnings.empty:

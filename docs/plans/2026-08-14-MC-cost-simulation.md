@@ -83,6 +83,15 @@ remain visible in the catalogue but are excluded from automatic pools and from
 feature-dependent training rows; their manual scenarios report missing support
 instead of receiving an average-model substitution.
 
+The baseline judgment protocol uses `include_reasoning=false`. Candidate-token
+preparation therefore fits and simulates the final answer length visible to the
+judge, while retaining full transcript length and generated-reasoning evidence
+for audit and future protocols. Judgment artifacts record this presentation
+condition and fail closed if it does not match. The current judgment data also
+contain no self-comparisons or reasoning-class contrasts, so those effects are
+excluded from the sanctioned models; explicit manual scenarios receive named
+support warnings until matching observations exist.
+
 `prepare` scans every Inspect archive under both configured candidate roots and
 can take several minutes; it publishes its generation atomically only after the
 scan completes. Its manifest-bound `analysis/mc_cost/prepare_accounting.json`

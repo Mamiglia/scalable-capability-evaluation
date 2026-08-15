@@ -43,6 +43,7 @@ def test_prepare_judgments_builds_signed_and_symmetric_features():
     assert row.oversight == 1.0
     assert row.theta_gap_x_oversight == 1.0
     assert row.theta_gap_x_difficulty == 0.7
+    assert row.same_model_family == 0
     assert row.release_gap_days == 731
     assert row.relative_release_days == 0.5
     token_row = judge_token_rows(got).iloc[0]
@@ -58,13 +59,61 @@ def test_prepare_judgments_names_missing_metadata():
         "reasoning_difference": 0, "left_chars": 1, "right_chars": 1,
     }])
     catalogue = pd.DataFrame([
-        {"model_id": "judge", "theta": 0.0, "release": "2024-01-01"},
-        {"model_id": "left", "theta": 1.0, "release": "2024-01-01"},
-        {"model_id": "right", "theta": 0.0, "release": None},
+        {"model_id": "judge", "theta": 0.0, "release": "2024-01-01", "family": "judge"},
+        {"model_id": "left", "theta": 1.0, "release": "2024-01-01", "family": "left"},
+        {"model_id": "right", "theta": 0.0, "release": None, "family": "right"},
     ])
 
     with pytest.raises(ValueError, match="right.*missing"):
         prepare_judgments(attempts, catalogue, pd.DataFrame())
+
+
+@pytest.mark.parametrize("left,right", [
+    ("gemma3-12b-it", "gemini-3.5-flash"),
+    ("gpt-5", "o3"),
+])
+def test_prepare_judgments_recomputes_family_from_canonical_catalogue(left, right):
+    attempts = pd.DataFrame([{
+        "chosen_left": 1, "judge": "judge", "item": "i",
+        "left_model": left, "right_model": right,
+        "length_difference": 0.0, "same_model_family": 0, "self_comparison": 0,
+        "reasoning_difference": 0, "left_chars": 1, "right_chars": 1,
+        "include_reasoning": False,
+    }])
+    catalogue = pd.DataFrame([
+        {"model_id": "judge", "theta": 0.0, "release": "2024-01-01", "family": "openai"},
+        {"model_id": left, "theta": 1.0, "release": "2025-01-01", "family": "google" if left.startswith("gemma") else "openai"},
+        {"model_id": right, "theta": 0.0, "release": "2023-01-01", "family": "google" if right.startswith("gemini") else "openai"},
+    ])
+    items = pd.DataFrame([{
+        "irt_model": "fixed_3pl", "fit": "gpqa", "benchmark": "gpqa",
+        "item": "i", "difficulty": 0.0,
+    }])
+
+    got = prepare_judgments(attempts, catalogue, items)
+
+    assert got.loc[0, "same_model_family"] == 1
+    assert got.loc[0, "same_family_x_theta_gap"] == 1.0
+
+
+def test_prepare_judgments_names_missing_canonical_family():
+    attempts = pd.DataFrame([{
+        "chosen_left": 1, "judge": "judge", "item": "i", "left_model": "left", "right_model": "right",
+        "length_difference": 0.0, "same_model_family": 0, "self_comparison": 0,
+        "reasoning_difference": 0, "left_chars": 1, "right_chars": 1,
+    }])
+    catalogue = pd.DataFrame([
+        {"model_id": "judge", "theta": 0.0, "release": "2024-01-01", "family": "judge"},
+        {"model_id": "left", "theta": 1.0, "release": "2025-01-01", "family": None},
+        {"model_id": "right", "theta": 0.0, "release": "2023-01-01", "family": "right"},
+    ])
+    items = pd.DataFrame([{
+        "irt_model": "fixed_3pl", "fit": "gpqa", "benchmark": "gpqa",
+        "item": "i", "difficulty": 0.0,
+    }])
+
+    with pytest.raises(ValueError, match="left left missing family"):
+        prepare_judgments(attempts, catalogue, items)
 
 
 def test_judge_tokens_define_reasoning_as_output_subset():
@@ -106,6 +155,7 @@ def test_candidate_rows_deduplicate_and_exclude_zero_usage(monkeypatch):
     monkeypatch.setattr(data, "read_eval_log", lambda _: log)
     catalogue = pd.DataFrame([{
         "model_id": "candidate", "theta": 0.5, "release": "2025-01-01", "reasoning_class": "reasoning",
+        "family": "candidate",
     }])
     items = pd.DataFrame([{
         "irt_model": "fixed_3pl", "fit": "gpqa", "benchmark": "gpqa", "item": "i", "difficulty": 0.4,
@@ -132,6 +182,43 @@ def test_candidate_rows_deduplicate_and_exclude_zero_usage(monkeypatch):
     }
 
 
+def test_candidate_rows_keep_final_and_full_transcript_lengths_separate(monkeypatch):
+    import mc_cost.data as data
+
+    message = SimpleNamespace(content=[
+        SimpleNamespace(type="reasoning", text="private chain"),
+        SimpleNamespace(type="text", text="final answer"),
+    ])
+    sample = SimpleNamespace(
+        id="i_1", epoch=1, error=None,
+        model_usage={"m": SimpleNamespace(
+            input_tokens=10, output_tokens=20, reasoning_tokens=10, total_tokens=30,
+        )},
+        scores={"s": SimpleNamespace(value="C")},
+        output=SimpleNamespace(choices=[SimpleNamespace(message=message)]),
+    )
+    log = SimpleNamespace(
+        eval=SimpleNamespace(task="gpqa", model="openrouter/candidate"), samples=[sample],
+    )
+    monkeypatch.setattr(data, "list_eval_logs", lambda _: [SimpleNamespace(name="one")])
+    monkeypatch.setattr(data, "read_eval_log", lambda _: log)
+    catalogue = pd.DataFrame([{
+        "model_id": "candidate", "theta": 0.5, "release": "2025-01-01",
+        "family": "candidate", "reasoning_class": "reasoning",
+    }])
+    items = pd.DataFrame([{
+        "irt_model": "fixed_3pl", "fit": "gpqa", "benchmark": "gpqa",
+        "item": "i", "difficulty": 0.4,
+    }])
+
+    row = candidate_token_rows(["unused"], catalogue, items).iloc[0]
+
+    assert row.response_chars == len("final answer")
+    assert row.full_response_chars > row.response_chars
+    assert row.generated_reasoning == 1
+    assert row.visible_reasoning == 0
+
+
 def test_candidate_rows_reject_missing_fitting_metadata(monkeypatch):
     import mc_cost.data as data
 
@@ -145,7 +232,9 @@ def test_candidate_rows_reject_missing_fitting_metadata(monkeypatch):
     )
     monkeypatch.setattr(data, "list_eval_logs", lambda _: [SimpleNamespace(name="one")])
     monkeypatch.setattr(data, "read_eval_log", lambda _: log)
-    catalogue = pd.DataFrame([{"model_id": "candidate", "theta": None, "release": None}])
+    catalogue = pd.DataFrame([{
+        "model_id": "candidate", "theta": None, "release": None, "family": "candidate",
+    }])
 
     with pytest.raises(ValueError, match="candidate.*missing.*theta.*release.*item.*missing"):
         candidate_token_rows(["unused"], catalogue, pd.DataFrame())
@@ -162,7 +251,9 @@ def test_mc_candidate_rows_account_for_incomplete_logs(monkeypatch):
     monkeypatch.setattr(data, "read_eval_log", lambda _: log)
 
     got = candidate_token_rows(
-        ["unused"], pd.DataFrame([{"model_id": "fitted", "theta": 0.0, "release": "2025-01-01"}]),
+        ["unused"], pd.DataFrame([{
+            "model_id": "fitted", "theta": 0.0, "release": "2025-01-01", "family": "fitted",
+        }]),
         pd.DataFrame(), skip_incomplete=True,
     )
 
@@ -194,7 +285,9 @@ def test_mc_candidate_rows_name_error_zero_and_missing_metadata_exclusions(monke
     )
     monkeypatch.setattr(data, "list_eval_logs", lambda _: [SimpleNamespace(name="one")])
     monkeypatch.setattr(data, "read_eval_log", lambda _: log)
-    catalogue = pd.DataFrame([{"model_id": "candidate", "theta": None, "release": None}])
+    catalogue = pd.DataFrame([{
+        "model_id": "candidate", "theta": None, "release": None, "family": "candidate",
+    }])
 
     got = candidate_token_rows(["unused"], catalogue, pd.DataFrame(), skip_incomplete=True)
 
@@ -226,9 +319,9 @@ def test_write_prepared_tables_stores_training_standardization(tmp_path):
     stored = pd.read_parquet(paths["judgments"])
     stats = pd.read_json(paths["judgment_standardization"])
     assert stored.theta_gap.tolist() == [-1.0, 1.0]
-    assert stored.reasoning_difference.tolist() == [-1.0, 1.0]
+    assert stored.reasoning_difference.tolist() == [0.0, 2.0]
     assert stats.loc["theta_gap", "mean"] == 1.0
-    assert stats.loc["reasoning_difference", "mean"] == 1.0
+    assert "reasoning_difference" not in stats.index
     assert paths["candidate_tokens"].exists()
     assert paths["judge_tokens"].exists()
 
@@ -247,5 +340,5 @@ def test_write_prepared_tables_uses_only_explicit_training_rows(tmp_path):
     stats = pd.read_json(paths["judgment_standardization"])
     assert stats.loc["theta_gap", "mean"] == 1.0
     assert stored.theta_gap.tolist() == [-1.0, 1.0, 99.0]
-    assert stats.loc["reasoning_difference", "mean"] == 1.0
-    assert stored.reasoning_difference.tolist() == [-1.0, 1.0, 99.0]
+    assert "reasoning_difference" not in stats.index
+    assert stored.reasoning_difference.tolist() == [0.0, 2.0, 100.0]

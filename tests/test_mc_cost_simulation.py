@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 from scipy.special import expit
 
+import mc_cost.simulation as simulation
 from mc_cost.simulation import (
     LatentCache,
     SimulationConfig,
@@ -67,6 +68,7 @@ def judgment_artifact(*, observed_judge=True, judge_scale=0.0):
     }
     return {
         "posterior": posterior,
+        "presentation_include_reasoning": False,
         "feature_order": [],
         "category_maps": {
             "judges": judges, "models": {"a": 0}, "items": {"i1": 0, "i2": 1},
@@ -409,6 +411,40 @@ def test_observed_cells_are_sampled_by_exact_reasoning_configuration():
     assert np.isnan(metric(got, "p_choose_m1", comparison_id=0)[0])
 
 
+def test_final_only_candidate_lengths_drive_judgment_features_and_judge_input(monkeypatch):
+    observed = pd.DataFrame([
+        {
+            "model": "a", "item": "i1", "correct": 1, "response_chars": 11,
+            "full_response_chars": 111, "generated_reasoning": 1, "visible_reasoning": 1,
+        },
+        {
+            "model": "b", "item": "i1", "correct": 1, "response_chars": 13,
+            "full_response_chars": 130, "generated_reasoning": 0, "visible_reasoning": 0,
+        },
+    ])
+    presented_rows = []
+
+    def probabilities(_artifact, presented, *_args):
+        presented_rows.append(presented.copy())
+        return np.full(len(presented), 0.5)
+
+    monkeypatch.setattr(simulation, "_scenario_left_probabilities", probabilities)
+    got = simulate(
+        pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+        SimulationConfig(trials=1, attempted_items=1, presentations=1, mode="manual"),
+        item_ids=["i1"], observed_cells=observed,
+        capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+        irt=irt(), judgment_artifact=judgment_artifact(),
+        candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+        catalogue=catalogue(), seed=4,
+    )
+
+    presented = presented_rows[0]
+    assert sorted(presented[["left_chars", "right_chars"]].iloc[0]) == [11, 13]
+    assert presented[["left_visible_reasoning", "right_visible_reasoning"]].eq(0).all(axis=None)
+    assert metric(got, "judge_input_tokens", model="j", role="judge") == [24.0]
+
+
 def test_manual_rows_keep_raw_probability_and_ties_out_of_accuracy():
     got = run_simulation()
     assert np.isclose(metric(got, "p_choose_m1", comparison_id=0)[0], expit(1.0))
@@ -450,20 +486,40 @@ def test_manual_rows_have_their_own_usable_call_tie_and_accuracy_metrics():
     assert np.isnan(metric(got, "choice_accuracy", comparison_id=1)[0])
 
 
-def test_self_comparison_uses_candidate_identity_feature():
+@pytest.mark.parametrize("feature", ["self_comparison", "reasoning_difference_sd"])
+def test_unsupported_prior_only_judgment_features_are_rejected(feature):
     artifact = judgment_artifact()
-    artifact["feature_order"] = ["self_comparison"]
+    artifact["feature_order"] = [feature]
+    if feature.endswith("_sd"):
+        artifact["training_scales"]["reasoning_difference"] = {"mean": 0.0, "scale": 1.0}
     artifact["posterior"]["global_beta"] = np.array([[1.0]])
-    got = simulate(
-        pd.DataFrame([{"judge": "j", "m1": "a", "m2": "a"}]),
-        SimulationConfig(trials=1, attempted_items=1, presentations=1, mode="manual"),
-        item_ids=["i1"], observed_cells=observed_cells(),
-        capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
-        irt=irt(), judgment_artifact=artifact,
-        candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
-        catalogue=catalogue(), seed=4,
-    )
-    assert np.isclose(metric(got, "p_choose_m1", comparison_id=0)[0], expit(1.0))
+    with pytest.raises(ValueError, match="unsupported judgment feature"):
+        simulate(
+            pd.DataFrame([{"judge": "j", "m1": "a", "m2": "a"}]),
+            SimulationConfig(trials=1, attempted_items=1, presentations=1, mode="manual"),
+            item_ids=["i1"], observed_cells=observed_cells(),
+            capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+            irt=irt(), judgment_artifact=artifact,
+            candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+            catalogue=catalogue(), seed=4,
+        )
+
+
+@pytest.mark.parametrize("condition", [True, None])
+def test_simulation_rejects_non_final_or_undeclared_judgment_presentation(condition):
+    artifact = judgment_artifact()
+    artifact["presentation_include_reasoning"] = condition
+
+    with pytest.raises(ValueError, match="final-only|include_reasoning=false"):
+        simulate(
+            pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+            SimulationConfig(trials=1, attempted_items=1, presentations=1, mode="manual"),
+            item_ids=["i1"], observed_cells=observed_cells(),
+            capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+            irt=irt(), judgment_artifact=artifact,
+            candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+            catalogue=catalogue(), seed=4,
+        )
 
 
 def test_unpredictable_manual_row_stays_named_with_nan_probability_and_exact_bound():
@@ -507,7 +563,7 @@ def test_one_cache_reuses_unseen_judge_within_trial_and_redraws_across_cycled_po
     assert probabilities.loc[0, 0] != probabilities.loc[1, 0]
 
 
-def test_posterior_draws_cycle_zero_one_zero_and_same_seed_repeats():
+def test_independent_posterior_draws_repeat_for_the_same_seed():
     def with_two_draws(artifact):
         result = copy.deepcopy(artifact)
         result["posterior"] = {
@@ -540,14 +596,111 @@ def test_posterior_draws_cycle_zero_one_zero_and_same_seed_repeats():
         )
 
     first = run()
-    assert np.allclose(
-        metric(first, "p_choose_m1", comparison_id=0),
-        [expit(1.0), expit(4.0), expit(1.0)],
-    )
+    allowed = np.array([expit(1.0), expit(2.0), expit(4.0)])
+    assert all(np.isclose(value, allowed).any() for value in metric(first, "p_choose_m1", comparison_id=0))
     second = run()
     pd.testing.assert_frame_equal(first.trials, second.trials)
     pd.testing.assert_frame_equal(first.summary, second.summary)
     pd.testing.assert_frame_equal(first.warnings, second.warnings)
+
+
+def test_independent_posterior_schedules_use_full_ranges_and_keep_capability_irt_aligned(monkeypatch):
+    def repeated(artifact, count):
+        result = copy.deepcopy(artifact)
+        result["posterior"] = {
+            name: np.repeat(np.asarray(values), count, axis=0)
+            for name, values in result["posterior"].items()
+        }
+        return result
+
+    judgment = repeated(judgment_artifact(), 4000)
+    candidate = repeated(candidate_artifact(), 4000)
+    judge_tokens = repeated(judge_token_artifact(), 4000)
+    capability_draws = np.zeros((1000, 3))
+    capability_draws[:, 1] = 1.0 + np.arange(1000) / 1000
+    irt_draws = copy.deepcopy(irt())
+    irt_draws["a"] = np.repeat(irt_draws["a"], 1000, axis=0)
+    irt_draws["b"] = np.repeat(irt_draws["b"], 1000, axis=0)
+    irt_draws["b"][:, 0] = np.arange(1000) / 1000
+    irt_draws["floor"] = np.ones(2)
+    empty_observed = pd.DataFrame(columns=["model", "item", "correct"])
+    captured = {}
+    original_cells = simulation._candidate_cells
+    original_probabilities = simulation._scenario_left_probabilities
+    original_lengths = simulation.draw_transcript_lengths
+    original_usage = simulation.draw_token_usage
+
+    def cells_probe(*args, **kwargs):
+        cells = original_cells(*args, **kwargs)
+        a = cells.loc[cells.model.eq("a")].iloc[0]
+        captured["aligned"].append((a.theta, a.difficulty))
+        return cells
+
+    def probability_probe(artifact, presented, metadata, capability, posterior_index, cache, trial):
+        captured["judgment"].append(posterior_index)
+        return original_probabilities(
+            artifact, presented, metadata, capability, posterior_index, cache, trial,
+        )
+
+    def length_probe(artifact, rows, rng, posterior_index, *args, **kwargs):
+        captured["candidate_length"].append(posterior_index)
+        return original_lengths(artifact, rows, rng, posterior_index, *args, **kwargs)
+
+    def usage_probe(artifact, rows, rng, posterior_index, *args, **kwargs):
+        captured[artifact["role"]].append(posterior_index)
+        return original_usage(artifact, rows, rng, posterior_index, *args, **kwargs)
+
+    monkeypatch.setattr(simulation, "_candidate_cells", cells_probe)
+    monkeypatch.setattr(simulation, "_scenario_left_probabilities", probability_probe)
+    monkeypatch.setattr(simulation, "draw_transcript_lengths", length_probe)
+    monkeypatch.setattr(simulation, "draw_token_usage", usage_probe)
+
+    def run(seed):
+        captured.clear()
+        captured.update({
+            "aligned": [], "judgment": [], "candidate_length": [], "candidate": [], "judge": [],
+        })
+        result = simulate(
+            pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+            SimulationConfig(
+                trials=20, attempted_items=1, presentations=1, mode="manual",
+                reuse_responses=False,
+            ),
+            item_ids=["i1"], observed_cells=empty_observed,
+            capability_models=["j", "a", "b"], capability_draws=capability_draws,
+            irt=irt_draws, judgment_artifact=judgment,
+            candidate_token_artifact=candidate, judge_token_artifact=judge_tokens,
+            catalogue=catalogue(), seed=seed,
+        )
+        return result, copy.deepcopy(captured)
+
+    first, first_indexes = run(12)
+    second, second_indexes = run(12)
+
+    for name in ("judgment", "candidate_length", "candidate", "judge"):
+        assert max(first_indexes[name]) > 999
+    assert first_indexes["candidate_length"] == first_indexes["candidate"]
+    assert all(np.isclose(theta - 1.0, difficulty) for theta, difficulty in first_indexes["aligned"])
+    assert first_indexes == second_indexes
+    pd.testing.assert_frame_equal(first.trials, second.trials)
+
+
+def test_artifact_posterior_arrays_must_have_one_draw_count():
+    artifact = judgment_artifact()
+    artifact["posterior"]["judge_effects"] = np.repeat(
+        artifact["posterior"]["judge_effects"], 2, axis=0,
+    )
+
+    with pytest.raises(ValueError, match="judgment.*aligned draw counts"):
+        simulate(
+            pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+            SimulationConfig(trials=1, attempted_items=1, presentations=1, mode="manual"),
+            item_ids=["i1"], observed_cells=observed_cells(),
+            capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+            irt=irt(), judgment_artifact=artifact,
+            candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+            catalogue=catalogue(), seed=4,
+        )
 
 
 def test_shared_graph_counts_unique_candidate_generation_and_seed_is_deterministic():

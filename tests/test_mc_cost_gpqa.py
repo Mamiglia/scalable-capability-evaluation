@@ -141,6 +141,7 @@ def test_mc_prepare_names_dropped_catalogue_metadata_identity(monkeypatch):
     )
 
     assert len(attempts) == 2
+    assert "length_difference_sd" not in attempts
     assert got_accounting.loc["j", "attempts_skipped_missing_catalogue_metadata"] == 1
     assert eligibility.loc["j", "eligible"]
     assert eligibility.loc["dropped"].to_dict() == {"pairs": 0, "samples": 0, "eligible": False}
