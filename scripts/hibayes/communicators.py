@@ -34,9 +34,9 @@ def _effect_table(model, predictors: Sequence[str]) -> pd.DataFrame:
         values = [("position_bias_left", intercept_draws[:, judge_index])]
         values += [(name, draws[:, judge_index, i]) for i, name in enumerate(predictors)]
         values += [
-            (f"transcript_condition={condition} vs raw", condition_draws[:, judge_index, i])
+            (f"transcript_condition={condition} vs {conditions[0]}", condition_draws[:, judge_index, i])
             for i, condition in enumerate(conditions)
-            if condition != "raw"
+            if condition != conditions[0]
         ]
         judge_rows = np.asarray(model.features["judge_index"]) == judge_index
         for feature, samples in values:

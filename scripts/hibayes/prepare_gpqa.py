@@ -6,6 +6,7 @@ import json
 import re
 import zipfile
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +35,15 @@ TRANSCRIPTS = re.compile(
 def model_family(name: str) -> str:
     match = re.match(r"[a-z]+", name.lower())
     return match.group() if match else name.lower()
+
+
+def standardise(data: pd.DataFrame, columns: Sequence[str]) -> None:
+    """Add a `<column>_sd` for each column: centred, divided by its own SD."""
+    for column in columns:
+        scale = data[column].std()
+        if not scale:
+            raise ValueError(f"Cannot standardise constant feature: {column}")
+        data[f"{column}_sd"] = (data[column] - data[column].mean()) / scale
 
 
 def load_capabilities(models_path: Path, responses_path: Path) -> dict[str, float]:
@@ -189,11 +199,7 @@ def prepare(
     data = data[data["judge"].isin(judges)].copy()
     if data.empty:
         raise ValueError("No judges meet the pair and sample thresholds")
-    for column in ("length_difference", "capability_difference"):
-        scale = data[column].std()
-        if not scale:
-            raise ValueError(f"Cannot standardise constant feature: {column}")
-        data[f"{column}_sd"] = (data[column] - data[column].mean()) / scale
+    standardise(data, ("length_difference", "capability_difference"))
     return data.sort_values(["judge", "model_pair", "item", "transcript_condition"]).reset_index(drop=True), accounting, eligibility
 
 

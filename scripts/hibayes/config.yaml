@@ -14,7 +14,7 @@ data_process:
           - same_model_family
           - self_comparison
         category_order:
-          transcript_condition: [raw, truncated_10, truncated_50, truncated_90]
+          transcript_condition: [a_baseline]
 
 model:
   path: scripts/hibayes/model.py
@@ -52,9 +52,6 @@ communicate:
     - judge_feature_report:
         plot_exclude:
           - self_comparison
-          - transcript_condition=truncated_10 vs raw
-          - transcript_condition=truncated_50 vs raw
-          - transcript_condition=truncated_90 vs raw
         predictors:
           - length_difference_sd
           - capability_difference_sd
