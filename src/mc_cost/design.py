@@ -18,8 +18,25 @@ class AutomaticConfig:
     require_stronger: bool = True
 
 
+def prediction_eligible(catalogue: pd.DataFrame) -> pd.Series:
+    required = {"theta", "release", "family", "reasoning_class"}
+    if missing := sorted(required - set(catalogue)):
+        raise ValueError(f"catalogue lacks prediction metadata columns: {', '.join(missing)}")
+    theta = pd.to_numeric(catalogue["theta"], errors="coerce")
+    release = pd.to_datetime(catalogue["release"], errors="coerce")
+    family = catalogue["family"].map(lambda value: isinstance(value, str) and bool(value.strip()))
+    return pd.Series(
+        np.isfinite(theta) & release.notna()
+        & family
+        & catalogue["reasoning_class"].isin({"reasoning", "non_reasoning"}),
+        index=catalogue.index,
+    )
+
+
 def automatic_comparisons(catalogue: pd.DataFrame, config: AutomaticConfig, rng) -> pd.DataFrame:
-    required = {"model_id", "release", "theta", "judge_pool", "candidate_pool"}
+    required = {
+        "model_id", "release", "theta", "family", "reasoning_class", "judge_pool", "candidate_pool",
+    }
     missing = sorted(required - set(catalogue))
     if missing:
         raise ValueError(f"catalogue lacks required columns: {', '.join(missing)}")
@@ -43,9 +60,8 @@ def automatic_comparisons(catalogue: pd.DataFrame, config: AutomaticConfig, rng)
     models["theta_value"] = pd.to_numeric(models["theta"], errors="coerce")
     models["judge_enabled"] = models["judge_pool"].map(pool_enabled)
     models["candidate_enabled"] = models["candidate_pool"].map(pool_enabled)
-    valid_judges = models.loc[
-        models["judge_enabled"] & models["release_day"].notna() & np.isfinite(models["theta_value"])
-    ]
+    models["prediction_eligible"] = prediction_eligible(models)
+    valid_judges = models.loc[models["judge_enabled"] & models["prediction_eligible"]]
     if selected_judges:
         selected = list(selected_judges)
         if len(selected) != config.j or len(set(selected)) != len(selected):
@@ -61,9 +77,7 @@ def automatic_comparisons(catalogue: pd.DataFrame, config: AutomaticConfig, rng)
         selected = rng.choice(valid_judges["model_id"].to_numpy(), config.j, replace=False).tolist()
         judges = valid_judges.set_index("model_id").loc[selected].reset_index()
 
-    anchors = models.loc[
-        models["candidate_enabled"] & models["release_day"].notna() & np.isfinite(models["theta_value"])
-    ]
+    anchors = models.loc[models["candidate_enabled"] & models["prediction_eligible"]]
     anchor_mask = anchors["release_day"].gt(judges["release_day"].max())
     if config.require_stronger:
         anchor_mask &= anchors["theta_value"].gt(judges["theta_value"].max())
@@ -76,11 +90,14 @@ def automatic_comparisons(catalogue: pd.DataFrame, config: AutomaticConfig, rng)
     comparator_sets = {}
     release_by_id = models.set_index("model_id")["release_day"]
     for anchor in anchors:
-        comparators = models.loc[models["release_day"].lt(release_by_id[anchor]), "model_id"]
+        comparators = models.loc[
+            models["prediction_eligible"] & models["release_day"].lt(release_by_id[anchor]),
+            "model_id",
+        ]
         if len(comparators) < config.n:
             raise ValueError(
                 f"requested N={config.n}, eligible comparator count={len(comparators)} "
-                f"for anchor {anchor} (release before anchor)"
+                f"for anchor {anchor} (prediction metadata and release before anchor)"
             )
         comparator_sets[anchor] = rng.choice(comparators.to_numpy(), config.n, replace=False).tolist()
     return pd.DataFrame(

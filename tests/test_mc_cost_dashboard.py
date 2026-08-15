@@ -78,6 +78,7 @@ def test_dashboard_payload_requires_numeric_exact_values_and_only_all_null_unava
     exact = {"metric": "judgment_call_upper_bound", "exact": True, "value": 12}
     unavailable = {
         "metric": "kendall_tau", "valid": False,
+        "reason": "no usable ranking edges",
         "p5": None, "p50": None, "p95": None,
     }
     validate_dashboard_payload(minimal_payload(automatic=[exact], ranking_recovery=[unavailable]))
@@ -92,10 +93,25 @@ def test_dashboard_payload_requires_numeric_exact_values_and_only_all_null_unava
     for invalid in (
         {**unavailable, "p50": 0.0},
         {**unavailable, "valid": True},
-        {**unavailable, "metric": "choice_accuracy"},
+        {**unavailable, "reason": ""},
     ):
         with pytest.raises(ValueError, match="quantile"):
             validate_dashboard_payload(minimal_payload(ranking_recovery=[invalid]))
+
+
+def test_dashboard_payload_allows_only_explicitly_unavailable_null_quantiles():
+    identity = {
+        "mode": "manual", "metric": "cost", "warning_state": "missing_price",
+        "judge": "j", "m1": "a", "m2": "b",
+        "judge_reasoning_class": "non_reasoning",
+        "m1_reasoning_class": "reasoning", "m2_reasoning_class": "non_reasoning",
+        "p5": None, "p50": None, "p95": None,
+    }
+
+    validate_dashboard_payload(minimal_payload(manual=[identity]))
+
+    with pytest.raises(ValueError, match="all null|unavailable"):
+        validate_dashboard_payload(minimal_payload(manual=[{**identity, "warning_state": "ok"}]))
 
 
 def test_dashboard_builder_sorts_every_row_array_and_derives_scaling_rows():

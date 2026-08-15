@@ -423,6 +423,9 @@ def test_manual_rows_keep_raw_probability_and_ties_out_of_accuracy():
     )
     assert metric(tied, "ties") == [2.0]
     assert np.isnan(metric(tied, "choice_accuracy")[0])
+    assert tied.trials.query(
+        "metric == 'choice_accuracy' and comparison_id.isnull()"
+    )["warning_state"].tolist() == ["unavailable"]
     assert len(metric(tied, "p_choose_m1", comparison_id=0)) == 1
 
 
@@ -480,6 +483,10 @@ def test_unpredictable_manual_row_stays_named_with_nan_probability_and_exact_bou
         catalogue=prices, seed=1,
     )
     assert np.isnan(metric(got, "p_choose_m1", comparison_id=0)[0])
+    unavailable = got.trials.loc[
+        got.trials["metric"].isin(["choice_accuracy", "p_choose_m1"]), "warning_state",
+    ]
+    assert set(unavailable) == {"unavailable"}
     assert got.summary.query("metric == 'judgment_call_upper_bound'").iloc[0]["value"] == 2
 
 
@@ -573,7 +580,7 @@ def test_missing_constituent_price_propagates_to_total_cost():
     assert got.warnings.query("code == 'missing_price'")["model"].tolist() == ["b"]
 
 
-def test_zero_use_unpriced_planned_configuration_stays_nan_and_suppresses_total():
+def test_zero_use_unpriced_planned_configuration_costs_zero_without_suppressing_total():
     prices = catalogue()
     prices.loc[prices.model_id == "b", ["price_in", "price_out"]] = np.nan
     got = simulate(
@@ -585,11 +592,11 @@ def test_zero_use_unpriced_planned_configuration_stays_nan_and_suppresses_total(
         candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
         catalogue=prices, seed=2,
     )
-    assert np.isnan(metric(
+    assert metric(
         got, "cost", model="b", role="candidate", reasoning_class="non_reasoning",
-    )[0])
-    assert np.isnan(metric(got, "cost", model="__total__", role="all")[0])
-    assert got.warnings.query("code == 'missing_price'")["model"].tolist() == ["b"]
+    ) == [0.0]
+    assert metric(got, "cost", model="__total__", role="all") == [0.0]
+    assert got.warnings.query("code == 'missing_price'").empty
 
 
 def test_required_family_feature_rejects_missing_catalogue_metadata():

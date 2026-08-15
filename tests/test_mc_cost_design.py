@@ -5,21 +5,21 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mc_cost.catalogue import build_catalogue, pool_enabled
+from mc_cost.catalogue import build_capability_draws, build_catalogue, pool_enabled
 from mc_cost.design import AutomaticConfig, automatic_comparisons, manual_comparisons
 
 
 def catalogue():
     return pd.DataFrame([
-        {"model_id": "j1", "theta": 0.0, "release": "2024-01-01", "judge_pool": True, "candidate_pool": False,
+        {"model_id": "j1", "theta": 0.0, "release": "2024-01-01", "family": "test", "judge_pool": True, "candidate_pool": False,
          "reasoning_class": "non_reasoning"},
-        {"model_id": "j2", "theta": 0.5, "release": "2024-06-01", "judge_pool": True, "candidate_pool": False,
+        {"model_id": "j2", "theta": 0.5, "release": "2024-06-01", "family": "test", "judge_pool": True, "candidate_pool": False,
          "reasoning_class": "reasoning"},
-        {"model_id": "a", "theta": 2.0, "release": "2026-01-01", "judge_pool": False, "candidate_pool": True,
+        {"model_id": "a", "theta": 2.0, "release": "2026-01-01", "family": "test", "judge_pool": False, "candidate_pool": True,
          "reasoning_class": "reasoning"},
-        {"model_id": "old-strong", "theta": 0.3, "release": "2025-01-01", "judge_pool": False, "candidate_pool": True,
+        {"model_id": "old-strong", "theta": 0.3, "release": "2025-01-01", "family": "test", "judge_pool": False, "candidate_pool": True,
          "reasoning_class": "non_reasoning"},
-        {"model_id": "old-weak", "theta": -1.0, "release": "2023-01-01", "judge_pool": False, "candidate_pool": True,
+        {"model_id": "old-weak", "theta": -1.0, "release": "2023-01-01", "family": "test", "judge_pool": False, "candidate_pool": True,
          "reasoning_class": "non_reasoning"},
     ])
 
@@ -47,14 +47,16 @@ def test_automatic_reports_eligible_count_instead_of_lowering_n():
         automatic_comparisons(catalogue(), config, np.random.default_rng(1))
 
 
-def test_automatic_uses_only_release_date_for_comparators():
+def test_automatic_rejects_comparator_count_that_depends_on_missing_family():
     models = pd.concat([catalogue(), pd.DataFrame([{
-        "model_id": "unpooled-old", "theta": np.nan, "release": "2020-01-01",
-        "judge_pool": False, "candidate_pool": False, "reasoning_class": pd.NA,
+        "model_id": "familyless-old", "theta": 0.1, "release": "2020-01-01", "family": pd.NA,
+        "judge_pool": False, "candidate_pool": False, "reasoning_class": "non_reasoning",
     }])], ignore_index=True)
-    config = AutomaticConfig(j=1, m=1, n=3, attempted_items=10, selected_judges=("j1",))
-    got = automatic_comparisons(models, config, np.random.default_rng(3))
-    assert "unpooled-old" in set(got["m2"])
+    models.loc[models.model_id.eq("old-strong"), "candidate_pool"] = False
+    config = AutomaticConfig(j=1, m=1, n=5, attempted_items=10, selected_judges=("j1",))
+
+    with pytest.raises(ValueError, match="eligible comparator count=4"):
+        automatic_comparisons(models, config, np.random.default_rng(3))
 
 
 def test_manual_retains_duplicates_and_warns_without_blocking():
@@ -178,13 +180,23 @@ def test_default_dashboard_grid_and_advertised_scenario_fit_real_explicit_pools(
         paths["model_overrides"],
     )
     eligible_judges = models.loc[models["judge_pool"].map(pool_enabled), "model_id"].tolist()
+    with np.load(paths["irt_posterior"], allow_pickle=False) as posterior:
+        draw_models, _ = build_capability_draws(models, posterior, np.random.default_rng(0))
+    metadata = models.set_index("model_id")
 
     assert config["dashboard"]["judge_counts"] == list(range(1, len(eligible_judges) + 1))
-    comparisons = automatic_comparisons(
-        models,
-        AutomaticConfig(j=3, m=8, n=4, attempted_items=1),
-        np.random.default_rng(0),
-    )
-    assert comparisons["judge"].nunique() == 3
-    assert comparisons["m1"].nunique() == 8
-    assert len(comparisons) == 3 * 8 * 4
+    for seed in range(5):
+        comparisons = automatic_comparisons(
+            models,
+            AutomaticConfig(j=3, m=8, n=4, attempted_items=1),
+            np.random.default_rng(seed),
+        )
+        selected = set(comparisons[["judge", "m1", "m2"]].to_numpy().ravel())
+        selected_metadata = metadata.loc[sorted(selected)]
+        assert selected <= set(draw_models)
+        assert selected_metadata["reasoning_class"].isin({"reasoning", "non_reasoning"}).all()
+        assert pd.to_datetime(selected_metadata["release"], errors="coerce").notna().all()
+        assert np.isfinite(pd.to_numeric(selected_metadata["theta"], errors="coerce")).all()
+        assert comparisons["judge"].nunique() == 3
+        assert comparisons["m1"].nunique() == 8
+        assert len(comparisons) == 3 * 8 * 4

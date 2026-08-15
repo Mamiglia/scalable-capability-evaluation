@@ -27,7 +27,7 @@ from mc_cost.data import (
     standardize_judgments,
     write_prepared_tables,
 )
-from mc_cost.design import AutomaticConfig, automatic_comparisons, manual_comparisons
+from mc_cost.design import AutomaticConfig, automatic_comparisons, manual_comparisons, prediction_eligible
 from mc_cost.gpqa import prepare_for_mc as prepare_mc_gpqa
 from mc_cost.model import (
     FEATURE_COLUMNS,
@@ -952,7 +952,8 @@ def _dashboard_manual_bank(
                 )
             explicit.append({**identity, "manual_source": "configured"})
 
-    classes = catalogue.set_index("model_id")["reasoning_class"].to_dict()
+    eligible = catalogue.loc[prediction_eligible(catalogue)]
+    classes = eligible.set_index("model_id")["reasoning_class"].to_dict()
     default_models = sorted(
         str(model) for model, reasoning_class in classes.items()
         if isinstance(reasoning_class, str) and reasoning_class in {"reasoning", "non_reasoning"}
@@ -965,6 +966,7 @@ def _dashboard_manual_bank(
             "m2_reasoning_class": classes[m2],
         }
         for judge, m1, m2 in product(default_models, repeat=3)
+        if m1 != m2
     ]
     defaults = [{**row, "manual_source": "deterministic_default_sample"} for row in defaults]
     key = lambda row: tuple(row[name] for name in _MANUAL_COLUMNS)

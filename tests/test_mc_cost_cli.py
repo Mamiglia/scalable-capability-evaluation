@@ -24,7 +24,12 @@ import mc_cost.cli as cli
 from mc_cost.cli import main, write_run_config
 from mc_cost.data import JUDGMENT_COLUMNS
 from mc_cost.model import JUDGMENT_SPECS, PosteriorArtifact, load_artifact, save_artifact
-from mc_cost.simulation import SimulationResult, validate_dashboard_payload
+from mc_cost.simulation import (
+    SimulationResult,
+    _trial_rows,
+    summarize_trials,
+    validate_dashboard_payload,
+)
 from mc_cost.validation import require_decision
 
 
@@ -80,7 +85,8 @@ def tiny_mc_config(tmp_path):
         pool = tmp_path / "pool.json"
         pool.write_text(json.dumps([
             {
-                "name": model, "release": f"{year}-01-01", "reasoning": model.startswith("c"),
+                "name": model, "family": model[0], "release": f"{year}-01-01",
+                "reasoning": model.startswith("c"),
                 "judge_pool": model.startswith("j"), "candidate_pool": model.startswith("c"),
                 "observed_judge": model.startswith("j"), "observed_candidate": True,
                 "price_in": 1.0, "price_out": 2.0,
@@ -1042,6 +1048,88 @@ def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path,
     assert payload["source_hashes"]["decision"]
 
 
+def test_export_dashboard_keeps_unavailable_metrics_and_warnings(tmp_path, monkeypatch):
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "strength_filters": [True], "manual_triple_limit": 0,
+        "manual_triples": [
+            {"judge": "j", "m1": "a", "m2": "a"},
+            {"judge": "j", "m1": "a", "m2": "missing"},
+        ],
+    }
+    config, output, _ = pipeline_artifacts(tmp_path, dashboard=dashboard)
+    catalogue = pd.read_csv(output / "catalogue.csv")
+    catalogue.loc[catalogue.model_id.eq("a"), "price_out"] = np.nan
+    catalogue = pd.concat([catalogue, pd.DataFrame([{
+        "model_id": "missing", "theta": np.nan, "release": None, "family": "missing",
+        "reasoning_class": "non_reasoning", "judge_pool": False, "candidate_pool": False,
+        "price_in": 1.0, "price_out": 2.0,
+    }])], ignore_index=True)
+    catalogue.to_csv(output / "catalogue.csv", index=False)
+    write_generation(output, "catalogue.manifest.json", CATALOGUE_FILES)
+    hashes = refresh_artifact_provenance(output)
+    write_valid_decision(output, hashes)
+
+    def unavailable_result(comparisons, simulation_config, **kwargs):
+        selected = comparisons(np.random.default_rng(0)) if callable(comparisons) else comparisons
+        if isinstance(selected, tuple):
+            selected, warnings = selected
+        else:
+            warnings = pd.DataFrame(columns=["code", "message"])
+        selected = selected.reset_index(drop=True).copy()
+        selected.insert(0, "comparison_id", np.arange(len(selected)))
+        presented = pd.DataFrame(columns=[
+            "comparison_id", "m1_theta", "m2_theta", "chose_m1", "p_choose_m1",
+        ])
+        usage = pd.DataFrame(columns=[
+            "role", "model", "reasoning_class", "calls", "input_tokens", "output_tokens",
+            "ordinary_output_tokens", "reasoning_tokens",
+        ])
+        priced = usage.assign(cost=pd.Series(dtype=float))
+        missing_prices = set()
+        if simulation_config.mode == "automatic":
+            usage = pd.DataFrame([{
+                "role": "candidate", "model": "a", "reasoning_class": "non_reasoning",
+                "calls": 1, "input_tokens": 2, "output_tokens": 3,
+                "ordinary_output_tokens": 3, "reasoning_tokens": 0,
+            }])
+            priced = usage.assign(cost=np.nan)
+            missing_prices = {"a"}
+            warnings = pd.DataFrame([{
+                "code": "missing_price", "model": "a",
+                "message": "missing input or output price for a",
+            }])
+        trials = pd.DataFrame(_trial_rows(
+            simulation_config, 0, selected, presented, usage, priced, missing_prices,
+        ))
+        return SimulationResult(trials, summarize_trials(trials), warnings)
+
+    monkeypatch.setattr(cli, "simulate", unavailable_result)
+    target = tmp_path / "dashboard.json"
+
+    assert main(["export-dashboard", "--config", str(config), "--out", str(target)]) == 0
+
+    payload = json.loads(target.read_text())
+    validate_dashboard_payload(payload)
+    assert {row["code"] for row in payload["warnings"]} >= {
+        "missing_price", "automatic_rule_violation", "missing_prediction_metadata",
+    }
+    assert {
+        (row["m1"], row["m2"]) for row in payload["manual"]
+    } == {("a", "a"), ("a", "missing")}
+    assert all(
+        row["warning_state"] == "unavailable"
+        for row in payload["manual"]
+        if row["metric"] in {"choice_accuracy", "p_choose_m1"}
+    )
+    assert any(
+        row["metric"] == "cost" and row["p50"] is None
+        and row["warning_state"] == "missing_price"
+        for row in payload["automatic"]
+    )
+
+
 def test_dashboard_records_restore_manual_identity_after_real_summary_nulls():
     identity = {
         "judge": "j", "m1": "a", "m2": "b",
@@ -1174,10 +1262,25 @@ def test_export_dashboard_samples_default_manual_bank_with_truncation_warning_de
         "j", "a", "b", "non_reasoning", "reasoning", "non_reasoning",
     ) in identities
     warning = next(row for row in payload["warnings"] if row["code"] == "manual_bank_truncated")
-    assert warning["total_count"] == 28
+    assert warning["total_count"] == 19
     assert warning["exported_count"] == 2
-    assert warning["omitted_count"] == len(warning["omitted_identities"]) == 26
+    assert warning["omitted_count"] == len(warning["omitted_identities"]) == 17
     assert calls == ["automatic", "manual", "manual"] * 2
+
+
+def test_default_manual_bank_excludes_self_and_prediction_ineligible_models():
+    catalogue = pd.DataFrame([
+        {"model_id": "j", "theta": 0.0, "release": "2024-01-01", "family": "j", "reasoning_class": "non_reasoning"},
+        {"model_id": "a", "theta": 1.0, "release": "2025-01-01", "family": "a", "reasoning_class": "reasoning"},
+        {"model_id": "b", "theta": -1.0, "release": "2023-01-01", "family": "b", "reasoning_class": "non_reasoning"},
+        {"model_id": "missing", "theta": None, "release": None, "family": "missing", "reasoning_class": "reasoning"},
+    ])
+
+    rows, _ = cli._dashboard_manual_bank(catalogue, [], seed=0, limit=1000)
+
+    assert rows
+    assert all(row["m1"] != row["m2"] for row in rows)
+    assert all("missing" not in (row["judge"], row["m1"], row["m2"]) for row in rows)
 
 
 def test_project_registers_mc_cost_entry_point():

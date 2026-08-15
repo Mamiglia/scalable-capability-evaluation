@@ -150,13 +150,14 @@ def validate_dashboard_payload(payload: Mapping[str, Any]) -> None:
                 raise ValueError(f"dashboard {name} quantile rows require p5, p50, and p95")
             quantiles = [row[key] for key in ("p5", "p50", "p95")]
             if all(value is None for value in quantiles):
-                if (
-                    name != "ranking_recovery" or row.get("valid") is not False
-                    or row.get("metric") != "kendall_tau"
-                ):
-                    raise ValueError(
-                        "dashboard quantile rows may be all null only for unavailable ranking recovery"
-                    )
+                warning_state = row.get("warning_state")
+                warned = isinstance(warning_state, str) and warning_state not in {"", "ok"}
+                invalid = (
+                    row.get("valid") is False
+                    and isinstance(row.get("reason"), str) and bool(row["reason"])
+                )
+                if not warned and not invalid:
+                    raise ValueError("dashboard all-null quantiles require an explicit unavailable state")
                 continue
             if not all(_finite_number(value) for value in quantiles):
                 raise ValueError(f"dashboard {name} quantiles must be finite numeric values")
@@ -359,10 +360,13 @@ def cost_rows(usage: pd.DataFrame, catalogue: pd.DataFrame) -> tuple[pd.DataFram
     result = result.merge(prices, on="model", how="left", validate="many_to_one", sort=False)
     for column in ("price_in", "price_out"):
         result[column] = pd.to_numeric(result[column], errors="coerce")
-    missing_price = result[["price_in", "price_out"]].isna().any(axis=1)
+    missing_price = (
+        (result["price_in"].isna() & result["input_tokens"].gt(0))
+        | (result["price_out"].isna() & result["output_tokens"].gt(0))
+    )
     result["cost"] = (
-        result["input_tokens"] * result["price_in"]
-        + result["output_tokens"] * result["price_out"]
+        result["input_tokens"] * result["price_in"].fillna(0)
+        + result["output_tokens"] * result["price_out"].fillna(0)
     ) / 1_000_000
     result.loc[missing_price, "cost"] = np.nan
     models = result.loc[missing_price, "model"].astype(str).drop_duplicates().tolist()
@@ -914,7 +918,7 @@ def _trial_rows(
         return (float(np.mean(correct[~tied])) if (~tied).any() else np.nan, int(tied.sum()))
 
     accuracy, ties = outcomes(presented)
-    add("choice_accuracy", accuracy)
+    add("choice_accuracy", accuracy, warning_state="ok" if np.isfinite(accuracy) else "unavailable")
     add("ties", ties)
     for source in comparisons.itertuples(index=False):
         group = presented.loc[presented["comparison_id"].eq(source.comparison_id)]
@@ -925,7 +929,10 @@ def _trial_rows(
         }
         add("usable_items", len(group) / config.presentations, **context)
         add("judgment_calls", len(group), **context)
-        add("choice_accuracy", accuracy, **context)
+        add(
+            "choice_accuracy", accuracy, **context,
+            warning_state="ok" if np.isfinite(accuracy) else "unavailable",
+        )
         add("m1_wins", int(group["chose_m1"].sum()), **context)
         if not group.empty:
             add("m1_theta", float(group["m1_theta"].iloc[0]), **context)
@@ -959,7 +966,10 @@ def _trial_rows(
         add(
             "cost", record["cost"], model=record["model"], role=record["role"],
             reasoning_class=record["reasoning_class"],
-            warning_state="missing_price" if record["model"] in missing_prices else "ok",
+            warning_state=(
+                "missing_price"
+                if record["model"] in missing_prices and pd.isna(record["cost"]) else "ok"
+            ),
         )
     for role in ("candidate", "judge"):
         role_costs = priced.loc[priced["role"].eq(role), "cost"] if not priced.empty else pd.Series(dtype=float)
@@ -969,12 +979,12 @@ def _trial_rows(
         )
         add(
             "cost", role_cost, model="__total__", role=role,
-            warning_state="missing_price" if set(priced.loc[priced["role"].eq(role), "model"]) & missing_prices else "ok",
+            warning_state="missing_price" if role_costs.isna().any() else "ok",
         )
     total_cost = priced["cost"].sum() if len(priced) and not priced["cost"].isna().any() else (0.0 if priced.empty else np.nan)
     add(
         "cost", total_cost, model="__total__", role="all",
-        warning_state="missing_price" if missing_prices else "ok",
+        warning_state="missing_price" if priced["cost"].isna().any() else "ok",
     )
     return rows
 
