@@ -190,16 +190,17 @@ def _decoder_layers(model):
 def _causal_mean(hs, pos):
     """Replace the residual at each ablated position `pos` with the mean over KEPT positions
     strictly EARLIER than it, so no future-token content leaks into an earlier position (a plain
-    mean over ALL other positions would, artefactually inflating later-span responsibility).
-    Positions with no earlier kept position are left unchanged. hs: [1, T, H]; returns a new tensor."""
+    mean over ALL other positions would, artefactually inflating later-span responsibility). The
+    leading span (positions with no earlier kept position) is zeroed rather than left intact:
+    there is no causal history to substitute, and leaving it would understate that span's effect.
+    hs: [1, T, H]; returns a new tensor."""
     hs = hs.clone()
     keep = torch.ones(hs.shape[1], dtype=torch.bool, device=hs.device)
     keep[pos] = False
     kept_idx = keep.nonzero(as_tuple=True)[0]
     for p in pos:  # kept positions are never in pos, so reads stay on original values
         earlier = kept_idx[kept_idx < p]
-        if len(earlier):
-            hs[:, p, :] = hs[:, earlier, :].mean(dim=1).to(hs.dtype)
+        hs[:, p, :] = hs[:, earlier, :].mean(dim=1).to(hs.dtype) if len(earlier) else 0.0
     return hs
 
 

@@ -116,5 +116,8 @@ def test_causal_mean_uses_only_earlier_kept_positions():
     # future-leak guard: changing later positions must not move an earlier ablated position
     hs2 = hs.clone(); hs2[0, 3, 0] = 99; hs2[0, 4, 0] = 99
     assert abs(token_ablate._causal_mean(hs2, [2, 4])[0, 2, 0].item() - 0.5) < 1e-6
-    # first position has no earlier kept position -> left unchanged
-    assert token_ablate._causal_mean(hs.clone(), [0])[0, 0, 0].item() == 0
+    # leading span (no earlier kept position) is zeroed, not left intact
+    lead = torch.arange(5.0).view(1, 5, 1) + 10          # position 0 == 10, not 0
+    assert token_ablate._causal_mean(lead, [0])[0, 0, 0].item() == 0
+    out01 = token_ablate._causal_mean(lead, [0, 1])       # both leading -> both zeroed
+    assert out01[0, 0, 0].item() == 0 and out01[0, 1, 0].item() == 0
