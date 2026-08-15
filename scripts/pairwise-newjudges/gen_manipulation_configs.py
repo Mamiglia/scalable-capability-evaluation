@@ -11,6 +11,7 @@ Usage:
   uv run python scripts/pairwise-newjudges/gen_manipulation_configs.py
 """
 import random
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -26,9 +27,9 @@ OUT_DIR = ROOT / "scripts/pairwise-newjudges/configs/manipulations"
 
 SEED = 0
 N_PAIRS = 50
-# Items drawn per pair. Bump to 30 and rerun to double the campaign - nothing
+# Items drawn per pair. Bump and rerun to change the campaign size - nothing
 # else in this file depends on the value.
-ITEMS_PER_PAIR = 15
+ITEMS_PER_PAIR = 30
 # How the 50 pairs split across the three ECI-gap bins (must sum to N_PAIRS).
 GAP_BIN_TARGETS = {"small": 17, "medium": 17, "large": 16}
 assert sum(GAP_BIN_TARGETS.values()) == N_PAIRS, "GAP_BIN_TARGETS must sum to N_PAIRS"
@@ -37,6 +38,9 @@ MAX_LENGTH = 65536
 # Only used to check baseline coverage - never written into a config, so
 # adding a fourth judge later is a CLI change to run.py, not a config edit.
 COVERAGE_JUDGES = ["qwen3-8b", "qwen3-32b", "gpt-oss-120b"]
+# Drop any pair naming an answer model matching this regex (case-insensitive)
+# from the candidate pool before stratified sampling. None = no exclusion.
+EXCLUDE_ANSWER_MODEL_PATTERN: str | None = None
 
 # (condition name, truncate_keep, truncate_frac). The _100 conditions are the
 # length-matching controls: frac=1.0 cuts only the longer transcript, down to
@@ -55,6 +59,14 @@ TRUNCATION_CONDITIONS = [
 
 def pair_key(major: str, minor: str) -> str:
     return f"{major}-vs-{minor}"
+
+
+def filtered_comparisons(comparisons: list, exclude_pattern: str | None) -> list:
+    """Drop pairs naming an answer model matching exclude_pattern (case-insensitive)."""
+    if not exclude_pattern:
+        return comparisons
+    rx = re.compile(exclude_pattern, re.IGNORECASE)
+    return [p for p in comparisons if not (rx.search(p[0]) or rx.search(p[1]))]
 
 
 def gap_bins(comparisons: list, eci: dict) -> tuple[dict, tuple[float, float]]:
@@ -160,7 +172,13 @@ def main() -> None:
     verdicts = pd.read_csv(BASELINE_VERDICTS)
     baseline = verdicts[(verdicts.bench == "gpqa") & (verdicts.condition == BASELINE_CONDITION)]
 
-    bins, boundaries = gap_bins(gpqa_cfg["comparisons"], eci)
+    pool = filtered_comparisons(gpqa_cfg["comparisons"], EXCLUDE_ANSWER_MODEL_PATTERN)
+    if EXCLUDE_ANSWER_MODEL_PATTERN:
+        print(f"EXCLUDE_ANSWER_MODEL_PATTERN={EXCLUDE_ANSWER_MODEL_PATTERN!r}: "
+              f"{len(gpqa_cfg['comparisons']) - len(pool)}/{len(gpqa_cfg['comparisons'])} "
+              f"pairs dropped from the candidate pool before stratification\n")
+
+    bins, boundaries = gap_bins(pool, eci)
     print(f"gap bins (tertile boundaries at {boundaries[0]:.2f} and {boundaries[1]:.2f}):")
     for name in ("small", "medium", "large"):
         print(f"  {name}: {len(bins[name])} pairs available, target {GAP_BIN_TARGETS[name]}")

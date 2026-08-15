@@ -5,7 +5,13 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts" / "pairwise-newjudges"))
 
-from gen_manipulation_configs import COVERAGE_JUDGES, ITEMS_PER_PAIR, covered_items, sample_pair_items
+from gen_manipulation_configs import (
+    COVERAGE_JUDGES,
+    ITEMS_PER_PAIR,
+    covered_items,
+    filtered_comparisons,
+    sample_pair_items,
+)
 
 
 def _row(item_id, judge, order, parse_ok=True):
@@ -31,3 +37,13 @@ def test_sample_pair_items_is_deterministic():
     covered = [f"item-{i}" for i in range(ITEMS_PER_PAIR * 2)]
     assert sample_pair_items("m1", "m2", covered) == sample_pair_items("m1", "m2", covered)
     assert len(sample_pair_items("m1", "m2", covered)) == ITEMS_PER_PAIR
+
+
+def test_filtered_comparisons_drops_either_side_case_insensitively():
+    comparisons = [["DeepSeek-R1", "phi-4"], ["glm-5", "deepseek-chat"], ["glm-5", "phi-4"]]
+    assert filtered_comparisons(comparisons, r"deepseek") == [["glm-5", "phi-4"]]
+
+
+def test_filtered_comparisons_is_a_noop_without_a_pattern():
+    comparisons = [["DeepSeek-R1", "phi-4"]]
+    assert filtered_comparisons(comparisons, None) == comparisons

@@ -1,7 +1,7 @@
 log_root: logs/pairwise-newjudges/manipulations/trunc_first_50
 condition: trunc_first_50
 seed: 0
-items_per_pair: 15
+items_per_pair: 30
 transcripts:
   DeepSeek-R1: external_data/epoch-gpqa/DeepSeek-R1.eval
   DeepSeek-R1-0528: external_data/epoch-gpqa/DeepSeek-R1-0528.eval
@@ -151,154 +151,298 @@ comparisons:
 sample_ids:
   DeepSeek-R1-vs-DeepSeek-R1-0528:
   - rec06pnAkLOr2t2mp
+  - rec0VuKUjt1SZ7NYv
   - rec0wZvZgiz320KRs
   - rec4JrWy7Il8ho5vk
+  - rec4L69T0Y1AS4AFS
   - rec527dNeEtWJrYNl
+  - rec8nshandHARTkrg
+  - rec8y3ZrBOcLgNEkE
   - rec9W28HgpEUeUN8k
   - rec9ubQihAh6g9bft
   - recAAJoHMW45Lv5je
+  - recBGxVySx1pkrO1i
   - recBXlqrZUCR897It
+  - recBhnXrUyTJ6WHIR
   - recDytVnNYZe2HuUU
+  - recE2ihVfqEK4R9d0
   - recG1ljJQcVy6CbSl
+  - recGFKDUd8qgz81Zl
+  - recI1ls9OXdxatHQn
+  - recIDiDKKrN61Auyr
+  - recINGR1z01Fh1Z3A
   - recIOlKBsOeEcgkA1
+  - recIj8lR4tuDgrHou
   - recKcjTwONILZqHAX
   - recKm6LNWykGapmCr
   - recKv4hFyNpViUXnL
+  - recLB0EkQ54bYVhnd
+  - recLrRirj7iXoB0rU
   - recNAiPUKOulQbKVP
+  - recNFJjE5PPTqVJGv
   DeepSeek-R1-0528-vs-gpt-4o-2024-11-20:
+  - rec06pnAkLOr2t2mp
   - rec0Arme2jcXQZnAW
+  - rec4UqStf9WUVif1f
+  - rec527dNeEtWJrYNl
   - rec5eA17Qr1ucNLUf
   - rec6sE2CRtD4drtHg
   - rec7C06XOB2h298ue
+  - rec8y3ZrBOcLgNEkE
+  - rec9W28HgpEUeUN8k
+  - rec9ubQihAh6g9bft
   - recBGxVySx1pkrO1i
   - recBhnXrUyTJ6WHIR
+  - recD8oX1KevFbl7bL
   - recG1ljJQcVy6CbSl
   - recGee5m84dg5FZkc
+  - recIIUynGGpsGEYuo
+  - recIMcQfaQNa6vzsT
   - recINSFEYLCyyd08m
   - recIj8lR4tuDgrHou
+  - recIlghoOw5VbY4Zh
   - recJJcOHhFeSaRpl4
+  - recJpyGtGIsxulevT
+  - recK9F5aqdaybl8bb
+  - recKcjTwONILZqHAX
   - recL9MFV5zmdlle5T
+  - recLAgwx9vbgB5EHk
+  - recLrRirj7iXoB0rU
   - recMicVBcqy1xM1jq
   - recN4DY9Q5V03glmQ
   - recNFJjE5PPTqVJGv
   DeepSeek-R1-0528-vs-phi-4:
   - rec06pnAkLOr2t2mp
   - rec0VuKUjt1SZ7NYv
+  - rec0wZvZgiz320KRs
   - rec1zl5LvaatzGhFt
   - rec260hNUCEj109Dj
   - rec2UlKqC6RFHdcro
   - rec2fsnzUuvNtUYK8
   - rec4UqStf9WUVif1f
+  - rec527dNeEtWJrYNl
+  - rec5eA17Qr1ucNLUf
   - rec5rjeLsEq5Fg7Oj
   - rec6sE2CRtD4drtHg
+  - rec9W28HgpEUeUN8k
+  - rec9ubQihAh6g9bft
+  - recCJJOeBGERaHYax
+  - recDytVnNYZe2HuUU
   - recEmTBhx2hgw6tPQ
+  - recFaL6j8UMhutXrc
+  - recG1ljJQcVy6CbSl
+  - recGee5m84dg5FZkc
   - recHVUd2DkoKfedJZ
   - recIMcQfaQNa6vzsT
   - recINGR1z01Fh1Z3A
+  - recIOlKBsOeEcgkA1
   - recIlghoOw5VbY4Zh
+  - recKcjTwONILZqHAX
+  - recLAgwx9vbgB5EHk
+  - recLrRirj7iXoB0rU
   - recNu3MXkvWUzHZr9
+  - recO3hvCWRGiG0odN
   DeepSeek-R1-Distill-Llama-70B-vs-qwen2-72b-instruct:
+  - rec06pnAkLOr2t2mp
+  - rec0VuKUjt1SZ7NYv
+  - rec0yTRmO1o1xCA6H
   - rec2ZTsqazBZ3LTWZ
   - rec4L69T0Y1AS4AFS
+  - rec4UqStf9WUVif1f
   - rec527dNeEtWJrYNl
   - rec7C06XOB2h298ue
   - recD8oX1KevFbl7bL
   - recE2ihVfqEK4R9d0
+  - recG1ljJQcVy6CbSl
   - recGee5m84dg5FZkc
+  - recI1ls9OXdxatHQn
   - recIDiDKKrN61Auyr
   - recIIUynGGpsGEYuo
   - recINGR1z01Fh1Z3A
   - recJJcOHhFeSaRpl4
   - recKm6LNWykGapmCr
+  - recKv4hFyNpViUXnL
+  - recL9MFV5zmdlle5T
+  - recLrRirj7iXoB0rU
   - recNFJjE5PPTqVJGv
   - recNu3MXkvWUzHZr9
+  - recNuT2oSnO86bxOx
   - recO3hvCWRGiG0odN
+  - recOkA2zsy4GSMD9R
+  - recOvqPKUtyy9ISA1
+  - recPL4ZPpVYxgMu57
+  - recPSTGXK3P39yNYT
+  - recReg13iV2HwJTaA
   DeepSeek-V3-vs-Llama-3.3-70B-Instruct:
   - rec0VuKUjt1SZ7NYv
+  - rec0wZvZgiz320KRs
+  - rec260hNUCEj109Dj
   - rec2UlKqC6RFHdcro
   - rec32C1ZEapBnCC0E
+  - rec47oNPXudlTIk4y
+  - rec4JrWy7Il8ho5vk
+  - rec4UqStf9WUVif1f
   - rec4r4KWNLrT7g2kR
+  - rec6sE2CRtD4drtHg
   - rec8nshandHARTkrg
+  - rec9ubQihAh6g9bft
   - recBXlqrZUCR897It
+  - recBhnXrUyTJ6WHIR
   - recDytVnNYZe2HuUU
   - recEmTBhx2hgw6tPQ
   - recFaL6j8UMhutXrc
+  - recHVUd2DkoKfedJZ
+  - recIIUynGGpsGEYuo
+  - recIMcQfaQNa6vzsT
   - recINGR1z01Fh1Z3A
   - recIOlKBsOeEcgkA1
   - recL9MFV5zmdlle5T
+  - recLSzwBUS3olCjhl
   - recNAiPUKOulQbKVP
   - recO3hvCWRGiG0odN
+  - recOYsaYs6RmtlTDy
   - recOkA2zsy4GSMD9R
+  - recPIzpnuYpB4yvmp
+  - recPL4ZPpVYxgMu57
   DeepSeek-V3-0324-vs-gpt-4o-2024-08-06:
   - rec06pnAkLOr2t2mp
   - rec0VuKUjt1SZ7NYv
+  - rec0wZvZgiz320KRs
+  - rec260hNUCEj109Dj
   - rec2ZTsqazBZ3LTWZ
+  - rec32C1ZEapBnCC0E
   - rec4L69T0Y1AS4AFS
   - rec5eA17Qr1ucNLUf
+  - rec5rjeLsEq5Fg7Oj
   - rec6sE2CRtD4drtHg
+  - rec8nshandHARTkrg
+  - rec8y3ZrBOcLgNEkE
+  - rec9W28HgpEUeUN8k
+  - recA1i5ZAh0Uzclxp
+  - recAAJoHMW45Lv5je
   - recBXlqrZUCR897It
   - recBtVK8rBVtIlXDq
+  - recDDxpS9s8cwkqfq
+  - recDytVnNYZe2HuUU
+  - recG1ljJQcVy6CbSl
+  - recGFKDUd8qgz81Zl
+  - recHVUd2DkoKfedJZ
   - recI1ls9OXdxatHQn
   - recIDiDKKrN61Auyr
   - recIIUynGGpsGEYuo
   - recIOlKBsOeEcgkA1
   - recIj8lR4tuDgrHou
+  - recKv4hFyNpViUXnL
   - recL9MFV5zmdlle5T
   - recLrRirj7iXoB0rU
   Qwen3-235B-A22B-Thinking-2507-vs-DeepSeek-V3-0324:
+  - rec06pnAkLOr2t2mp
   - rec0yTRmO1o1xCA6H
   - rec32C1ZEapBnCC0E
   - rec4JrWy7Il8ho5vk
+  - rec4L69T0Y1AS4AFS
   - rec4UqStf9WUVif1f
+  - rec5eA17Qr1ucNLUf
+  - rec6sE2CRtD4drtHg
   - rec8nshandHARTkrg
+  - rec8y3ZrBOcLgNEkE
   - recA1i5ZAh0Uzclxp
   - recAAJoHMW45Lv5je
   - recBGxVySx1pkrO1i
+  - recBhnXrUyTJ6WHIR
+  - recBtVK8rBVtIlXDq
   - recCJJOeBGERaHYax
+  - recDytVnNYZe2HuUU
+  - recFaL6j8UMhutXrc
   - recG1ljJQcVy6CbSl
+  - recIIUynGGpsGEYuo
   - recINGR1z01Fh1Z3A
   - recINSFEYLCyyd08m
+  - recIj8lR4tuDgrHou
+  - recJpyGtGIsxulevT
   - recKcjTwONILZqHAX
+  - recKm6LNWykGapmCr
+  - recL9MFV5zmdlle5T
   - recLAgwx9vbgB5EHk
   - recNFJjE5PPTqVJGv
+  - recNu3MXkvWUzHZr9
   claude-3-7-sonnet-20250219-vs-DeepSeek-R1:
   - rec06pnAkLOr2t2mp
+  - rec0Arme2jcXQZnAW
+  - rec0wZvZgiz320KRs
   - rec0yTRmO1o1xCA6H
+  - rec2ZTsqazBZ3LTWZ
+  - rec4JrWy7Il8ho5vk
+  - rec4L69T0Y1AS4AFS
   - rec527dNeEtWJrYNl
+  - rec5eA17Qr1ucNLUf
+  - rec6sE2CRtD4drtHg
   - rec8y3ZrBOcLgNEkE
   - rec9W28HgpEUeUN8k
+  - rec9ubQihAh6g9bft
   - recAAJoHMW45Lv5je
+  - recBXlqrZUCR897It
   - recCJJOeBGERaHYax
+  - recD8oX1KevFbl7bL
+  - recDytVnNYZe2HuUU
+  - recE2ihVfqEK4R9d0
   - recFaL6j8UMhutXrc
   - recHVUd2DkoKfedJZ
   - recI1ls9OXdxatHQn
+  - recIDiDKKrN61Auyr
   - recIIUynGGpsGEYuo
+  - recIMcQfaQNa6vzsT
+  - recINGR1z01Fh1Z3A
   - recJJcOHhFeSaRpl4
   - recKv4hFyNpViUXnL
   - recL9MFV5zmdlle5T
   - recNAiPUKOulQbKVP
   claude-3-7-sonnet-20250219-vs-qwen3-235b-a22b:
   - rec06pnAkLOr2t2mp
+  - rec0Arme2jcXQZnAW
   - rec0VuKUjt1SZ7NYv
   - rec0wZvZgiz320KRs
   - rec0yTRmO1o1xCA6H
+  - rec1zl5LvaatzGhFt
+  - rec2UlKqC6RFHdcro
+  - rec2ZTsqazBZ3LTWZ
+  - rec4UqStf9WUVif1f
   - rec4r4KWNLrT7g2kR
   - rec5eA17Qr1ucNLUf
   - rec6sE2CRtD4drtHg
   - recAAJoHMW45Lv5je
+  - recBXlqrZUCR897It
   - recCJJOeBGERaHYax
+  - recE2ihVfqEK4R9d0
   - recEmTBhx2hgw6tPQ
   - recFaL6j8UMhutXrc
+  - recG1ljJQcVy6CbSl
   - recGee5m84dg5FZkc
   - recI1ls9OXdxatHQn
   - recIIUynGGpsGEYuo
+  - recINSFEYLCyyd08m
+  - recIOlKBsOeEcgkA1
+  - recKcjTwONILZqHAX
   - recKm6LNWykGapmCr
+  - recKv4hFyNpViUXnL
+  - recL9MFV5zmdlle5T
+  - recLrRirj7iXoB0rU
+  - recNFJjE5PPTqVJGv
   claude-opus-4-1-20250805-vs-deepseek-reasoner:
+  - rec0wZvZgiz320KRs
   - rec260hNUCEj109Dj
+  - rec2ZTsqazBZ3LTWZ
   - rec32C1ZEapBnCC0E
+  - rec4UqStf9WUVif1f
+  - rec4r4KWNLrT7g2kR
   - rec6sE2CRtD4drtHg
+  - rec8y3ZrBOcLgNEkE
+  - recA1i5ZAh0Uzclxp
   - recAAJoHMW45Lv5je
   - recBXlqrZUCR897It
+  - recBtVK8rBVtIlXDq
+  - recCJJOeBGERaHYax
+  - recFaL6j8UMhutXrc
   - recGFKDUd8qgz81Zl
   - recIMcQfaQNa6vzsT
   - recINGR1z01Fh1Z3A
@@ -306,50 +450,101 @@ sample_ids:
   - recIOlKBsOeEcgkA1
   - recIlghoOw5VbY4Zh
   - recJJcOHhFeSaRpl4
+  - recKm6LNWykGapmCr
   - recLAgwx9vbgB5EHk
   - recLB0EkQ54bYVhnd
+  - recLSzwBUS3olCjhl
+  - recNAiPUKOulQbKVP
+  - recNu3MXkvWUzHZr9
   - recOYsaYs6RmtlTDy
+  - recOkA2zsy4GSMD9R
+  - recPIzpnuYpB4yvmp
   claude-opus-4-5-20251101-vs-claude-haiku-4-5-20251001:
+  - rec0Arme2jcXQZnAW
   - rec0wZvZgiz320KRs
   - rec1oj2DveQWl9Rpw
   - rec260hNUCEj109Dj
   - rec32C1ZEapBnCC0E
   - rec4L69T0Y1AS4AFS
   - rec527dNeEtWJrYNl
+  - rec5eA17Qr1ucNLUf
+  - rec6sE2CRtD4drtHg
   - rec9GugrngvsQR99A
+  - rec9W28HgpEUeUN8k
+  - recA1i5ZAh0Uzclxp
   - recAAJoHMW45Lv5je
   - recDj2Y2BbtV02Wv5
   - recE2ihVfqEK4R9d0
+  - recEmTBhx2hgw6tPQ
   - recHVUd2DkoKfedJZ
+  - recI1ls9OXdxatHQn
+  - recIDiDKKrN61Auyr
+  - recIMcQfaQNa6vzsT
+  - recINGR1z01Fh1Z3A
   - recINSFEYLCyyd08m
+  - recIOlKBsOeEcgkA1
+  - recIlghoOw5VbY4Zh
   - recJJcOHhFeSaRpl4
   - recJZ3QEfRKjYw9a7
   - recKm6LNWykGapmCr
+  - recKv4hFyNpViUXnL
+  - recLB0EkQ54bYVhnd
+  - recLrRirj7iXoB0rU
   gemini-2.0-flash-thinking-exp-01-21-vs-DeepSeek-V3-0324:
+  - rec0wZvZgiz320KRs
   - rec1zl5LvaatzGhFt
   - rec32C1ZEapBnCC0E
+  - rec4JrWy7Il8ho5vk
+  - rec4L69T0Y1AS4AFS
   - rec6sE2CRtD4drtHg
   - rec8y3ZrBOcLgNEkE
   - rec9GugrngvsQR99A
+  - rec9ubQihAh6g9bft
+  - recBXlqrZUCR897It
   - recBhnXrUyTJ6WHIR
   - recBtVK8rBVtIlXDq
+  - recCJJOeBGERaHYax
   - recE2ihVfqEK4R9d0
   - recGee5m84dg5FZkc
+  - recIIUynGGpsGEYuo
+  - recINSFEYLCyyd08m
   - recJpyGtGIsxulevT
   - recLAgwx9vbgB5EHk
   - recLB0EkQ54bYVhnd
+  - recNAiPUKOulQbKVP
+  - recNFJjE5PPTqVJGv
   - recNu3MXkvWUzHZr9
+  - recNuT2oSnO86bxOx
+  - recO3hvCWRGiG0odN
   - recOkA2zsy4GSMD9R
   - recPL4ZPpVYxgMu57
+  - recQ8oxSY2aCwFRS8
+  - recTs7qzfJs6kfLUK
+  - recUc29lMDBEvurYo
   gemini-2.0-pro-exp-02-05-vs-Llama-3.1-405B-Instruct:
+  - rec0VuKUjt1SZ7NYv
+  - rec1zl5LvaatzGhFt
+  - rec260hNUCEj109Dj
+  - rec4UqStf9WUVif1f
+  - rec7C06XOB2h298ue
   - rec8y3ZrBOcLgNEkE
   - recA1i5ZAh0Uzclxp
+  - recBhnXrUyTJ6WHIR
+  - recBtVK8rBVtIlXDq
+  - recDytVnNYZe2HuUU
   - recG1ljJQcVy6CbSl
   - recI1ls9OXdxatHQn
+  - recIMcQfaQNa6vzsT
   - recIOlKBsOeEcgkA1
   - recIj8lR4tuDgrHou
+  - recJJcOHhFeSaRpl4
   - recJpyGtGIsxulevT
+  - recKm6LNWykGapmCr
   - recLB0EkQ54bYVhnd
+  - recLrRirj7iXoB0rU
+  - recNAiPUKOulQbKVP
+  - recNFJjE5PPTqVJGv
+  - recNu3MXkvWUzHZr9
   - recOvqPKUtyy9ISA1
   - recPIzpnuYpB4yvmp
   - recPL4ZPpVYxgMu57
@@ -361,356 +556,693 @@ sample_ids:
   - rec0Arme2jcXQZnAW
   - rec0VuKUjt1SZ7NYv
   - rec0wZvZgiz320KRs
+  - rec0yTRmO1o1xCA6H
   - rec2UlKqC6RFHdcro
   - rec4JrWy7Il8ho5vk
+  - rec4UqStf9WUVif1f
+  - rec4r4KWNLrT7g2kR
+  - rec527dNeEtWJrYNl
+  - rec5eA17Qr1ucNLUf
   - rec6sE2CRtD4drtHg
   - rec7C06XOB2h298ue
+  - rec9ubQihAh6g9bft
   - recA1i5ZAh0Uzclxp
+  - recAAJoHMW45Lv5je
+  - recBXlqrZUCR897It
+  - recBhnXrUyTJ6WHIR
+  - recBtVK8rBVtIlXDq
   - recCJJOeBGERaHYax
+  - recD8oX1KevFbl7bL
+  - recDytVnNYZe2HuUU
   - recE2ihVfqEK4R9d0
+  - recFaL6j8UMhutXrc
+  - recGFKDUd8qgz81Zl
   - recI1ls9OXdxatHQn
+  - recIDiDKKrN61Auyr
   - recIMcQfaQNa6vzsT
   - recLB0EkQ54bYVhnd
   - recN4DY9Q5V03glmQ
   - recNAiPUKOulQbKVP
   kimi-k2.6-vs-claude-opus-4-1-20250805:
   - rec06pnAkLOr2t2mp
+  - rec0Arme2jcXQZnAW
   - rec0VuKUjt1SZ7NYv
+  - rec0wZvZgiz320KRs
   - rec0yTRmO1o1xCA6H
   - rec1zl5LvaatzGhFt
+  - rec260hNUCEj109Dj
+  - rec2UlKqC6RFHdcro
   - rec32C1ZEapBnCC0E
   - rec4JrWy7Il8ho5vk
   - rec4L69T0Y1AS4AFS
   - rec4r4KWNLrT7g2kR
+  - rec5eA17Qr1ucNLUf
   - rec6sE2CRtD4drtHg
+  - rec8y3ZrBOcLgNEkE
   - recBGxVySx1pkrO1i
   - recDytVnNYZe2HuUU
+  - recEmTBhx2hgw6tPQ
+  - recG1ljJQcVy6CbSl
   - recGFKDUd8qgz81Zl
+  - recIMcQfaQNa6vzsT
+  - recIOlKBsOeEcgkA1
   - recJpyGtGIsxulevT
+  - recKcjTwONILZqHAX
+  - recLAgwx9vbgB5EHk
+  - recLB0EkQ54bYVhnd
+  - recLSzwBUS3olCjhl
   - recNFJjE5PPTqVJGv
   - recNu3MXkvWUzHZr9
+  - recOkA2zsy4GSMD9R
   kimi-k2.6-vs-glm-5:
   - rec0Arme2jcXQZnAW
   - rec0VuKUjt1SZ7NYv
   - rec0wZvZgiz320KRs
   - rec0yTRmO1o1xCA6H
   - rec2fsnzUuvNtUYK8
+  - rec32C1ZEapBnCC0E
   - rec4JrWy7Il8ho5vk
+  - rec4UqStf9WUVif1f
   - rec5eA17Qr1ucNLUf
+  - rec5rjeLsEq5Fg7Oj
+  - rec6sE2CRtD4drtHg
+  - rec8nshandHARTkrg
+  - rec9GugrngvsQR99A
   - recAAJoHMW45Lv5je
   - recBGxVySx1pkrO1i
+  - recBXlqrZUCR897It
+  - recBhnXrUyTJ6WHIR
+  - recBtVK8rBVtIlXDq
+  - recD8oX1KevFbl7bL
+  - recE2ihVfqEK4R9d0
   - recEmTBhx2hgw6tPQ
+  - recGee5m84dg5FZkc
   - recIIUynGGpsGEYuo
   - recINGR1z01Fh1Z3A
+  - recIOlKBsOeEcgkA1
   - recIj8lR4tuDgrHou
+  - recIlghoOw5VbY4Zh
+  - recK9F5aqdaybl8bb
   - recKm6LNWykGapmCr
   - recKv4hFyNpViUXnL
   o1-preview-2024-09-12-vs-phi-4:
   - rec0VuKUjt1SZ7NYv
+  - rec0wZvZgiz320KRs
   - rec1zl5LvaatzGhFt
   - rec260hNUCEj109Dj
   - rec2UlKqC6RFHdcro
   - rec4L69T0Y1AS4AFS
   - rec5eA17Qr1ucNLUf
+  - rec6sE2CRtD4drtHg
+  - rec7C06XOB2h298ue
+  - rec7qmSnbud4FHSqL
+  - rec8y3ZrBOcLgNEkE
   - rec9GugrngvsQR99A
+  - recBhnXrUyTJ6WHIR
+  - recBtVK8rBVtIlXDq
+  - recCJJOeBGERaHYax
+  - recDj2Y2BbtV02Wv5
   - recE2ihVfqEK4R9d0
+  - recG1ljJQcVy6CbSl
+  - recGFKDUd8qgz81Zl
   - recHVUd2DkoKfedJZ
   - recIj8lR4tuDgrHou
   - recIlghoOw5VbY4Zh
   - recJZ3QEfRKjYw9a7
+  - recKm6LNWykGapmCr
+  - recKv4hFyNpViUXnL
   - recLAgwx9vbgB5EHk
   - recLSzwBUS3olCjhl
+  - recNFJjE5PPTqVJGv
   - recOYsaYs6RmtlTDy
+  - recPL4ZPpVYxgMu57
   claude-3-5-haiku-20241022-vs-Mixtral-8x7B-Instruct-v0.1:
+  - rec1zl5LvaatzGhFt
+  - rec260hNUCEj109Dj
   - rec2UlKqC6RFHdcro
   - rec2ZTsqazBZ3LTWZ
+  - rec527dNeEtWJrYNl
+  - rec7qmSnbud4FHSqL
   - rec8nshandHARTkrg
+  - rec9GugrngvsQR99A
   - recBXlqrZUCR897It
   - recBhnXrUyTJ6WHIR
+  - recDytVnNYZe2HuUU
   - recE2ihVfqEK4R9d0
+  - recGFKDUd8qgz81Zl
   - recHVUd2DkoKfedJZ
+  - recI1ls9OXdxatHQn
+  - recIj8lR4tuDgrHou
   - recIlghoOw5VbY4Zh
+  - recKm6LNWykGapmCr
+  - recNFJjE5PPTqVJGv
   - recNu3MXkvWUzHZr9
+  - recO3hvCWRGiG0odN
   - recOYsaYs6RmtlTDy
+  - recOvqPKUtyy9ISA1
   - recPL4ZPpVYxgMu57
   - recPzW1WqRnPs57D6
   - recRTiyaRymerDJ4y
+  - recReg13iV2HwJTaA
+  - recS48OsU6kVadBPW
   - recSBcGLPatKb3Ygu
   - recTs7qzfJs6kfLUK
   claude-3-opus-20240229-vs-claude-3-sonnet-20240229:
+  - rec06pnAkLOr2t2mp
   - rec0Arme2jcXQZnAW
+  - rec0wZvZgiz320KRs
+  - rec1zl5LvaatzGhFt
   - rec260hNUCEj109Dj
   - rec2ZTsqazBZ3LTWZ
   - rec2fsnzUuvNtUYK8
   - rec32C1ZEapBnCC0E
+  - rec47oNPXudlTIk4y
+  - rec4JrWy7Il8ho5vk
+  - rec4L69T0Y1AS4AFS
+  - rec5eA17Qr1ucNLUf
+  - rec8nshandHARTkrg
   - recCJJOeBGERaHYax
+  - recDDxpS9s8cwkqfq
   - recDj2Y2BbtV02Wv5
+  - recEmTBhx2hgw6tPQ
   - recG1ljJQcVy6CbSl
+  - recIMcQfaQNa6vzsT
+  - recINSFEYLCyyd08m
+  - recIj8lR4tuDgrHou
   - recJJcOHhFeSaRpl4
   - recKm6LNWykGapmCr
   - recLAgwx9vbgB5EHk
   - recNAiPUKOulQbKVP
+  - recNFJjE5PPTqVJGv
   - recNuT2oSnO86bxOx
+  - recO3hvCWRGiG0odN
   - recOYsaYs6RmtlTDy
   - recPIzpnuYpB4yvmp
   claude-opus-4-1-20250805-vs-DeepSeek-R1-Distill-Llama-70B:
+  - rec06pnAkLOr2t2mp
   - rec0Arme2jcXQZnAW
   - rec0wZvZgiz320KRs
   - rec0yTRmO1o1xCA6H
+  - rec1zl5LvaatzGhFt
+  - rec260hNUCEj109Dj
+  - rec2ZTsqazBZ3LTWZ
   - rec4UqStf9WUVif1f
   - rec6sE2CRtD4drtHg
   - rec8y3ZrBOcLgNEkE
+  - rec9GugrngvsQR99A
+  - recAAJoHMW45Lv5je
+  - recBhnXrUyTJ6WHIR
   - recBtVK8rBVtIlXDq
   - recCJJOeBGERaHYax
+  - recDytVnNYZe2HuUU
+  - recG1ljJQcVy6CbSl
+  - recIDiDKKrN61Auyr
+  - recIMcQfaQNa6vzsT
   - recIj8lR4tuDgrHou
+  - recJpyGtGIsxulevT
   - recKcjTwONILZqHAX
   - recLB0EkQ54bYVhnd
+  - recNu3MXkvWUzHZr9
+  - recNuT2oSnO86bxOx
   - recOYsaYs6RmtlTDy
   - recOkA2zsy4GSMD9R
   - recPL4ZPpVYxgMu57
+  - recPzW1WqRnPs57D6
   - recReg13iV2HwJTaA
   claude-sonnet-4-5-20250929-vs-DeepSeek-R1:
   - rec06pnAkLOr2t2mp
   - rec0VuKUjt1SZ7NYv
   - rec0yTRmO1o1xCA6H
+  - rec1zl5LvaatzGhFt
   - rec32C1ZEapBnCC0E
   - rec4JrWy7Il8ho5vk
+  - rec4UqStf9WUVif1f
   - rec9ubQihAh6g9bft
   - recD8oX1KevFbl7bL
   - recDytVnNYZe2HuUU
+  - recE2ihVfqEK4R9d0
+  - recI1ls9OXdxatHQn
+  - recIMcQfaQNa6vzsT
   - recINGR1z01Fh1Z3A
+  - recJJcOHhFeSaRpl4
+  - recJpyGtGIsxulevT
+  - recKcjTwONILZqHAX
+  - recKv4hFyNpViUXnL
   - recL9MFV5zmdlle5T
+  - recLAgwx9vbgB5EHk
+  - recNAiPUKOulQbKVP
   - recNu3MXkvWUzHZr9
   - recNuT2oSnO86bxOx
+  - recOYsaYs6RmtlTDy
+  - recOkA2zsy4GSMD9R
   - recOvqPKUtyy9ISA1
   - recPSTGXK3P39yNYT
+  - recPzW1WqRnPs57D6
   - recQ8oxSY2aCwFRS8
+  - recQiWOxhkXRz9NVE
   deepseek-reasoner-vs-DeepSeek-R1-Distill-Llama-70B:
   - rec06pnAkLOr2t2mp
   - rec0Arme2jcXQZnAW
+  - rec0VuKUjt1SZ7NYv
   - rec0wZvZgiz320KRs
   - rec0yTRmO1o1xCA6H
+  - rec1zl5LvaatzGhFt
   - rec2ZTsqazBZ3LTWZ
   - rec527dNeEtWJrYNl
   - rec6sE2CRtD4drtHg
+  - rec7C06XOB2h298ue
   - rec8y3ZrBOcLgNEkE
+  - rec9ubQihAh6g9bft
   - recA1i5ZAh0Uzclxp
+  - recBXlqrZUCR897It
   - recBhnXrUyTJ6WHIR
+  - recBtVK8rBVtIlXDq
   - recD8oX1KevFbl7bL
+  - recE2ihVfqEK4R9d0
+  - recGFKDUd8qgz81Zl
   - recGee5m84dg5FZkc
+  - recI1ls9OXdxatHQn
   - recINGR1z01Fh1Z3A
+  - recIOlKBsOeEcgkA1
+  - recJJcOHhFeSaRpl4
+  - recJZ3QEfRKjYw9a7
+  - recKm6LNWykGapmCr
+  - recKv4hFyNpViUXnL
   - recLB0EkQ54bYVhnd
+  - recLrRirj7iXoB0rU
   - recNu3MXkvWUzHZr9
   deepseek-reasoner-vs-Llama-3.1-70B-Instruct:
   - rec06pnAkLOr2t2mp
   - rec0wZvZgiz320KRs
+  - rec1zl5LvaatzGhFt
+  - rec260hNUCEj109Dj
   - rec2ZTsqazBZ3LTWZ
+  - rec2fsnzUuvNtUYK8
   - rec32C1ZEapBnCC0E
   - rec47oNPXudlTIk4y
+  - rec4JrWy7Il8ho5vk
+  - rec4UqStf9WUVif1f
+  - rec527dNeEtWJrYNl
   - rec5eA17Qr1ucNLUf
+  - rec7C06XOB2h298ue
+  - rec8nshandHARTkrg
   - rec9GugrngvsQR99A
   - recA1i5ZAh0Uzclxp
+  - recD8oX1KevFbl7bL
+  - recE2ihVfqEK4R9d0
+  - recEmTBhx2hgw6tPQ
+  - recIDiDKKrN61Auyr
   - recINGR1z01Fh1Z3A
   - recINSFEYLCyyd08m
   - recIOlKBsOeEcgkA1
+  - recK9F5aqdaybl8bb
   - recKm6LNWykGapmCr
+  - recLAgwx9vbgB5EHk
   - recLB0EkQ54bYVhnd
+  - recLSzwBUS3olCjhl
   - recLrRirj7iXoB0rU
   - recN4DY9Q5V03glmQ
   gemini-1.5-flash-001-vs-Llama-2-70b-chat-hf:
   - rec06pnAkLOr2t2mp
+  - rec2UlKqC6RFHdcro
+  - rec2ZTsqazBZ3LTWZ
   - rec32C1ZEapBnCC0E
   - rec4JrWy7Il8ho5vk
+  - rec4UqStf9WUVif1f
   - rec4r4KWNLrT7g2kR
   - rec6sE2CRtD4drtHg
   - rec9GugrngvsQR99A
   - rec9W28HgpEUeUN8k
   - recAAJoHMW45Lv5je
+  - recBtVK8rBVtIlXDq
   - recCJJOeBGERaHYax
   - recDj2Y2BbtV02Wv5
+  - recE2ihVfqEK4R9d0
+  - recI1ls9OXdxatHQn
   - recIMcQfaQNa6vzsT
+  - recJJcOHhFeSaRpl4
+  - recJZ3QEfRKjYw9a7
+  - recKm6LNWykGapmCr
+  - recLSzwBUS3olCjhl
+  - recMicVBcqy1xM1jq
   - recN4DY9Q5V03glmQ
   - recO3hvCWRGiG0odN
+  - recOYsaYs6RmtlTDy
+  - recOkA2zsy4GSMD9R
   - recOvqPKUtyy9ISA1
+  - recPIzpnuYpB4yvmp
+  - recQ8oxSY2aCwFRS8
   - recReg13iV2HwJTaA
   glm-4.7-vs-claude-3-opus-20240229:
   - rec06pnAkLOr2t2mp
+  - rec1zl5LvaatzGhFt
+  - rec32C1ZEapBnCC0E
+  - rec4JrWy7Il8ho5vk
   - rec6sE2CRtD4drtHg
   - rec7C06XOB2h298ue
+  - rec8nshandHARTkrg
   - rec8y3ZrBOcLgNEkE
   - rec9ubQihAh6g9bft
   - recA1i5ZAh0Uzclxp
   - recE2ihVfqEK4R9d0
+  - recG1ljJQcVy6CbSl
   - recGFKDUd8qgz81Zl
+  - recGee5m84dg5FZkc
+  - recHVUd2DkoKfedJZ
+  - recI1ls9OXdxatHQn
+  - recIDiDKKrN61Auyr
   - recIIUynGGpsGEYuo
   - recIMcQfaQNa6vzsT
+  - recIj8lR4tuDgrHou
   - recIlghoOw5VbY4Zh
   - recJZ3QEfRKjYw9a7
   - recJpyGtGIsxulevT
+  - recKcjTwONILZqHAX
+  - recLrRirj7iXoB0rU
+  - recNAiPUKOulQbKVP
   - recNuT2oSnO86bxOx
   - recO3hvCWRGiG0odN
+  - recOYsaYs6RmtlTDy
+  - recOkA2zsy4GSMD9R
   glm-4.7-vs-gemini-1.5-flash-002:
   - rec06pnAkLOr2t2mp
   - rec0wZvZgiz320KRs
+  - rec4JrWy7Il8ho5vk
   - rec4L69T0Y1AS4AFS
+  - rec5eA17Qr1ucNLUf
+  - rec8y3ZrBOcLgNEkE
   - rec9ubQihAh6g9bft
+  - recCJJOeBGERaHYax
+  - recD8oX1KevFbl7bL
   - recDytVnNYZe2HuUU
+  - recE2ihVfqEK4R9d0
+  - recFaL6j8UMhutXrc
+  - recG1ljJQcVy6CbSl
   - recGFKDUd8qgz81Zl
   - recHVUd2DkoKfedJZ
   - recI1ls9OXdxatHQn
+  - recIIUynGGpsGEYuo
   - recJJcOHhFeSaRpl4
   - recKv4hFyNpViUXnL
+  - recLAgwx9vbgB5EHk
   - recLrRirj7iXoB0rU
+  - recN4DY9Q5V03glmQ
   - recNFJjE5PPTqVJGv
+  - recNu3MXkvWUzHZr9
+  - recNuT2oSnO86bxOx
+  - recO3hvCWRGiG0odN
   - recOvqPKUtyy9ISA1
   - recPIzpnuYpB4yvmp
   - recPSTGXK3P39yNYT
+  - recPzW1WqRnPs57D6
   glm-5-vs-DeepSeek-R1-Distill-Llama-70B:
+  - rec06pnAkLOr2t2mp
   - rec0wZvZgiz320KRs
   - rec0yTRmO1o1xCA6H
   - rec1zl5LvaatzGhFt
   - rec260hNUCEj109Dj
+  - rec2UlKqC6RFHdcro
   - rec2fsnzUuvNtUYK8
   - rec4JrWy7Il8ho5vk
+  - rec5eA17Qr1ucNLUf
   - rec6sE2CRtD4drtHg
+  - rec7C06XOB2h298ue
   - rec9GugrngvsQR99A
   - recA1i5ZAh0Uzclxp
+  - recBGxVySx1pkrO1i
+  - recBtVK8rBVtIlXDq
+  - recCJJOeBGERaHYax
   - recD8oX1KevFbl7bL
   - recDytVnNYZe2HuUU
+  - recE2ihVfqEK4R9d0
   - recHVUd2DkoKfedJZ
   - recIOlKBsOeEcgkA1
+  - recIj8lR4tuDgrHou
   - recJpyGtGIsxulevT
+  - recKcjTwONILZqHAX
+  - recL9MFV5zmdlle5T
   - recLrRirj7iXoB0rU
+  - recN4DY9Q5V03glmQ
+  - recNuT2oSnO86bxOx
+  - recO3hvCWRGiG0odN
+  - recOkA2zsy4GSMD9R
   glm-5-vs-Qwen3-235B-A22B-Thinking-2507:
+  - rec0Arme2jcXQZnAW
+  - rec0VuKUjt1SZ7NYv
+  - rec0wZvZgiz320KRs
   - rec260hNUCEj109Dj
   - rec4JrWy7Il8ho5vk
   - rec4UqStf9WUVif1f
+  - rec5rjeLsEq5Fg7Oj
   - rec6sE2CRtD4drtHg
   - rec8y3ZrBOcLgNEkE
   - rec9W28HgpEUeUN8k
+  - recA1i5ZAh0Uzclxp
+  - recBGxVySx1pkrO1i
+  - recBXlqrZUCR897It
   - recBhnXrUyTJ6WHIR
+  - recBtVK8rBVtIlXDq
   - recCJJOeBGERaHYax
+  - recD8oX1KevFbl7bL
+  - recDytVnNYZe2HuUU
   - recGFKDUd8qgz81Zl
   - recGFNRVl1qBZGwyU
+  - recIDiDKKrN61Auyr
   - recIIUynGGpsGEYuo
+  - recIMcQfaQNa6vzsT
   - recINGR1z01Fh1Z3A
   - recINSFEYLCyyd08m
   - recIj8lR4tuDgrHou
   - recJJcOHhFeSaRpl4
+  - recJpyGtGIsxulevT
+  - recLSzwBUS3olCjhl
+  - recN4DY9Q5V03glmQ
   glm-5.1-vs-Qwen3-235B-A22B-Thinking-2507:
   - rec06pnAkLOr2t2mp
   - rec0Arme2jcXQZnAW
+  - rec0VuKUjt1SZ7NYv
   - rec0wZvZgiz320KRs
+  - rec0yTRmO1o1xCA6H
   - rec1zl5LvaatzGhFt
+  - rec2UlKqC6RFHdcro
+  - rec7C06XOB2h298ue
+  - rec8nshandHARTkrg
   - rec9GugrngvsQR99A
+  - rec9W28HgpEUeUN8k
+  - rec9ubQihAh6g9bft
   - recBXlqrZUCR897It
   - recBtVK8rBVtIlXDq
+  - recCJJOeBGERaHYax
   - recDytVnNYZe2HuUU
+  - recGFKDUd8qgz81Zl
+  - recGee5m84dg5FZkc
+  - recHVUd2DkoKfedJZ
   - recIIUynGGpsGEYuo
   - recIMcQfaQNa6vzsT
   - recINSFEYLCyyd08m
   - recIOlKBsOeEcgkA1
   - recIj8lR4tuDgrHou
+  - recJJcOHhFeSaRpl4
   - recKcjTwONILZqHAX
   - recLB0EkQ54bYVhnd
+  - recLSzwBUS3olCjhl
+  - recLrRirj7iXoB0rU
+  - recMicVBcqy1xM1jq
   gpt-4.1-2025-04-14-vs-DeepSeek-R1-Distill-Llama-70B:
   - rec0Arme2jcXQZnAW
   - rec0VuKUjt1SZ7NYv
   - rec1zl5LvaatzGhFt
+  - rec2ZTsqazBZ3LTWZ
   - rec2fsnzUuvNtUYK8
+  - rec32C1ZEapBnCC0E
   - rec4L69T0Y1AS4AFS
+  - rec7C06XOB2h298ue
+  - rec9GugrngvsQR99A
+  - rec9W28HgpEUeUN8k
   - rec9ubQihAh6g9bft
   - recA1i5ZAh0Uzclxp
+  - recBGxVySx1pkrO1i
   - recBhnXrUyTJ6WHIR
   - recBtVK8rBVtIlXDq
+  - recCJJOeBGERaHYax
   - recD8oX1KevFbl7bL
   - recDytVnNYZe2HuUU
+  - recGee5m84dg5FZkc
   - recI1ls9OXdxatHQn
   - recIDiDKKrN61Auyr
+  - recIIUynGGpsGEYuo
+  - recIOlKBsOeEcgkA1
+  - recKcjTwONILZqHAX
   - recKm6LNWykGapmCr
+  - recKv4hFyNpViUXnL
   - recLB0EkQ54bYVhnd
+  - recN4DY9Q5V03glmQ
+  - recOYsaYs6RmtlTDy
+  - recOkA2zsy4GSMD9R
   gpt-4.1-mini-2025-04-14-vs-claude-3-sonnet-20240229:
+  - rec0Arme2jcXQZnAW
+  - rec1zl5LvaatzGhFt
   - rec2UlKqC6RFHdcro
   - rec2fsnzUuvNtUYK8
   - rec32C1ZEapBnCC0E
   - rec4UqStf9WUVif1f
   - rec5eA17Qr1ucNLUf
   - rec6sE2CRtD4drtHg
+  - rec9GugrngvsQR99A
   - rec9W28HgpEUeUN8k
+  - recAAJoHMW45Lv5je
+  - recBtVK8rBVtIlXDq
+  - recDj2Y2BbtV02Wv5
+  - recEmTBhx2hgw6tPQ
+  - recG1ljJQcVy6CbSl
   - recGee5m84dg5FZkc
+  - recIDiDKKrN61Auyr
   - recIIUynGGpsGEYuo
+  - recINSFEYLCyyd08m
   - recIOlKBsOeEcgkA1
   - recIlghoOw5VbY4Zh
+  - recJJcOHhFeSaRpl4
+  - recJZ3QEfRKjYw9a7
+  - recJpyGtGIsxulevT
+  - recKcjTwONILZqHAX
   - recKm6LNWykGapmCr
   - recLB0EkQ54bYVhnd
   - recLrRirj7iXoB0rU
+  - recNFJjE5PPTqVJGv
   - recNu3MXkvWUzHZr9
   qwen3-235b-a22b-vs-gpt-4o-2024-08-06:
+  - rec06pnAkLOr2t2mp
+  - rec0VuKUjt1SZ7NYv
   - rec0wZvZgiz320KRs
+  - rec1zl5LvaatzGhFt
   - rec260hNUCEj109Dj
   - rec2UlKqC6RFHdcro
   - rec2ZTsqazBZ3LTWZ
   - rec4L69T0Y1AS4AFS
   - rec5rjeLsEq5Fg7Oj
+  - rec7C06XOB2h298ue
+  - rec8nshandHARTkrg
+  - recBXlqrZUCR897It
   - recBhnXrUyTJ6WHIR
+  - recDytVnNYZe2HuUU
   - recE2ihVfqEK4R9d0
   - recEmTBhx2hgw6tPQ
+  - recFaL6j8UMhutXrc
+  - recG1ljJQcVy6CbSl
+  - recGFKDUd8qgz81Zl
+  - recHVUd2DkoKfedJZ
   - recI1ls9OXdxatHQn
   - recIDiDKKrN61Auyr
   - recIIUynGGpsGEYuo
   - recINGR1z01Fh1Z3A
+  - recJJcOHhFeSaRpl4
   - recJZ3QEfRKjYw9a7
+  - recKv4hFyNpViUXnL
+  - recL9MFV5zmdlle5T
   - recLB0EkQ54bYVhnd
+  - recLrRirj7iXoB0rU
   qwen3-max-2025-09-23-vs-DeepSeek-R1-Distill-Llama-70B:
   - rec06pnAkLOr2t2mp
+  - rec0Arme2jcXQZnAW
   - rec0VuKUjt1SZ7NYv
   - rec0wZvZgiz320KRs
   - rec0yTRmO1o1xCA6H
+  - rec1oj2DveQWl9Rpw
+  - rec260hNUCEj109Dj
+  - rec2ZTsqazBZ3LTWZ
+  - rec32C1ZEapBnCC0E
   - rec4L69T0Y1AS4AFS
   - rec4UqStf9WUVif1f
+  - rec5eA17Qr1ucNLUf
+  - rec8y3ZrBOcLgNEkE
   - recA1i5ZAh0Uzclxp
   - recBXlqrZUCR897It
   - recBhnXrUyTJ6WHIR
   - recD8oX1KevFbl7bL
   - recE2ihVfqEK4R9d0
+  - recG1ljJQcVy6CbSl
   - recGee5m84dg5FZkc
   - recIIUynGGpsGEYuo
+  - recIj8lR4tuDgrHou
+  - recJJcOHhFeSaRpl4
+  - recJZ3QEfRKjYw9a7
+  - recJpyGtGIsxulevT
   - recLrRirj7iXoB0rU
+  - recNFJjE5PPTqVJGv
+  - recNu3MXkvWUzHZr9
+  - recOkA2zsy4GSMD9R
   - recPIzpnuYpB4yvmp
   qwen3-max-2025-09-23-vs-Llama-3.3-70B-Instruct:
   - rec0Arme2jcXQZnAW
+  - rec0wZvZgiz320KRs
   - rec1zl5LvaatzGhFt
+  - rec260hNUCEj109Dj
+  - rec2UlKqC6RFHdcro
+  - rec4UqStf9WUVif1f
   - rec5eA17Qr1ucNLUf
+  - rec7C06XOB2h298ue
   - recA1i5ZAh0Uzclxp
   - recAAJoHMW45Lv5je
+  - recBhnXrUyTJ6WHIR
   - recDDxpS9s8cwkqfq
   - recFaL6j8UMhutXrc
+  - recGFKDUd8qgz81Zl
+  - recINGR1z01Fh1Z3A
+  - recIOlKBsOeEcgkA1
   - recJpyGtGIsxulevT
+  - recKm6LNWykGapmCr
+  - recKv4hFyNpViUXnL
   - recL9MFV5zmdlle5T
   - recLSzwBUS3olCjhl
   - recLrRirj7iXoB0rU
   - recNAiPUKOulQbKVP
   - recOYsaYs6RmtlTDy
+  - recOkA2zsy4GSMD9R
   - recOvqPKUtyy9ISA1
+  - recPSTGXK3P39yNYT
+  - recPzW1WqRnPs57D6
+  - recQ8oxSY2aCwFRS8
   - recQiWOxhkXRz9NVE
   Qwen3-235B-A22B-Thinking-2507-vs-gemini-1.0-pro-001:
   - rec0VuKUjt1SZ7NYv
+  - rec1zl5LvaatzGhFt
   - rec260hNUCEj109Dj
+  - rec2UlKqC6RFHdcro
   - rec32C1ZEapBnCC0E
+  - rec4UqStf9WUVif1f
+  - rec7C06XOB2h298ue
   - rec9W28HgpEUeUN8k
   - rec9ubQihAh6g9bft
+  - recBGxVySx1pkrO1i
+  - recBhnXrUyTJ6WHIR
   - recCJJOeBGERaHYax
+  - recDytVnNYZe2HuUU
   - recE2ihVfqEK4R9d0
   - recEmTBhx2hgw6tPQ
+  - recG1ljJQcVy6CbSl
   - recGFKDUd8qgz81Zl
+  - recGFNRVl1qBZGwyU
+  - recHVUd2DkoKfedJZ
   - recIDiDKKrN61Auyr
+  - recIIUynGGpsGEYuo
   - recINGR1z01Fh1Z3A
+  - recIj8lR4tuDgrHou
+  - recJZ3QEfRKjYw9a7
   - recKv4hFyNpViUXnL
   - recLB0EkQ54bYVhnd
+  - recLrRirj7iXoB0rU
   - recMicVBcqy1xM1jq
   - recN4DY9Q5V03glmQ
+  - recNAiPUKOulQbKVP
   claude-opus-4-1-20250805-vs-Yi-34B-Chat:
+  - rec0VuKUjt1SZ7NYv
+  - rec1zl5LvaatzGhFt
+  - rec260hNUCEj109Dj
+  - rec4JrWy7Il8ho5vk
+  - rec4r4KWNLrT7g2kR
   - rec527dNeEtWJrYNl
+  - rec7C06XOB2h298ue
+  - recAAJoHMW45Lv5je
   - recBGxVySx1pkrO1i
   - recDytVnNYZe2HuUU
   - recE2ihVfqEK4R9d0
@@ -718,71 +1250,139 @@ sample_ids:
   - recGFKDUd8qgz81Zl
   - recINGR1z01Fh1Z3A
   - recNuT2oSnO86bxOx
+  - recOYsaYs6RmtlTDy
+  - recOkA2zsy4GSMD9R
+  - recPIzpnuYpB4yvmp
+  - recPL4ZPpVYxgMu57
+  - recPSTGXK3P39yNYT
   - recQ8oxSY2aCwFRS8
+  - recQiWOxhkXRz9NVE
+  - recRTiyaRymerDJ4y
   - recRZjaElf8ft7xTq
   - recRgabRzMaEoBRcM
   - recRhwQwHijW0gCLo
+  - recUc29lMDBEvurYo
   - recVEXvhYxAhELVqB
   - recXsYa3i2UhGF5fe
   - recYOzCsevNz61Lyn
   claude-opus-4-20250514-vs-Llama-3.1-8B-Instruct:
+  - rec0VuKUjt1SZ7NYv
   - rec0wZvZgiz320KRs
   - rec0yTRmO1o1xCA6H
+  - rec2UlKqC6RFHdcro
   - rec4JrWy7Il8ho5vk
+  - rec4L69T0Y1AS4AFS
+  - rec4UqStf9WUVif1f
+  - rec527dNeEtWJrYNl
+  - rec5eA17Qr1ucNLUf
+  - rec6sE2CRtD4drtHg
   - rec8y3ZrBOcLgNEkE
+  - rec9ubQihAh6g9bft
   - recAAJoHMW45Lv5je
   - recBtVK8rBVtIlXDq
   - recHVUd2DkoKfedJZ
   - recIDiDKKrN61Auyr
+  - recIj8lR4tuDgrHou
   - recIlghoOw5VbY4Zh
+  - recJJcOHhFeSaRpl4
   - recJpyGtGIsxulevT
+  - recKcjTwONILZqHAX
   - recKm6LNWykGapmCr
   - recL9MFV5zmdlle5T
   - recLAgwx9vbgB5EHk
+  - recLSzwBUS3olCjhl
+  - recNAiPUKOulQbKVP
   - recOYsaYs6RmtlTDy
   - recPIzpnuYpB4yvmp
+  - recPL4ZPpVYxgMu57
+  - recPzW1WqRnPs57D6
   claude-opus-4-5-20251101-vs-claude-3-sonnet-20240229:
+  - rec06pnAkLOr2t2mp
+  - rec0Arme2jcXQZnAW
+  - rec0wZvZgiz320KRs
   - rec1oj2DveQWl9Rpw
   - rec1zl5LvaatzGhFt
   - rec32C1ZEapBnCC0E
   - rec4JrWy7Il8ho5vk
+  - rec4L69T0Y1AS4AFS
   - rec527dNeEtWJrYNl
   - rec6sE2CRtD4drtHg
   - rec7C06XOB2h298ue
   - rec8nshandHARTkrg
   - rec8y3ZrBOcLgNEkE
+  - rec9W28HgpEUeUN8k
+  - recAAJoHMW45Lv5je
   - recBhnXrUyTJ6WHIR
+  - recFaL6j8UMhutXrc
   - recG1ljJQcVy6CbSl
+  - recGFKDUd8qgz81Zl
   - recGFNRVl1qBZGwyU
+  - recI1ls9OXdxatHQn
+  - recJJcOHhFeSaRpl4
   - recJpyGtGIsxulevT
+  - recKm6LNWykGapmCr
   - recKv4hFyNpViUXnL
+  - recL9MFV5zmdlle5T
+  - recLAgwx9vbgB5EHk
+  - recLSzwBUS3olCjhl
+  - recLrRirj7iXoB0rU
   - recNuT2oSnO86bxOx
   claude-sonnet-4-5-20250929-vs-DeepSeek-R1-Distill-Llama-70B:
   - rec06pnAkLOr2t2mp
   - rec0Arme2jcXQZnAW
+  - rec2UlKqC6RFHdcro
   - rec32C1ZEapBnCC0E
   - rec4JrWy7Il8ho5vk
+  - rec4L69T0Y1AS4AFS
+  - rec5eA17Qr1ucNLUf
+  - rec7C06XOB2h298ue
   - rec8y3ZrBOcLgNEkE
+  - rec9ubQihAh6g9bft
+  - recAAJoHMW45Lv5je
   - recBGxVySx1pkrO1i
+  - recBhnXrUyTJ6WHIR
   - recD8oX1KevFbl7bL
   - recG1ljJQcVy6CbSl
+  - recGee5m84dg5FZkc
   - recI1ls9OXdxatHQn
+  - recIMcQfaQNa6vzsT
   - recINGR1z01Fh1Z3A
+  - recIOlKBsOeEcgkA1
   - recJpyGtGIsxulevT
+  - recNFJjE5PPTqVJGv
   - recNu3MXkvWUzHZr9
   - recO3hvCWRGiG0odN
+  - recOkA2zsy4GSMD9R
   - recOvqPKUtyy9ISA1
+  - recPIzpnuYpB4yvmp
+  - recPzW1WqRnPs57D6
   - recRZjaElf8ft7xTq
+  - recReg13iV2HwJTaA
   gemini-2.0-flash-001-vs-Mixtral-8x7B-Instruct-v0.1:
   - rec0Arme2jcXQZnAW
+  - rec1zl5LvaatzGhFt
   - rec2UlKqC6RFHdcro
   - rec2ZTsqazBZ3LTWZ
+  - rec4JrWy7Il8ho5vk
+  - rec4UqStf9WUVif1f
+  - rec6sE2CRtD4drtHg
   - rec7C06XOB2h298ue
   - rec7qmSnbud4FHSqL
   - rec8nshandHARTkrg
   - rec8y3ZrBOcLgNEkE
+  - rec9GugrngvsQR99A
+  - recAAJoHMW45Lv5je
+  - recBhnXrUyTJ6WHIR
+  - recBtVK8rBVtIlXDq
+  - recD8oX1KevFbl7bL
+  - recDytVnNYZe2HuUU
+  - recEmTBhx2hgw6tPQ
+  - recFaL6j8UMhutXrc
   - recIDiDKKrN61Auyr
+  - recIIUynGGpsGEYuo
+  - recIj8lR4tuDgrHou
   - recJJcOHhFeSaRpl4
+  - recJZ3QEfRKjYw9a7
   - recK9F5aqdaybl8bb
   - recKcjTwONILZqHAX
   - recLSzwBUS3olCjhl
@@ -790,83 +1390,158 @@ sample_ids:
   - recO3hvCWRGiG0odN
   - recOYsaYs6RmtlTDy
   glm-4.7-vs-Llama-3.1-70B-Instruct:
+  - rec0Arme2jcXQZnAW
   - rec260hNUCEj109Dj
+  - rec2UlKqC6RFHdcro
+  - rec4JrWy7Il8ho5vk
+  - rec4UqStf9WUVif1f
+  - rec5eA17Qr1ucNLUf
   - rec6sE2CRtD4drtHg
+  - rec7C06XOB2h298ue
   - rec8nshandHARTkrg
   - rec8y3ZrBOcLgNEkE
+  - rec9GugrngvsQR99A
+  - rec9ubQihAh6g9bft
   - recBhnXrUyTJ6WHIR
   - recDDxpS9s8cwkqfq
+  - recDytVnNYZe2HuUU
   - recFaL6j8UMhutXrc
+  - recG1ljJQcVy6CbSl
+  - recHVUd2DkoKfedJZ
   - recIIUynGGpsGEYuo
   - recINGR1z01Fh1Z3A
   - recIOlKBsOeEcgkA1
   - recJZ3QEfRKjYw9a7
+  - recKcjTwONILZqHAX
+  - recKm6LNWykGapmCr
   - recLAgwx9vbgB5EHk
+  - recLSzwBUS3olCjhl
   - recN4DY9Q5V03glmQ
   - recNu3MXkvWUzHZr9
+  - recNuT2oSnO86bxOx
   - recOkA2zsy4GSMD9R
   glm-4.7-vs-claude-3-haiku-20240307:
+  - rec06pnAkLOr2t2mp
+  - rec0Arme2jcXQZnAW
+  - rec0wZvZgiz320KRs
+  - rec1oj2DveQWl9Rpw
   - rec2UlKqC6RFHdcro
+  - rec2ZTsqazBZ3LTWZ
+  - rec32C1ZEapBnCC0E
+  - rec4L69T0Y1AS4AFS
   - rec4UqStf9WUVif1f
   - rec6sE2CRtD4drtHg
+  - rec7C06XOB2h298ue
   - rec8y3ZrBOcLgNEkE
+  - rec9W28HgpEUeUN8k
   - rec9ubQihAh6g9bft
   - recAAJoHMW45Lv5je
+  - recBGxVySx1pkrO1i
   - recBtVK8rBVtIlXDq
   - recD8oX1KevFbl7bL
   - recDDxpS9s8cwkqfq
   - recDytVnNYZe2HuUU
+  - recGFKDUd8qgz81Zl
+  - recGee5m84dg5FZkc
   - recINSFEYLCyyd08m
   - recIOlKBsOeEcgkA1
   - recLAgwx9vbgB5EHk
   - recNAiPUKOulQbKVP
   - recNFJjE5PPTqVJGv
+  - recOYsaYs6RmtlTDy
+  - recOkA2zsy4GSMD9R
+  - recOvqPKUtyy9ISA1
   glm-5-vs-claude-3-5-haiku-20241022:
   - rec06pnAkLOr2t2mp
+  - rec0VuKUjt1SZ7NYv
   - rec0wZvZgiz320KRs
+  - rec1zl5LvaatzGhFt
+  - rec260hNUCEj109Dj
   - rec2UlKqC6RFHdcro
+  - rec527dNeEtWJrYNl
+  - rec5rjeLsEq5Fg7Oj
+  - rec6sE2CRtD4drtHg
+  - rec8nshandHARTkrg
   - rec9GugrngvsQR99A
   - rec9ubQihAh6g9bft
   - recCJJOeBGERaHYax
+  - recDDxpS9s8cwkqfq
   - recDytVnNYZe2HuUU
+  - recE2ihVfqEK4R9d0
   - recGFKDUd8qgz81Zl
+  - recHVUd2DkoKfedJZ
   - recIIUynGGpsGEYuo
+  - recINGR1z01Fh1Z3A
   - recIj8lR4tuDgrHou
   - recJJcOHhFeSaRpl4
+  - recJpyGtGIsxulevT
   - recLB0EkQ54bYVhnd
   - recNFJjE5PPTqVJGv
+  - recOvqPKUtyy9ISA1
+  - recPSTGXK3P39yNYT
   - recPzW1WqRnPs57D6
+  - recRTiyaRymerDJ4y
   - recReg13iV2HwJTaA
   glm-5.1-vs-DeepSeek-R1-Distill-Llama-70B:
+  - rec1zl5LvaatzGhFt
+  - rec260hNUCEj109Dj
   - rec32C1ZEapBnCC0E
+  - rec4L69T0Y1AS4AFS
   - rec527dNeEtWJrYNl
   - rec5eA17Qr1ucNLUf
+  - rec7C06XOB2h298ue
+  - rec9GugrngvsQR99A
+  - rec9W28HgpEUeUN8k
+  - rec9ubQihAh6g9bft
   - recA1i5ZAh0Uzclxp
   - recBXlqrZUCR897It
   - recBtVK8rBVtIlXDq
+  - recD8oX1KevFbl7bL
   - recDytVnNYZe2HuUU
+  - recG1ljJQcVy6CbSl
   - recGFKDUd8qgz81Zl
+  - recHVUd2DkoKfedJZ
   - recI1ls9OXdxatHQn
   - recIIUynGGpsGEYuo
   - recIMcQfaQNa6vzsT
   - recJJcOHhFeSaRpl4
+  - recJZ3QEfRKjYw9a7
+  - recJpyGtGIsxulevT
+  - recKcjTwONILZqHAX
   - recKm6LNWykGapmCr
+  - recL9MFV5zmdlle5T
+  - recLB0EkQ54bYVhnd
   - recNuT2oSnO86bxOx
   - recOYsaYs6RmtlTDy
   glm-5.1-vs-claude-3-sonnet-20240229:
+  - rec0VuKUjt1SZ7NYv
   - rec1oj2DveQWl9Rpw
   - rec1zl5LvaatzGhFt
+  - rec47oNPXudlTIk4y
   - rec4UqStf9WUVif1f
   - rec5eA17Qr1ucNLUf
+  - rec6sE2CRtD4drtHg
+  - rec7C06XOB2h298ue
+  - rec8nshandHARTkrg
+  - rec9GugrngvsQR99A
   - recBGxVySx1pkrO1i
+  - recBhnXrUyTJ6WHIR
   - recG1ljJQcVy6CbSl
   - recGFKDUd8qgz81Zl
+  - recGFNRVl1qBZGwyU
+  - recGee5m84dg5FZkc
+  - recI1ls9OXdxatHQn
+  - recIIUynGGpsGEYuo
   - recIMcQfaQNa6vzsT
+  - recIOlKBsOeEcgkA1
   - recIj8lR4tuDgrHou
   - recIlghoOw5VbY4Zh
   - recJpyGtGIsxulevT
   - recK9F5aqdaybl8bb
+  - recKcjTwONILZqHAX
+  - recLAgwx9vbgB5EHk
   - recLB0EkQ54bYVhnd
+  - recMicVBcqy1xM1jq
   - recN4DY9Q5V03glmQ
   - recNFJjE5PPTqVJGv
   glm-5.1-vs-qwen2-72b-instruct:
@@ -874,66 +1549,128 @@ sample_ids:
   - rec0VuKUjt1SZ7NYv
   - rec0yTRmO1o1xCA6H
   - rec2UlKqC6RFHdcro
+  - rec2ZTsqazBZ3LTWZ
+  - rec4JrWy7Il8ho5vk
+  - rec4UqStf9WUVif1f
   - rec6sE2CRtD4drtHg
   - rec8nshandHARTkrg
+  - rec8y3ZrBOcLgNEkE
   - recBhnXrUyTJ6WHIR
+  - recBtVK8rBVtIlXDq
+  - recDDxpS9s8cwkqfq
+  - recGFKDUd8qgz81Zl
   - recGee5m84dg5FZkc
   - recHVUd2DkoKfedJZ
+  - recI1ls9OXdxatHQn
+  - recIIUynGGpsGEYuo
+  - recIMcQfaQNa6vzsT
   - recJZ3QEfRKjYw9a7
   - recJpyGtGIsxulevT
+  - recK9F5aqdaybl8bb
+  - recKcjTwONILZqHAX
+  - recKv4hFyNpViUXnL
   - recL9MFV5zmdlle5T
   - recLSzwBUS3olCjhl
+  - recMicVBcqy1xM1jq
+  - recNu3MXkvWUzHZr9
   - recOYsaYs6RmtlTDy
   - recOkA2zsy4GSMD9R
   kimi-k2.6-vs-claude-2.1:
   - rec06pnAkLOr2t2mp
+  - rec0wZvZgiz320KRs
+  - rec1zl5LvaatzGhFt
+  - rec260hNUCEj109Dj
   - rec2fsnzUuvNtUYK8
+  - rec47oNPXudlTIk4y
   - rec527dNeEtWJrYNl
+  - rec8y3ZrBOcLgNEkE
+  - rec9GugrngvsQR99A
+  - rec9W28HgpEUeUN8k
+  - rec9ubQihAh6g9bft
   - recAAJoHMW45Lv5je
+  - recCJJOeBGERaHYax
+  - recDDxpS9s8cwkqfq
+  - recDytVnNYZe2HuUU
   - recE2ihVfqEK4R9d0
   - recGFNRVl1qBZGwyU
+  - recGee5m84dg5FZkc
   - recIIUynGGpsGEYuo
+  - recIMcQfaQNa6vzsT
+  - recINGR1z01Fh1Z3A
   - recJJcOHhFeSaRpl4
   - recJpyGtGIsxulevT
   - recKcjTwONILZqHAX
   - recKm6LNWykGapmCr
   - recL9MFV5zmdlle5T
+  - recLSzwBUS3olCjhl
   - recNFJjE5PPTqVJGv
   - recNuT2oSnO86bxOx
   - recOvqPKUtyy9ISA1
   o1-preview-2024-09-12-vs-Llama-2-70b-chat-hf:
+  - rec0yTRmO1o1xCA6H
+  - rec260hNUCEj109Dj
+  - rec2UlKqC6RFHdcro
   - rec2ZTsqazBZ3LTWZ
+  - rec4JrWy7Il8ho5vk
+  - rec4L69T0Y1AS4AFS
   - rec4UqStf9WUVif1f
   - rec6sE2CRtD4drtHg
   - rec8y3ZrBOcLgNEkE
   - rec9ubQihAh6g9bft
   - recAAJoHMW45Lv5je
+  - recBhnXrUyTJ6WHIR
+  - recDj2Y2BbtV02Wv5
   - recE2ihVfqEK4R9d0
+  - recFaL6j8UMhutXrc
   - recGFKDUd8qgz81Zl
   - recIIUynGGpsGEYuo
   - recIOlKBsOeEcgkA1
+  - recIlghoOw5VbY4Zh
+  - recJZ3QEfRKjYw9a7
+  - recK9F5aqdaybl8bb
+  - recKcjTwONILZqHAX
   - recLAgwx9vbgB5EHk
+  - recNu3MXkvWUzHZr9
   - recNuT2oSnO86bxOx
+  - recPL4ZPpVYxgMu57
   - recPzW1WqRnPs57D6
+  - recRTiyaRymerDJ4y
   - recReg13iV2HwJTaA
   - recTs7qzfJs6kfLUK
   o1-preview-2024-09-12-vs-Yi-34B-Chat:
   - rec0wZvZgiz320KRs
   - rec2UlKqC6RFHdcro
+  - rec4JrWy7Il8ho5vk
+  - rec4UqStf9WUVif1f
   - rec5eA17Qr1ucNLUf
+  - rec7C06XOB2h298ue
   - rec7qmSnbud4FHSqL
+  - rec9ubQihAh6g9bft
+  - recBGxVySx1pkrO1i
+  - recD8oX1KevFbl7bL
   - recDDxpS9s8cwkqfq
+  - recDytVnNYZe2HuUU
+  - recE2ihVfqEK4R9d0
+  - recHVUd2DkoKfedJZ
+  - recINGR1z01Fh1Z3A
   - recJpyGtGIsxulevT
+  - recKm6LNWykGapmCr
+  - recKv4hFyNpViUXnL
+  - recNu3MXkvWUzHZr9
   - recO3hvCWRGiG0odN
   - recOYsaYs6RmtlTDy
+  - recPL4ZPpVYxgMu57
   - recPSTGXK3P39yNYT
   - recRTiyaRymerDJ4y
   - recRZjaElf8ft7xTq
+  - recRgabRzMaEoBRcM
   - recRhwQwHijW0gCLo
   - recSBcGLPatKb3Ygu
   - recTs7qzfJs6kfLUK
   - recWXwn9v4IG9ZrM6
   qwen3-max-2025-09-23-vs-claude-3-haiku-20240307:
+  - rec06pnAkLOr2t2mp
+  - rec1zl5LvaatzGhFt
   - rec2UlKqC6RFHdcro
   - rec4UqStf9WUVif1f
   - rec7C06XOB2h298ue
@@ -942,13 +1679,26 @@ sample_ids:
   - recD8oX1KevFbl7bL
   - recDj2Y2BbtV02Wv5
   - recDytVnNYZe2HuUU
+  - recE2ihVfqEK4R9d0
+  - recGFKDUd8qgz81Zl
   - recGee5m84dg5FZkc
+  - recHVUd2DkoKfedJZ
+  - recI1ls9OXdxatHQn
   - recIIUynGGpsGEYuo
+  - recINSFEYLCyyd08m
+  - recIlghoOw5VbY4Zh
+  - recJZ3QEfRKjYw9a7
   - recKm6LNWykGapmCr
+  - recL9MFV5zmdlle5T
   - recLAgwx9vbgB5EHk
+  - recLSzwBUS3olCjhl
+  - recNuT2oSnO86bxOx
   - recO3hvCWRGiG0odN
+  - recOYsaYs6RmtlTDy
+  - recOvqPKUtyy9ISA1
   - recPSTGXK3P39yNYT
   - recPzW1WqRnPs57D6
+  - recQ8oxSY2aCwFRS8
 truncate_fracs:
 - 0.5
 truncate_keep: first
