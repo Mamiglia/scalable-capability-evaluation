@@ -60,6 +60,55 @@ def test_extractor_accounts_for_truncated_prompt_instead_of_aborting_file(tmp_pa
     ]
 
 
+def test_extractor_names_file_and_duplicate_exclusions(tmp_path):
+    directory = tmp_path / "judge" / "a-vs-b"
+    directory.mkdir(parents=True)
+    headerless = directory / "01_headerless.eval"
+    with zipfile.ZipFile(headerless, "w") as archive:
+        archive.writestr("samples/ignored.json", "{}")
+    failed = directory / "02_failed.eval"
+    with zipfile.ZipFile(failed, "w") as archive:
+        archive.writestr("header.json", json.dumps({"status": "error"}))
+    duplicate = directory / "03_duplicate.eval"
+    sample = {
+        "id": "item_1", "uuid": "same", "target": 1,
+        "input": "Transcript 1:\n---\nleft\n---\nTranscript 2:\n---\nright\n---\nWhich of",
+        "scores": {"judge_scorer": {"answer": "1", "metadata": {}}},
+    }
+    with zipfile.ZipFile(duplicate, "w") as archive:
+        archive.writestr("header.json", json.dumps({
+            "status": "success",
+            "eval": {"eval_id": "eval", "metadata": {}, "model": "judge", "task": "gpqa"},
+        }))
+        archive.writestr("samples/one.json", json.dumps(sample))
+        archive.writestr("samples/two.json", json.dumps(sample))
+
+    attempts, accounting = extract_attempts(tmp_path)
+
+    assert len(attempts) == 1
+    assert accounting.loc["judge", [
+        "files_skipped_no_header", "files_skipped_not_success", "duplicate_attempts_skipped",
+    ]].tolist() == [1, 1, 1]
+    exclusions = {row["reason"]: row for row in attempts.attrs["exclusions"]}
+    assert exclusions == {
+        "missing_header": {
+            "source": "judgment", "source_log": str(headerless), "judge": "judge",
+            "model": "a|b", "item": None, "reason": "missing_header",
+            "missing_fields": [], "count": 1,
+        },
+        "non_success": {
+            "source": "judgment", "source_log": str(failed), "judge": "judge",
+            "model": "a|b", "item": None, "reason": "non_success",
+            "missing_fields": [], "count": 1,
+        },
+        "duplicate_attempt": {
+            "source": "judgment", "source_log": str(duplicate), "judge": "judge",
+            "model": "a|b", "item": "item", "reason": "duplicate_attempt",
+            "missing_fields": [], "count": 1,
+        },
+    }
+
+
 def test_mc_prepare_names_dropped_catalogue_metadata_identity(monkeypatch):
     rows = pd.DataFrame([
         {

@@ -134,10 +134,20 @@ def extract_attempts(
             with zipfile.ZipFile(path) as archive:
                 if "header.json" not in archive.namelist():
                     accounting[judge]["files_skipped_no_header"] += 1
+                    _exclude(
+                        exclusions, source="judgment", source_log=str(path), judge=judge,
+                        model="|".join(sorted((major, minor))), item=None,
+                        reason="missing_header", missing_fields=[],
+                    )
                     continue
                 header = json.loads(archive.read("header.json"))
                 if header.get("status") != "success":
                     accounting[judge]["files_skipped_not_success"] += 1
+                    _exclude(
+                        exclusions, source="judgment", source_log=str(path), judge=judge,
+                        model="|".join(sorted((major, minor))), item=None,
+                        reason="non_success", missing_fields=[],
+                    )
                     continue
                 eval_id = header["eval"].get("eval_id")
                 eval_metadata = header["eval"].get("metadata") or {}
@@ -147,11 +157,16 @@ def extract_attempts(
                     if not name.startswith("samples/") or not name.endswith(".json"):
                         continue
                     sample = json.loads(archive.read(name))
+                    item = str(sample.get("id", "")).rsplit("_", 1)[0]
                     sample_key = sample.get("uuid") or (eval_id, sample.get("id"), sample.get("epoch"))
                     if sample_key in seen_samples:
                         accounting[judge]["duplicate_attempts_skipped"] += 1
+                        _exclude(
+                            exclusions, source="judgment", source_log=str(path), judge=judge,
+                            model="|".join(sorted((major, minor))), item=item,
+                            reason="duplicate_attempt", missing_fields=[],
+                        )
                         continue
-                    item = str(sample.get("id", "")).rsplit("_", 1)[0]
                     answer, confidence = judge_answer(sample)
                     if answer is None:
                         accounting[judge]["attempts_skipped_invalid_answer"] += 1

@@ -124,9 +124,9 @@ def build_catalogue(
     capability_rows = _records(capabilities)
     override_rows = _records(overrides) if overrides is not None else []
     pool_by_name = defaultdict(list)
-    for record in pool:
+    for record_index, record in enumerate(pool):
         for key in {normalized_name(name) for name in _pool_names(record)}:
-            pool_by_name[key].append(record)
+            pool_by_name[key].append(record_index)
 
     model_ids = _canonical_models(canonical_models)
     by_name = {normalized_name(model_id): model_id for model_id in model_ids}
@@ -180,28 +180,29 @@ def build_catalogue(
             if len(matches) > 1:
                 raise ValueError(
                     f"model {model_id!r} matches multiple model-pool records for normalized key "
-                    f"{key!r}; set an explicit unique pool_name"
+                    f"{key!r}; choose a pool_name whose normalized key is unique"
                 )
             if matches:
-                metadata = matches[0]
+                metadata = pool[matches[0]]
             else:
                 metadata = None
         else:
             metadata = None
         if metadata is None:
+            matched_keys = []
+            matched_records = set()
             for name in metadata_names:
                 key = normalized_name(name)
                 matches = pool_by_name.get(key, [])
-                if len(matches) > 1:
-                    raise ValueError(
-                        f"model {model_id!r} matches multiple model-pool records for normalized key "
-                        f"{key!r}; set an explicit pool_name"
-                    )
-            metadata = next(
-                (pool_by_name[normalized_name(name)][0] for name in metadata_names
-                 if pool_by_name.get(normalized_name(name))),
-                {},
-            )
+                if matches and key not in matched_keys:
+                    matched_keys.append(key)
+                matched_records.update(matches)
+            if len(matched_records) > 1:
+                raise ValueError(
+                    f"model {model_id!r} matches multiple model-pool records via normalized keys "
+                    f"{', '.join(matched_keys)}; set an explicit pool_name"
+                )
+            metadata = pool[next(iter(matched_records))] if matched_records else {}
         capability = fitted.get(model_id, {})
         row = {column: pd.NA for column in CATALOGUE_COLUMNS}
         row.update({

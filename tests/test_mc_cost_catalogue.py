@@ -102,6 +102,26 @@ def test_catalogue_allows_duplicate_aliases_from_one_pool_record(tmp_path):
     assert build_catalogue(canonical, pool, capabilities).loc[0, "release"] == "2024-01-01"
 
 
+def test_catalogue_rejects_aliases_reaching_distinct_pool_records_without_pool_name(tmp_path):
+    canonical = tmp_path / "canonical.md"
+    canonical.write_text("- Canonical\n")
+    pool = tmp_path / "pool.json"
+    pool.write_text(json.dumps([
+        {"name": "Canonical", "release": "2024-01-01"},
+        {"name": "Alias", "release": "2025-01-01"},
+    ]))
+    capabilities = pd.DataFrame([{
+        "irt_model": "fixed_3pl", "fit": "gpqa", "model": "canonical", "theta": 0.0,
+    }])
+    override = {"model_id": "Canonical", "aliases": ["Alias"]}
+
+    with pytest.raises(ValueError, match=r"Canonical.*canonical.*alias.*pool_name"):
+        build_catalogue(canonical, pool, capabilities, [override])
+
+    got = build_catalogue(canonical, pool, capabilities, [{**override, "pool_name": "Alias"}])
+    assert got.loc[0, "release"] == "2025-01-01"
+
+
 def test_default_catalogue_resolves_observed_logs_and_has_explicit_eligible_pools():
     config = json.loads(Path("configs/mc_cost/default.json").read_text())
     paths = config["paths"]
