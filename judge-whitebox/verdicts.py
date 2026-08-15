@@ -27,14 +27,14 @@ def pick_device():
     return "cpu"
 
 
-def load_model(model_name, adapter, c):
+def load_model(model_name, adapter, c, dtype=torch.bfloat16):
     model_path = wbconfig.resolve_model(model_name, c)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.bfloat16)
+    model = AutoModelForCausalLM.from_pretrained(model_path, dtype=dtype)
     if adapter:
         from peft import PeftModel
         model = PeftModel.from_pretrained(model, adapter)

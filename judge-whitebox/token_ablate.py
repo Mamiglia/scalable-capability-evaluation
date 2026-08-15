@@ -204,11 +204,16 @@ def mean_ablate(model, holder, baseline="mean"):
         if baseline == "zero":
             hs[:, pos, :] = 0.0
         else:
+            # causal mean: replace each ablated position with the mean over KEPT positions strictly
+            # EARLIER than it. Meaning over all kept positions (incl. later) would inject
+            # future-token content into earlier positions and inflate later-span responsibility.
             keep = torch.ones(hs.shape[1], dtype=torch.bool, device=hs.device)
             keep[pos] = False
-            if not keep.any():
-                return output
-            hs[:, pos, :] = hs[:, keep, :].mean(dim=1, keepdim=True).to(hs.dtype)
+            kept_idx = keep.nonzero(as_tuple=True)[0]
+            for p in pos:  # kept positions are never in pos, so reads stay on original values
+                earlier = kept_idx[kept_idx < p]
+                if len(earlier):
+                    hs[:, p, :] = hs[:, earlier, :].mean(dim=1).to(hs.dtype)
         return (hs,) + tuple(output[1:]) if isinstance(output, tuple) else hs
 
     for layer in _decoder_layers(model):
@@ -259,7 +264,8 @@ def _metrics(df, single_order):
     if not single_order:
         return adapter_ablate.metrics(df)
     sgap = df["gap"].to_numpy() * np.where(df["label"].to_numpy() == 1, 1.0, -1.0)
-    return {"acc": (df["pick"] == df["label"]).mean(),
+    return {"order_even": float(df["gap"].mean()),  # single-order: the raw signed slot gap
+            "acc": (df["pick"] == df["label"]).mean(),
             "pos_term": 2 * (df["pick"] == 1).mean() - 1,
             "content_gap": float(sgap.mean()),
             "pick_weaker_acc": (df["pick"] == 3 - df["label"]).mean()}
@@ -276,7 +282,7 @@ def run_token_ablation(model, tokenizer, df, c, mode, baseline="mean", fine=Fals
     holder = _Holder()
     mm = lambda d: _metrics(d, single_order)  # noqa: E731 - metric closure reused per condition
     group_names = list(kept[0][1])
-    metric_keys = ["pos_term", "content_gap", "acc", "pick_weaker_acc"]
+    metric_keys = ["order_even", "content_gap", "pos_term", "acc", "pick_weaker_acc"]
 
     rows = []
     if mode == "ft":
@@ -320,11 +326,13 @@ def main():
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
+    # float32 so the causal interventions are exact: bf16 rounding otherwise leaves 'LoRA off'
+    # ~0.4 logit away from the true base, biasing every sufficiency/necessity by that offset.
     if args.mode == "ft":
         assert args.adapter, "--mode ft needs --adapter"
-        model, tokenizer, _ = adapter_ablate.load_unmerged(args.model, args.adapter, c)
+        model, tokenizer, _ = adapter_ablate.load_unmerged(args.model, args.adapter, c, dtype=torch.float32)
     else:
-        model, tokenizer, _ = verdicts.load_model(args.model, None, c)
+        model, tokenizer, _ = verdicts.load_model(args.model, None, c, dtype=torch.float32)
 
     df = wbpairs.load_pairs(c, split=c["verdicts"]["eval_split"], limit=args.limit)
     if args.order is not None:

@@ -17,16 +17,17 @@ import wbpairs
 import wbprompts
 
 
-def load_unmerged(model_name, adapter, c):
+def load_unmerged(model_name, adapter, c, dtype=torch.bfloat16):
     """Mirrors verdicts.load_model, but keeps the adapter attached as an unmerged PeftModel
-    (no merge_and_unload) and freezes all parameters."""
+    (no merge_and_unload) and freezes all parameters. dtype override lets a causal harness run in
+    float32 so the LoRA increment is exact (bf16 rounding makes 'LoRA off' != base by ~0.4 logit)."""
     model_path = wbconfig.resolve_model(model_name, c)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.bfloat16)
+    model = AutoModelForCausalLM.from_pretrained(model_path, dtype=dtype)
     model = PeftModel.from_pretrained(model, adapter)
     # toggle's "scaling=0 => base-only" identity assumes plain LoRA; DoRA also renormalises by a
     # learned magnitude that doesn't vanish when scaling goes to 0, so it would break the toggle.
