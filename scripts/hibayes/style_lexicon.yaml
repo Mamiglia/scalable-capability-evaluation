@@ -43,8 +43,9 @@ hedging: [perhaps, possibly, might, may, seems, appears to, likely, presumably, 
 # correction during RNA synthesis" - concentrated in four physics and biology
 # items. Exactly one hit is genuine backtracking ("**Correction:** Upon closer
 # inspection..."). No tightening survives that ratio on one true positive.
-# "wait" kept: all 40 hits read as genuine self-interruption ("Wait, let me
-# reconsider", "But wait - this doesn't match the options").
+# "wait" kept: 132 hits, of which 40 were read in context and all 40 are genuine
+# self-interruption ("Wait, let me reconsider", "But wait - this doesn't match
+# the options").
 # "actually" kept: roughly 17 of 134 hits are contrastive emphasis rather than
 # backtracking ("the ribosome actually will NOT terminate"), but they spread
 # evenly across physics, chemistry and biology items, so they add noise rather

@@ -29,6 +29,16 @@ PLOT_LABELS = {
 
 
 def _effect_table(model, predictors: Sequence[str]) -> pd.DataFrame:
+    # The posterior's predictor axis is unnamed, so every label below is assigned
+    # by position from this list. A different length already raises downstream,
+    # but a reordering would silently attach each judge's coefficients to the
+    # wrong feature, so compare against the list the model was actually built with.
+    fitted = model.model_config.extra_kwargs.get("predictors")
+    if fitted is not None and list(fitted) != list(predictors):
+        raise ValueError(
+            f"Communicator predictors {list(predictors)} do not match the fitted model's "
+            f"{list(fitted)}; every effect label would be wrong"
+        )
     posterior = model.inference_data.posterior
     judges = model.coords["judge"]
     conditions = model.coords["transcript_condition"]
