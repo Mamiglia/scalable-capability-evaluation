@@ -35,6 +35,14 @@ def has_success_log(directory: Path) -> bool:
     return False
 
 
+def validated_truncate_keep(config: dict) -> str:
+    """Read truncate_keep from config; only "first" or "last" is a valid value."""
+    keep = config.get("truncate_keep", "first")
+    if keep not in ("first", "last"):
+        raise ValueError(f"truncate_keep must be 'first' or 'last', got {keep!r}")
+    return keep
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", type=Path, required=True)
@@ -50,37 +58,53 @@ def main():
 
     cfg = yaml.safe_load(args.config.read_text())
     log_root = Path(args.log_root) if args.log_root else ROOT / cfg["log_root"]
-    pending = []
-    for major, minor in cfg["comparisons"]:
-        pair_dir = log_root / args.judge_short / f"{major}-vs-{minor}"
-        if has_success_log(pair_dir):
-            continue
-        base_ids = cfg["sample_ids"][f"{major}-vs-{minor}"]
-        if not base_ids:
-            continue  # empty id list must not fall through to "all samples"
-        if args.limit:
-            base_ids = base_ids[:args.limit]
-        # judge dataset ids are <item>_1 (normal) and <item>_2 (reversed)
-        sample_ids = [f"{i}_{t}" for i in base_ids for t in (1, 2)]
-        task = judge_task(
-            major_path=ROOT / cfg["transcripts"][major],
-            minor_path=ROOT / cfg["transcripts"][minor],
-            system_prompt=cfg["system_prompt"],
-            max_length=cfg["max_length"],
-            include_reasoning=cfg["include_reasoning"],
-            task_name=f"{cfg['condition']}_{args.judge_short}_{major}-vs-{minor}",
-            experiment_name=args.config.stem,
-        )
-        if cfg.get("invert_at_analysis"):
-            # the dataset template ends every prompt with "...more capable
-            # model?" regardless of system prompt; reword it for this condition
-            for s in task.dataset:
-                s.input = s.input.replace(
-                    "is from the more capable model? Answer",
-                    "is from the less capable model? Answer")
-        pending.append((major, minor, task, sample_ids, pair_dir))
+    # truncate_fracs: list of fractions, each a length-control run with both
+    # transcripts cut to that fraction of the shorter one (logs under
+    # trunc-<pct>/, or trunc-end-<pct>/ if truncate_keep: last).
+    fracs = cfg.get("truncate_fracs") or [None]
+    keep = validated_truncate_keep(cfg)
 
-    print(f"{len(pending)} pair-runs pending (of {len(cfg['comparisons'])})")
+    pending = []
+    for frac in fracs:
+        if frac is None:
+            root, suffix = log_root, ""
+        elif keep == "last":
+            root, suffix = log_root / f"trunc-end-{int(frac * 100)}", f"_tend{int(frac * 100)}"
+        else:
+            root, suffix = log_root / f"trunc-{int(frac * 100)}", f"_t{int(frac * 100)}"
+        for major, minor in cfg["comparisons"]:
+            pair_dir = root / args.judge_short / f"{major}-vs-{minor}"
+            if has_success_log(pair_dir):
+                continue
+            base_ids = cfg["sample_ids"][f"{major}-vs-{minor}"]
+            if not base_ids:
+                continue  # empty id list must not fall through to "all samples"
+            if args.limit:
+                base_ids = base_ids[:args.limit]
+            # judge dataset ids are <item>_1 (normal) and <item>_2 (reversed)
+            sample_ids = [f"{i}_{t}" for i in base_ids for t in (1, 2)]
+            task = judge_task(
+                major_path=ROOT / cfg["transcripts"][major],
+                minor_path=ROOT / cfg["transcripts"][minor],
+                system_prompt=cfg["system_prompt"],
+                max_length=cfg["max_length"],
+                include_reasoning=cfg["include_reasoning"],
+                truncate_frac=frac,
+                truncate_keep=keep,
+                task_name=f"{cfg['condition']}_{args.judge_short}_{major}-vs-{minor}{suffix}",
+                experiment_name=args.config.stem,
+            )
+            if cfg.get("invert_at_analysis"):
+                # the dataset template ends every prompt with "...more capable
+                # model?" regardless of system prompt; reword it for this condition
+                for s in task.dataset:
+                    s.input = s.input.replace(
+                        "is from the more capable model? Answer",
+                        "is from the less capable model? Answer")
+            pending.append((major, minor, task, sample_ids, pair_dir))
+
+    n_total = len(fracs) * len(cfg["comparisons"])
+    print(f"{len(pending)} pair-runs pending (of {n_total})")
     if args.dry_run:
         for major, minor, task, ids, _ in pending:
             print(f"  {major}-vs-{minor}: {len(ids)} samples")
