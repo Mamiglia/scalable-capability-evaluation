@@ -11,6 +11,7 @@ from dataset import (
     USER_PROMPT,
     Transcript,
     build_dataset,
+    has_reasoning,
     read_transcripts,
     responses_to_sample,
 )
@@ -93,6 +94,25 @@ class TestResponsesToSample:
                 transcript("Ans A", question="Question 1"),
                 transcript("Ans B", question="Question 2"),
             )
+
+
+class TestHasReasoning:
+    """Unit tests for has_reasoning in dataset.py."""
+
+    def test_answer_only_fails(self):
+        assert not has_reasoning("ANSWER: A", min_chars=10)
+
+    def test_reasoning_passes(self):
+        text = "First I considered X, then Y, then concluded Z.\nANSWER: A"
+        assert has_reasoning(text, min_chars=10)
+
+    def test_boundary_at_exactly_min_chars(self):
+        text = ("x" * 10) + "\nANSWER: A"
+        assert has_reasoning(text, min_chars=10)
+        assert not has_reasoning(text, min_chars=11)
+
+    def test_empty_string_fails(self):
+        assert not has_reasoning("", min_chars=10)
 
 
 class TestReadTranscripts:
