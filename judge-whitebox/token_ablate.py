@@ -51,7 +51,7 @@ def _marker_tokens(text, base, lexicon, offsets):
     return idx
 
 
-def token_groups(row, tokenizer, c, invert=False):
+def token_groups(row, tokenizer, c, invert=False, fine=False):
     """Map a rendered verdict prompt's tokens to interpretable groups.
 
     Structural groups (instr_format, slot_labels, question, transcript_1, transcript_2,
@@ -120,6 +120,13 @@ def token_groups(row, tokenizer, c, invert=False):
             | _marker_tokens(row["text_2"], start2, lexicon, offsets)
         groups[name] = sorted(idx)
 
+    if fine:  # split each transcript into a reasoning-setup head and a conclusion/answer tail
+        for tname in ("transcript_1", "transcript_2"):
+            idx = groups[tname]
+            half = len(idx) // 2
+            groups[f"{tname}_head"] = idx[:half]
+            groups[f"{tname}_tail"] = idx[half:]
+
     return groups
 
 
@@ -180,25 +187,27 @@ def _decoder_layers(model):
 
 
 @contextlib.contextmanager
-def mean_ablate(model, holder):
-    """BASE probe. Forward-hook on every decoder block replaces the residual at holder.positions
-    with the mean over the OTHER (kept) positions of that sequence, at every layer (on-manifold,
-    not zero). holder.positions set per row by the caller; None or empty = no-op. Batch-1."""
+def mean_ablate(model, holder, baseline="mean"):
+    """BASE probe. Forward-hook on every decoder block replaces the residual at holder.positions,
+    at every layer, with either the mean over the OTHER (kept) positions of that sequence
+    (baseline='mean', on-manifold) or zeros (baseline='zero', off-manifold). holder.positions set
+    per row by the caller; None or empty = no-op. Batch-1."""
     handles = []
 
     def hook(mod, inputs, output):
         if not holder.positions:
             return output
         hs = output[0] if isinstance(output, tuple) else output
-        seq = hs.shape[1]
         pos = list(holder.positions)
-        keep = torch.ones(seq, dtype=torch.bool, device=hs.device)
-        keep[pos] = False
-        if not keep.any():
-            return output
-        mean = hs[:, keep, :].mean(dim=1, keepdim=True)
         hs = hs.clone()
-        hs[:, pos, :] = mean.to(hs.dtype)
+        if baseline == "zero":
+            hs[:, pos, :] = 0.0
+        else:
+            keep = torch.ones(hs.shape[1], dtype=torch.bool, device=hs.device)
+            keep[pos] = False
+            if not keep.any():
+                return output
+            hs[:, pos, :] = hs[:, keep, :].mean(dim=1, keepdim=True).to(hs.dtype)
         return (hs,) + tuple(output[1:]) if isinstance(output, tuple) else hs
 
     for layer in _decoder_layers(model):
@@ -210,7 +219,7 @@ def mean_ablate(model, holder):
             h.remove()
 
 
-def _kept_rows(df, tokenizer, c):
+def _kept_rows(df, tokenizer, c, fine=False):
     """Rows whose rendered prompt is within max_input_tokens, with their token_groups and length."""
     max_tokens = c["verdicts"]["max_input_tokens"]
     kept, n_skipped = [], 0
@@ -220,7 +229,7 @@ def _kept_rows(df, tokenizer, c):
         if len(ids) > max_tokens:
             n_skipped += 1
             continue
-        kept.append((row, token_groups(row, tokenizer, c), len(ids)))
+        kept.append((row, token_groups(row, tokenizer, c, fine=fine), len(ids)))
     if n_skipped:
         print(f"skipped {n_skipped} rows over {max_tokens} tokens")
     return kept
@@ -242,12 +251,13 @@ def _verdicts(model, tokenizer, kept, holder, positions_fn):
     return pd.DataFrame(out, columns=["pair_uid", "order", "l1", "l2", "gap", "pick", "label"])
 
 
-def run_token_ablation(model, tokenizer, df, c, mode):
+def run_token_ablation(model, tokenizer, df, c, mode, baseline="mean", fine=False):
     """mode='ft': keep the LoRA only at each token-group (vs LoRA-nowhere=base and LoRA-everywhere
-    =full) -> sufficiency/necessity of each group's LoRA-write. mode='base': mean-ablate each
-    token-group (vs intact) -> the base verdict's dependence on each group. Returns a tidy df,
+    =full) -> sufficiency/necessity of each group's LoRA-write. mode='base': ablate each
+    token-group (vs intact) -> the base verdict's dependence on each group; `baseline` picks the
+    ablation value (mean|zero). `fine` adds transcript head/tail groups. Returns a tidy df,
     one row per (group, metric)."""
-    kept = _kept_rows(df, tokenizer, c)
+    kept = _kept_rows(df, tokenizer, c, fine=fine)
     assert kept, "no rows within max_input_tokens"
     holder = _Holder()
     group_names = list(kept[0][1])
@@ -269,7 +279,7 @@ def run_token_ablation(model, tokenizer, df, c, mode):
                                      sufficiency=only_m[mk] - none_m[mk],
                                      necessity=full_m[mk] - minus_m[mk]))
     else:
-        with mean_ablate(model, holder):
+        with mean_ablate(model, holder, baseline=baseline):
             intact_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder, lambda g, s: set()))
             for gn in group_names:
                 ablate_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder,
@@ -287,6 +297,9 @@ def main():
     p.add_argument("--adapter", default=None, help="required for --mode ft")
     p.add_argument("--mode", required=True, choices=["base", "ft"])
     p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--ablate-baseline", choices=["mean", "zero"], default="mean",
+                   help="base probe: mean (on-manifold) or zero (off-manifold) ablation value")
+    p.add_argument("--fine", action="store_true", help="add transcript head/tail groups")
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
@@ -297,7 +310,8 @@ def main():
         model, tokenizer, _ = verdicts.load_model(args.model, None, c)
 
     df = wbpairs.load_pairs(c, split=c["verdicts"]["eval_split"], limit=args.limit)
-    out = run_token_ablation(model, tokenizer, df, c, args.mode)
+    out = run_token_ablation(model, tokenizer, df, c, args.mode,
+                             baseline=args.ablate_baseline, fine=args.fine)
     path = pathlib.Path(args.out)
     path.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(path, index=False)

@@ -18,13 +18,16 @@ source wb_common.sh
 
 MNAME="${WB_MODEL:-Qwen3-8B}"
 MODE="${WB_MODE:?set WB_MODE=base|ft}"
+TAG="${WB_TAG:+_$WB_TAG}"   # pilot cells set WB_TAG so their outputs don't collide
 
 mkdir -p "$OUT/token_ablate"
-DEST="$OUT/token_ablate/token_ablate_${MNAME}_${MODE}.csv"
+DEST="$OUT/token_ablate/token_ablate_${MNAME}_${MODE}${TAG}.csv"
 
 ARGS=(--model "$MNAME" --mode "$MODE" --out "$DEST")
 if [ "$MODE" = "ft" ]; then ARGS+=(--adapter "${WB_ADAPTER:?set WB_ADAPTER for mode ft}"); fi
 [ -n "${WB_LIMIT:-}" ] && ARGS+=(--limit "$WB_LIMIT")
+[ -n "${WB_BASELINE:-}" ] && ARGS+=(--ablate-baseline "$WB_BASELINE")
+[ -n "${WB_FINE:-}" ] && ARGS+=(--fine)
 
 echo "=== token_ablate $MNAME $MODE $(date) ==="
 python token_ablate.py "${ARGS[@]}"
