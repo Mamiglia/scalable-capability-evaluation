@@ -798,7 +798,8 @@ def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path,
     assert payload["ranking_recovery"]
     automatic_configurations = {row["configuration"] for row in payload["automatic"]}
     assert {
-        row["configuration"] for row in payload["ranking_recovery"] if "J" in row
+        row["configuration"] for row in payload["ranking_recovery"]
+        if row["mode"] == "automatic"
     } == automatic_configurations
     identity = {
         key: payload["manual"][0][key]
@@ -813,7 +814,99 @@ def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path,
         "m1_reasoning_class": "non_reasoning",
         "m2_reasoning_class": "non_reasoning",
     }
+    assert payload["manual"][0]["manual_source"] == "configured"
+    assert payload["manual"][0]["resolved_configuration"]["manual"] == {
+        "identity": identity, "limit": 0, "source": "configured",
+    }
     assert payload["source_hashes"]["decision"]
+
+
+def test_dashboard_records_restore_manual_identity_after_real_summary_nulls():
+    identity = {
+        "judge": "j", "m1": "a", "m2": "b",
+        "judge_reasoning_class": "non_reasoning",
+        "m1_reasoning_class": "reasoning",
+        "m2_reasoning_class": "non_reasoning",
+    }
+    # Task 7's tidy summary retains every grouping column. Per-model rows
+    # therefore carry null comparison identities, which must not erase the
+    # exact manual scenario during dashboard serialization.
+    summary = pd.DataFrame([{
+        "configuration": "manual", "mode": "manual", "comparison_id": None,
+        "judge": None, "m1": None, "m2": None,
+        "model": "a", "reasoning_class": "reasoning", "role": "candidate",
+        "metric": "cost", "warning_state": "ok", "p5": 1.0, "p50": 2.0,
+        "p95": 3.0, "n_trials": 3, "exact": False, "value": None,
+    }])
+    catalogue = pd.DataFrame([
+        {"model_id": "j", "theta": 0.0, "reasoning_class": "non_reasoning",
+         "observed_judge": True, "observed_candidate": False},
+        {"model_id": "a", "theta": 1.0, "reasoning_class": "reasoning",
+         "observed_judge": False, "observed_candidate": True},
+        {"model_id": "b", "theta": -1.0, "reasoning_class": "non_reasoning",
+         "observed_judge": False, "observed_candidate": False},
+    ])
+    result = SimulationResult(pd.DataFrame(), summary, pd.DataFrame(columns=["code", "message"]))
+
+    rows, _ = cli._dashboard_records(result, identity, catalogue)
+
+    assert all({key: row[key] for key in cli._MANUAL_COLUMNS} == identity for row in rows)
+    assert rows[0]["row_prediction_status"] == "observed"
+    assert rows[0]["scenario_prediction_status"] == "predicted"
+    assert rows[0]["scenario_extrapolation"] is True
+
+
+def test_export_dashboard_applies_configured_pool_columns_and_keeps_resolved_metadata(
+    tmp_path, monkeypatch,
+):
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "strength_filters": [True], "manual_triple_limit": 0, "manual_triples": [],
+        "judge_pool_column": "custom_judges", "candidate_pool_column": "custom_candidates",
+    }
+    config, output, _ = pipeline_artifacts(tmp_path, dashboard=dashboard)
+    catalogue = pd.read_csv(output / "catalogue.csv")
+    catalogue["custom_judges"] = catalogue["model_id"].eq("b")
+    catalogue["custom_candidates"] = catalogue["model_id"].eq("a")
+    catalogue.to_csv(output / "catalogue.csv", index=False)
+    write_generation(output, "catalogue.manifest.json", CATALOGUE_FILES)
+    hashes = refresh_artifact_provenance(output)
+    write_valid_decision(output, hashes)
+    selected = []
+
+    def fake_simulate(comparisons, resolved, **kwargs):
+        selected.extend(comparisons(np.random.default_rng(0))["judge"].tolist())
+        return fake_result(resolved.configuration)
+
+    monkeypatch.setattr(cli, "simulate", fake_simulate)
+    target = tmp_path / "dashboard.json"
+
+    assert main([
+        "export-dashboard", "--config", str(config), "--out", str(target),
+        "--trials", "3", "--seed", "19",
+    ]) == 0
+
+    row = json.loads(target.read_text())["automatic"][0]
+    assert selected == ["b"]
+    assert row["judge_pool"] == "custom_judges"
+    assert row["anchor_pool"] == "custom_candidates"
+    assert row["resolved_configuration"] == {
+        "accuracy_target": "higher_theta",
+        "grid": {"J": 1, "M": 1, "N": 1, "attempted_items": 1},
+        "manual": {"identity": None, "limit": 0, "source": None},
+        "pools": {
+            "candidate_column": "custom_candidates",
+            "comparator": "all_released",
+            "judge_column": "custom_judges",
+        },
+        "presentations": 1,
+        "response_policy": "reuse_responses",
+        "seed": 19,
+        "selected_judges": [],
+        "strength_filter": True,
+        "trials": 3,
+    }
 
 
 def test_export_dashboard_samples_default_manual_bank_with_truncation_warning_deterministically(

@@ -354,6 +354,27 @@ def _reference_scores(values: Any) -> dict[str, float]:
     return result
 
 
+def fitted_ranking_components(pair_wins: Mapping[tuple[str, str], Sequence[float]]) -> list[dict[str, Any]]:
+    """Fit disconnected Bradley-Terry components with stable membership keys."""
+    output = []
+    graph_components = sorted(
+        components(pair_wins), key=lambda members: (-len(members), tuple(sorted(members))),
+    )
+    for members in graph_components:
+        ordered = tuple(sorted(members))
+        component_wins = {
+            pair: values for pair, values in pair_wins.items()
+            if pair[0] in members and pair[1] in members
+        }
+        output.append({
+            "component_models": "|".join(ordered),
+            "members": ordered,
+            "pair_wins": component_wins,
+            "strengths": fit_bt(component_wins),
+        })
+    return output
+
+
 def ranking_recovery(
     votes: pd.DataFrame,
     reference: pd.DataFrame,
@@ -382,26 +403,22 @@ def ranking_recovery(
     grouped = collect_pair_wins(votes.to_dict("records"), ["fit"])
     results, warning_rows = [], []
     for (fit_name,), pair_wins in sorted(grouped.items(), key=lambda entry: str(entry[0])):
-        graph_components = sorted(
-            components(pair_wins), key=lambda members: (-len(members), tuple(sorted(members))),
-        )
-        if len(graph_components) > 1:
+        fitted_components = fitted_ranking_components(pair_wins)
+        if len(fitted_components) > 1:
             membership = "; ".join(
-                f"{fit_name}:{index}=[{','.join(sorted(members))}]"
-                for index, members in enumerate(graph_components)
+                f"{fit_name}:{part['component_models']}"
+                for part in fitted_components
             )
             warning_rows.append({
                 "code": "disconnected_graph", "fit": fit_name,
                 "components": membership,
-                "message": f"ranking graph has {len(graph_components)} components: {membership}",
+                "message": f"ranking graph has {len(fitted_components)} components: {membership}",
             })
-        for index, members in enumerate(graph_components):
-            component_id = f"{fit_name}:{index}"
-            component_wins = {
-                pair: result for pair, result in pair_wins.items()
-                if pair[0] in members and pair[1] in members
-            }
-            strengths = fit_bt(component_wins)
+        for part in fitted_components:
+            members = set(part["members"])
+            component_wins = part["pair_wins"]
+            strengths = part["strengths"]
+            component_id = f"{fit_name}:{part['component_models']}"
             matched = sorted(set(strengths) & set(direct_scores))
             tau = (
                 float(kendalltau(
@@ -432,7 +449,7 @@ def ranking_recovery(
             )
             results.append({
                 "fit": fit_name, "component": component_id,
-                "component_models": "|".join(sorted(members)),
+                "component_models": part["component_models"],
                 "matched_models": "|".join(matched), "n_models": len(members),
                 "n_matched_models": len(matched),
                 "n_votes": int(sum(value[1] for value in component_wins.values())),

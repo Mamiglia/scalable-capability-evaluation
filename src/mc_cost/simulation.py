@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -17,13 +18,13 @@ from scipy.stats import kendalltau
 
 from mc_cost.data import RELEASE_EPOCH
 from mc_cost.model import FEATURE_COLUMNS, JudgmentData, PosteriorArtifact, left_logits
-from mc_cost.ranking import components, fit_bt
 from mc_cost.tokens import draw_token_usage, draw_transcript_lengths
-from mc_cost.validation import require_decision
+from mc_cost.validation import fitted_ranking_components, require_decision
 
 
 TRIAL_METRICS = (
     "usable_items", "judgment_calls", "candidate_calls", "choice_accuracy", "m1_wins",
+    "m1_theta", "m2_theta",
     "candidate_input_tokens", "candidate_output_tokens",
     "candidate_ordinary_output_tokens", "candidate_reasoning_tokens",
     "judge_input_tokens", "judge_output_tokens",
@@ -103,6 +104,10 @@ def _validate_json_value(value: Any, path: str) -> None:
     raise ValueError(f"dashboard {path} contains a non-JSON value")
 
 
+def _finite_number(value: Any) -> bool:
+    return isinstance(value, Real) and not isinstance(value, bool) and bool(np.isfinite(value))
+
+
 def validate_dashboard_payload(payload: Mapping[str, Any]) -> None:
     """Validate the complete static-dashboard boundary before publication."""
     if not isinstance(payload, Mapping) or set(payload) != set(_DASHBOARD_KEYS):
@@ -137,9 +142,26 @@ def validate_dashboard_payload(payload: Mapping[str, Any]) -> None:
             raise ValueError("dashboard manual reasoning classes must be reasoning or non_reasoning")
     for name in ("automatic", "manual", "scaling", "ranking_recovery"):
         for row in payload[name]:
-            present = [key in row for key in ("p5", "p50", "p95")]
-            if any(present) and not all(present):
+            if row.get("exact") is True:
+                if not _finite_number(row.get("value")):
+                    raise ValueError(f"dashboard {name} exact rows require a declared exact numeric value")
+                continue
+            if not all(key in row for key in ("p5", "p50", "p95")):
                 raise ValueError(f"dashboard {name} quantile rows require p5, p50, and p95")
+            quantiles = [row[key] for key in ("p5", "p50", "p95")]
+            if all(value is None for value in quantiles):
+                if (
+                    name != "ranking_recovery" or row.get("valid") is not False
+                    or row.get("metric") != "kendall_tau"
+                ):
+                    raise ValueError(
+                        "dashboard quantile rows may be all null only for unavailable ranking recovery"
+                    )
+                continue
+            if not all(_finite_number(value) for value in quantiles):
+                raise ValueError(f"dashboard {name} quantiles must be finite numeric values")
+            if not quantiles[0] <= quantiles[1] <= quantiles[2]:
+                raise ValueError(f"dashboard {name} quantiles must be ordered p5 <= p50 <= p95")
     _validate_json_value(dict(payload), "payload")
 
 
@@ -156,6 +178,7 @@ def dashboard_payload(
             and row.get("comparison_id") is None
         ) or (
             row.get("metric") == "cost" and row.get("model") == "__total__"
+            and row.get("role") == "all"
         )
     )
     payload = {
@@ -181,56 +204,55 @@ def dashboard_ranking_recovery(
     required = {"trial", "comparison_id", "m1", "m2", "metric", "value"}
     if missing := required - set(result.trials):
         raise ValueError(f"simulation trials lack ranking columns: {', '.join(sorted(missing))}")
-    if {"model_id", "theta"} - set(catalogue):
-        raise ValueError("catalogue requires model_id and theta for ranking recovery")
-    theta_values = pd.to_numeric(catalogue.set_index("model_id")["theta"], errors="coerce")
-    theta = {model: value for model, value in theta_values.items() if np.isfinite(value)}
+    if "model_id" not in catalogue:
+        raise ValueError("catalogue requires model_id for ranking recovery")
     comparison = result.trials.loc[
         result.trials["comparison_id"].notna()
-        & result.trials["metric"].isin(["judgment_calls", "m1_wins"]),
+        & result.trials["metric"].isin(["judgment_calls", "m1_wins", "m1_theta", "m2_theta"]),
         ["trial", "comparison_id", "m1", "m2", "metric", "value"],
     ]
-    calls = comparison.loc[comparison["metric"].eq("judgment_calls")].drop(columns="metric").rename(
-        columns={"value": "calls"},
-    )
-    wins = comparison.loc[comparison["metric"].eq("m1_wins")].drop(columns="metric").rename(
-        columns={"value": "m1_wins"},
-    )
-    joined = calls.merge(
-        wins, on=["trial", "comparison_id", "m1", "m2"], how="inner", validate="one_to_one",
-    )
     raw = []
     disconnected_trials = 0
     incomplete_reasons = set()
-    for trial, rows in joined.groupby("trial", sort=True):
+    incomplete_models = set()
+    for trial, trial_rows in comparison.groupby("trial", sort=True):
         pair_wins = defaultdict(lambda: [0.0, 0])
-        for row in rows.itertuples(index=False):
-            call_count = int(round(float(row.calls)))
-            m1_wins = int(round(float(row.m1_wins)))
+        theta: dict[str, float] = {}
+        for _, rows in trial_rows.groupby(["comparison_id", "m1", "m2"], sort=True, dropna=False):
+            values = rows.set_index("metric")["value"].to_dict()
+            m1, m2 = str(rows["m1"].iloc[0]), str(rows["m2"].iloc[0])
+            incomplete_models.update((m1, m2))
+            if not {"judgment_calls", "m1_wins", "m1_theta", "m2_theta"} <= set(values):
+                incomplete_reasons.add("trial comparison lacks generating theta or vote totals")
+                continue
+            numeric = [values[key] for key in ("judgment_calls", "m1_wins", "m1_theta", "m2_theta")]
+            if not all(_finite_number(value) for value in numeric):
+                incomplete_reasons.add("trial comparison has non-finite generating theta or vote totals")
+                continue
+            call_count = int(round(float(values["judgment_calls"])))
+            m1_wins = int(round(float(values["m1_wins"])))
             if call_count < 1:
                 incomplete_reasons.add("no usable judgment calls")
                 continue
-            if row.m1 == row.m2:
+            if m1 == m2:
                 incomplete_reasons.add("self comparison has no ranking edge")
                 continue
             if not 0 <= m1_wins <= call_count:
                 raise ValueError("simulation m1_wins must be between zero and judgment_calls")
-            if str(row.m1) < str(row.m2):
-                pair, first_wins = (str(row.m1), str(row.m2)), m1_wins
+            for model, value in ((m1, float(values["m1_theta"])), (m2, float(values["m2_theta"]))):
+                if model in theta and not np.isclose(theta[model], value):
+                    raise ValueError("simulation trial has inconsistent generating theta for a model")
+                theta[model] = value
+            if m1 < m2:
+                pair, first_wins = (m1, m2), m1_wins
             else:
-                pair, first_wins = (str(row.m2), str(row.m1)), call_count - m1_wins
+                pair, first_wins = (m2, m1), call_count - m1_wins
             pair_wins[pair][0] += first_wins
             pair_wins[pair][1] += call_count
-        graph_components = sorted(
-            components(pair_wins), key=lambda members: (-len(members), tuple(sorted(members))),
-        )
-        disconnected_trials += int(len(graph_components) > 1)
-        for component_index, members in enumerate(graph_components):
-            component_wins = {
-                pair: values for pair, values in pair_wins.items()
-                if pair[0] in members and pair[1] in members
-            }
-            strengths = fit_bt(component_wins)
+        fitted_components = fitted_ranking_components(pair_wins)
+        disconnected_trials += int(len(fitted_components) > 1)
+        for part in fitted_components:
+            strengths = part["strengths"]
             matched = sorted(set(strengths) & set(theta))
             tau = (
                 float(kendalltau(
@@ -240,37 +262,37 @@ def dashboard_ranking_recovery(
                 if len(matched) >= 2 else np.nan
             )
             raw.append({
-                "trial": int(trial), "component_index": component_index,
-                "component_models": "|".join(sorted(members)), "value": tau,
+                "trial": int(trial), "component_models": part["component_models"], "value": tau,
                 "valid": bool(np.isfinite(tau)),
-                "reason": "" if np.isfinite(tau) else "fewer than 2 matched models",
+                "reason": "" if np.isfinite(tau) else "fewer than 2 matched generating-theta models",
             })
     if not raw:
         reason = "; ".join(sorted(incomplete_reasons)) or "no per-comparison judgment calls"
         return ([{
-            **dict(context), "metric": "kendall_tau", "component_index": 0,
-            "component_models": "", "p5": None, "p50": None, "p95": None,
+            **dict(context), "metric": "kendall_tau",
+            "component_models": "|".join(sorted(incomplete_models)),
+            "p5": None, "p50": None, "p95": None,
             "n_trials": 0, "valid": False, "reason": reason,
-            "reference": "fitted_posterior", "recovery_type": "generating_theta_consistency",
-        }], [{
-            **dict(context), "code": "ranking_recovery_partial", "message": reason,
-        }])
+            "partial_reasons": sorted(incomplete_reasons) or [reason],
+            "reference": "trial_capability_draw", "recovery_type": "generating_theta_consistency",
+        }], [
+            {**dict(context), "code": "ranking_recovery_partial", "message": item}
+            for item in (sorted(incomplete_reasons) or [reason])
+        ])
 
     recovery = []
     frame = pd.DataFrame(raw)
-    for component_index, group in frame.groupby("component_index", sort=True):
+    for component_models, group in frame.groupby("component_models", sort=True):
         finite = group.loc[group["valid"], "value"]
-        models = sorted(set(group["component_models"]))
-        invalid = int((~group["valid"]).sum())
+        reasons = sorted(set(group.loc[group["reason"].ne(""), "reason"]) | incomplete_reasons)
         recovery.append({
-            **dict(context), "metric": "kendall_tau", "component_index": int(component_index),
-            "component_models": models[0] if len(models) == 1 else "varies by trial",
+            **dict(context), "metric": "kendall_tau", "component_models": component_models,
             "p5": float(finite.quantile(.05)) if len(finite) else None,
             "p50": float(finite.quantile(.5)) if len(finite) else None,
             "p95": float(finite.quantile(.95)) if len(finite) else None,
             "n_trials": int(group["trial"].nunique()), "valid": bool(len(finite)),
-            "reason": "" if not invalid else f"{invalid} trial-components unavailable",
-            "reference": "fitted_posterior", "recovery_type": "generating_theta_consistency",
+            "reason": "; ".join(reasons), "partial_reasons": reasons,
+            "reference": "trial_capability_draw", "recovery_type": "generating_theta_consistency",
         })
     warnings = []
     if disconnected_trials:
@@ -279,10 +301,9 @@ def dashboard_ranking_recovery(
             "message": f"ranking graph was disconnected in {disconnected_trials} trials; components were fit separately",
         })
     if incomplete_reasons:
-        warnings.append({
-            **dict(context), "code": "ranking_recovery_partial",
-            "message": "; ".join(sorted(incomplete_reasons)),
-        })
+        warnings.extend({
+            **dict(context), "code": "ranking_recovery_partial", "message": reason,
+        } for reason in sorted(incomplete_reasons))
     return recovery, warnings
 
 
@@ -906,6 +927,9 @@ def _trial_rows(
         add("judgment_calls", len(group), **context)
         add("choice_accuracy", accuracy, **context)
         add("m1_wins", int(group["chose_m1"].sum()), **context)
+        if not group.empty:
+            add("m1_theta", float(group["m1_theta"].iloc[0]), **context)
+            add("m2_theta", float(group["m2_theta"].iloc[0]), **context)
         add("ties", ties, **context)
         if config.mode == "manual":
             value = float(group["p_choose_m1"].mean()) if not group.empty else np.nan
@@ -936,6 +960,16 @@ def _trial_rows(
             "cost", record["cost"], model=record["model"], role=record["role"],
             reasoning_class=record["reasoning_class"],
             warning_state="missing_price" if record["model"] in missing_prices else "ok",
+        )
+    for role in ("candidate", "judge"):
+        role_costs = priced.loc[priced["role"].eq(role), "cost"] if not priced.empty else pd.Series(dtype=float)
+        role_cost = (
+            role_costs.sum() if len(role_costs) and not role_costs.isna().any()
+            else (0.0 if role_costs.empty else np.nan)
+        )
+        add(
+            "cost", role_cost, model="__total__", role=role,
+            warning_state="missing_price" if set(priced.loc[priced["role"].eq(role), "model"]) & missing_prices else "ok",
         )
     total_cost = priced["cost"].sum() if len(priced) and not priced["cost"].isna().any() else (0.0 if priced.empty else np.nan)
     add(

@@ -1,12 +1,15 @@
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 import pandas as pd
 
 from mc_cost.simulation import (
+    SimulationConfig,
     SimulationResult,
+    _trial_rows,
     dashboard_payload,
     dashboard_ranking_recovery,
     validate_dashboard_payload,
@@ -42,7 +45,7 @@ def test_dashboard_payload_requires_exact_versioned_schema():
         validate_dashboard_payload({**minimal_payload(), "formula": "browser-side"})
 
 
-def test_dashboard_payload_requires_six_field_manual_identity_and_finite_quantiles():
+def test_dashboard_payload_requires_six_field_manual_identity_and_ordered_finite_quantiles():
     row = {
         "mode": "manual", "metric": "p_choose_m1",
         "judge": "j", "m1": "a", "m2": "b",
@@ -59,6 +62,40 @@ def test_dashboard_payload_requires_six_field_manual_identity_and_finite_quantil
         }]))
     with pytest.raises(ValueError, match="finite"):
         validate_dashboard_payload(minimal_payload(manual=[{**row, "p95": float("inf")}]))
+
+    invalid_rows = [
+        ({key: value for key, value in row.items() if key != "p5"}, "p5, p50, and p95"),
+        ({**row, "p50": "0.5"}, "finite numeric"),
+        ({**row, "p5": float("nan")}, "finite numeric"),
+        ({**row, "p5": 0.7, "p50": 0.5}, "ordered"),
+    ]
+    for invalid, message in invalid_rows:
+        with pytest.raises(ValueError, match=message):
+            validate_dashboard_payload(minimal_payload(manual=[invalid]))
+
+
+def test_dashboard_payload_requires_numeric_exact_values_and_only_all_null_unavailable_ranking():
+    exact = {"metric": "judgment_call_upper_bound", "exact": True, "value": 12}
+    unavailable = {
+        "metric": "kendall_tau", "valid": False,
+        "p5": None, "p50": None, "p95": None,
+    }
+    validate_dashboard_payload(minimal_payload(automatic=[exact], ranking_recovery=[unavailable]))
+
+    for invalid in (
+        {"metric": "judgment_call_upper_bound", "exact": True},
+        {**exact, "value": "12"},
+        {**exact, "value": np.inf},
+    ):
+        with pytest.raises(ValueError, match="exact numeric value"):
+            validate_dashboard_payload(minimal_payload(automatic=[invalid]))
+    for invalid in (
+        {**unavailable, "p50": 0.0},
+        {**unavailable, "valid": True},
+        {**unavailable, "metric": "choice_accuracy"},
+    ):
+        with pytest.raises(ValueError, match="quantile"):
+            validate_dashboard_payload(minimal_payload(ranking_recovery=[invalid]))
 
 
 def test_dashboard_builder_sorts_every_row_array_and_derives_scaling_rows():
@@ -93,37 +130,83 @@ def test_dashboard_builder_sorts_every_row_array_and_derives_scaling_rows():
     assert {row["metric"] for row in payload["scaling"]} == {"choice_accuracy", "cost"}
 
 
-def test_dashboard_ranking_recovery_keeps_components_separate_and_summarizes_trials():
+def test_trial_rows_export_generating_theta_and_per_role_cost_totals():
+    comparisons = pd.DataFrame([{
+        "comparison_id": 0, "judge": "j", "m1": "a", "m2": "b",
+    }])
+    presented = pd.DataFrame([{
+        "comparison_id": 0, "chose_m1": 1, "m1_theta": 1.5, "m2_theta": -0.5,
+        "p_choose_m1": 0.8,
+    }])
+    usage = pd.DataFrame([
+        {"role": "candidate", "model": "a", "reasoning_class": "reasoning", "calls": 2,
+         "input_tokens": 3, "output_tokens": 4, "ordinary_output_tokens": 1, "reasoning_tokens": 3},
+        {"role": "judge", "model": "j", "reasoning_class": "non_reasoning", "calls": 1,
+         "input_tokens": 5, "output_tokens": 6, "ordinary_output_tokens": 6, "reasoning_tokens": 0},
+    ])
+    priced = usage.assign(cost=[0.25, 0.75])
+
+    rows = _trial_rows(
+        SimulationConfig(trials=1, attempted_items=1, mode="manual"),
+        0, comparisons, presented, usage, priced, set(),
+    )
+
+    metrics = {(row["metric"], row["model"], row["role"]): row["value"] for row in rows}
+    comparison_metrics = {
+        row["metric"]: row["value"] for row in rows
+        if not pd.isna(row["comparison_id"]) and row["comparison_id"] == 0
+    }
+    assert comparison_metrics["m1_theta"] == 1.5
+    assert comparison_metrics["m2_theta"] == -0.5
+    assert metrics[("cost", "__total__", "candidate")] == 0.25
+    assert metrics[("cost", "__total__", "judge")] == 0.75
+
+
+def ranking_rows(trial, comparison_id, m1, m2, wins, m1_theta, m2_theta, calls=10):
+    context = {
+        "trial": trial, "configuration": "grid", "mode": "automatic",
+        "comparison_id": comparison_id, "judge": "j", "m1": m1, "m2": m2,
+    }
+    return [
+        {**context, "metric": "judgment_calls", "value": calls},
+        {**context, "metric": "m1_wins", "value": wins},
+        {**context, "metric": "m1_theta", "value": m1_theta},
+        {**context, "metric": "m2_theta", "value": m2_theta},
+    ]
+
+
+def test_dashboard_ranking_recovery_uses_trial_theta_and_stable_component_membership():
     rows = []
-    for trial in (0, 1):
-        for comparison_id, (m1, m2) in enumerate((
-            ("a", "b"), ("c", "d"), ("a", "a"),
-        )):
-            context = {
-                "trial": trial, "configuration": "grid", "mode": "automatic",
-                "comparison_id": comparison_id, "judge": "j", "m1": m1, "m2": m2,
-            }
-            rows.extend([
-                {**context, "metric": "judgment_calls", "value": 10},
-                {**context, "metric": "m1_wins", "value": 8},
-                # Deliberately contradictory: ranking must use exact M1 wins,
-                # not reverse-engineer votes from a point-theta accuracy label.
-                {**context, "metric": "choice_accuracy", "value": 0.2},
-            ])
+    # The generating order reverses between trials. A static catalogue theta
+    # would report +1 for both; the exact trial theta yields median zero.
+    rows.extend(ranking_rows(0, 0, "a", "b", 8, 2.0, 1.0))
+    rows.extend(ranking_rows(1, 0, "a", "b", 8, 0.0, 1.0))
+    # Membership changes by trial and must never be merged by ordinal position.
+    rows.extend(ranking_rows(0, 1, "c", "d", 8, 2.0, 1.0))
+    rows.extend(ranking_rows(1, 1, "c", "e", 8, 2.0, 1.0))
+    # Both partial reasons must survive export, even beside valid components.
+    rows.extend(ranking_rows(0, 2, "a", "a", 8, 2.0, 2.0))
+    rows.extend(ranking_rows(1, 2, "b", "c", 0, 1.0, 0.0, calls=0))
     result = SimulationResult(pd.DataFrame(rows), pd.DataFrame(), pd.DataFrame())
     catalogue = pd.DataFrame({
-        "model_id": ["a", "b", "c", "d"], "theta": [4.0, 3.0, 2.0, 1.0],
+        "model_id": ["a", "b", "c", "d", "e"], "theta": [4.0, 3.0, 2.0, 1.0, 0.0],
     })
 
     recovery, warnings = dashboard_ranking_recovery(result, catalogue, {"J": 1})
 
-    assert len(recovery) == 2
-    assert {row["component_index"] for row in recovery} == {0, 1}
-    assert all(row["metric"] == "kendall_tau" and row["p50"] == 1.0 for row in recovery)
+    by_members = {row["component_models"]: row for row in recovery}
+    assert set(by_members) == {"a|b", "c|d", "c|e"}
+    assert by_members["a|b"]["p50"] == pytest.approx(0.0)
+    assert by_members["a|b"]["n_trials"] == 2
+    assert by_members["c|d"]["n_trials"] == by_members["c|e"]["n_trials"] == 1
+    assert {
+        reason for row in recovery for reason in row["partial_reasons"]
+    } >= {"self comparison has no ranking edge", "no usable judgment calls"}
     assert {row["code"] for row in warnings} == {"disconnected_graph", "ranking_recovery_partial"}
-    assert "self comparison" in next(
+    partial_messages = {
         row["message"] for row in warnings if row["code"] == "ranking_recovery_partial"
-    )
+    }
+    assert partial_messages == {"self comparison has no ranking edge", "no usable judgment calls"}
 
 
 def test_dashboard_markup_has_accessible_native_controls_and_local_plotly():
@@ -139,7 +222,8 @@ def test_dashboard_markup_has_accessible_native_controls_and_local_plotly():
     assert html.count("<label") >= 10
     assert 'src="plotly.min.js"' in html
     assert 'src="mc_cost.js"' in html
-    assert '<input id="judge-count" type="number"' in html
+    assert '<select id="judge-count"' in html
+    assert 'id="automatic-guidance"' in html
     assert '<table' in html
 
 
@@ -151,5 +235,9 @@ def test_dashboard_assets_keep_existing_viewer_separate_and_support_dark_mode():
     assert '<a href="mc_cost.html">Monte Carlo cost simulator</a>' in index
     assert 'fetch("data/mc_cost.json")' in script
     assert "Plotly.react" in script
+    assert "mc-cost export-dashboard --config configs/mc_cost/default.json" in script
+    assert "partial_reasons" in script
+    assert "<th>Candidate calls</th>" in (ROOT / "interactive_viewer/mc_cost.html").read_text()
+    assert "<th>Judge calls</th>" in (ROOT / "interactive_viewer/mc_cost.html").read_text()
     assert "@media (prefers-color-scheme: dark)" in styles
     assert "@media (max-width:" in styles

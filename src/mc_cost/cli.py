@@ -932,7 +932,7 @@ def _dashboard_manual_bank(
                 raise CliError(
                     "dashboard.manual_triples require reasoning-class overrides when catalogue defaults are missing"
                 )
-            explicit.append(identity)
+            explicit.append({**identity, "manual_source": "configured"})
 
     classes = catalogue.set_index("model_id")["reasoning_class"].to_dict()
     default_models = sorted(
@@ -948,6 +948,7 @@ def _dashboard_manual_bank(
         }
         for judge, m1, m2 in product(default_models, repeat=3)
     ]
+    defaults = [{**row, "manual_source": "deterministic_default_sample"} for row in defaults]
     key = lambda row: tuple(row[name] for name in _MANUAL_COLUMNS)
     explicit_by_key = {key(row): row for row in explicit}
     defaults_by_key = {key(row): row for row in defaults}
@@ -959,7 +960,10 @@ def _dashboard_manual_bank(
         sampled = candidates
     exported_by_key = {**explicit_by_key, **{key(row): row for row in sampled}}
     all_by_key = {**defaults_by_key, **explicit_by_key}
-    omitted = [all_by_key[name] for name in sorted(all_by_key.keys() - exported_by_key.keys())]
+    omitted = [
+        {column: all_by_key[name][column] for column in _MANUAL_COLUMNS}
+        for name in sorted(all_by_key.keys() - exported_by_key.keys())
+    ]
     warning = None
     if omitted:
         warning = {
@@ -975,17 +979,61 @@ def _dashboard_manual_bank(
 
 
 def _dashboard_context(
-    resolved: dict[str, Any], dashboard: dict[str, Any], *, require_stronger: bool,
+    resolved: dict[str, Any], dashboard: dict[str, Any], *, require_stronger: bool | None,
+    manual_identity: dict[str, str] | None = None, manual_source: str | None = None,
 ) -> dict[str, Any]:
-    return {
-        "configuration": _scenario_name(resolved), "mode": "automatic",
-        "J": int(resolved["judges"]), "M": int(resolved["anchors"]),
-        "N": int(resolved["comparators"]), "attempted_items": int(resolved["items"]),
-        "presentations": int(resolved["presentations"]), "strength_filter": require_stronger,
-        "judge_pool": str(dashboard.get("judge_pool_name", "Catalogue judge pool")),
-        "anchor_pool": str(dashboard.get("anchor_pool_name", "Catalogue candidate pool")),
-        "comparator_pool": str(dashboard.get("comparator_pool_name", "All released catalogue models")),
+    judge_pool = dashboard.get("judge_pool_column", "judge_pool")
+    candidate_pool = dashboard.get("candidate_pool_column", "candidate_pool")
+    j = int(resolved["judges"]) if "judges" in resolved else None
+    m = int(resolved["anchors"]) if "anchors" in resolved else None
+    n = int(resolved["comparators"]) if "comparators" in resolved else None
+    identity = dict(manual_identity) if manual_identity is not None else None
+    normalized = {
+        "trials": int(resolved["trials"]), "seed": int(resolved["seed"]),
+        "response_policy": "reuse_responses" if resolved["reuse_responses"] else "generate_responses",
+        "accuracy_target": str(resolved["accuracy_target"]),
+        "selected_judges": list(resolved.get("selected_judges", ())),
+        "strength_filter": require_stronger,
+        "grid": {"J": j, "M": m, "N": n, "attempted_items": int(resolved["items"])},
+        "presentations": int(resolved["presentations"]),
+        "manual": {
+            "limit": int(dashboard.get("manual_triple_limit", 0)),
+            "source": manual_source, "identity": identity,
+        },
+        "pools": {
+            "judge_column": judge_pool, "candidate_column": candidate_pool,
+            "comparator": "all_released",
+        },
     }
+    context = {
+        "configuration": _scenario_name(resolved), "mode": resolved["mode"],
+        "trials": normalized["trials"], "seed": normalized["seed"],
+        "response_policy": normalized["response_policy"],
+        "accuracy_target": normalized["accuracy_target"],
+        "selected_judges": normalized["selected_judges"],
+        "J": j, "M": m, "N": n, "attempted_items": int(resolved["items"]),
+        "presentations": normalized["presentations"], "strength_filter": require_stronger,
+        "judge_pool": judge_pool, "anchor_pool": candidate_pool,
+        "comparator_pool": "all_released", "manual_triple_limit": normalized["manual"]["limit"],
+        "manual_source": manual_source, "resolved_configuration": normalized,
+    }
+    if identity is not None:
+        context.update(identity)
+    return context
+
+
+def _dashboard_selection_catalogue(
+    catalogue: pd.DataFrame, dashboard: dict[str, Any],
+) -> pd.DataFrame:
+    result = catalogue.copy()
+    for target, setting in (
+        ("judge_pool", "judge_pool_column"), ("candidate_pool", "candidate_pool_column"),
+    ):
+        source = dashboard.get(setting, target)
+        if not isinstance(source, str) or not source or source not in result:
+            raise CliError(f"dashboard.{setting} must name a catalogue column")
+        result[target] = result[source]
+    return result
 
 
 def _dashboard_records(
@@ -996,35 +1044,91 @@ def _dashboard_records(
 
     def is_observed(model: str, role: str) -> bool:
         column = "observed_candidate" if role == "candidate" else "observed_judge"
-        return column in models and pool_enabled(models.at[model, column])
+        return model in models.index and column in models and pool_enabled(models.at[model, column])
+
+    def identity_observed(identity: dict[str, Any]) -> bool:
+        return all(
+            identity.get(role) in models.index
+            and is_observed(identity[role], "judge" if role == "judge" else "candidate")
+            and identity.get(f"{role}_reasoning_class") == models.at[identity[role], "reasoning_class"]
+            for role in ("judge", "m1", "m2")
+        )
+
+    manual_identity = (
+        {key: context.get(key) for key in _MANUAL_COLUMNS}
+        if all(isinstance(context.get(key), str) and context[key] for key in _MANUAL_COLUMNS)
+        else None
+    )
+    scenario_identities = []
+    if manual_identity is not None:
+        scenario_identities.append(manual_identity)
+    else:
+        seen = set()
+        for source in _records(result.summary):
+            identities = tuple(source.get(role) for role in ("judge", "m1", "m2"))
+            if any(identity is None for identity in identities) or identities in seen:
+                continue
+            seen.add(identities)
+            scenario_identities.append({
+                "judge": identities[0], "m1": identities[1], "m2": identities[2],
+                **{
+                    f"{role}_reasoning_class": (
+                        models.at[model, "reasoning_class"] if model in models.index else None
+                    )
+                    for role, model in zip(("judge", "m1", "m2"), identities)
+                },
+            })
+    scenario_observed = bool(scenario_identities) and all(map(identity_observed, scenario_identities))
+    scenario_status = "observed" if scenario_observed else "predicted"
+    support_warnings = [
+        row for row in _records(result.warnings)
+        if row.get("code") in {"missing_prediction_metadata", "out_of_support"}
+    ]
+    scenario_extrapolation = not scenario_observed or bool(support_warnings)
+    support_evidence = [
+        f"{identity['judge']}/{identity['judge_reasoning_class']} judge; "
+        f"{identity['m1']}/{identity['m1_reasoning_class']} and "
+        f"{identity['m2']}/{identity['m2_reasoning_class']} candidates: "
+        f"{'observed' if identity_observed(identity) else 'predicted'}"
+        for identity in scenario_identities
+    ] or ["no comparison-level support evidence was exported"]
+    support_evidence.extend(
+        f"{warning['code']}: {warning.get('message', '')}" for warning in support_warnings
+    )
 
     rows = []
     for row in _records(result.summary):
-        record = {**context, **row}
+        original = dict(row)
+        record = {**row, **context}
         if record.get("m1") in theta and record.get("m2") in theta:
             left, right = theta[record["m1"]], theta[record["m2"]]
             record["capability_gap"] = float(left - right) if np.isfinite([left, right]).all() else None
-        identities = [record.get(role) for role in ("judge", "m1", "m2")]
-        if all(identity in models.index for identity in identities):
+        original_identities = [original.get(role) for role in ("judge", "m1", "m2")]
+        if all(identity in models.index for identity in original_identities):
+            identity = manual_identity or {
+                "judge": original_identities[0], "m1": original_identities[1],
+                "m2": original_identities[2],
+                **{
+                    f"{role}_reasoning_class": models.at[model, "reasoning_class"]
+                    for role, model in zip(("judge", "m1", "m2"), original_identities)
+                },
+            }
+            observed = identity_observed(identity)
+        elif original.get("model") in models.index and original.get("role") in {"candidate", "judge"}:
             observed = (
-                is_observed(identities[0], "judge")
-                and all(is_observed(identity, "candidate") for identity in identities[1:])
-                and all(
-                    record.get(f"{role}_reasoning_class") == models.at[identity, "reasoning_class"]
-                    for role, identity in zip(("judge", "m1", "m2"), identities)
-                )
-            )
-        elif record.get("model") in models.index and record.get("role") in {"candidate", "judge"}:
-            observed = (
-                is_observed(record["model"], record["role"])
-                and record.get("reasoning_class") == models.at[record["model"], "reasoning_class"]
+                is_observed(original["model"], original["role"])
+                and original.get("reasoning_class") == models.at[original["model"], "reasoning_class"]
             )
         else:
-            observed = False
-        record["prediction_status"] = "observed" if observed else "predicted"
-        record["extrapolation"] = not observed
+            observed = scenario_observed
+        record["row_prediction_status"] = "observed" if observed else "predicted"
+        record["prediction_status"] = record["row_prediction_status"]
+        record["scenario_prediction_status"] = scenario_status
+        record["scenario_extrapolation"] = scenario_extrapolation
+        record["extrapolation"] = scenario_extrapolation
+        record["support_evidence"] = support_evidence
         rows.append(record)
-    warning_rows = [{**context, **row} for row in _records(result.warnings)]
+    warning_rows = [{**row, **context} for row in _records(result.warnings)]
     return rows, warning_rows
 
 
@@ -1034,6 +1138,7 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
     if not isinstance(dashboard, dict):
         raise CliError("configuration must contain a dashboard object")
     defaults = _simulation_defaults(config)
+    selection_catalogue = _dashboard_selection_catalogue(inputs["catalogue"], dashboard)
     trials = args.trials if args.trials is not None else int(defaults.get("trials", 1000))
     seed = args.seed if args.seed is not None else int(defaults.get("seed", 0))
     keys = (
@@ -1073,7 +1178,7 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
         )
         try:
             result = _call_simulation(
-                _comparison_source(resolved, defaults, inputs["catalogue"]), resolved, inputs,
+                _comparison_source(resolved, defaults, selection_catalogue), resolved, inputs,
             )
         except ValueError as error:
             message = str(error)
@@ -1091,12 +1196,14 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
         warnings.extend(recovery_warnings)
 
     manual_identities, truncation_warning = _dashboard_manual_bank(
-        inputs["catalogue"], dashboard.get("manual_triples", []), seed=seed,
+        selection_catalogue, dashboard.get("manual_triples", []), seed=seed,
         limit=dashboard.get("manual_triple_limit", 0),
     )
     if truncation_warning:
         warnings.append(truncation_warning)
-    for identity in manual_identities:
+    for exported_identity in manual_identities:
+        manual_source = exported_identity["manual_source"]
+        identity = {key: exported_identity[key] for key in _MANUAL_COLUMNS}
         resolved = {
             "mode": "manual", "trials": trials,
             "items": int(defaults.get("attempted_items")),
@@ -1105,11 +1212,15 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
             "accuracy_target": defaults.get("accuracy_target", "higher_theta"), "seed": seed,
             "manual_comparisons": [identity],
         }
-        comparisons = manual_comparisons(inputs["catalogue"], pd.DataFrame([identity]))
+        context = _dashboard_context(
+            resolved, dashboard, require_stronger=None,
+            manual_identity=identity, manual_source=manual_source,
+        )
+        comparisons = manual_comparisons(selection_catalogue, pd.DataFrame([identity]))
         result = _call_simulation(comparisons, resolved, inputs)
-        scenario_rows, warning_rows = _dashboard_records(result, identity, inputs["catalogue"])
+        scenario_rows, warning_rows = _dashboard_records(result, context, inputs["catalogue"])
         recovery_rows, recovery_warnings = dashboard_ranking_recovery(
-            result, inputs["catalogue"], identity,
+            result, inputs["catalogue"], context,
         )
         manual.extend(scenario_rows)
         ranking_rows.extend(recovery_rows)

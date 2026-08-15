@@ -12,6 +12,7 @@ from mc_cost.validation import (
     compare_downsamples,
     cross_validate_judgments,
     decision_payload,
+    fitted_ranking_components,
     posterior_predictive_replay,
     ranking_recovery,
     require_decision,
@@ -64,6 +65,17 @@ def test_ranking_recovery_returns_component_results_and_warning():
     assert isolated["reason"] == "reference model has no comparison edge"
     assert "disconnected_graph" in set(warnings["code"])
     assert "isolated_reference_model" in set(warnings["code"])
+
+
+def test_fitted_ranking_components_have_stable_membership_keys():
+    fitted = fitted_ranking_components({
+        ("c", "d"): [4, 5],
+        ("a", "b"): [3, 5],
+    })
+
+    assert [part["component_models"] for part in fitted] == ["a|b", "c|d"]
+    assert [part["members"] for part in fitted] == [("a", "b"), ("c", "d")]
+    assert all(set(part["strengths"]) == set(part["members"]) for part in fitted)
 
 
 def test_ranking_recovery_retains_reference_when_no_component_matches():

@@ -92,14 +92,20 @@ function catalogueModel(modelId) {
 }
 
 function resolvedManualRow(row) {
-  const result = {};
+  const identity = {};
+  const missingClasses = [];
   for (const role of ["judge", "m1", "m2"]) {
     const model = row.querySelector(`[data-role="${role}"]`).value;
     const override = row.querySelector(`[data-class="${role}"]`).value;
-    result[role] = model;
-    result[`${role}_reasoning_class`] = override || catalogueModel(model)?.reasoning_class || "";
+    const reasoningClass = override || catalogueModel(model)?.reasoning_class;
+    identity[role] = model;
+    if (reasoningClass === "reasoning" || reasoningClass === "non_reasoning") {
+      identity[`${role}_reasoning_class`] = reasoningClass;
+    } else {
+      missingClasses.push(role);
+    }
   }
-  return result;
+  return {identity: missingClasses.length ? null : identity, missingClasses};
 }
 
 function matchesIdentity(row, identity) {
@@ -108,16 +114,17 @@ function matchesIdentity(row, identity) {
 
 function selectedManualGroups() {
   return [...byId("manual-rows").rows].map((editorRow, index) => {
-    const identity = resolvedManualRow(editorRow);
-    return {index, identity, rows: state.data.manual.filter((row) => matchesIdentity(row, identity))};
+    const resolved = resolvedManualRow(editorRow);
+    const models = Object.fromEntries(["judge", "m1", "m2"].map((role) => [role, editorRow.querySelector(`[data-role="${role}"]`).value]));
+    return {
+      index, ...resolved, models,
+      rows: resolved.identity ? state.data.manual.filter((row) => matchesIdentity(row, resolved.identity)) : [],
+    };
   });
 }
 
 function populateAutomaticControls() {
-  const scenarios = [
-    ...state.data.automatic,
-    ...state.data.warnings.filter((row) => row.J !== null && row.J !== undefined),
-  ];
+  const scenarios = state.data.automatic;
   const mappings = [
     ["judge-pool", "judge_pool"], ["anchor-pool", "anchor_pool"], ["comparator-pool", "comparator_pool"],
   ];
@@ -127,21 +134,22 @@ function populateAutomaticControls() {
     unique(scenarios, key).forEach((value) => option(select, value));
   }
   for (const [id, key] of [["judge-count", "J"], ["anchor-count", "M"], ["comparator-count", "N"], ["attempted-items", "attempted_items"], ["presentations", "presentations"]]) {
-    const values = unique(scenarios, key).map(Number);
-    const input = byId(id);
-    input.value = values[0] ?? 1;
-    input.min = values[0] ?? 1;
-    input.max = values.at(-1) ?? 1;
+    const select = byId(id);
+    select.replaceChildren();
+    unique(scenarios, key).forEach((value) => option(select, value));
   }
+  const strength = byId("strength-filter");
+  strength.replaceChildren();
   const strengths = unique(scenarios, "strength_filter");
-  byId("strength-filter").value = String(strengths[0] ?? true);
+  strengths.forEach((value) => option(strength, value, value ? "Newer and stronger" : "Newer only"));
 }
 
-function classOptions(select, role) {
+function classOptions(select, role, hasDefault, current = "") {
   select.replaceChildren();
-  option(select, "", "Catalogue default");
+  option(select, "", hasDefault ? "Catalogue default" : "Override required");
   option(select, "reasoning", "Reasoning override");
   option(select, "non_reasoning", "Non-reasoning override");
+  select.value = current;
   select.setAttribute("aria-label", `${role.toUpperCase()} reasoning class`);
 }
 
@@ -154,11 +162,14 @@ function addManualRow(initial = null) {
     state.data.catalogue.forEach((model) => option(select, model.model_id, model.display_name || model.model_id));
     if (initial?.[role]) select.value = initial[role];
     const classes = row.querySelector(`[data-class="${role}"]`);
-    classOptions(classes, role);
     const defaultClass = catalogueModel(select.value)?.reasoning_class;
-    if (!defaultClass) classes.value = initial?.[`${role}_reasoning_class`] || "";
-    if (initial?.[`${role}_reasoning_class`] && initial[`${role}_reasoning_class`] !== defaultClass) classes.value = initial[`${role}_reasoning_class`];
-    select.addEventListener("change", render);
+    const initialClass = initial?.[`${role}_reasoning_class`];
+    classOptions(classes, role, Boolean(defaultClass), initialClass && initialClass !== defaultClass ? initialClass : "");
+    select.addEventListener("change", () => {
+      const current = classes.value;
+      classOptions(classes, role, Boolean(catalogueModel(select.value)?.reasoning_class), current);
+      render();
+    });
     classes.addEventListener("change", render);
   }
   row.querySelector(".remove-row").addEventListener("click", () => { row.remove(); render(); });
@@ -191,9 +202,7 @@ function renderSummary(rows, manualGroups) {
   if (byId("mode").value === "manual") {
     summary.append(summaryItem("Manual rows", {value: manualGroups.length}, true));
     summary.append(summaryItem("Exact forecasts found", {value: manualGroups.filter((group) => group.rows.length).length}, true));
-    const firstRows = manualGroups.find((group) => group.rows.length)?.rows || [];
-    summary.append(summaryItem("Calls per row", metric(firstRows, "judgment_calls", (row) => row.comparison_id !== null)));
-    summary.append(summaryItem("Cost per row", metric(firstRows, "cost", (row) => row.model === "__total__"), false, true));
+    summary.append(summaryItem("Rows needing an override or export", {value: manualGroups.filter((group) => !group.rows.length).length}, true));
     return;
   }
   summary.append(
@@ -205,17 +214,20 @@ function renderSummary(rows, manualGroups) {
   );
 }
 
-function renderBadges(rows) {
+function renderBadges(autoRows, manualGroups) {
   const badges = byId("badges");
   badges.replaceChildren();
-  const statuses = unique(rows, "prediction_status");
+  const scenarioRows = byId("mode").value === "automatic"
+    ? autoRows.slice(0, 1)
+    : manualGroups.flatMap((group) => group.rows.slice(0, 1));
+  const statuses = unique(scenarioRows, "scenario_prediction_status");
   for (const status of statuses.length ? statuses : ["predicted"]) {
     const badge = document.createElement("span");
     badge.className = `badge ${status === "observed" ? "good" : ""}`;
     badge.textContent = status === "observed" ? "Observed configuration" : "Posterior prediction";
     badges.append(badge);
   }
-  if (rows.some((row) => row.extrapolation)) {
+  if (scenarioRows.some((row) => row.scenario_extrapolation)) {
     const badge = document.createElement("span");
     badge.className = "badge warn";
     badge.textContent = "Extrapolation";
@@ -282,10 +294,19 @@ function renderManualResults(groups) {
   for (const group of groups) {
     const probability = metric(group.rows, "p_choose_m1", (row) => row.comparison_id !== null);
     const accuracy = metric(group.rows, "choice_accuracy", (row) => row.comparison_id !== null);
+    const candidateCalls = metric(group.rows, "candidate_calls", (item) => item.comparison_id === null);
+    const judgeCalls = metric(group.rows, "judgment_calls", (item) => item.comparison_id !== null);
+    const candidateCost = metric(group.rows, "cost", (item) => item.model === "__total__" && item.role === "candidate");
+    const judgeCost = metric(group.rows, "cost", (item) => item.model === "__total__" && item.role === "judge");
+    const totalCost = metric(group.rows, "cost", (item) => item.model === "__total__" && item.role === "all");
     const row = document.createElement("tr");
     const values = [
-      group.index + 1, `${group.identity.judge}: ${group.identity.m1} vs ${group.identity.m2}`,
-      interval(probability), interval(accuracy), group.rows.length ? (group.rows[0].prediction_status || "predicted") : "not exported",
+      group.index + 1, `${group.models.judge}: ${group.models.m1} vs ${group.models.m2}`,
+      interval(probability), interval(accuracy), interval(candidateCalls), interval(judgeCalls),
+      interval(candidateCost, true), interval(judgeCost, true), interval(totalCost, true),
+      group.missingClasses.length
+        ? `Override required: ${group.missingClasses.join(", ")}`
+        : group.rows.length ? (group.rows[0].scenario_prediction_status || "predicted") : "not exported",
     ];
     for (const value of values) { const cell = document.createElement("td"); cell.textContent = value; row.append(cell); }
     body.append(row);
@@ -297,18 +318,54 @@ function relevantRanking(autoRows, manualGroups) {
     const configurations = new Set(autoRows.map((row) => row.configuration));
     return state.data.ranking_recovery.filter((row) => configurations.has(row.configuration));
   }
-  const identities = manualGroups.map((group) => group.identity);
+  const identities = manualGroups.map((group) => group.identity).filter(Boolean);
   return state.data.ranking_recovery.filter((row) => identities.some((identity) => matchesIdentity(row, identity)));
+}
+
+function rankingScenarioKey(row) {
+  const scenario = row.mode === "manual"
+    ? identityKeys.map((key) => row[key])
+    : [row.configuration, ...autoKeys.map((key) => row[key])];
+  return JSON.stringify([...scenario, row.component_models]);
 }
 
 function renderRanking(rows) {
   const valid = rows.filter((row) => row.valid && row.metric === "kendall_tau");
-  bandPlot("ranking-plot", valid, "component_index", "Connected component", "Kendall τ");
+  if (!valid.length) {
+    emptyPlot("ranking-plot", "No available ranking recovery for this exact scenario.");
+  } else {
+    const grouped = new Map();
+    for (const row of valid) {
+      const key = rankingScenarioKey(row);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(row);
+    }
+    const traces = [];
+    for (const group of grouped.values()) {
+      const row = group[0];
+      const scenario = row.mode === "manual"
+        ? `${row.judge}: ${row.m1} vs ${row.m2}`
+        : `Grid ${String(row.configuration).slice(0, 8)}`;
+      traces.push({
+        x: [row.component_models, row.component_models, row.component_models],
+        y: [row.p5, row.p50, row.p95], mode: "markers",
+        marker: {size: [7, 11, 7], symbol: ["line-ew", "circle", "line-ew"]},
+        name: `${scenario} · ${row.component_models}`,
+        text: ["p5", "p50", "p95"],
+        hovertemplate: "%{text} %{y:.3f}<extra>%{fullData.name}</extra>",
+      });
+    }
+    const theme = plotTheme();
+    theme.showlegend = true;
+    theme.xaxis.title = "Stable connected-component membership";
+    theme.yaxis.title = "Kendall τ";
+    theme.yaxis.range = [-1, 1];
+    Plotly.react("ranking-plot", traces, theme, plotConfig);
+  }
   const list = byId("ranking-reasons");
   list.replaceChildren();
-  unique(rows.filter((row) => !row.valid), "reason").forEach((reason) => {
-    const item = document.createElement("li"); item.textContent = reason || "Partial ranking result"; list.append(item);
-  });
+  const reasons = [...new Set(rows.flatMap((row) => row.partial_reasons || (row.reason ? [row.reason] : [])))].filter(Boolean).sort();
+  reasons.forEach((reason) => { const item = document.createElement("li"); item.textContent = reason; list.append(item); });
 }
 
 function relevantWarnings(autoRows, manualGroups) {
@@ -316,7 +373,7 @@ function relevantWarnings(autoRows, manualGroups) {
   return state.data.warnings.filter((warning) => {
     if (warning.code === "manual_bank_truncated") return true;
     if (byId("mode").value === "automatic") return !warning.configuration || configurations.has(warning.configuration) || matchesAutomatic(warning, automaticSelection());
-    return !identityKeys.some((key) => key in warning) || manualGroups.some((group) => matchesIdentity(warning, group.identity));
+    return !identityKeys.some((key) => key in warning) || manualGroups.some((group) => group.identity && matchesIdentity(warning, group.identity));
   });
 }
 
@@ -335,11 +392,25 @@ function renderWarnings(warnings) {
 }
 
 function renderManualGuidance(groups) {
-  const missing = groups.filter((group) => !group.rows.length).map((group) => group.identity);
   const guidance = byId("manual-guidance");
-  guidance.hidden = !missing.length;
-  if (!missing.length) { guidance.textContent = ""; return; }
-  guidance.textContent = `No exact exported prediction exists for ${missing.length === 1 ? "this configuration" : "these configurations"}. Add ${JSON.stringify(missing.length === 1 ? missing[0] : missing)} to dashboard.manual_triples, then rerun mc-cost export-dashboard --config configs/mc_cost/default.json.`;
+  const invalid = groups.filter((group) => group.missingClasses.length);
+  const missing = groups.filter((group) => group.identity && !group.rows.length).map((group) => group.identity);
+  guidance.hidden = !invalid.length && !missing.length;
+  if (invalid.length) {
+    guidance.textContent = `Choose a reasoning-class override for every model without a catalogue default (rows ${invalid.map((group) => group.index + 1).join(", ")}). No scenario identity is produced until those overrides are valid.`;
+  } else if (missing.length) {
+    guidance.textContent = `No exact exported prediction exists for ${missing.length === 1 ? "this configuration" : "these configurations"}. Add ${JSON.stringify(missing.length === 1 ? missing[0] : missing)} to dashboard.manual_triples, then rerun mc-cost export-dashboard --config configs/mc_cost/default.json.`;
+  } else {
+    guidance.textContent = "";
+  }
+}
+
+function renderAutomaticGuidance(rows) {
+  const guidance = byId("automatic-guidance");
+  guidance.hidden = rows.length > 0;
+  guidance.textContent = rows.length
+    ? ""
+    : "This exact grid or pool selection is not in the export. Add it to the dashboard configuration, then rerun mc-cost export-dashboard --config configs/mc_cost/default.json.";
 }
 
 function render() {
@@ -349,9 +420,10 @@ function render() {
   byId("manual-controls").hidden = !manualMode;
   const autoRows = manualMode ? [] : exactAutomaticRows();
   const manualGroups = manualMode ? selectedManualGroups() : [];
+  renderAutomaticGuidance(autoRows);
   renderManualGuidance(manualGroups);
   renderSummary(autoRows, manualGroups);
-  renderBadges(manualMode ? manualGroups.flatMap((group) => group.rows) : autoRows);
+  renderBadges(autoRows, manualGroups);
   renderAccuracy(autoRows, manualGroups);
   renderScaling();
   renderTokens(autoRows, manualGroups);
