@@ -17,7 +17,7 @@ import yaml
 from inspect_ai.log import read_eval_log
 
 from analyze import ROOT, OUT_DIR, FIELDS, summarize
-from judge.util import extract_transcript
+from judge.util import extract_score, extract_transcript
 
 # ECIs per configs/comparisons/model_set.json (qwen3-32b from the epoch import)
 ECI = {"qwen3-8b": 127.9, "qwen3-32b": 130.0, "qwen3-vl-30b-a3b-instruct": 131.27,
@@ -36,9 +36,16 @@ MAX_LENGTH = 65536
 
 @functools.lru_cache(maxsize=None)
 def _lengths(log_path, include_reasoning):
+    """item -> length of its first correct epoch, the epoch the judge saw."""
     log = read_eval_log(str(ROOT / log_path))
-    return {s.id: len(extract_transcript(s, include_reasoning=include_reasoning)[:MAX_LENGTH])
-            for s in log.samples}
+    grouped = {}
+    for s in log.samples:
+        if extract_score(s):
+            grouped.setdefault(s.id, []).append(s)
+    for group in grouped.values():
+        group.sort(key=lambda s: getattr(s, "epoch", 0))
+    return {item_id: len(extract_transcript(group[0], include_reasoning=include_reasoning)[:MAX_LENGTH])
+            for item_id, group in grouped.items()}
 
 
 def success_samples(pair_dir):

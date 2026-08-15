@@ -22,7 +22,7 @@ from pathlib import Path
 import yaml
 from inspect_ai.log import read_eval_log
 
-from judge.util import extract_transcript
+from judge.util import extract_score, extract_transcript
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent.parent
@@ -41,9 +41,16 @@ def _load_config(bench, condition):
 
 @functools.lru_cache(maxsize=None)
 def _transcript_lengths(log_path, include_reasoning, max_length):
+    """item -> length of its first correct epoch, the epoch the judge saw."""
     log = read_eval_log(str(ROOT / log_path))
-    return {s.id: len(extract_transcript(s, include_reasoning=include_reasoning)[:max_length])
-            for s in log.samples}
+    grouped = {}
+    for s in log.samples:
+        if extract_score(s):
+            grouped.setdefault(s.id, []).append(s)
+    for group in grouped.values():
+        group.sort(key=lambda s: getattr(s, "epoch", 0))
+    return {item_id: len(extract_transcript(group[0], include_reasoning=include_reasoning)[:max_length])
+            for item_id, group in grouped.items()}
 
 
 def rows_from_pair_dir(pair_dir, bench, condition, judge, cfg):
