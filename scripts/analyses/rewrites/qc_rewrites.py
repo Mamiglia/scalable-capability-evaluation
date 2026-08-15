@@ -27,7 +27,8 @@ ORIGINALS = REWRITE_DIR / "originals.jsonl"
 EXCLUDED = REWRITE_DIR / "excluded.json"
 
 MIN_WORD_RATIO = 0.4
-MAX_WORD_RATIO = 1.05
+MAX_WORD_RATIO = 1.05  # slack for tokenisation noise when measuring against the original
+MAX_EXPANSION_RATIO = 1.0  # the instruction is compression only: never longer than the original
 
 # Minimal per-category style lexicon, counted as hits per 1000 words. A shared
 # style-feature module is owned elsewhere; this stands in until it exists.
@@ -121,7 +122,8 @@ def merge_exclusions(previous: dict, failures: list, rewriter: str) -> list[dict
     return [cells[k] for k in sorted(cells)]
 
 
-def check(original: dict, rewrite: str, min_ratio: float, max_ratio: float) -> str | None:
+def check(original: dict, rewrite: str, min_ratio: float, max_ratio: float,
+          max_expansion: float = MAX_EXPANSION_RATIO) -> str | None:
     """Reason this rewrite fails, or None."""
     if not rewrite.strip():
         return "empty"
@@ -130,6 +132,11 @@ def check(original: dict, rewrite: str, min_ratio: float, max_ratio: float) -> s
         # another transcript's content, so its answer cannot be trusted
         return f"delimiter_leak({DELIMITER_RE.search(rewrite).group(0)!r})"
     ratio = len(rewrite.split()) / max(original["n_words"], 1)
+    if ratio > max_expansion:
+        # Reported apart from a ratio miss: expansion is the direction that can mask a weak
+        # original, so these are excluded rather than retried - the rewriter already chose
+        # to expand this transcript once.
+        return f"expanded={ratio:.2f}"
     if not min_ratio <= ratio <= max_ratio:
         return f"word_ratio={ratio:.2f}"
     want = final_answer_line(original["transcript"])
@@ -143,7 +150,7 @@ def check(original: dict, rewrite: str, min_ratio: float, max_ratio: float) -> s
         return "answer_line_missing"
     if answer_value(got) == answer_value(want):
         return None  # same answer, only the wrapping differs
-    return f"answer_changed({answer_value(want)!r}->{answer_value(got)!r})"
+    return f"answer_changed({answer_value(want)[:40]!r}->{answer_value(got)[:40]!r})"
 
 
 def main() -> int:
@@ -151,6 +158,7 @@ def main() -> int:
     ap.add_argument("rewriter", choices=["haiku", "gpt"])
     ap.add_argument("--min-ratio", type=float, default=MIN_WORD_RATIO)
     ap.add_argument("--max-ratio", type=float, default=MAX_WORD_RATIO)
+    ap.add_argument("--max-expansion", type=float, default=MAX_EXPANSION_RATIO)
     ap.add_argument("--drop-failures", action="store_true",
                     help="rewrite the paraphrase file without failing rows, so a re-run redoes them")
     ap.add_argument("--write-exclusions", action="store_true",
@@ -166,7 +174,7 @@ def main() -> int:
     for row in rewrites:
         key = (row["model"], row["item_id"])
         orig = originals[key]
-        reason = check(orig, row["rewritten"], args.min_ratio, args.max_ratio)
+        reason = check(orig, row["rewritten"], args.min_ratio, args.max_ratio, args.max_expansion)
         if reason:
             failures.append((key, reason, len(row["rewritten"].split()) / max(orig["n_words"], 1)))
         else:
@@ -263,7 +271,12 @@ def main() -> int:
 def _self_check() -> None:
     orig = {"n_words": 10, "transcript": "Some reasoning here.\nANSWER: B"}
     assert check(orig, "a b c d e f g h\nANSWER: B", 0.4, 1.05) is None  # 10 words, ratio 1.0
-    assert check(orig, "a b c d e f g h i\nANSWER: B", 0.4, 1.05).startswith("word_ratio")  # 1.1
+    assert check(orig, "a b c d e f g h i\nANSWER: B", 0.4, 1.05).startswith("expanded")  # 1.1
+    # one word longer than the original is still expansion, even inside the 1.05 slack
+    assert check({"n_words": 100, "transcript": "x\nANSWER: B"},
+                 " ".join(["w"] * 101) + "\nANSWER: B", 0.4, 1.05).startswith("expanded")
+    assert check({"n_words": 100, "transcript": "x\nANSWER: B"},
+                 " ".join(["w"] * 98) + "\nANSWER: B", 0.4, 1.05) is None
     assert check(orig, "", 0.4, 1.05) == "empty"
     assert check(orig, "one\nANSWER: B", 0.4, 1.05).startswith("word_ratio")  # 0.3, under floor
     assert check(orig, "a b c d e f g h\nANSWER: C", 0.4, 1.05).startswith("answer_changed")
