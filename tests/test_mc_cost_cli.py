@@ -590,6 +590,7 @@ def test_real_judgment_callback_encodes_target_free_held_out_rows(monkeypatch):
 def fake_result(configuration="test"):
     trials = pd.DataFrame([{
         "trial": 0, "configuration": configuration, "mode": "automatic",
+        "comparison_id": None, "m1": None, "m2": None,
         "metric": "cost", "value": 1.0,
     }])
     summary = pd.DataFrame([{
@@ -762,6 +763,7 @@ def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path,
     dashboard = {
         "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
         "attempted_item_counts": [1], "presentation_counts": [1],
+        "strength_filters": [True, False], "manual_triple_limit": 0,
         "manual_triples": [{"judge": "j", "m1": "a", "m2": "b"}],
     }
     config, output, hashes = pipeline_artifacts(tmp_path, dashboard=dashboard)
@@ -784,25 +786,84 @@ def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path,
     ]) == 0
 
     payload = json.loads(target.read_text())
-    assert calls == ["automatic", "manual"]
-    assert {row["mode"] for row in payload["scenarios"]} == {"automatic", "manual"}
-    assert payload["source_hashes"]["decision"]
-    assert payload["config"] == {
-        "accuracy_target": "higher_theta",
-        "grid": {
-            "anchors": [1], "comparators": [1], "items": [1],
-            "judges": [1], "presentations": [1],
-        },
-        "manual": {
-            "items": 1, "presentations": 1,
-            "triples": [{"judge": "j", "m1": "a", "m2": "b"}],
-        },
-        "require_stronger": True,
-        "reuse_responses": True,
-        "seed": 19,
-        "selected_judges": [],
-        "trials": 3,
+    assert calls == ["automatic", "automatic", "manual"]
+    assert set(payload) == {
+        "schema_version", "generated_at", "source_hashes", "quantiles", "catalogue",
+        "automatic", "manual", "scaling", "ranking_recovery", "warnings",
     }
+    assert payload["generated_at"] == "2026-08-15T00:00:00Z"
+    assert {row["strength_filter"] for row in payload["automatic"]} == {True, False}
+    assert {row["mode"] for row in payload["automatic"]} == {"automatic"}
+    assert {row["mode"] for row in payload["manual"]} == {"manual"}
+    assert payload["ranking_recovery"]
+    automatic_configurations = {row["configuration"] for row in payload["automatic"]}
+    assert {
+        row["configuration"] for row in payload["ranking_recovery"] if "J" in row
+    } == automatic_configurations
+    identity = {
+        key: payload["manual"][0][key]
+        for key in (
+            "judge", "m1", "m2", "judge_reasoning_class",
+            "m1_reasoning_class", "m2_reasoning_class",
+        )
+    }
+    assert identity == {
+        "judge": "j", "m1": "a", "m2": "b",
+        "judge_reasoning_class": "non_reasoning",
+        "m1_reasoning_class": "non_reasoning",
+        "m2_reasoning_class": "non_reasoning",
+    }
+    assert payload["source_hashes"]["decision"]
+
+
+def test_export_dashboard_samples_default_manual_bank_with_truncation_warning_deterministically(
+    tmp_path, monkeypatch,
+):
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "manual_triples": [{
+            "judge": "j", "m1": "a", "m2": "b", "m1_reasoning_class": "reasoning",
+        }],
+        "manual_triple_limit": 1,
+    }
+    config, output, hashes = pipeline_artifacts(tmp_path, dashboard=dashboard)
+    write_valid_decision(output, hashes)
+    calls = []
+
+    def fake_simulate(comparisons, resolved, **kwargs):
+        calls.append(resolved.mode)
+        result = fake_result(resolved.configuration)
+        return SimulationResult(
+            result.trials.assign(mode=resolved.mode), result.summary.assign(mode=resolved.mode), result.warnings,
+        )
+
+    monkeypatch.setattr(cli, "simulate", fake_simulate)
+    target = tmp_path / "dashboard.json"
+    command = [
+        "export-dashboard", "--config", str(config), "--out", str(target),
+        "--trials", "3", "--seed", "19",
+    ]
+
+    assert main(command) == 0
+    first = target.read_bytes()
+    assert main(command) == 0
+    assert target.read_bytes() == first
+
+    payload = json.loads(first)
+    identities = {
+        tuple(row[key] for key in cli._MANUAL_COLUMNS)
+        for row in payload["manual"]
+    }
+    assert len(identities) == 2
+    assert (
+        "j", "a", "b", "non_reasoning", "reasoning", "non_reasoning",
+    ) in identities
+    warning = next(row for row in payload["warnings"] if row["code"] == "manual_bank_truncated")
+    assert warning["total_count"] == 28
+    assert warning["exported_count"] == 2
+    assert warning["omitted_count"] == len(warning["omitted_identities"]) == 26
+    assert calls == ["automatic", "manual", "manual"] * 2
 
 
 def test_project_registers_mc_cost_entry_point():

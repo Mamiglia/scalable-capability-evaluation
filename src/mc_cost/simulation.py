@@ -2,23 +2,28 @@
 
 from __future__ import annotations
 
+import json
+from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from scipy.special import expit
+from scipy.stats import kendalltau
 
 from mc_cost.data import RELEASE_EPOCH
 from mc_cost.model import FEATURE_COLUMNS, JudgmentData, PosteriorArtifact, left_logits
+from mc_cost.ranking import components, fit_bt
 from mc_cost.tokens import draw_token_usage, draw_transcript_lengths
 from mc_cost.validation import require_decision
 
 
 TRIAL_METRICS = (
-    "usable_items", "judgment_calls", "candidate_calls", "choice_accuracy",
+    "usable_items", "judgment_calls", "candidate_calls", "choice_accuracy", "m1_wins",
     "candidate_input_tokens", "candidate_output_tokens",
     "candidate_ordinary_output_tokens", "candidate_reasoning_tokens",
     "judge_input_tokens", "judge_output_tokens",
@@ -29,6 +34,16 @@ _TRIAL_COLUMNS = [
     "model", "reasoning_class", "role", "metric", "value", "warning_state",
 ]
 _WARNING_COLUMNS = ["code", "trial", "row", "source_row", "model", "message"]
+_DASHBOARD_KEYS = (
+    "schema_version", "generated_at", "source_hashes", "quantiles", "catalogue",
+    "automatic", "manual", "scaling", "ranking_recovery", "warnings",
+)
+_DASHBOARD_ARRAYS = (
+    "catalogue", "automatic", "manual", "scaling", "ranking_recovery", "warnings",
+)
+_MANUAL_IDENTITY = (
+    "judge", "m1", "m2", "judge_reasoning_class", "m1_reasoning_class", "m2_reasoning_class",
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +76,214 @@ class SimulationResult:
     trials: pd.DataFrame
     summary: pd.DataFrame
     warnings: pd.DataFrame
+
+
+def _dashboard_sort(rows) -> list[dict[str, Any]]:
+    records = [dict(row) for row in rows]
+    return sorted(records, key=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")))
+
+
+def _validate_json_value(value: Any, path: str) -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not np.isfinite(value):
+            raise ValueError(f"dashboard {path} must contain only finite numbers or null")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_json_value(item, f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError(f"dashboard {path} object keys must be strings")
+        for key, item in value.items():
+            _validate_json_value(item, f"{path}.{key}")
+        return
+    raise ValueError(f"dashboard {path} contains a non-JSON value")
+
+
+def validate_dashboard_payload(payload: Mapping[str, Any]) -> None:
+    """Validate the complete static-dashboard boundary before publication."""
+    if not isinstance(payload, Mapping) or set(payload) != set(_DASHBOARD_KEYS):
+        raise ValueError(f"dashboard schema fields must be exactly: {', '.join(_DASHBOARD_KEYS)}")
+    if payload["schema_version"] != 1:
+        raise ValueError("dashboard schema_version must be 1")
+    try:
+        generated_at = datetime.fromisoformat(str(payload["generated_at"]).replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("dashboard generated_at must be an ISO-8601 UTC timestamp") from None
+    if generated_at.tzinfo is None or generated_at.utcoffset() != timezone.utc.utcoffset(generated_at):
+        raise ValueError("dashboard generated_at must be an ISO-8601 UTC timestamp")
+    hashes = payload["source_hashes"]
+    if not isinstance(hashes, Mapping) or any(
+        not isinstance(key, str) or not isinstance(value, str) or not value
+        for key, value in hashes.items()
+    ):
+        raise ValueError("dashboard source_hashes must map names to nonempty hashes")
+    if payload["quantiles"] != [0.05, 0.5, 0.95]:
+        raise ValueError("dashboard quantiles must be [0.05, 0.5, 0.95]")
+
+    for name in _DASHBOARD_ARRAYS:
+        rows = payload[name]
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValueError(f"dashboard {name} must be a list of objects")
+        if rows != _dashboard_sort(rows):
+            raise ValueError(f"dashboard {name} rows must be sorted")
+    for row in payload["manual"]:
+        if any(not isinstance(row.get(key), str) or not row[key] for key in _MANUAL_IDENTITY):
+            raise ValueError("dashboard manual rows require an exact six-field scenario identity")
+        if any(row[key] not in {"reasoning", "non_reasoning"} for key in _MANUAL_IDENTITY[3:]):
+            raise ValueError("dashboard manual reasoning classes must be reasoning or non_reasoning")
+    for name in ("automatic", "manual", "scaling", "ranking_recovery"):
+        for row in payload[name]:
+            present = [key in row for key in ("p5", "p50", "p95")]
+            if any(present) and not all(present):
+                raise ValueError(f"dashboard {name} quantile rows require p5, p50, and p95")
+    _validate_json_value(dict(payload), "payload")
+
+
+def dashboard_payload(
+    *, generated_at: str, source_hashes: Mapping[str, str], catalogue,
+    automatic, manual, ranking_recovery, warnings,
+) -> dict[str, Any]:
+    """Build one canonical, formula-free payload for the static viewer."""
+    automatic_rows = _dashboard_sort(automatic)
+    scaling_rows = _dashboard_sort(
+        row for row in automatic_rows
+        if (
+            row.get("metric") in {"choice_accuracy", "judgment_calls", "usable_items"}
+            and row.get("comparison_id") is None
+        ) or (
+            row.get("metric") == "cost" and row.get("model") == "__total__"
+        )
+    )
+    payload = {
+        "schema_version": 1,
+        "generated_at": generated_at,
+        "source_hashes": dict(sorted(source_hashes.items())),
+        "quantiles": [0.05, 0.5, 0.95],
+        "catalogue": _dashboard_sort(catalogue),
+        "automatic": automatic_rows,
+        "manual": _dashboard_sort(manual),
+        "scaling": scaling_rows,
+        "ranking_recovery": _dashboard_sort(ranking_recovery),
+        "warnings": _dashboard_sort(warnings),
+    }
+    validate_dashboard_payload(payload)
+    return payload
+
+
+def dashboard_ranking_recovery(
+    result: SimulationResult, catalogue: pd.DataFrame, context: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Summarize component-local Bradley-Terry recovery from exact trial aggregates."""
+    required = {"trial", "comparison_id", "m1", "m2", "metric", "value"}
+    if missing := required - set(result.trials):
+        raise ValueError(f"simulation trials lack ranking columns: {', '.join(sorted(missing))}")
+    if {"model_id", "theta"} - set(catalogue):
+        raise ValueError("catalogue requires model_id and theta for ranking recovery")
+    theta_values = pd.to_numeric(catalogue.set_index("model_id")["theta"], errors="coerce")
+    theta = {model: value for model, value in theta_values.items() if np.isfinite(value)}
+    comparison = result.trials.loc[
+        result.trials["comparison_id"].notna()
+        & result.trials["metric"].isin(["judgment_calls", "m1_wins"]),
+        ["trial", "comparison_id", "m1", "m2", "metric", "value"],
+    ]
+    calls = comparison.loc[comparison["metric"].eq("judgment_calls")].drop(columns="metric").rename(
+        columns={"value": "calls"},
+    )
+    wins = comparison.loc[comparison["metric"].eq("m1_wins")].drop(columns="metric").rename(
+        columns={"value": "m1_wins"},
+    )
+    joined = calls.merge(
+        wins, on=["trial", "comparison_id", "m1", "m2"], how="inner", validate="one_to_one",
+    )
+    raw = []
+    disconnected_trials = 0
+    incomplete_reasons = set()
+    for trial, rows in joined.groupby("trial", sort=True):
+        pair_wins = defaultdict(lambda: [0.0, 0])
+        for row in rows.itertuples(index=False):
+            call_count = int(round(float(row.calls)))
+            m1_wins = int(round(float(row.m1_wins)))
+            if call_count < 1:
+                incomplete_reasons.add("no usable judgment calls")
+                continue
+            if row.m1 == row.m2:
+                incomplete_reasons.add("self comparison has no ranking edge")
+                continue
+            if not 0 <= m1_wins <= call_count:
+                raise ValueError("simulation m1_wins must be between zero and judgment_calls")
+            if str(row.m1) < str(row.m2):
+                pair, first_wins = (str(row.m1), str(row.m2)), m1_wins
+            else:
+                pair, first_wins = (str(row.m2), str(row.m1)), call_count - m1_wins
+            pair_wins[pair][0] += first_wins
+            pair_wins[pair][1] += call_count
+        graph_components = sorted(
+            components(pair_wins), key=lambda members: (-len(members), tuple(sorted(members))),
+        )
+        disconnected_trials += int(len(graph_components) > 1)
+        for component_index, members in enumerate(graph_components):
+            component_wins = {
+                pair: values for pair, values in pair_wins.items()
+                if pair[0] in members and pair[1] in members
+            }
+            strengths = fit_bt(component_wins)
+            matched = sorted(set(strengths) & set(theta))
+            tau = (
+                float(kendalltau(
+                    [strengths[model] for model in matched],
+                    [theta[model] for model in matched],
+                ).statistic)
+                if len(matched) >= 2 else np.nan
+            )
+            raw.append({
+                "trial": int(trial), "component_index": component_index,
+                "component_models": "|".join(sorted(members)), "value": tau,
+                "valid": bool(np.isfinite(tau)),
+                "reason": "" if np.isfinite(tau) else "fewer than 2 matched models",
+            })
+    if not raw:
+        reason = "; ".join(sorted(incomplete_reasons)) or "no per-comparison judgment calls"
+        return ([{
+            **dict(context), "metric": "kendall_tau", "component_index": 0,
+            "component_models": "", "p5": None, "p50": None, "p95": None,
+            "n_trials": 0, "valid": False, "reason": reason,
+            "reference": "fitted_posterior", "recovery_type": "generating_theta_consistency",
+        }], [{
+            **dict(context), "code": "ranking_recovery_partial", "message": reason,
+        }])
+
+    recovery = []
+    frame = pd.DataFrame(raw)
+    for component_index, group in frame.groupby("component_index", sort=True):
+        finite = group.loc[group["valid"], "value"]
+        models = sorted(set(group["component_models"]))
+        invalid = int((~group["valid"]).sum())
+        recovery.append({
+            **dict(context), "metric": "kendall_tau", "component_index": int(component_index),
+            "component_models": models[0] if len(models) == 1 else "varies by trial",
+            "p5": float(finite.quantile(.05)) if len(finite) else None,
+            "p50": float(finite.quantile(.5)) if len(finite) else None,
+            "p95": float(finite.quantile(.95)) if len(finite) else None,
+            "n_trials": int(group["trial"].nunique()), "valid": bool(len(finite)),
+            "reason": "" if not invalid else f"{invalid} trial-components unavailable",
+            "reference": "fitted_posterior", "recovery_type": "generating_theta_consistency",
+        })
+    warnings = []
+    if disconnected_trials:
+        warnings.append({
+            **dict(context), "code": "disconnected_graph",
+            "message": f"ranking graph was disconnected in {disconnected_trials} trials; components were fit separately",
+        })
+    if incomplete_reasons:
+        warnings.append({
+            **dict(context), "code": "ranking_recovery_partial",
+            "message": "; ".join(sorted(incomplete_reasons)),
+        })
+    return recovery, warnings
 
 
 class LatentCache(dict):
@@ -682,6 +905,7 @@ def _trial_rows(
         add("usable_items", len(group) / config.presentations, **context)
         add("judgment_calls", len(group), **context)
         add("choice_accuracy", accuracy, **context)
+        add("m1_wins", int(group["chose_m1"].sum()), **context)
         add("ties", ties, **context)
         if config.mode == "manual":
             value = float(group["p_choose_m1"].mean()) if not group.empty else np.nan
