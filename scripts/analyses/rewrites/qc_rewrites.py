@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 REWRITE_DIR = ROOT / "judge_results/rewrites"
 ORIGINALS = REWRITE_DIR / "originals.jsonl"
-DROPPED = REWRITE_DIR / "dropped.json"
+EXCLUDED = REWRITE_DIR / "excluded.json"
 
 MIN_WORD_RATIO = 0.4
 MAX_WORD_RATIO = 1.05
@@ -118,8 +118,8 @@ def main() -> None:
     ap.add_argument("--max-ratio", type=float, default=MAX_WORD_RATIO)
     ap.add_argument("--drop-failures", action="store_true",
                     help="rewrite the paraphrase file without failing rows, so a re-run redoes them")
-    ap.add_argument("--record-dropped", action="store_true",
-                    help="record the still-failing rows in dropped.json for downstream exclusion")
+    ap.add_argument("--write-exclusions", action="store_true",
+                    help="name the still-failing cells in excluded.json; changes no transcript file")
     args = ap.parse_args()
 
     path = REWRITE_DIR / f"paraphrase_{args.rewriter}.jsonl"
@@ -133,7 +133,7 @@ def main() -> None:
         orig = originals[key]
         reason = check(orig, row["rewritten"], args.min_ratio, args.max_ratio)
         if reason:
-            failures.append((key, reason))
+            failures.append((key, reason, len(row["rewritten"].split()) / max(orig["n_words"], 1)))
         else:
             ratios.append(len(row["rewritten"].split()) / max(orig["n_words"], 1))
             ok_pairs.append((orig, row))
@@ -148,7 +148,7 @@ def main() -> None:
         print(f"longer than original: {sum(r > 1.0 for r in ratios)} rows")
 
     by_reason: dict[str, int] = {}
-    for _, reason in failures:
+    for _, reason, _ratio in failures:
         by_reason[reason.split("=")[0].split("(")[0]] = by_reason.get(reason.split("=")[0].split("(")[0], 0) + 1
     for reason, n in sorted(by_reason.items(), key=lambda kv: -kv[1]):
         print(f"  fail {reason}: {n}")
@@ -184,18 +184,34 @@ def main() -> None:
             print("\nstyle check passed: no category rose in both rate and count")
 
     if args.drop_failures and failures:
-        keep = {tuple(k) for k, _ in failures}
+        keep = {k for k, _, _ in failures}
         kept = [r for r in rewrites if (r["model"], r["item_id"]) not in keep]
         path.write_text("".join(json.dumps(r) + "\n" for r in kept))
         print(f"\ndropped {len(rewrites) - len(kept)} failing rows from {path.name}; re-run to redo")
 
-    if args.record_dropped and failures:
-        existing = json.loads(DROPPED.read_text()) if DROPPED.exists() else []
-        seen = {tuple(d["key"]) for d in existing}
-        existing += [{"key": list(k), "rewriter": args.rewriter, "reason": r}
-                     for k, r in failures if k not in seen]
-        DROPPED.write_text(json.dumps(existing, indent=2) + "\n")
-        print(f"recorded {len(existing)} dropped cells in {DROPPED.name}")
+    if args.write_exclusions:
+        EXCLUDED.write_text(json.dumps({
+            "why": (
+                "Cells excluded from the judging campaign. These rewrites fall outside the "
+                "word-ratio bounds, and below the lower bound is where rewrites stop "
+                "paraphrasing and start summarising: reading them found originals that "
+                "flounder or contradict themselves turned into clean, confident, completed "
+                "reasoning. Excluding them removes rows known to contain repaired reasoning, "
+                "which would make a weak model look strong. This is not threshold "
+                "bookkeeping. Reading above the lower bound found no such repair."
+            ),
+            "excluded_from": "all conditions - originals, both rewriter sets, truncations - "
+                             "so every condition covers identical (model, item) cells",
+            "caveat": "exclusion is uneven across models, because compression varies by model; "
+                      "the surviving corpus is not a uniform sample of the original one",
+            "min_word_ratio": args.min_ratio,
+            "max_word_ratio": args.max_ratio,
+            "rewriter": args.rewriter,
+            "n_excluded": len(failures),
+            "cells": [{"model": k[0], "item_id": k[1], "word_ratio": round(ratio, 3),
+                       "reason": reason} for k, reason, ratio in sorted(failures)],
+        }, indent=2) + "\n")
+        print(f"\nwrote {len(failures)} excluded cells to {EXCLUDED.name}; no transcript file changed")
 
 
 def _self_check() -> None:
