@@ -93,6 +93,11 @@ def strip_answer(text: str) -> str:
     return text[:idx].rstrip() if idx != -1 else text
 
 
+def has_reasoning(text: str, min_chars: int = 100) -> bool:
+    """False for answer-only transcripts: nothing left after the ANSWER line."""
+    return len(strip_answer(text)) >= min_chars
+
+
 def truncate_pair(a: str, b: str, frac: float) -> tuple[str, str]:
     """Cut both transcripts to frac of the shorter one's length, answers removed."""
     a, b = strip_answer(a), strip_answer(b)
