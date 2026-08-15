@@ -40,7 +40,10 @@ MAX_LENGTH = 65536
 COVERAGE_JUDGES = ["qwen3-8b", "qwen3-32b", "gpt-oss-120b"]
 # Drop any pair naming an answer model matching this regex (case-insensitive)
 # from the candidate pool before stratified sampling. None = no exclusion.
-EXCLUDE_ANSWER_MODEL_PATTERN: str | None = None
+# Live campaign policy: exclude -flash/-low answer models (cheap/distilled
+# variants), deepseek stays in - set here, not passed at the call site, so
+# rerunning this file with no edits reproduces the live subset.
+EXCLUDE_ANSWER_MODEL_PATTERN: str | None = r"-flash|-low"
 
 # (condition name, truncate_keep, truncate_frac). The _100 conditions are the
 # length-matching controls: frac=1.0 cuts only the longer transcript, down to
