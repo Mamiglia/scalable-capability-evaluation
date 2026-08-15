@@ -48,6 +48,14 @@ def register_model_costs(costs: dict) -> None:
         )
 
 
+def validated_truncate_keep(config: dict) -> str:
+    """Read truncate_keep from config; only "first" or "last" is a valid value."""
+    keep = config.get("truncate_keep", "first")
+    if keep not in ("first", "last"):
+        raise ValueError(f"truncate_keep must be 'first' or 'last', got {keep!r}")
+    return keep
+
+
 def configured_comparisons(config: dict) -> list[list[str]]:
     """Return explicit rows, or apply every configured judge to every pair."""
     if "comparisons" in config:
@@ -84,7 +92,7 @@ def main() -> int:
     epochs = cfg.get("epochs") or 1
     fracs = cfg.get("truncate_fracs") or [None]
     # One config covers one keep direction - no first/last cross-product.
-    keep = cfg.get("truncate_keep", "first")
+    keep = validated_truncate_keep(cfg)
     # Ablation switch: judges see candidates' reasoning. Protocol default stays False.
     include_reasoning = bool(cfg.get("include_reasoning", False))
     max_tokens = cfg.get("max_tokens")
