@@ -51,13 +51,18 @@ def test_order_two_puts_minor_on_the_left():
     assert row["length_difference"] > 0
 
 
-def test_string_order_maps_the_same_as_integer_order():
-    """A re-export writing "1"/"2" must not flip every row to minor-on-the-left."""
-    numeric = built(verdicts(order=2, picked=1))[0].loc["i1"]
-    text = built(verdicts(order="2", picked=1))[0].loc["i1"]
-    assert (text["left_model"], text["right_model"]) == ("weak", "strong")
-    assert text["left_chars"] == numeric["left_chars"]
-    assert text["capability_difference"] == numeric["capability_difference"]
+@pytest.mark.parametrize(
+    "order,left,right,left_chars",
+    # order="1" is the case that discriminates: an uncoerced `"1" == 1` is False, so
+    # the minor model silently goes left. order="2" agrees either way, so on its own
+    # it cannot tell the fixed code from the broken code.
+    [("1", "strong", "weak", 100), ("2", "weak", "strong", 400)],
+)
+def test_string_order_maps_the_same_as_integer_order(order, left, right, left_chars):
+    """A re-export writing "1"/"2" must not put the minor model on the left."""
+    row = built(verdicts(order=order, picked=1))[0].loc["i1"]
+    assert (row["left_model"], row["right_model"]) == (left, right)
+    assert row["left_chars"] == left_chars
 
 
 def test_order_outside_one_and_two_is_rejected():
