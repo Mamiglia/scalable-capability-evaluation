@@ -7,7 +7,7 @@ from inspect_ai.model import ModelOutput
 from inspect_ai.scorer import Score
 from inspect_ai.dataset import MemoryDataset
 
-from dataset import responses_to_sample, build_dataset, USER_PROMPT
+from dataset import responses_to_sample, build_dataset, truncate_pair, USER_PROMPT
 
 
 class TestResponsesToSample:
@@ -125,6 +125,22 @@ class TestResponsesToSample:
 
         with pytest.raises(AssertionError, match="Sample inputs must match"):
             responses_to_sample(sample_a, sample_b)
+
+
+class TestTruncatePair:
+    """Unit tests for truncate_pair in dataset.py."""
+
+    def test_truncate_pair_keeps_first_by_default(self):
+        a, b = truncate_pair("x" * 100 + "ANSWER: A", "y" * 50 + "ANSWER: B", 0.5)
+        assert a == "x" * 25 and b == "y" * 25
+
+    def test_truncate_pair_keep_last(self):
+        a, b = truncate_pair("abcdefghij", "0123456789012345", 0.5, keep="last")
+        assert a == "fghij" and b == "23456789012345"[-5:]
+
+    def test_truncate_pair_full_fraction_length_matches(self):
+        a, b = truncate_pair("a" * 80, "b" * 40, 1.0, keep="last")
+        assert len(a) == len(b) == 40 and a == "a" * 40
 
 
 class TestBuildDataset:

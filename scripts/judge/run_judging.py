@@ -11,7 +11,9 @@ Optional knobs:
                      verdicts vary for a fixed input (default 1)
   truncate_fracs:    list of fractions; each adds a length-control run with both
                      transcripts cut to that fraction of the shorter one
-                     (logs under trunc-<pct>/)
+                     (logs under trunc-<pct>/, or trunc-end-<pct>/ if truncate_keep: last)
+  truncate_keep:     "first" (default) or "last" - which end of each transcript
+                     to keep. One config covers one keep direction.
   include_reasoning: judges see candidates' reasoning (protocol default: false)
 
 Each comparison runs in two phases: first the first phase1_items items of
@@ -29,10 +31,32 @@ from pathlib import Path
 import yaml
 from inspect_ai import eval_set
 from inspect_ai.log import read_eval_log
+from inspect_ai.model import ModelCost, ModelInfo, get_model_info, set_model_info
 
 from judge.task import judge_task
 
 DEFAULT_PHASE1_ITEMS = 20
+
+
+def register_model_costs(costs: dict) -> None:
+    """Teach Inspect live endpoint prices for its per-sample cost limiter."""
+    for model, values in costs.items():
+        info = get_model_info(model) or ModelInfo(model=model)
+        set_model_info(
+            model,
+            info.model_copy(update={"cost": ModelCost(**values)}),
+        )
+
+
+def configured_comparisons(config: dict) -> list[list[str]]:
+    """Return explicit rows, or apply every configured judge to every pair."""
+    if "comparisons" in config:
+        return config["comparisons"]
+    return [
+        [judge, major, minor]
+        for judge in config["judges"]
+        for major, minor in config["pairs"]
+    ]
 
 
 def has_success_log(directory: Path) -> bool:
@@ -59,23 +83,41 @@ def main() -> int:
     phase1_items = cfg.get("phase1_items") or DEFAULT_PHASE1_ITEMS
     epochs = cfg.get("epochs") or 1
     fracs = cfg.get("truncate_fracs") or [None]
+    # One config covers one keep direction - no first/last cross-product.
+    keep = cfg.get("truncate_keep", "first")
     # Ablation switch: judges see candidates' reasoning. Protocol default stays False.
     include_reasoning = bool(cfg.get("include_reasoning", False))
+    max_tokens = cfg.get("max_tokens")
+    cost_limit = cfg.get("cost_limit_per_sample")
+    max_connections = cfg.get("max_connections") or 40
+    timeout = cfg.get("timeout")
+    attempt_timeout = cfg.get("attempt_timeout")
+    max_retries = cfg.get("max_retries")
+    register_model_costs(cfg.get("model_costs") or {})
     # Per-judge OpenRouter routing (endpoint pins); keyed by judge slug.
     judge_model_args = cfg.get("judge_model_args") or {}
+    comparisons = configured_comparisons(cfg)
 
     tasks = {}
 
     def get_task(judge_short, major, minor, frac):
-        key = (judge_short, major, minor, frac)
+        # The candidate dataset is independent of judge identity. Reusing it
+        # avoids rereading the same large response logs for every judge.
+        key = (major, minor, frac)
         if key not in tasks:
-            suffix = f"_t{int(frac * 100)}" if frac else ""
+            if not frac:
+                suffix = ""
+            elif keep == "last":
+                suffix = f"_tend{int(frac * 100)}"
+            else:
+                suffix = f"_t{int(frac * 100)}"
             tasks[key] = judge_task(
                 major_path=Path(paths[major]),
                 minor_path=Path(paths[minor]),
                 include_reasoning=include_reasoning,
                 truncate_frac=frac,
-                task_name=f"{judge_short}_{major}-vs-{minor}{suffix}",
+                truncate_keep=keep,
+                task_name=f"{major}-vs-{minor}{suffix}",
                 experiment_name=args.config.stem,
             )
         return tasks[key]
@@ -84,8 +126,13 @@ def main() -> int:
     pending = []
     for phase in ((args.phase,) if args.phase else (1, 2)):
         for frac in fracs:
-            root = log_root if frac is None else log_root / f"trunc-{int(frac * 100)}"
-            for judge, major, minor in cfg["comparisons"]:
+            if frac is None:
+                root = log_root
+            elif keep == "last":
+                root = log_root / f"trunc-end-{int(frac * 100)}"
+            else:
+                root = log_root / f"trunc-{int(frac * 100)}"
+            for judge, major, minor in comparisons:
                 judge_short = judge.split("/")[-1]
                 pair_dir = root / judge_short / f"{major}-vs-{minor}"
                 if frac is None and has_success_log(pair_dir):
@@ -105,7 +152,7 @@ def main() -> int:
                     continue
                 pending.append((phase, judge, judge_short, major, minor, frac, block, phase_dir))
 
-    n_total = 2 * len(fracs) * len(cfg["comparisons"])
+    n_total = 2 * len(fracs) * len(comparisons)
     print(f"{len(pending)} phase-runs pending (of {n_total} possible)")
     if args.dry_run:
         for phase, _, judge_short, major, minor, frac, block, _ in pending:
@@ -122,7 +169,12 @@ def main() -> int:
             log_dir=str(phase_dir),
             sample_id=block,
             epochs=epochs,
-            max_connections=40,
+            max_connections=max_connections,
+            max_tokens=max_tokens,
+            cost_limit=cost_limit,
+            timeout=timeout,
+            attempt_timeout=attempt_timeout,
+            max_retries=max_retries,
         )
         if not success:
             failures.append(f"phase{phase} {judge_short} on {major}-vs-{minor}")

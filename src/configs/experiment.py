@@ -29,6 +29,11 @@ CONFIDENCE: <An integer between 1 and 5, how sure you are that the model you pic
 TRUNCATION_NOTE = """
 Both transcripts have been cut to the same number of characters and their final answers removed, so each one stops mid-reasoning. Judge the reasoning that is shown; do not penalise a transcript for being cut off or for not stating an answer."""
 
+# Appended instead of TRUNCATION_NOTE when the truncation keeps each
+# transcript's end rather than its start.
+TRUNCATION_NOTE_END = """
+Both transcripts have been cut to the same number of characters, keeping only the final portion, and their final answers removed — each one starts mid-reasoning. Judge the reasoning that is shown; do not penalise a transcript for starting abruptly or for not stating an answer."""
+
 
 @dataclass(kw_only=True)
 class ExperimentConfig(DraccusConfig):

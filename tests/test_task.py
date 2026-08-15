@@ -54,7 +54,24 @@ class TestJudgeTask:
             include_reverse=True,
             include_reasoning=True,
             truncate_frac=None,
+            truncate_keep="first",
         )
+
+    @patch("judge.task.read_eval_log")
+    @patch("judge.task.build_dataset")
+    def test_accepts_equivalent_task_labels(self, mock_build_dataset, mock_read_log):
+        """Local and imported GPQA logs use different labels for the same task."""
+        local, imported = MagicMock(), MagicMock()
+        local.eval.task, local.eval.model = "inspect_evals/gpqa_diamond", "local"
+        imported.eval.task, imported.eval.model = "GPQA Diamond", "imported"
+        mock_read_log.side_effect = [local, imported]
+        mock_build_dataset.return_value = MemoryDataset(
+            samples=[Sample(input="test")],
+        )
+
+        task = judge_task("local.eval", "imported.eval")
+
+        assert isinstance(task, Task)
 
 
 @patch("judge.task.read_eval_log")

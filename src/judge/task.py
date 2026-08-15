@@ -4,9 +4,15 @@ from inspect_ai import Task
 from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
-from configs.experiment import ExperimentConfig, SYSTEM_PROMPT, TRUNCATION_NOTE
+from configs.experiment import ExperimentConfig, SYSTEM_PROMPT, TRUNCATION_NOTE, TRUNCATION_NOTE_END
 from judge.dataset import build_dataset
 from judge.scorer import judge_scorer
+
+
+def _task_key(name: str) -> str:
+    """Normalize harmless task-label differences across eval exporters."""
+    label = name.rsplit("/", 1)[-1].casefold().replace("_", " ").replace("-", " ")
+    return " ".join(label.split())
 
 
 def judge_task(
@@ -18,6 +24,7 @@ def judge_task(
     include_reverse: bool = True,
     include_reasoning: bool = True,
     truncate_frac: float | None = None,
+    truncate_keep: str = "first",
     experiment_name: str | None = None,
     task_name: str | None = None,
 ) -> Task:
@@ -27,7 +34,7 @@ def judge_task(
     log_major = read_eval_log(major_path, header_only=True)
     log_minor = read_eval_log(minor_path, header_only=True)
     
-    assert log_major.eval.task.rsplit("/", 1)[-1] == log_minor.eval.task.rsplit("/", 1)[-1], "The two logs must be from the same task."
+    assert _task_key(log_major.eval.task) == _task_key(log_minor.eval.task), "The two logs must be from the same task."
 
     major_name = log_major.eval.model
     minor_name = log_minor.eval.model
@@ -36,7 +43,8 @@ def judge_task(
     name = task_name or f"{benchmark_name}={major_path.stem}|{minor_path.stem}"
 
     if truncate_frac is not None:
-        system_prompt = system_prompt + TRUNCATION_NOTE
+        note = TRUNCATION_NOTE_END if truncate_keep == "last" else TRUNCATION_NOTE
+        system_prompt = system_prompt + note
 
     return Task(
         name=name,
@@ -49,6 +57,7 @@ def judge_task(
             include_reverse=include_reverse,
             include_reasoning=include_reasoning,
             truncate_frac=truncate_frac,
+            truncate_keep=truncate_keep,
         ),
         solver=[system_message(system_prompt), generate()],
         scorer=judge_scorer(),
@@ -63,6 +72,7 @@ def judge_task(
             "include_reverse": include_reverse,
             "include_reasoning": include_reasoning,
             "truncate_frac": truncate_frac,
+            "truncate_keep": truncate_keep,
             "experiment_name": experiment_name,
         },
     )

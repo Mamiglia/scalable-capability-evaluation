@@ -46,10 +46,15 @@ def strip_answer(text: str) -> str:
     return text[:idx].rstrip() if idx != -1 else text
 
 
-def truncate_pair(a: str, b: str, frac: float) -> tuple[str, str]:
-    """Cut both transcripts to frac of the shorter one's length, answers removed."""
+def truncate_pair(a: str, b: str, frac: float, keep: str = "first") -> tuple[str, str]:
+    """Cut both transcripts to frac of the shorter one's length, answers removed.
+
+    keep="first" keeps the opening of each transcript; keep="last" keeps the end.
+    """
     a, b = strip_answer(a), strip_answer(b)
     cut = max(1, int(frac * min(len(a), len(b))))
+    if keep == "last":
+        return a[-cut:], b[-cut:]
     return a[:cut], b[:cut]
 
 
@@ -61,6 +66,7 @@ def responses_to_sample(
     max_len: int = 24000,
     include_reasoning: bool = True,
     truncate_frac: float | None = None,
+    truncate_keep: str = "first",
 ) -> Sample:
     """
     Converts two model samples into a single formatted string representation.
@@ -76,6 +82,7 @@ def responses_to_sample(
         include_reasoning (bool): Whether to include CoT reasoning blocks.
         truncate_frac (float | None): If set, cut both transcripts to this
             fraction of the shorter one's length (length-control condition).
+        truncate_keep (str): "first" keeps the opening, "last" keeps the end.
 
     Returns:
         Sample: A formatted sample representing both model responses.
@@ -87,7 +94,7 @@ def responses_to_sample(
     output_1 = extract_transcript(sample_1, include_reasoning=include_reasoning)[:max_len]
     output_2 = extract_transcript(sample_2, include_reasoning=include_reasoning)[:max_len]
     if truncate_frac is not None:
-        output_1, output_2 = truncate_pair(output_1, output_2, truncate_frac)
+        output_1, output_2 = truncate_pair(output_1, output_2, truncate_frac, keep=truncate_keep)
 
     text = format_str.format(
         question=input_text,
@@ -111,6 +118,7 @@ def build_dataset(
 include_reverse: bool = True,
     include_reasoning: bool = True,
     truncate_frac: float | None = None,
+    truncate_keep: str = "first",
 ):
     """
     Builds a dataset from two eval logs, comparing the responses of two models.
@@ -121,6 +129,9 @@ include_reverse: bool = True,
         format_str (str): The format string to use for the output.
         max_len (int): The maximum length of each model's response.
         include_reasoning (bool): Whether to include CoT reasoning blocks.
+        truncate_frac (float | None): If set, cut both transcripts to this
+            fraction of the shorter one's length (length-control condition).
+        truncate_keep (str): "first" keeps the opening, "last" keeps the end.
     Returns:
         Dataset: A dataset containing the formatted comparisons of model responses.
     """
@@ -158,10 +169,10 @@ include_reverse: bool = True,
             sample_major = major_samples[sample_id][0]
             sample_minor = minor_samples[sample_id][0]
 
-        samples.append(responses_to_sample(sample_major, sample_minor, target='1', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning, truncate_frac=truncate_frac))
+        samples.append(responses_to_sample(sample_major, sample_minor, target='1', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning, truncate_frac=truncate_frac, truncate_keep=truncate_keep))
 
         if include_reverse:
-            samples.append(responses_to_sample(sample_minor, sample_major, target='2', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning, truncate_frac=truncate_frac))
+            samples.append(responses_to_sample(sample_minor, sample_major, target='2', format_str=format_str, max_len=max_len, include_reasoning=include_reasoning, truncate_frac=truncate_frac, truncate_keep=truncate_keep))
         
     name_major = log_major.eval.model
     name_minor = log_minor.eval.model
