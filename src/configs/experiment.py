@@ -1,5 +1,6 @@
 """Judge experiment configuration dataclass."""
 
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Tuple
@@ -79,11 +80,13 @@ class ExperimentConfig(DraccusConfig):
             )
 
         if self.mode == "paired":
-            if len(major_evals) != len(minor_evals):
-                raise ValueError(
-                    f"Number of major evals ({len(major_evals)}) does not match number of minor evals ({len(minor_evals)})"
+            n = min(len(major_evals), len(minor_evals))
+            if n != len(major_evals) or n != len(minor_evals):
+                warnings.warn(
+                    f"{self.task_name}: trimming paired evals from "
+                    f"major={len(major_evals)}, minor={len(minor_evals)} to {n}"
                 )
-            return list(zip(major_evals, minor_evals))
+            return list(zip(major_evals[:n], minor_evals[:n]))
         if self.mode == "combinatorial":
             return [(m, n) for m in major_evals for n in minor_evals]
         if self.mode == "custom":
