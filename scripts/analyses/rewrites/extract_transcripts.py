@@ -11,9 +11,10 @@ Existing rows are never rewritten or dropped, even if the subset no longer
 needs them - a rewrite campaign may already be reading the file.
 
 Usage:
-  uv run python scripts/analyses/rewrites/extract_transcripts.py
+  uv run python scripts/analyses/rewrites/extract_transcripts.py [config.yaml]
 """
 import json
+import sys
 from pathlib import Path
 
 try:
@@ -60,8 +61,8 @@ def load_existing(path: Path) -> dict[tuple[str, str], dict]:
     return {(r["model"], r["item_id"]): r for r in rows}
 
 
-def main() -> None:
-    cfg = yaml.safe_load(SUBSET_CONFIG.read_text())
+def main(config: Path = SUBSET_CONFIG) -> None:
+    cfg = yaml.safe_load(config.read_text())
     assert cfg["include_reasoning"] is False, "subset must be final-text-only"
 
     keys = unique_keys(cfg["comparisons"], cfg["sample_ids"])
@@ -109,4 +110,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(Path(sys.argv[1]) if len(sys.argv) > 1 else SUBSET_CONFIG)
