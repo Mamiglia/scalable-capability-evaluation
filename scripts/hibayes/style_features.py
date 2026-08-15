@@ -20,12 +20,13 @@ STANDALONE_CAPITAL_I = "I"
 # corpus's maths/physics/chemistry content: the identity matrix/operator
 # ("det(P - lambda I)", "W^2 = I"), moment of inertia ("I = mu R^2"),
 # definite-integral variables, the element iodine, and spectroscopic
-# notation ("H I", "He I"). Tuned against judge_results/rewrites/originals.jsonl
-# (task-4b-report.md): require "I" to be followed by a lowercase word or a
-# contraction ("I need", "I'll") - a real first-person "I" is always followed
-# by a verb, a symbol reference never is. Also exclude "I is", since "I is"
-# is never valid English for the pronoun ("I am" is) but is exactly how these
-# transcripts introduce a symbol ("...where I is the moment of inertia").
+# notation ("H I", "He I"). A real first-person "I" is always followed by a
+# verb ("I need", "I'll"), while a symbol reference is followed by "=", ")",
+# ",", a digit, or another uppercase token - never a bare lowercase word - so
+# require a lowercase word or a contraction right after "I". Also exclude
+# "I is": that's never valid English for the pronoun ("I am" is), but is
+# exactly how these transcripts introduce a symbol definition ("...where I
+# is the moment of inertia").
 STANDALONE_I_RE = re.compile(r"\bI(?=(?:'[a-z])|(?:\s+[a-z]))(?!\s+is\b)")
 
 

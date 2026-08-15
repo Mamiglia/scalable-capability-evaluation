@@ -24,11 +24,10 @@ def test_capital_i_matches_only_standalone_capitalised_i():
 
 
 def test_capital_i_not_counted_before_symbol_notation():
-    # Tightened after Step 3 validation on real transcripts (task-4b-report.md):
-    # this corpus uses bare "I" for the identity matrix, moment of inertia, and
-    # integral variables. A genuine first-person "I" is always followed by a
-    # verb; a symbol reference is followed by "=", ")", ",", or similar - so
-    # require a lowercase word (or contraction) right after "I".
+    # This corpus uses bare "I" for the identity matrix, moment of inertia,
+    # and integral variables. A genuine first-person "I" is always followed
+    # by a verb; a symbol reference is followed by "=", ")", ",", or similar
+    # - so require a lowercase word (or contraction) right after "I".
     # Real corpus case that used to be a false positive and now isn't
     # (Yi-34B-Chat, item recOYsaYs6RmtlTDy): "I = (Mx + My) * R^2" - moment of
     # inertia, not the model speaking.
@@ -59,6 +58,23 @@ def test_capital_i_contractions_still_count():
     rates = feature_rates(text, {"personal_pronouns": ["I"]})
     n_words = len(text.split())
     assert rates["personal_pronouns"] == 1000 * 2 / n_words
+
+
+def test_capital_i_pronoun_before_punctuation_or_at_end_of_text_still_counts():
+    # Regression guard: the tightened rule only looks at the single token
+    # right after "I" (a lowercase word or contraction) - it must not start
+    # requiring anything beyond that. A genuine "I VERB" use still counts
+    # when the clause is followed shortly by punctuation, and still counts
+    # when that clause is the last thing in the whole text.
+    text = "Let me reconsider. Actually, I agree."
+    rates = feature_rates(text, {"personal_pronouns": ["I"]})
+    n_words = len(text.split())
+    assert rates["personal_pronouns"] == 1000 * 1 / n_words
+
+    text = "Let me reconsider, actually I agree"  # no trailing punctuation at all
+    rates = feature_rates(text, {"personal_pronouns": ["I"]})
+    n_words = len(text.split())
+    assert rates["personal_pronouns"] == 1000 * 1 / n_words
 
 
 def test_question_mark_counted_per_character():
