@@ -46,6 +46,19 @@ STYLE_PATTERNS = {
 ANSWER_LINE_RE = re.compile(r"\bANSWER\s*:|\bFinal Answer\s*:", re.IGNORECASE)
 
 
+def answer_value(line: str) -> str:
+    """What the answer actually is, with the wrapping the models vary on removed.
+
+    Originals present the same answer as 'ANSWER: B', '**ANSWER: B**',
+    '\\[ \\text{ANSWER: B} \\]', 'Final Answer: C' or inline at the end of a paragraph.
+    The load-bearing part is the value after the colon.
+    """
+    tail = re.split(r"(?i)\b(?:final\s+)?answer\s*:", line)[-1]
+    tail = re.sub(r"<\|[^|]*\|>", "", tail)
+    tail = tail.replace("\u00d7", "x").replace("\u2212", "-")  # scientific notation varies
+    return re.sub(r"[\\{}\[\]$*`.\s]", "", tail).strip().upper()
+
+
 def final_answer_line(text: str) -> str | None:
     """The last line that reads as a final answer - whatever prefix this model used."""
     for line in reversed([l for l in text.splitlines() if l.strip()]):
@@ -88,9 +101,14 @@ def check(original: dict, rewrite: str, min_ratio: float, max_ratio: float) -> s
     want = final_answer_line(original["transcript"])
     if want is None:
         return None  # original has no answer line to preserve
-    if want not in rewrite:
-        return f"answer_line_lost({want[:40]!r})"
-    return None
+    if want in rewrite:
+        return None
+    got = final_answer_line(rewrite)
+    if got is None:
+        return "answer_line_missing"
+    if answer_value(got) == answer_value(want):
+        return None  # same answer, only the wrapping differs
+    return f"answer_changed({answer_value(want)!r}->{answer_value(got)!r})"
 
 
 def main() -> None:
@@ -186,7 +204,20 @@ def _self_check() -> None:
     assert check(orig, "a b c d e f g h i\nANSWER: B", 0.4, 1.05).startswith("word_ratio")  # 1.1
     assert check(orig, "", 0.4, 1.05) == "empty"
     assert check(orig, "one\nANSWER: B", 0.4, 1.05).startswith("word_ratio")  # 0.3, under floor
-    assert check(orig, "a b c d e f g h\nANSWER: C", 0.4, 1.05).startswith("answer_line_lost")
+    assert check(orig, "a b c d e f g h\nANSWER: C", 0.4, 1.05).startswith("answer_changed")
+    bold = {"n_words": 10, "transcript": "x\n**ANSWER: B**"}
+    assert check(bold, "a b c d e f g h\nANSWER: B", 0.4, 1.05) is None  # markup stripped, same answer
+    assert check(bold, "a b c d e f g h\nANSWER: C", 0.4, 1.05).startswith("answer_changed")
+    tmpl = {"n_words": 10, "transcript": "x\nANSWER: D<|im_end|>"}
+    assert check(tmpl, "a b c d e f g h\nANSWER: D", 0.4, 1.05) is None
+    assert check(bold, "a b c d e f g h", 0.4, 1.05) == "answer_line_missing"
+    latex = {"n_words": 10, "transcript": "x\n\\[ \\text{ANSWER: B} \\]"}
+    assert check(latex, "a b c d e f g h\nANSWER: B", 0.4, 1.05) is None
+    sci = {"n_words": 10, "transcript": "q\nANSWER: A) 6.3x10^-7 M"}
+    assert check(sci, "a b c d e f\nANSWER: A) 6.3\u00d710^-7 M", 0.4, 1.05) is None
+    gem = {"n_words": 10, "transcript": "x\nFinal Answer: C"}
+    assert check(gem, "a b c d e f g h\nANSWER: C", 0.4, 1.05) is None
+    assert check(gem, "a b c d e f g h\nANSWER: D", 0.4, 1.05).startswith("answer_changed")
     quirk = {"n_words": 10, "transcript": "x\nFinal Answer: 42"}
     assert check(quirk, "a b c d e f g\nFinal Answer: 42", 0.4, 1.05) is None
     assert final_answer_line("a\nANSWER: B\ntrailing note") == "ANSWER: B"
