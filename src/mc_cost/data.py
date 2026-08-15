@@ -10,6 +10,7 @@ import pandas as pd
 from inspect_ai.log import list_eval_logs, read_eval_log
 
 from judge.util import extract_transcript
+from mc_cost.catalogue import catalogue_aliases, normalized_name
 
 
 RELEASE_EPOCH = pd.Timestamp("2020-01-01")
@@ -127,12 +128,21 @@ def _candidate_item_id(sample) -> str:
     return str(sample.id).rsplit("_", 1)[0]
 
 
-def candidate_token_rows(log_roots, catalogue: pd.DataFrame, items: pd.DataFrame) -> pd.DataFrame:
+def _benchmark(task: str) -> str:
+    name = task.split("/")[-1].strip().lower().replace("-", "_").replace(" ", "_")
+    return "gpqa" if name == "gpqa_diamond" else name
+
+
+def candidate_token_rows(
+    log_roots, catalogue: pd.DataFrame, items: pd.DataFrame, *, skip_incomplete: bool = False,
+) -> pd.DataFrame:
     """Extract one valid candidate-generation usage row per model/item/epoch."""
     metadata = _catalogue_metadata(catalogue)
+    aliases = catalogue_aliases(catalogue)
     difficulty = _gpqa_items(items).set_index(["benchmark", "item"])["difficulty"]
     rows, seen_logs, seen_samples = [], set(), set()
     excluded_zero_or_error = 0
+    excluded_incomplete = 0
     for root in log_roots:
         for info in list_eval_logs(str(root)):
             if info.name in seen_logs:
@@ -141,8 +151,14 @@ def candidate_token_rows(log_roots, catalogue: pd.DataFrame, items: pd.DataFrame
             log = read_eval_log(info)
             if not log.samples:
                 continue
-            benchmark = log.eval.task.split("/")[-1]
-            model = _short_model(log.eval.model)
+            benchmark = _benchmark(log.eval.task)
+            raw_model = _short_model(log.eval.model)
+            model = aliases.get(normalized_name(raw_model))
+            if model is None:
+                if skip_incomplete:
+                    excluded_incomplete += len(log.samples)
+                    continue
+                raise ValueError(f"model {raw_model} missing from catalogue")
             for sample in log.samples:
                 tokens = _sample_tokens(sample)
                 if getattr(sample, "error", None) or tokens["total"] == 0:
@@ -163,6 +179,9 @@ def candidate_token_rows(log_roots, catalogue: pd.DataFrame, items: pd.DataFrame
                 if pd.isna(item_difficulty):
                     missing.append("difficulty")
                 if missing:
+                    if skip_incomplete:
+                        excluded_incomplete += 1
+                        continue
                     details = []
                     model_fields = [field for field in missing if field != "difficulty"]
                     if model_fields:
@@ -184,7 +203,10 @@ def candidate_token_rows(log_roots, catalogue: pd.DataFrame, items: pd.DataFrame
                     "total_tokens": tokens["total"],
                 })
     result = pd.DataFrame(rows)
-    result.attrs["accounting"] = {"zero_usage_or_error": excluded_zero_or_error}
+    result.attrs["accounting"] = {
+        "zero_usage_or_error": excluded_zero_or_error,
+        "missing_catalogue_metadata": excluded_incomplete,
+    }
     return result
 
 

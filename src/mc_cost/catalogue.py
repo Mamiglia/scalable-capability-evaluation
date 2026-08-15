@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import defaultdict
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import pandas as pd
 from scipy.special import expit
 
 CATALOGUE_COLUMNS = [
-    "model_id", "display_name", "release", "theta", "theta_p5", "theta_p95",
+    "model_id", "display_name", "aliases", "release", "theta", "theta_p5", "theta_p95",
     "theta_source", "gpqa_correct", "gpqa_total", "family", "reasoning_class", "judge_pool",
     "candidate_pool", "observed_judge", "observed_candidate", "price_in", "price_out",
 ]
@@ -68,29 +69,123 @@ def _reasoning_class(value):
     return "reasoning" if bool(value) else "non_reasoning"
 
 
+def _aliases(value) -> list[str]:
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return []
+        if value.startswith("["):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                return [value]
+        else:
+            return [value]
+    if isinstance(value, (list, tuple, set)):
+        return [str(alias) for alias in value if str(alias)]
+    return []
+
+
+def _pool_names(record: Mapping) -> list[str]:
+    names = []
+    for field in ("name", "model", "model_id", "or_id"):
+        value = record.get(field)
+        if isinstance(value, str) and value:
+            names.extend((value, value.rsplit("/", 1)[-1]))
+    return names
+
+
+def catalogue_aliases(catalogue: pd.DataFrame) -> dict[str, str]:
+    """Return normalized raw/canonical names mapped to catalogue IDs."""
+    result = {}
+    for _, row in catalogue.iterrows():
+        model_id = str(row["model_id"])
+        for name in (model_id, *_aliases(row.get("aliases", pd.NA))):
+            key = normalized_name(name)
+            if key in result and result[key] != model_id:
+                raise ValueError(f"catalogue alias {name!r} refers to multiple model IDs")
+            result[key] = model_id
+    return result
+
+
+def resolve_model_id(value: str, catalogue: pd.DataFrame) -> str | None:
+    """Resolve case/punctuation variants and declared aliases to a canonical ID."""
+    return catalogue_aliases(catalogue).get(normalized_name(value))
+
+
 def build_catalogue(
     canonical_models: str | Path,
     model_pool: str | Path,
     capabilities: str | Path | pd.DataFrame,
+    overrides: str | Path | pd.DataFrame | list[dict] | None = None,
 ) -> pd.DataFrame:
-    """Join canonical IDs to editable metadata and fitted capabilities."""
+    """Union canonical seeds and fitted models, then apply explicit MC metadata."""
     pool = _records(model_pool)
     capability_rows = _records(capabilities)
-    pool_by_name = {normalized_name(_first(row, "name", "model", "model_id")): row for row in pool}
+    override_rows = _records(overrides) if overrides is not None else []
+    pool_by_name = {}
+    for record in pool:
+        for name in _pool_names(record):
+            pool_by_name.setdefault(normalized_name(name), record)
+
+    model_ids = _canonical_models(canonical_models)
+    by_name = {normalized_name(model_id): model_id for model_id in model_ids}
+    aliases = defaultdict(list)
+    override_by_id = {}
+    for override in override_rows:
+        if not isinstance(override.get("model_id"), str) or not override["model_id"]:
+            raise ValueError("model override requires a nonempty model_id")
+        requested = override["model_id"]
+        model_id = by_name.get(normalized_name(requested))
+        if model_id is None:
+            model_id = requested
+            model_ids.append(model_id)
+            by_name[normalized_name(model_id)] = model_id
+        if model_id in override_by_id:
+            raise ValueError(f"duplicate model override for {model_id}")
+        override_by_id[model_id] = override
+        for alias in _aliases(override.get("aliases", [])):
+            key = normalized_name(alias)
+            owner = by_name.get(key)
+            if owner is not None and owner != model_id:
+                raise ValueError(f"model alias {alias!r} conflicts with {owner}")
+            by_name[key] = model_id
+            if normalized_name(alias) != normalized_name(model_id):
+                aliases[model_id].append(alias)
 
     fitted = {}
     for row in capability_rows:
         if str(row.get("irt_model", "")) == "fixed_3pl" and str(row.get("fit", "")) == "gpqa":
-            fitted[normalized_name(_first(row, "model", "model_id", "name"))] = row
+            capability_name = str(_first(row, "model", "model_id", "name"))
+            key = normalized_name(capability_name)
+            model_id = by_name.get(key)
+            if model_id is None:
+                model_id = capability_name
+                model_ids.append(model_id)
+                by_name[key] = model_id
+            if model_id in fitted:
+                raise ValueError(f"multiple fitted capabilities resolve to {model_id}")
+            fitted[model_id] = row
+            if key != normalized_name(model_id):
+                aliases[model_id].append(capability_name)
 
     rows = []
-    for model_id in _canonical_models(canonical_models):
-        metadata = pool_by_name.get(normalized_name(model_id), {})
-        capability = fitted.get(normalized_name(model_id), {})
+    for model_id in model_ids:
+        override = override_by_id.get(model_id, {})
+        metadata_names = [model_id, *aliases[model_id]]
+        pool_name = override.get("pool_name")
+        if isinstance(pool_name, str):
+            metadata_names.insert(0, pool_name)
+        metadata = next(
+            (pool_by_name[normalized_name(name)] for name in metadata_names if normalized_name(name) in pool_by_name),
+            {},
+        )
+        capability = fitted.get(model_id, {})
         row = {column: pd.NA for column in CATALOGUE_COLUMNS}
         row.update({
             "model_id": model_id,
             "display_name": _first(metadata, "display_name", "name") if metadata else model_id,
+            "aliases": json.dumps(sorted(set(aliases[model_id])), separators=(",", ":")),
             "release": _first(metadata, "release"),
             "family": _first(metadata, "family", "dev", "organization"),
             "reasoning_class": _reasoning_class(_first(metadata, "reasoning_class", "reasoning")),
@@ -109,6 +204,11 @@ def build_catalogue(
         for column in ("theta_source", "judge_pool", "candidate_pool", "observed_judge", "observed_candidate"):
             if column in capability:
                 row[column] = capability[column]
+        for column in CATALOGUE_COLUMNS:
+            if column not in {"model_id", "aliases"} and column in override:
+                row[column] = (
+                    _reasoning_class(override[column]) if column == "reasoning_class" else override[column]
+                )
         rows.append(row)
 
     return pd.DataFrame(rows, columns=CATALOGUE_COLUMNS)
@@ -164,6 +264,7 @@ def _uncertainty_source(row: pd.Series) -> bool:
 def validate_catalogue(frame: pd.DataFrame) -> None:
     if "model_id" in frame and frame["model_id"].duplicated().any():
         raise ValueError("duplicate model_id")
+    catalogue_aliases(frame)
     classes = frame.get("reasoning_class", pd.Series(dtype=str)).dropna().astype(str)
     if not classes.isin({"reasoning", "non_reasoning"}).all():
         raise ValueError("reasoning_class must be reasoning or non_reasoning")
@@ -230,9 +331,16 @@ def build_capability_draws(catalogue: pd.DataFrame, irt_draws, rng) -> tuple[lis
     posterior_by_name = {normalized_name(model): column for column, model in enumerate(models)}
     rows, labels = [], []
     for _, row in catalogue.iterrows():
-        name = normalized_name(row["model_id"])
-        if name in posterior_by_name:
-            values = theta[:, posterior_by_name[name]]
+        posterior_name = next(
+            (
+                normalized_name(name)
+                for name in (str(row["model_id"]), *_aliases(row.get("aliases", pd.NA)))
+                if normalized_name(name) in posterior_by_name
+            ),
+            None,
+        )
+        if posterior_name is not None:
+            values = theta[:, posterior_by_name[posterior_name]]
         elif _valid_counts(row.get("gpqa_correct", pd.NA), row.get("gpqa_total", pd.NA)):
             values = theta_draws_from_accuracy(row["gpqa_correct"], row["gpqa_total"], posterior, rng)
         else:

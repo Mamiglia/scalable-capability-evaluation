@@ -43,7 +43,49 @@ uv run mc-cost export-dashboard --config configs/mc_cost/default.json
 uv run python -m http.server 8000 -d interactive_viewer
 ```
 
-The dashboard is at `http://localhost:8000/mc_cost.html`. Edit durable model
-metadata in `model-sampler/model_pool.json`, then rerun `catalogue`, `prepare`,
-`fit`, `validate`, and `export-dashboard`; the generated catalogue and fitted
-artifacts are hash-bound, and the browser does not fit or approximate the model.
+The dashboard is at `http://localhost:8000/mc_cost.html`. The browser only reads
+precomputed results; it does not fit or approximate the model.
+
+## Inputs and reruns
+
+- `configs/mc_cost/default.json` selects all source paths and holds fit,
+  simulation, and dashboard grids. Automatic `J`, `M`, and `N` can also be set
+  with `--judges`, `--anchors`, and `--comparators` on `simulate`.
+- `configs/mc_cost/model_overrides.json` is the durable MC-specific metadata
+  input. Edit it to declare identity aliases, automatic judge/candidate pool
+  membership, observed-role flags, or a deliberate metadata correction.
+- `docs/canonical-models.md` seeds stable canonical IDs. Fitted fixed-3PL GPQA
+  models are unioned into the catalogue, so this file does not freeze the
+  future catalogue.
+- `model-sampler/model_pool.json` supplies release, family, reasoning-class,
+  and price metadata when names resolve. It does not decide MC pool membership;
+  pool flags come from the explicit overrides file.
+- `irt_results/easy_item_prediction/tables/fit_capabilities.csv`,
+  `irt_results/easy_item_prediction/tables/fit_difficulties.csv`, and
+  `irt_results/easy_item_prediction/posterior/irt_posterior.npz` are products of
+  `scripts/irt_proxy/run.py`, not hand-edited MC inputs.
+- `logs/judging-variations/gpqa/a_baseline` supplies the observed pairwise
+  judgments and judge token usage. `data/gpqa` and
+  `external_data/epoch-gpqa` supply candidate token observations.
+
+After changing canonical IDs, model-pool metadata, overrides, or IRT products,
+rerun `catalogue`, `prepare`, `fit`, `validate`, `simulate`, and
+`export-dashboard` in order. After changing judgment or candidate logs, rerun
+from `prepare`; after changing fit settings, rerun from `fit`; after changing
+only simulation/dashboard grids or manual triples, rerun `simulate` as needed
+and then `export-dashboard`. Generated files in `analysis/mc_cost` are
+hash-bound outputs and must not be edited.
+
+The MC preparation path resolves observed aliases to catalogue IDs and uses
+only uncertainty-backed fixed-3PL capability values. It does not insert legacy
+raw GPQA accuracy as `theta`. Models without capability or release metadata
+remain visible in the catalogue but are excluded from automatic pools and from
+feature-dependent training rows; their manual scenarios report missing support
+instead of receiving an average-model substitution.
+
+`prepare` scans every Inspect archive under both configured candidate roots and
+can take several minutes; it publishes its generation atomically only after the
+scan completes. The Task 11 production preflight completed catalogue and
+judgment preparation and checked representative candidate archives from both
+roots, rather than running the complete candidate-token scan or any production
+fit.

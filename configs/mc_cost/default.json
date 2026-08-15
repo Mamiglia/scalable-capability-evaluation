@@ -2,12 +2,11 @@
   "paths": {
     "canonical_models": "docs/canonical-models.md",
     "model_pool": "model-sampler/model_pool.json",
-    "irt_capabilities": "irt_results/easy_item_prediction/fit_capabilities.csv",
-    "irt_items": "irt_results/easy_item_prediction/fit_difficulties.csv",
-    "irt_posterior": "irt_results/easy_item_prediction/irt_posterior.npz",
-    "judge_logs": "logs/imported_runs/gpqa_judging",
-    "judge_models": "logs/imported_runs_2/gpqa-pilot-rd2/models.csv",
-    "epoch_responses": "external_data/epoch-gpqa/responses.parquet",
+    "model_overrides": "configs/mc_cost/model_overrides.json",
+    "irt_capabilities": "irt_results/easy_item_prediction/tables/fit_capabilities.csv",
+    "irt_items": "irt_results/easy_item_prediction/tables/fit_difficulties.csv",
+    "irt_posterior": "irt_results/easy_item_prediction/posterior/irt_posterior.npz",
+    "judge_logs": "logs/judging-variations/gpqa/a_baseline",
     "candidate_log_roots": ["data/gpqa", "external_data/epoch-gpqa"],
     "output": "analysis/mc_cost"
   },

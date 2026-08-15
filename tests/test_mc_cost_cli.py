@@ -23,7 +23,6 @@ from inspect_ai.scorer import Score
 import mc_cost.cli as cli
 from mc_cost.cli import main, write_run_config
 from mc_cost.data import JUDGMENT_COLUMNS
-from mc_cost.gpqa import EXTERNAL_CAPABILITY_MODELS
 from mc_cost.model import JUDGMENT_SPECS, PosteriorArtifact, load_artifact, save_artifact
 from mc_cost.simulation import SimulationResult, validate_dashboard_payload
 from mc_cost.validation import require_decision
@@ -188,25 +187,13 @@ def tiny_mc_config(tmp_path):
                     judge, judge_samples,
                 )
 
-        judge_models = tmp_path / "judge_models.csv"
-        pd.DataFrame([
-            {"model": model, "accuracy": 0.5 + index / 10}
-            for index, model in enumerate(models)
-        ]).to_csv(judge_models, index=False)
-        responses = tmp_path / "responses.parquet"
-        pd.DataFrame([
-            {"model": model, "correct": 1}
-            for model in EXTERNAL_CAPABILITY_MODELS.values()
-        ]).to_parquet(responses, index=False)
-
         return config_file(
             tmp_path,
             paths={
                 "output": str(tmp_path / "artifacts"), "canonical_models": str(canonical),
                 "model_pool": str(pool), "irt_capabilities": str(capabilities),
                 "irt_items": str(item_path), "irt_posterior": str(posterior),
-                "judge_logs": str(judge_logs), "judge_models": str(judge_models),
-                "epoch_responses": str(responses),
+                "judge_logs": str(judge_logs),
                 "candidate_log_roots": [str(candidate_logs)],
             },
             fit={"warmup": warmup, "samples": samples, "chains": 1, "seed": seed},
@@ -357,6 +344,17 @@ def test_missing_irt_product_names_the_irt_proxy_producer(tmp_path, capsys):
     assert "scripts/irt_proxy/run.py" in capsys.readouterr().err
 
 
+def test_default_config_points_at_current_producers_and_observed_logs():
+    paths = json.loads(Path("configs/mc_cost/default.json").read_text())["paths"]
+    assert paths["irt_capabilities"] == "irt_results/easy_item_prediction/tables/fit_capabilities.csv"
+    assert paths["irt_items"] == "irt_results/easy_item_prediction/tables/fit_difficulties.csv"
+    assert paths["irt_posterior"] == "irt_results/easy_item_prediction/posterior/irt_posterior.npz"
+    assert paths["judge_logs"] == "logs/judging-variations/gpqa/a_baseline"
+    assert paths["model_overrides"] == "configs/mc_cost/model_overrides.json"
+    assert "judge_models" not in paths
+    assert "epoch_responses" not in paths
+
+
 def test_catalogue_builds_validated_table_and_aligned_draws_atomically(tmp_path):
     canonical = tmp_path / "canonical.md"
     canonical.write_text("- fitted\n")
@@ -380,10 +378,13 @@ def test_catalogue_builds_validated_table_and_aligned_draws_atomically(tmp_path)
         fixed_3pl__gpqa__floor=np.array([0.25]),
         fixed_3pl__gpqa__items=np.array(["gpqa:i"]),
     )
+    overrides = tmp_path / "overrides.json"
+    overrides.write_text('{"models": []}\n')
     config = config_file(tmp_path, paths={
         "output": str(tmp_path / "artifacts"),
         "canonical_models": str(canonical), "model_pool": str(pool),
-        "irt_capabilities": str(capabilities), "irt_posterior": str(posterior),
+        "model_overrides": str(overrides), "irt_capabilities": str(capabilities),
+        "irt_posterior": str(posterior),
     })
 
     assert main(["catalogue", "--config", str(config), "--seed", "7"]) == 0
@@ -393,6 +394,9 @@ def test_catalogue_builds_validated_table_and_aligned_draws_atomically(tmp_path)
     with np.load(tmp_path / "artifacts/capability_draws.npz", allow_pickle=False) as draws:
         assert draws["models"].tolist() == ["fitted"]
         assert draws["draws"].tolist() == [[0.4], [0.6]]
+        assert set(draws["source_names"].tolist()) == {
+            "canonical_models", "model_pool", "model_overrides", "irt_capabilities", "irt_posterior",
+        }
     manifest = json.loads((tmp_path / "artifacts/catalogue.manifest.json").read_text())
     assert set(manifest["files"]) == set(CATALOGUE_FILES)
 
@@ -415,10 +419,6 @@ def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monke
     }]).to_csv(items, index=False)
     logs = tmp_path / "logs"
     logs.mkdir()
-    models = tmp_path / "models.csv"
-    models.touch()
-    responses = tmp_path / "responses.parquet"
-    responses.touch()
     attempts = pd.DataFrame([{
         "chosen_left": 1, "judge": "j", "item": "i", "left_model": "a", "right_model": "b",
         "length_difference": 0.2, "same_model_family": 0, "self_comparison": 0,
@@ -432,17 +432,17 @@ def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monke
         calls.append((args, kwargs))
         return attempts, pd.DataFrame(), pd.DataFrame()
 
-    monkeypatch.setattr(cli, "prepare_gpqa", fake_prepare)
-    monkeypatch.setattr(cli, "candidate_token_rows", lambda *_: pd.DataFrame())
+    monkeypatch.setattr(cli, "prepare_mc_gpqa", fake_prepare)
+    monkeypatch.setattr(cli, "candidate_token_rows", lambda *_, **__: pd.DataFrame())
     config = config_file(tmp_path, paths={
         "output": str(output), "irt_items": str(items), "judge_logs": str(logs),
-        "judge_models": str(models), "epoch_responses": str(responses),
         "candidate_log_roots": [],
     })
 
     assert main(["prepare", "--config", str(config), "--seed", "9"]) == 0
 
-    assert calls and calls[0][0] == (logs, models, responses)
+    assert calls and calls[0][0][0] == logs
+    assert calls[0][0][1].equals(catalogue)
     assert pd.read_parquet(output / "judgments.parquet").shape[0] == 1
     assert (output / "token_candidate.parquet").is_file()
     assert (output / "token_judge.parquet").is_file()
@@ -462,14 +462,10 @@ def test_prepare_rejects_missing_configured_candidate_root_before_raw_loading(
     items.write_text("irt_model,fit,benchmark,item,difficulty\n")
     logs = tmp_path / "logs"
     logs.mkdir()
-    models, responses = tmp_path / "models.csv", tmp_path / "responses.parquet"
-    models.touch()
-    responses.touch()
     missing = tmp_path / "missing-candidate-logs"
-    monkeypatch.setattr(cli, "prepare_gpqa", lambda *_: pytest.fail("raw preparation ran"))
+    monkeypatch.setattr(cli, "prepare_mc_gpqa", lambda *_: pytest.fail("raw preparation ran"))
     config = config_file(tmp_path, paths={
         "output": str(output), "irt_items": str(items), "judge_logs": str(logs),
-        "judge_models": str(models), "epoch_responses": str(responses),
         "candidate_log_roots": [str(missing)],
     })
 

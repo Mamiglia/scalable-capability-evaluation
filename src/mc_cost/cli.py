@@ -28,7 +28,7 @@ from mc_cost.data import (
     write_prepared_tables,
 )
 from mc_cost.design import AutomaticConfig, automatic_comparisons, manual_comparisons
-from mc_cost.gpqa import prepare as prepare_gpqa
+from mc_cost.gpqa import prepare_for_mc as prepare_mc_gpqa
 from mc_cost.model import (
     FEATURE_COLUMNS,
     JUDGMENT_SPECS,
@@ -250,8 +250,11 @@ def _catalogue(args: argparse.Namespace, config: dict[str, Any]) -> None:
         name: _require_source(config, name)
         for name in ("canonical_models", "model_pool", "irt_capabilities", "irt_posterior")
     }
+    if "model_overrides" in config["paths"]:
+        sources["model_overrides"] = _require_source(config, "model_overrides")
     catalogue = build_catalogue(
         sources["canonical_models"], sources["model_pool"], sources["irt_capabilities"],
+        sources.get("model_overrides"),
     )
     validate_catalogue(catalogue)
     with np.load(sources["irt_posterior"], allow_pickle=False) as stored:
@@ -280,8 +283,6 @@ def _prepare(args: argparse.Namespace, config: dict[str, Any]) -> None:
     )
     items_path = _require_source(config, "irt_items")
     logs = _require_source(config, "judge_logs")
-    models = _require_source(config, "judge_models")
-    responses = _require_source(config, "epoch_responses")
     roots = config["paths"].get("candidate_log_roots", [])
     if not isinstance(roots, list) or any(not isinstance(root, str) for root in roots):
         raise CliError("configuration paths.candidate_log_roots must be a list of paths")
@@ -291,9 +292,9 @@ def _prepare(args: argparse.Namespace, config: dict[str, Any]) -> None:
             raise CliError(f"configured candidate log root does not exist: {root}")
     catalogue = pd.read_csv(output / "catalogue.csv")
     items = pd.read_csv(items_path)
-    attempts, _, _ = prepare_gpqa(logs, models, responses)
+    attempts, _, _ = prepare_mc_gpqa(logs, catalogue)
     judgments = prepare_judgments(attempts, catalogue, items)
-    candidates = candidate_token_rows(root_paths, catalogue, items)
+    candidates = candidate_token_rows(root_paths, catalogue, items, skip_incomplete=True)
     judges = judge_token_rows(judgments)
     with _temporary_directory(output.parent) as directory:
         stage = Path(directory)
@@ -704,6 +705,8 @@ def _capability_inputs(
         source_names = stored["source_names"].astype(str).tolist()
         source_values = stored["source_hashes"].astype(str).tolist()
     expected_names = {"canonical_models", "model_pool", "irt_capabilities", "irt_posterior"}
+    if "model_overrides" in config["paths"]:
+        expected_names.add("model_overrides")
     if (
         len(source_names) != len(source_values) or len(source_names) != len(set(source_names))
         or set(source_names) != expected_names

@@ -6,12 +6,14 @@ import json
 import re
 import zipfile
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import zipfile_zstd  # noqa: F401 - registers ZIP_ZSTANDARD with zipfile
+
+from mc_cost.catalogue import catalogue_aliases, normalized_name
 
 
 EXTERNAL_CAPABILITY_MODELS = {
@@ -27,7 +29,8 @@ EXTERNAL_CAPABILITY_MODELS = {
     "qwen3.6-plus": "qwen3.6-plus",
 }
 TRANSCRIPTS = re.compile(
-    r"Transcript A:\s*\n---\n(.*?)\n---\n\s*Transcript B:\s*\n---\n(.*?)\n---\n\s*Which of",
+    r"Transcript (?:A|1):\s*\n---\n(.*?)\n---\n.*?"
+    r"Transcript (?:B|2):\s*\n---\n(.*?)\n---\n\s*Which of",
     re.DOTALL,
 )
 
@@ -90,7 +93,12 @@ def judge_answer(sample: dict) -> tuple[str | None, float | None]:
     score = next(iter((sample.get("scores") or {}).values()), {})
     answer = score.get("answer")
     confidence = (score.get("metadata") or {}).get("confidence")
+    answer = {"1": "A", "2": "B"}.get(str(answer), answer)
     return (answer if answer in {"A", "B"} else None), confidence
+
+
+def major_is_left(sample: dict) -> bool:
+    return str(sample.get("target")) in {"A", "1"}
 
 
 def token_usage(sample: dict) -> dict[str, int]:
@@ -101,7 +109,9 @@ def token_usage(sample: dict) -> dict[str, int]:
     }
 
 
-def extract_attempts(log_root: Path, capabilities: dict[str, float]) -> tuple[pd.DataFrame, pd.DataFrame]:
+def extract_attempts(
+    log_root: Path, capabilities: Mapping[str, float] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows = []
     seen_samples = set()
     accounting = defaultdict(Counter)
@@ -109,7 +119,7 @@ def extract_attempts(log_root: Path, capabilities: dict[str, float]) -> tuple[pd
         judge, pair, condition = log_identity(path, log_root)
         accounting[judge]["eval_files_found"] += 1
         major, minor = pair.split("-vs-", 1)
-        if major not in capabilities or minor not in capabilities:
+        if capabilities is not None and (major not in capabilities or minor not in capabilities):
             raise ValueError(f"Missing capability estimate for pair {pair}")
         try:
             with zipfile.ZipFile(path) as archive:
@@ -135,17 +145,20 @@ def extract_attempts(log_root: Path, capabilities: dict[str, float]) -> tuple[pd
                     answer, confidence = judge_answer(sample)
                     if answer is None:
                         continue
-                    left_text, right_text = transcript_text(sample)
-                    major_is_left = sample.get("target") == "A"
-                    left_model, right_model = (major, minor) if major_is_left else (minor, major)
+                    try:
+                        left_text, right_text = transcript_text(sample)
+                    except ValueError:
+                        accounting[judge]["attempts_skipped_unparseable_transcript"] += 1
+                        seen_samples.add(sample_key)
+                        continue
+                    major_left = major_is_left(sample)
+                    left_model, right_model = (major, minor) if major_left else (minor, major)
                     usage = token_usage(sample)
-                    rows.append({
+                    row = {
                         "chosen_left": int(answer == "A"), "judge": judge,
                         "item": str(sample.get("id", "")).rsplit("_", 1)[0],
                         "model_pair": "|".join(sorted((major, minor))),
                         "left_model": left_model, "right_model": right_model,
-                        "left_capability": capabilities[left_model],
-                        "right_capability": capabilities[right_model],
                         "transcript_condition": condition,
                         "length_difference": np.log1p(len(left_text)) - np.log1p(len(right_text)),
                         "reasoning_difference": int("<THOUGHT_START>" in left_text)
@@ -153,15 +166,13 @@ def extract_attempts(log_root: Path, capabilities: dict[str, float]) -> tuple[pd
                         "contains_reasoning_and_the_other_does_not": int(
                             ("<THOUGHT_START>" in left_text) != ("<THOUGHT_START>" in right_text)
                         ),
-                        "capability_difference": capabilities[left_model] - capabilities[right_model],
-                        "capability_gap": abs(capabilities[left_model] - capabilities[right_model]),
                         "same_model_family": int(
                             left_model != right_model
                             and model_family(left_model) == model_family(right_model)
                         ),
                         "self_comparison": int(left_model == right_model),
                         "include_reasoning": include_reasoning,
-                        "major_is_left": major_is_left, "answer": answer,
+                        "major_is_left": major_left, "answer": answer,
                         "confidence": confidence, "left_chars": len(left_text),
                         "right_chars": len(right_text),
                         "judge_input_tokens": usage["input_tokens"],
@@ -174,7 +185,15 @@ def extract_attempts(log_root: Path, capabilities: dict[str, float]) -> tuple[pd
                         "phase": int(phase_match.group(1)) if phase_match else None,
                         "eval_id": eval_id, "sample_uuid": sample.get("uuid"),
                         "log_file": str(path),
-                    })
+                    }
+                    if capabilities is not None:
+                        row.update({
+                            "left_capability": capabilities[left_model],
+                            "right_capability": capabilities[right_model],
+                            "capability_difference": capabilities[left_model] - capabilities[right_model],
+                            "capability_gap": abs(capabilities[left_model] - capabilities[right_model]),
+                        })
+                    rows.append(row)
                     seen_samples.add(sample_key)
                     accounting[judge]["attempts_kept"] += 1
         except (OSError, KeyError, ValueError, zipfile.BadZipFile) as error:
@@ -182,16 +201,66 @@ def extract_attempts(log_root: Path, capabilities: dict[str, float]) -> tuple[pd
     return pd.DataFrame(rows), pd.DataFrame.from_dict(accounting, orient="index").fillna(0).astype(int)
 
 
-def prepare(
-    log_root: Path, models_path: Path, responses_path: Path, *,
-    min_pairs: int = 3, min_samples: int = 500,
+def _eligible(
+    data: pd.DataFrame, accounting: pd.DataFrame, *, min_pairs: int, min_samples: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    data, accounting = extract_attempts(log_root, load_capabilities(models_path, responses_path))
     eligibility = data.groupby("judge").agg(pairs=("model_pair", "nunique"), samples=("judge", "size"))
     judges = eligibility[(eligibility["pairs"] > min_pairs) & (eligibility["samples"] >= min_samples)].index
     data = data[data["judge"].isin(judges)].copy()
     if data.empty:
         raise ValueError("No judges meet the pair and sample thresholds")
+    return data, accounting, eligibility
+
+
+def prepare_for_mc(
+    log_root: Path, catalogue: pd.DataFrame, *, min_pairs: int = 3, min_samples: int = 500,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Prepare MC attempts on the catalogue's IRT scale, never raw accuracy."""
+    data, accounting = extract_attempts(log_root)
+    aliases = catalogue_aliases(catalogue)
+    identity_columns = ("judge", "left_model", "right_model")
+    unresolved = sorted({
+        str(value)
+        for column in identity_columns
+        for value in data[column].unique()
+        if normalized_name(value) not in aliases
+    })
+    if unresolved:
+        raise ValueError(f"judgment logs contain identities absent from catalogue: {', '.join(unresolved)}")
+    for column in identity_columns:
+        data[column] = data[column].map(lambda value: aliases[normalized_name(value)])
+
+    metadata = catalogue.set_index("model_id")
+    complete = pd.Series(True, index=data.index)
+    for column in identity_columns:
+        rows = metadata.reindex(data[column])
+        complete &= pd.to_numeric(rows["theta"], errors="coerce").notna().to_numpy()
+        complete &= pd.to_datetime(rows["release"], errors="coerce").notna().to_numpy()
+    skipped = data.loc[~complete, "judge"].value_counts()
+    if not skipped.empty:
+        accounting["attempts_skipped_missing_catalogue_metadata"] = skipped.reindex(
+            accounting.index, fill_value=0,
+        ).astype(int)
+    data = data.loc[complete].copy()
+    data, accounting, eligibility = _eligible(
+        data, accounting, min_pairs=min_pairs, min_samples=min_samples,
+    )
+    standardise(data, ("length_difference",))
+    return (
+        data.sort_values(["judge", "model_pair", "item", "transcript_condition"]).reset_index(drop=True),
+        accounting,
+        eligibility,
+    )
+
+
+def prepare(
+    log_root: Path, models_path: Path, responses_path: Path, *,
+    min_pairs: int = 3, min_samples: int = 500,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    data, accounting = extract_attempts(log_root, load_capabilities(models_path, responses_path))
+    data, accounting, eligibility = _eligible(
+        data, accounting, min_pairs=min_pairs, min_samples=min_samples,
+    )
     standardise(data, ("length_difference", "capability_difference"))
     return (
         data.sort_values(["judge", "model_pair", "item", "transcript_condition"]).reset_index(drop=True),

@@ -1,10 +1,12 @@
 import json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
 
 from mc_cost.catalogue import (
-    build_capability_draws, build_catalogue, theta_draws_from_accuracy, validate_catalogue,
+    build_capability_draws, build_catalogue, pool_enabled, resolve_model_id,
+    theta_draws_from_accuracy, validate_catalogue,
 )
 
 
@@ -28,6 +30,65 @@ def test_catalogue_joins_normalized_names_and_keeps_missing_metadata_visible(tmp
     assert pd.isna(got.loc[got.model_id == "model-missing", "release"]).item()
     assert pd.isna(got.loc[got.model_id == "model-missing", "judge_pool"]).item()
     assert pd.isna(got.loc[got.model_id == "model-missing", "candidate_pool"]).item()
+
+
+def test_catalogue_unions_fitted_models_and_applies_explicit_overrides(tmp_path):
+    canonical = tmp_path / "canonical.md"
+    canonical.write_text("- Canonical Model\n- missing-model\n")
+    pool = tmp_path / "pool.json"
+    pool.write_text(json.dumps([
+        {"name": "Canonical Model", "release": "2024-01-01", "reasoning": False},
+        {"name": "Future Model", "release": "2026-01-01", "reasoning": True},
+    ]))
+    capabilities = pd.DataFrame([
+        {
+            "irt_model": "fixed_3pl", "fit": "gpqa", "model": "canonical-model",
+            "theta": 0.1, "theta_p5": 0.0, "theta_p95": 0.2,
+        },
+        {
+            "irt_model": "fixed_3pl", "fit": "gpqa", "model": "future-model",
+            "theta": 1.1, "theta_p5": 0.9, "theta_p95": 1.3,
+        },
+    ])
+    overrides = tmp_path / "overrides.json"
+    overrides.write_text(json.dumps({"models": [
+        {"model_id": "Canonical Model", "aliases": ["canonical-model"], "judge_pool": True},
+        {"model_id": "future-model", "candidate_pool": True},
+    ]}))
+
+    got = build_catalogue(canonical, pool, capabilities, overrides)
+
+    assert got.model_id.tolist() == ["Canonical Model", "missing-model", "future-model"]
+    assert got.model_id.map(lambda value: value.lower().replace(" ", "")).is_unique
+    assert resolve_model_id("canonical-model", got) == "Canonical Model"
+    assert resolve_model_id("FUTURE MODEL", got) == "future-model"
+    assert pool_enabled(got.loc[got.model_id == "Canonical Model", "judge_pool"].item())
+    assert pool_enabled(got.loc[got.model_id == "future-model", "candidate_pool"].item())
+    assert pd.isna(got.loc[got.model_id == "missing-model", "theta"]).item()
+    validate_catalogue(got)
+
+
+def test_default_catalogue_resolves_observed_logs_and_has_explicit_eligible_pools():
+    config = json.loads(Path("configs/mc_cost/default.json").read_text())
+    paths = config["paths"]
+    got = build_catalogue(
+        paths["canonical_models"], paths["model_pool"], paths["irt_capabilities"],
+        paths["model_overrides"],
+    )
+    observed = {
+        model
+        for path in Path(paths["judge_logs"]).rglob("*.eval")
+        for model in path.relative_to(paths["judge_logs"]).parts[1].split("-vs-", 1)
+    }
+
+    assert observed
+    assert not [model for model in observed if resolve_model_id(model, got) is None]
+    assert got.loc[got["judge_pool"].map(pool_enabled), "model_id"].tolist()
+    assert got.loc[got["candidate_pool"].map(pool_enabled), "model_id"].tolist()
+    missing = got.loc[got.model_id == "gpt-oss-20b"].iloc[0]
+    assert pd.isna(missing.theta)
+    assert not pool_enabled(missing.judge_pool)
+    validate_catalogue(got)
 
 
 def test_accuracy_to_theta_inverts_each_fixed_3pl_draw():

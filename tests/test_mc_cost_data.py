@@ -12,6 +12,13 @@ from mc_cost.data import (
 )
 
 
+@pytest.mark.parametrize("task", ["inspect_evals/gpqa_diamond", "GPQA Diamond", "gpqa-diamond"])
+def test_gpqa_task_names_share_the_irt_benchmark_key(task):
+    from mc_cost.data import _benchmark
+
+    assert _benchmark(task) == "gpqa"
+
+
 def test_prepare_judgments_builds_signed_and_symmetric_features():
     attempts = pd.DataFrame([{
         "chosen_left": 1, "judge": "j", "item": "i", "left_model": "a", "right_model": "b",
@@ -92,7 +99,7 @@ def test_candidate_rows_deduplicate_and_exclude_zero_usage(monkeypatch):
         id="i_2", epoch=1, error=None, model_usage={"m": usage(0, 0, 0)}, scores={}, output=kept.output,
     )
     log = SimpleNamespace(
-        eval=SimpleNamespace(task="gpqa", model="openrouter/candidate", task_args={}),
+        eval=SimpleNamespace(task="inspect_evals/gpqa_diamond", model="openrouter/candidate", task_args={}),
         samples=[kept, duplicate, zero],
     )
     monkeypatch.setattr(data, "list_eval_logs", lambda _: [SimpleNamespace(name="one")])
@@ -109,6 +116,7 @@ def test_candidate_rows_deduplicate_and_exclude_zero_usage(monkeypatch):
     assert len(got) == 1
     row = got.iloc[0]
     assert row.role == "candidate"
+    assert row.benchmark == "gpqa"
     assert row.correct == 1
     assert row.theta == 0.5
     assert row.difficulty == 0.4
@@ -133,6 +141,25 @@ def test_candidate_rows_reject_missing_fitting_metadata(monkeypatch):
 
     with pytest.raises(ValueError, match="candidate.*missing.*theta.*release.*item.*missing"):
         candidate_token_rows(["unused"], catalogue, pd.DataFrame())
+
+
+def test_mc_candidate_rows_account_for_incomplete_logs(monkeypatch):
+    import mc_cost.data as data
+
+    sample = SimpleNamespace(id="i_1", epoch=1)
+    log = SimpleNamespace(
+        eval=SimpleNamespace(task="gpqa", model="openrouter/not-fitted"), samples=[sample],
+    )
+    monkeypatch.setattr(data, "list_eval_logs", lambda _: [SimpleNamespace(name="one")])
+    monkeypatch.setattr(data, "read_eval_log", lambda _: log)
+
+    got = candidate_token_rows(
+        ["unused"], pd.DataFrame([{"model_id": "fitted", "theta": 0.0, "release": "2025-01-01"}]),
+        pd.DataFrame(), skip_incomplete=True,
+    )
+
+    assert got.empty
+    assert got.attrs["accounting"]["missing_catalogue_metadata"] == 1
 
 
 def test_write_prepared_tables_stores_training_standardization(tmp_path):
