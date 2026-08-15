@@ -1,0 +1,46 @@
+# Features-only baseline: predict which member of a pair is higher-capability
+# from superficial transcript features alone.
+frame: analysis/hibayes/gpqa_glm.csv
+out_csv: analysis/hibayes/features_only_baseline.csv
+out_figure: analysis/hibayes/features_only_baseline
+
+# Which member is higher-capability. Sign convention is the frame's: left minus right.
+target_column: capability_difference
+group_column: model_pair
+# One comparison = one item shown to a judge in one presentation order.
+comparison_keys: [item, model_pair, order]
+judge_column: judge
+judge_choice_column: chosen_left
+
+variants:
+  length_only:
+    - length_difference_sd
+  length_and_style:
+    - length_difference_sd
+    - personal_pronouns_difference_sd
+    - hedging_difference_sd
+    - backtracking_difference_sd
+    - uncertainty_difference_sd
+    - confidence_difference_sd
+    - questions_difference_sd
+
+# Outer folds give out-of-fold predictions; inner folds pick hyperparameters on
+# the training folds only. Both are grouped by pair.
+outer_folds: 5
+inner_folds: 4
+random_seed: 0
+
+# Capability gap in ECI points separating the two reported slices.
+low_gap_threshold: 10.0
+
+# Accuracy bands: resample pairs with replacement.
+bootstrap_resamples: 2000
+
+estimators:
+  logistic:
+    C: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+  gradient_boosting:
+    learning_rate: [0.03, 0.1]
+    max_leaf_nodes: [7, 31]
+    min_samples_leaf: [20, 100]
+    max_iter: [300]
