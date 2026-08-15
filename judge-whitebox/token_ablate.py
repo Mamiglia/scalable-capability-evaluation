@@ -1,8 +1,26 @@
-"""Token-group mapping for a rendered verdict prompt: structural spans (from char-offsets
-of the row's own text and the template's fixed literals) plus marker-word spans (from a
-config lexicon), for position-resolved ablation."""
+"""Token-resolved causal ablation of an LLM judge's verdict.
+
+token_groups maps a rendered verdict prompt's tokens to interpretable groups (structural spans
++ marker-word spans). The two probes then intervene BY TOKEN POSITION, batch-1 so positions map
+straight from token_groups (no left-pad offset):
+- FT probe (lora_at_positions): keep the LoRA dW.x only at chosen positions, zero it elsewhere
+  -> which tokens' LoRA-write reproduces the base->ft change.
+- BASE probe (mean_ablate): replace the residual at chosen positions with the mean over the other
+  positions, at every layer -> which tokens the base verdict causally depends on.
+Metrics reuse adapter_ablate.metrics (pos_term, content_gap, acc, ...).
+"""
+import argparse
+import contextlib
+import pathlib
 import re
 
+import pandas as pd
+import torch
+
+import adapter_ablate
+import verdicts
+import wbconfig
+import wbpairs
 import wbprompts
 
 
@@ -103,3 +121,184 @@ def token_groups(row, tokenizer, c, invert=False):
         groups[name] = sorted(idx)
 
     return groups
+
+
+class _Holder:
+    """Per-forward intervention target: the set of token positions the active probe acts on.
+    positions=None disables the intervention (a plain forward)."""
+    positions = None
+
+
+@contextlib.contextmanager
+def lora_at_positions(model, holder):
+    """FT probe. Forward-hook on every LoRA module recomputes its dW.x increment and subtracts it
+    at every position NOT in holder.positions, so the LoRA is active only at holder.positions and
+    the base weight path is untouched everywhere. holder.positions is set per row by the caller;
+    None = full LoRA (no masking). Batch-1 assumed (positions index the unpadded sequence)."""
+    handles = []
+    for _, module in model.named_modules():
+        if not hasattr(module, "lora_A"):
+            continue
+
+        def hook(mod, inputs, output, mod_ref=None):
+            if holder.positions is None:
+                return output
+            x = inputs[0]
+            inc = None
+            for name in mod.active_adapters:
+                term = mod.lora_B[name](mod.lora_A[name](x)) * mod.scaling[name]
+                inc = term if inc is None else inc + term
+            if inc is None:
+                return output
+            keep = torch.zeros(output.shape[1], device=output.device, dtype=output.dtype)
+            keep[list(holder.positions)] = 1.0
+            return output - inc * (1.0 - keep)[None, :, None]
+
+        handles.append(module.register_forward_hook(hook))
+    try:
+        yield
+    finally:
+        for h in handles:
+            h.remove()
+
+
+def _decoder_layers(model):
+    """The list of decoder blocks, for either a plain CausalLM or an unmerged PeftModel."""
+    for attr in ("model.layers", "base_model.model.model.layers"):
+        obj = model
+        try:
+            for part in attr.split("."):
+                obj = getattr(obj, part)
+            return obj
+        except AttributeError:
+            continue
+    raise AttributeError("could not locate decoder layers")
+
+
+@contextlib.contextmanager
+def mean_ablate(model, holder):
+    """BASE probe. Forward-hook on every decoder block replaces the residual at holder.positions
+    with the mean over the OTHER (kept) positions of that sequence, at every layer (on-manifold,
+    not zero). holder.positions set per row by the caller; None or empty = no-op. Batch-1."""
+    handles = []
+
+    def hook(mod, inputs, output):
+        if not holder.positions:
+            return output
+        hs = output[0] if isinstance(output, tuple) else output
+        seq = hs.shape[1]
+        pos = list(holder.positions)
+        keep = torch.ones(seq, dtype=torch.bool, device=hs.device)
+        keep[pos] = False
+        if not keep.any():
+            return output
+        mean = hs[:, keep, :].mean(dim=1, keepdim=True)
+        hs = hs.clone()
+        hs[:, pos, :] = mean.to(hs.dtype)
+        return (hs,) + tuple(output[1:]) if isinstance(output, tuple) else hs
+
+    for layer in _decoder_layers(model):
+        handles.append(layer.register_forward_hook(hook))
+    try:
+        yield
+    finally:
+        for h in handles:
+            h.remove()
+
+
+def _kept_rows(df, tokenizer, c):
+    """Rows whose rendered prompt is within max_input_tokens, with their token_groups and length."""
+    max_tokens = c["verdicts"]["max_input_tokens"]
+    kept, n_skipped = [], 0
+    for _, row in df.iterrows():
+        prompt = wbprompts.render_verdict_prompt(row, tokenizer)
+        ids = tokenizer(prompt)["input_ids"]
+        if len(ids) > max_tokens:
+            n_skipped += 1
+            continue
+        kept.append((row, token_groups(row, tokenizer, c), len(ids)))
+    if n_skipped:
+        print(f"skipped {n_skipped} rows over {max_tokens} tokens")
+    return kept
+
+
+def _verdicts(model, tokenizer, kept, holder, positions_fn):
+    """Batch-1 verdict pass; per row set holder.positions=positions_fn(groups, seq) and read
+    l1/l2 at the last token. The intervention context manager must already be entered."""
+    device = next(model.parameters()).device
+    out = []
+    for row, grp, seq in kept:
+        holder.positions = positions_fn(grp, seq)
+        enc = tokenizer(wbprompts.render_verdict_prompt(row, tokenizer), return_tensors="pt").to(device)
+        with torch.no_grad():
+            logits = model(**enc).logits[0]
+        l1, l2 = verdicts.readout(logits[-1], tokenizer)
+        out.append(dict(pair_uid=row["pair_uid"], order=int(row["order"]), l1=l1, l2=l2,
+                         gap=l1 - l2, pick=1 if l1 > l2 else 2, label=int(row["label"])))
+    return pd.DataFrame(out, columns=["pair_uid", "order", "l1", "l2", "gap", "pick", "label"])
+
+
+def run_token_ablation(model, tokenizer, df, c, mode):
+    """mode='ft': keep the LoRA only at each token-group (vs LoRA-nowhere=base and LoRA-everywhere
+    =full) -> sufficiency/necessity of each group's LoRA-write. mode='base': mean-ablate each
+    token-group (vs intact) -> the base verdict's dependence on each group. Returns a tidy df,
+    one row per (group, metric)."""
+    kept = _kept_rows(df, tokenizer, c)
+    assert kept, "no rows within max_input_tokens"
+    holder = _Holder()
+    group_names = list(kept[0][1])
+    metric_keys = ["pos_term", "content_gap", "acc", "pick_weaker_acc"]
+
+    rows = []
+    if mode == "ft":
+        with lora_at_positions(model, holder):
+            none_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder, lambda g, s: set()))
+            full_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder, lambda g, s: set(range(s))))
+            for gn in group_names:
+                only_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder,
+                                                          lambda g, s, gn=gn: set(g[gn])))
+                minus_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder,
+                                                           lambda g, s, gn=gn: set(range(s)) - set(g[gn])))
+                for mk in metric_keys:
+                    rows.append(dict(group=gn, metric=mk, none=none_m[mk], full=full_m[mk],
+                                     only=only_m[mk], minus=minus_m[mk],
+                                     sufficiency=only_m[mk] - none_m[mk],
+                                     necessity=full_m[mk] - minus_m[mk]))
+    else:
+        with mean_ablate(model, holder):
+            intact_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder, lambda g, s: set()))
+            for gn in group_names:
+                ablate_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder,
+                                                            lambda g, s, gn=gn: set(g[gn])))
+                for mk in metric_keys:
+                    rows.append(dict(group=gn, metric=mk, intact=intact_m[mk], ablate=ablate_m[mk],
+                                     effect=ablate_m[mk] - intact_m[mk]))
+    return pd.DataFrame(rows)
+
+
+def main():
+    c = wbconfig.cfg()
+    p = argparse.ArgumentParser()
+    p.add_argument("--model", required=True)
+    p.add_argument("--adapter", default=None, help="required for --mode ft")
+    p.add_argument("--mode", required=True, choices=["base", "ft"])
+    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--out", required=True)
+    args = p.parse_args()
+
+    if args.mode == "ft":
+        assert args.adapter, "--mode ft needs --adapter"
+        model, tokenizer, _ = adapter_ablate.load_unmerged(args.model, args.adapter, c)
+    else:
+        model, tokenizer, _ = verdicts.load_model(args.model, None, c)
+
+    df = wbpairs.load_pairs(c, split=c["verdicts"]["eval_split"], limit=args.limit)
+    out = run_token_ablation(model, tokenizer, df, c, args.mode)
+    path = pathlib.Path(args.out)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(path, index=False)
+    print(f"{args.mode} token-ablation -> {path} ({len(out)} rows)")
+
+
+if __name__ == "__main__":
+    main()
