@@ -16,4 +16,6 @@ runpod:
   image: vllm/vllm-openai:v0.20.1
   vllm_args:
     - --trust-remote-code
+    - --reasoning-parser
+    - gemma4
 

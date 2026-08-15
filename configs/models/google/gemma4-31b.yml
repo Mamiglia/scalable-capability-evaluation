@@ -4,8 +4,8 @@ slug: openrouter/google/gemma-4-31b-it
 release_date: '2026-03-31'
 generate_args:
   extra_body:
-    chat_template_kwargs:
-      enable_thinking: true
+    reasoning:
+      enabled: true
 model_args:
   provider:
     order:
