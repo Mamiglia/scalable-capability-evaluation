@@ -76,6 +76,9 @@ class JudgmentData(NamedTuple):
     training_ranges: dict[str, list[float]] | None = None
     source_hashes: dict[str, str] | None = None
     presentation_include_reasoning: bool = False
+    presentation_max_chars: int = 65536
+    presentation_truncate_frac: float | None = None
+    presentation_truncate_keep: str = "first"
 
 
 @dataclass(frozen=True)
@@ -155,7 +158,8 @@ def encode_judgments(
     """Encode prepared rows, preserving the specification's feature order."""
     required = {
         "chosen_left", "judge", "item", "left_model", "right_model", "theta_gap",
-        "include_reasoning",
+        "include_reasoning", "presentation_max_chars", "presentation_truncate_frac",
+        "presentation_truncate_keep",
     }
     if spec.include_length:
         required.add("length_difference")
@@ -171,6 +175,18 @@ def encode_judgments(
         or presentation.astype(bool).any()
     ):
         raise ValueError("judgment fitting currently supports only include_reasoning=false")
+    max_chars = pd.to_numeric(frame["presentation_max_chars"], errors="coerce")
+    if (
+        max_chars.isna().any() or (max_chars <= 0).any()
+        or not np.equal(max_chars, np.floor(max_chars)).all()
+        or max_chars.nunique() != 1
+    ):
+        raise ValueError("judgment fitting requires one positive integer presentation_max_chars")
+    if frame["presentation_truncate_frac"].notna().any():
+        raise ValueError("judgment fitting does not support paired truncation")
+    truncate_keep = frame["presentation_truncate_keep"]
+    if truncate_keep.isna().any() or truncate_keep.nunique() != 1 or truncate_keep.iloc[0] != "first":
+        raise ValueError("judgment fitting requires presentation_truncate_keep=first")
     training_scales, source_hashes = _validate_provenance(
         training_scales, source_hashes, spec.global_features, spec.include_length,
     )
@@ -242,6 +258,8 @@ def encode_judgments(
         global_features=spec.global_features, category_maps=category_maps,
         training_scales=training_scales, training_ranges=ranges,
         source_hashes=source_hashes, presentation_include_reasoning=False,
+        presentation_max_chars=int(max_chars.iloc[0]), presentation_truncate_frac=None,
+        presentation_truncate_keep="first",
     )
 
 
@@ -285,9 +303,10 @@ def judgment_model(data: JudgmentData, conditional_judges: bool = True) -> None:
     candidate = candidate_scale * (candidate_raw - candidate_raw.mean())
     numpyro.deterministic("candidate_effects", candidate)
     item_scale = numpyro.sample("item_scale", dist.HalfNormal(0.5))
-    item = item_scale * numpyro.sample(
+    item_raw = numpyro.sample(
         "item_raw", dist.Normal(0, 1).expand([data.num_items]).to_event(1),
     )
+    item = item_scale * (item_raw - item_raw.mean())
     numpyro.deterministic("item_effects", item)
 
     logits = (
@@ -377,6 +396,9 @@ def fit_judgment_model(
         "source_hashes": data.source_hashes or {},
         "conditional_judges": conditional_judges,
         "presentation_include_reasoning": data.presentation_include_reasoning,
+        "presentation_max_chars": data.presentation_max_chars,
+        "presentation_truncate_frac": data.presentation_truncate_frac,
+        "presentation_truncate_keep": data.presentation_truncate_keep,
     }
     return PosteriorArtifact(posterior, metadata, diagnostics)
 

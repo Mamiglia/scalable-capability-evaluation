@@ -63,6 +63,7 @@ def test_judgment_model_declares_pooled_judge_and_model_effects():
     trace = handlers.trace(handlers.seed(judgment_model, 2)).get_trace(tiny_data(), True)
     assert trace["judge_effects"]["value"].shape == (1, 2)
     assert trace["candidate_effects"]["value"].shape == (2,)
+    assert np.allclose(trace["item_effects"]["value"], 0.0)
     assert trace["obs"]["value"].shape == (2,)
 
 
@@ -131,6 +132,8 @@ def test_encode_judgments_uses_declared_features_and_theta_release_judge_covaria
             "theta_gap_x_difficulty": 4.0, "same_family_x_theta_gap": 5.0,
             "self_comparison": 0.0, "reasoning_difference": 0.0,
             "include_reasoning": False,
+            "presentation_max_chars": 65536, "presentation_truncate_frac": None,
+            "presentation_truncate_keep": "first",
         },
         {
             "chosen_left": 0, "judge": "j1", "item": "i1", "left_model": "a", "right_model": "b",
@@ -139,6 +142,8 @@ def test_encode_judgments_uses_declared_features_and_theta_release_judge_covaria
             "theta_gap_x_difficulty": -4.0, "same_family_x_theta_gap": -5.0,
             "self_comparison": 0.0, "reasoning_difference": 0.0,
             "include_reasoning": False,
+            "presentation_max_chars": 65536, "presentation_truncate_frac": None,
+            "presentation_truncate_keep": "first",
         },
     ])
     catalogue = pd.DataFrame([
@@ -177,6 +182,9 @@ def test_encode_judgments_uses_declared_features_and_theta_release_judge_covaria
     }
     assert got.source_hashes == {"judgments": "abc", "catalogue": "def"}
     assert got.presentation_include_reasoning is False
+    assert got.presentation_max_chars == 65536
+    assert got.presentation_truncate_frac is None
+    assert got.presentation_truncate_keep == "first"
 
 
 @pytest.mark.parametrize("condition", [True, None, "false"])
@@ -184,6 +192,8 @@ def test_encode_judgments_rejects_unsupported_or_undeclared_presentation(conditi
     frame = pd.DataFrame([{
         "chosen_left": 1, "judge": "j", "item": "i", "left_model": "a", "right_model": "b",
         "theta_gap": 0.0, "include_reasoning": condition,
+        "presentation_max_chars": 65536, "presentation_truncate_frac": None,
+        "presentation_truncate_keep": "first",
     }])
     catalogue = pd.DataFrame([{"model_id": "j", "theta": 0.0, "release": "2024-01-01"}])
 
@@ -194,10 +204,46 @@ def test_encode_judgments_rejects_unsupported_or_undeclared_presentation(conditi
         )
 
 
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"presentation_max_chars": [100, 200]}, "presentation_max_chars"),
+        ({"presentation_truncate_frac": [None, 0.5]}, "paired truncation"),
+        ({"presentation_truncate_keep": ["first", "last"]}, "presentation_truncate_keep"),
+    ],
+)
+def test_encode_judgments_rejects_mixed_or_paired_truncation(changes, message):
+    frame = pd.DataFrame([
+        {
+            "chosen_left": 1, "judge": "j", "item": "i1", "left_model": "a",
+            "right_model": "b", "theta_gap": 0.0, "include_reasoning": False,
+            "presentation_max_chars": 65536, "presentation_truncate_frac": None,
+            "presentation_truncate_keep": "first",
+        },
+        {
+            "chosen_left": 0, "judge": "j", "item": "i2", "left_model": "b",
+            "right_model": "a", "theta_gap": 0.0, "include_reasoning": False,
+            "presentation_max_chars": 65536, "presentation_truncate_frac": None,
+            "presentation_truncate_keep": "first",
+        },
+    ])
+    for column, values in changes.items():
+        frame[column] = values
+    catalogue = pd.DataFrame([{"model_id": "j", "theta": 0.0, "release": "2024-01-01"}])
+
+    with pytest.raises(ValueError, match=message):
+        encode_judgments(
+            frame, catalogue, JudgmentSpec((), False), training_scales=TRAINING_SCALES,
+            source_hashes={"judgments": "abc"},
+        )
+
+
 def test_encode_judgments_rejects_empty_or_incompatible_provenance():
     frame = pd.DataFrame([{
         "chosen_left": 1, "judge": "j", "item": "i", "left_model": "a", "right_model": "b",
         "theta_gap": 0.0, "include_reasoning": False,
+        "presentation_max_chars": 65536, "presentation_truncate_frac": None,
+        "presentation_truncate_keep": "first",
     }])
     catalogue = pd.DataFrame([{"model_id": "j", "theta": 0.0, "release": "2024-01-01"}])
     spec = JudgmentSpec((), False)
@@ -259,6 +305,9 @@ def test_tiny_fit_records_configured_diagnostics_and_metadata(tmp_path):
         "source_hashes": data.source_hashes,
         "conditional_judges": False,
         "presentation_include_reasoning": False,
+        "presentation_max_chars": 65536,
+        "presentation_truncate_frac": None,
+        "presentation_truncate_keep": "first",
     }
     assert isinstance(artifact.diagnostics["divergences"], int)
     assert artifact.diagnostics["draws"] == 4

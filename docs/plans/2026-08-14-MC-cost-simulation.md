@@ -86,8 +86,10 @@ instead of receiving an average-model substitution.
 The baseline judgment protocol uses `include_reasoning=false`. Candidate-token
 preparation therefore fits and simulates the final answer length visible to the
 judge, while retaining full transcript length and generated-reasoning evidence
-for audit and future protocols. Judgment artifacts record this presentation
-condition and fail closed if it does not match. The current judgment data also
+for audit and future protocols. Each visible transcript is capped at the
+baseline's 65,536-character limit; paired-truncation conditions are unsupported
+and rejected. Judgment artifacts record this presentation condition and fail
+closed if it does not match. The current judgment data also
 contain no self-comparisons or reasoning-class contrasts, so those effects are
 excluded from the sanctioned models; explicit manual scenarios receive named
 support warnings until matching observations exist.

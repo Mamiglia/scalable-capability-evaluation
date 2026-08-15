@@ -2,6 +2,7 @@ import importlib.util
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.spatial import cKDTree
 from pathlib import Path
 
 from mc_cost.model import JUDGMENT_SPECS
@@ -17,6 +18,7 @@ from mc_cost.validation import (
     ranking_recovery,
     require_decision,
     support_distance,
+    build_support_index,
     validate_tokens,
     write_decision,
 )
@@ -244,6 +246,16 @@ def test_support_scaling_and_threshold_do_not_depend_on_queries():
     assert near.iloc[0].threshold == mixed.iloc[0].threshold
 
 
+def test_support_index_uses_ckdtree_and_matches_public_query_contract():
+    train = np.column_stack([np.arange(5000, dtype=float), np.zeros(5000)])
+    index = build_support_index(train)
+
+    assert isinstance(index.tree, cKDTree)
+    assert support_distance(train, train[[2500]]).iloc[0].distance == pytest.approx(
+        index.query(train[[2500]]).iloc[0].distance
+    )
+
+
 def test_ranking_recovery_labels_theta_and_runs_lomo_on_connected_component():
     votes = pd.DataFrame([
         {"fit": "gpqa", "major": a, "minor": b, "item_id": f"i{i}", "picked_major": 1}
@@ -266,6 +278,8 @@ def test_ranking_recovery_labels_theta_and_runs_lomo_on_connected_component():
 
 
 def test_decision_writer_is_deterministic_and_hash_bound(tmp_path):
+    predictors = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    threshold = float(support_distance(predictors, predictors[:1]).iloc[0].threshold)
     token_coverage = pd.DataFrame([
         {"role": "candidate", "reasoning_class": "reasoning", "outcome": "output_tokens", "coverage_90": 0.9},
         {"role": "judge", "reasoning_class": "non_reasoning", "outcome": "input_tokens", "coverage_90": 0.8},
@@ -274,9 +288,9 @@ def test_decision_writer_is_deterministic_and_hash_bound(tmp_path):
         selected_spec="core",
         judge_gate={"enabled": True, "mean_improvement": 0.1, "standard_error": 0.01},
         token_coverage=token_coverage,
-        predictors=np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
+        predictors=predictors,
         predictor_names=["theta_gap", "oversight"],
-        support_threshold=2.5,
+        support_threshold=threshold,
         data_hashes={"judgments": "abc", "candidate_tokens": "def"},
         validation_timestamp="2026-08-15T12:00:00Z",
     )
@@ -285,6 +299,13 @@ def test_decision_writer_is_deterministic_and_hash_bound(tmp_path):
     write_decision(second, payload)
 
     assert first.read_bytes() == second.read_bytes()
+    assert payload["judgment_support"] == {
+        "coordinate_system": "raw",
+        "predictor_names": ["theta_gap", "oversight"],
+        "training_matrix": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+        "training_ranges": [[0.0, 1.0], [0.0, 1.0]],
+        "nearest_neighbor_threshold": threshold,
+    }
     assert require_decision(first, payload["data_hashes"]) == payload
     with pytest.raises(ValueError, match="data hash mismatch"):
         require_decision(first, {"judgments": "changed", "candidate_tokens": "def"})

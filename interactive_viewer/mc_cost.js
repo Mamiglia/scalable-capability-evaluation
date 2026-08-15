@@ -410,7 +410,7 @@ function renderAutomaticGuidance(rows) {
   guidance.hidden = rows.length > 0;
   guidance.textContent = rows.length
     ? ""
-    : "This exact grid or pool selection is not in the export. Add it to the dashboard configuration, then rerun mc-cost export-dashboard --config configs/mc_cost/default.json.";
+    : "This exact grid or pool selection is not in the export. Add it to dashboard.joint_scenarios (and raise dashboard.max_judgment_calls if needed), then rerun mc-cost export-dashboard --config configs/mc_cost/default.json.";
 }
 
 function render() {

@@ -16,10 +16,10 @@ import pandas as pd
 from scipy.special import expit
 from scipy.stats import kendalltau
 
-from mc_cost.data import RELEASE_EPOCH
+from mc_cost.data import RELEASE_EPOCH, normalize_family
 from mc_cost.model import FEATURE_COLUMNS, JudgmentData, PosteriorArtifact, left_logits
 from mc_cost.tokens import draw_token_usage, draw_transcript_lengths
-from mc_cost.validation import fitted_ranking_components, require_decision
+from mc_cost.validation import build_support_index, fitted_ranking_components, require_decision
 
 
 TRIAL_METRICS = (
@@ -32,7 +32,7 @@ TRIAL_METRICS = (
 )
 _TRIAL_COLUMNS = [
     "trial", "configuration", "mode", "comparison_id", "judge", "m1", "m2",
-    "model", "reasoning_class", "role", "metric", "value", "warning_state",
+    "model", "reasoning_class", "role", "metric", "value", "warning_state", "reason",
 ]
 _WARNING_COLUMNS = ["code", "trial", "row", "source_row", "model", "message"]
 _DASHBOARD_KEYS = (
@@ -45,6 +45,8 @@ _DASHBOARD_ARRAYS = (
 _MANUAL_IDENTITY = (
     "judge", "m1", "m2", "judge_reasoning_class", "m1_reasoning_class", "m2_reasoning_class",
 )
+_WARNING_STATES = {"ok", "partial", "unavailable", "missing_price"}
+_UNAVAILABLE_STATES = {"unavailable", "missing_price"}
 
 
 @dataclass(frozen=True)
@@ -142,6 +144,10 @@ def validate_dashboard_payload(payload: Mapping[str, Any]) -> None:
             raise ValueError("dashboard manual reasoning classes must be reasoning or non_reasoning")
     for name in ("automatic", "manual", "scaling", "ranking_recovery"):
         for row in payload[name]:
+            if "warning_state" in row and row["warning_state"] not in _WARNING_STATES:
+                raise ValueError(
+                    "dashboard warning_state must be ok, partial, unavailable, or missing_price"
+                )
             if row.get("exact") is True:
                 if not _finite_number(row.get("value")):
                     raise ValueError(f"dashboard {name} exact rows require a declared exact numeric value")
@@ -151,13 +157,16 @@ def validate_dashboard_payload(payload: Mapping[str, Any]) -> None:
             quantiles = [row[key] for key in ("p5", "p50", "p95")]
             if all(value is None for value in quantiles):
                 warning_state = row.get("warning_state")
-                warned = isinstance(warning_state, str) and warning_state not in {"", "ok"}
+                reason = row.get("reason")
+                has_reason = isinstance(reason, str) and bool(reason.strip())
+                warned = warning_state in _UNAVAILABLE_STATES and has_reason
                 invalid = (
-                    row.get("valid") is False
-                    and isinstance(row.get("reason"), str) and bool(row["reason"])
+                    name == "ranking_recovery" and row.get("valid") is False and has_reason
                 )
                 if not warned and not invalid:
-                    raise ValueError("dashboard all-null quantiles require an explicit unavailable state")
+                    raise ValueError(
+                        "dashboard all-null quantiles require a recognized unavailable state and reason"
+                    )
                 continue
             if not all(_finite_number(value) for value in quantiles):
                 raise ValueError(f"dashboard {name} quantiles must be finite numeric values")
@@ -201,7 +210,10 @@ def dashboard_payload(
 def dashboard_ranking_recovery(
     result: SimulationResult, catalogue: pd.DataFrame, context: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Summarize component-local Bradley-Terry recovery from exact trial aggregates."""
+    """Summarize call-weighted, trial-local Bradley-Terry component recovery."""
+    presentations = context.get("presentations")
+    if not isinstance(presentations, int) or isinstance(presentations, bool) or presentations < 1:
+        raise ValueError("ranking recovery context presentations must be a positive integer")
     required = {"trial", "comparison_id", "m1", "m2", "metric", "value"}
     if missing := required - set(result.trials):
         raise ValueError(f"simulation trials lack ranking columns: {', '.join(sorted(missing))}")
@@ -215,14 +227,12 @@ def dashboard_ranking_recovery(
     raw = []
     disconnected_trials = 0
     incomplete_reasons = set()
-    incomplete_models = set()
     for trial, trial_rows in comparison.groupby("trial", sort=True):
         pair_wins = defaultdict(lambda: [0.0, 0])
         theta: dict[str, float] = {}
         for _, rows in trial_rows.groupby(["comparison_id", "m1", "m2"], sort=True, dropna=False):
             values = rows.set_index("metric")["value"].to_dict()
             m1, m2 = str(rows["m1"].iloc[0]), str(rows["m2"].iloc[0])
-            incomplete_models.update((m1, m2))
             if not {"judgment_calls", "m1_wins", "m1_theta", "m2_theta"} <= set(values):
                 incomplete_reasons.add("trial comparison lacks generating theta or vote totals")
                 continue
@@ -230,9 +240,9 @@ def dashboard_ranking_recovery(
             if not all(_finite_number(value) for value in numeric):
                 incomplete_reasons.add("trial comparison has non-finite generating theta or vote totals")
                 continue
-            call_count = int(round(float(values["judgment_calls"])))
-            m1_wins = int(round(float(values["m1_wins"])))
-            if call_count < 1:
+            call_count = float(values["judgment_calls"]) / presentations
+            m1_wins = float(values["m1_wins"]) / presentations
+            if call_count <= 0:
                 incomplete_reasons.add("no usable judgment calls")
                 continue
             if m1 == m2:
@@ -252,6 +262,8 @@ def dashboard_ranking_recovery(
             pair_wins[pair][1] += call_count
         fitted_components = fitted_ranking_components(pair_wins)
         disconnected_trials += int(len(fitted_components) > 1)
+        trial_components = []
+        trial_reasons = set()
         for part in fitted_components:
             strengths = part["strengths"]
             matched = sorted(set(strengths) & set(theta))
@@ -262,16 +274,24 @@ def dashboard_ranking_recovery(
                 ).statistic)
                 if len(matched) >= 2 else np.nan
             )
-            raw.append({
-                "trial": int(trial), "component_models": part["component_models"], "value": tau,
-                "valid": bool(np.isfinite(tau)),
-                "reason": "" if np.isfinite(tau) else "fewer than 2 matched generating-theta models",
-            })
+            if np.isfinite(tau):
+                weight = sum(float(values[1]) for values in part["pair_wins"].values())
+                trial_components.append((tau, weight))
+            else:
+                trial_reasons.add("fewer than 2 matched generating-theta models")
+        valid = [(tau, weight) for tau, weight in trial_components if weight > 0]
+        raw.append({
+            "trial": int(trial),
+            "value": float(np.average(
+                [tau for tau, _ in valid], weights=[weight for _, weight in valid],
+            )) if valid else np.nan,
+            "valid": bool(valid), "reason": "; ".join(sorted(trial_reasons)),
+        })
     if not raw:
         reason = "; ".join(sorted(incomplete_reasons)) or "no per-comparison judgment calls"
         return ([{
             **dict(context), "metric": "kendall_tau",
-            "component_models": "|".join(sorted(incomplete_models)),
+            "component_models": "trial-local components",
             "p5": None, "p50": None, "p95": None,
             "n_trials": 0, "valid": False, "reason": reason,
             "partial_reasons": sorted(incomplete_reasons) or [reason],
@@ -281,20 +301,18 @@ def dashboard_ranking_recovery(
             for item in (sorted(incomplete_reasons) or [reason])
         ])
 
-    recovery = []
     frame = pd.DataFrame(raw)
-    for component_models, group in frame.groupby("component_models", sort=True):
-        finite = group.loc[group["valid"], "value"]
-        reasons = sorted(set(group.loc[group["reason"].ne(""), "reason"]) | incomplete_reasons)
-        recovery.append({
-            **dict(context), "metric": "kendall_tau", "component_models": component_models,
-            "p5": float(finite.quantile(.05)) if len(finite) else None,
-            "p50": float(finite.quantile(.5)) if len(finite) else None,
-            "p95": float(finite.quantile(.95)) if len(finite) else None,
-            "n_trials": int(group["trial"].nunique()), "valid": bool(len(finite)),
-            "reason": "; ".join(reasons), "partial_reasons": reasons,
-            "reference": "trial_capability_draw", "recovery_type": "generating_theta_consistency",
-        })
+    finite = frame.loc[frame["valid"], "value"]
+    reasons = sorted(set(frame.loc[frame["reason"].ne(""), "reason"]) | incomplete_reasons)
+    recovery = [{
+        **dict(context), "metric": "kendall_tau", "component_models": "trial-local components",
+        "p5": float(finite.quantile(.05)) if len(finite) else None,
+        "p50": float(finite.quantile(.5)) if len(finite) else None,
+        "p95": float(finite.quantile(.95)) if len(finite) else None,
+        "n_trials": int(frame["trial"].nunique()), "n_finite_trials": int(frame["valid"].sum()),
+        "valid": bool(len(finite)), "reason": "; ".join(reasons), "partial_reasons": reasons,
+        "reference": "trial_capability_draw", "recovery_type": "generating_theta_consistency",
+    }]
     warnings = []
     if disconnected_trials:
         warnings.append({
@@ -382,15 +400,43 @@ def summarize_trials(trials: pd.DataFrame) -> pd.DataFrame:
     required = {"trial", "metric", "value"}
     if missing := required - set(trials):
         raise ValueError(f"trials lack required columns: {', '.join(sorted(missing))}")
-    groups = [column for column in trials if column not in {"trial", "value"}]
     values = trials.copy()
+    if "warning_state" not in values:
+        values["warning_state"] = "ok"
+    if "reason" not in values:
+        values["reason"] = ""
+    groups = [
+        column for column in values
+        if column not in {"trial", "value", "warning_state", "reason"}
+    ]
     values["value"] = pd.to_numeric(values["value"], errors="coerce")
-    return values.groupby(groups, dropna=False, sort=False)["value"].agg(
-        p5=lambda series: series.quantile(0.05),
-        p50=lambda series: series.quantile(0.5),
-        p95=lambda series: series.quantile(0.95),
-        n_trials="size",
-    ).reset_index()
+    rows = []
+    for labels, group in values.groupby(groups, dropna=False, sort=False):
+        labels = labels if isinstance(labels, tuple) else (labels,)
+        finite = group.loc[np.isfinite(group["value"])]
+        n_trials = int(group["trial"].nunique())
+        n_finite = int(finite["trial"].nunique())
+        states = sorted(set(group.loc[group["warning_state"].ne("ok"), "warning_state"].astype(str)))
+        reasons = sorted(set(
+            reason.strip() for reason in group["reason"]
+            if isinstance(reason, str) and reason.strip()
+        ))
+        if n_finite == n_trials and not states:
+            state, reason = "ok", ""
+        elif n_finite:
+            state, reason = "partial", "; ".join(reasons) or "some trials unavailable"
+        else:
+            state = states[0] if len(states) == 1 and states[0] in _UNAVAILABLE_STATES else "unavailable"
+            reason = "; ".join(reasons) or "no finite trials"
+        rows.append({
+            **dict(zip(groups, labels)),
+            "p5": finite["value"].quantile(.05) if len(finite) else np.nan,
+            "p50": finite["value"].quantile(.5) if len(finite) else np.nan,
+            "p95": finite["value"].quantile(.95) if len(finite) else np.nan,
+            "n_trials": n_trials, "n_finite_trials": n_finite,
+            "warning_state": state, "reason": reason,
+        })
+    return pd.DataFrame(rows)
 
 
 def counterbalance(
@@ -486,7 +532,7 @@ def _draw_value(values: Any, posterior_index: int, name: str) -> np.ndarray:
 
 
 def _price_metadata(catalogue: pd.DataFrame) -> pd.DataFrame:
-    required = {"model_id", "release", "reasoning_class"}
+    required = {"model_id", "release", "family", "reasoning_class"}
     if missing := required - set(catalogue):
         raise ValueError(f"catalogue lacks required columns: {', '.join(sorted(missing))}")
     if catalogue["model_id"].isna().any() or catalogue["model_id"].astype(str).duplicated().any():
@@ -494,6 +540,7 @@ def _price_metadata(catalogue: pd.DataFrame) -> pd.DataFrame:
     result = catalogue.copy()
     result["model_id"] = result["model_id"].astype(str)
     result["release_day"] = (pd.to_datetime(result["release"], errors="coerce") - RELEASE_EPOCH).dt.days
+    result["family"] = result["family"].map(normalize_family)
     return result.set_index("model_id", drop=False)
 
 
@@ -650,18 +697,124 @@ def _standardized(metadata: Mapping[str, Any], name: str, values: np.ndarray) ->
     return (np.asarray(values, dtype=float) - mean) / scale
 
 
+def _raw_judgment_features(
+    presented: pd.DataFrame, metadata: pd.DataFrame, capability: Mapping[str, float],
+    names: Sequence[str],
+) -> pd.DataFrame:
+    left_theta = presented["left_model"].map(capability).to_numpy(dtype=float)
+    right_theta = presented["right_model"].map(capability).to_numpy(dtype=float)
+    judge_theta = presented["judge"].map(capability).to_numpy(dtype=float)
+    left_release = presented["left_model"].map(metadata["release_day"]).to_numpy(dtype=float)
+    right_release = presented["right_model"].map(metadata["release_day"]).to_numpy(dtype=float)
+    judge_release = presented["judge"].map(metadata["release_day"]).to_numpy(dtype=float)
+    theta_gap = left_theta - right_theta
+    oversight = (left_theta + right_theta) / 2 - judge_theta
+    difficulty = presented["difficulty"].to_numpy(dtype=float)
+    left_family = presented["left_model"].map(metadata["family"])
+    right_family = presented["right_model"].map(metadata["family"])
+    raw = {
+        "theta_gap": theta_gap,
+        "oversight": oversight,
+        "release_gap_days": left_release - right_release,
+        "relative_release_days": (left_release + right_release) / 2 - judge_release,
+        "difficulty": difficulty,
+        "theta_gap_x_oversight": theta_gap * oversight,
+        "theta_gap_x_difficulty": theta_gap * difficulty,
+        "same_family_x_theta_gap": (
+            left_family.eq(right_family) & presented["left_model"].ne(presented["right_model"])
+        ).astype(float).to_numpy() * theta_gap,
+        "length_difference": (
+            np.log1p(presented["left_chars"].to_numpy(dtype=float))
+            - np.log1p(presented["right_chars"].to_numpy(dtype=float))
+        ),
+        "judge_theta": judge_theta,
+        "judge_release_days": judge_release,
+    }
+    if missing := [name for name in names if name not in raw]:
+        raise ValueError(f"judgment support has unsupported predictor names: {', '.join(missing)}")
+    values = pd.DataFrame({name: raw[name] for name in names}, index=presented.index)
+    if not np.isfinite(values.to_numpy(float)).all():
+        raise ValueError("simulated judgment support predictors must be finite")
+    return values
+
+
+def _decision_support(
+    decision: Mapping[str, Any], artifact: PosteriorArtifact | Mapping[str, Any],
+):
+    posterior, metadata = _artifact_parts(artifact)
+    support = decision.get("judgment_support")
+    required = {
+        "coordinate_system", "predictor_names", "training_matrix", "training_ranges",
+        "nearest_neighbor_threshold",
+    }
+    if not isinstance(support, Mapping) or set(support) != required:
+        raise ValueError("decision.json lacks complete judgment support")
+    if support["coordinate_system"] != "raw":
+        raise ValueError("judgment support coordinate_system must be raw")
+    names = support["predictor_names"]
+    if (
+        not isinstance(names, list) or not names
+        or any(not isinstance(name, str) or not name for name in names)
+        or len(names) != len(set(names))
+    ):
+        raise ValueError("judgment support predictor names must be unique nonempty strings")
+    unsupported = [
+        feature for feature in metadata.get("feature_order", ()) if feature not in FEATURE_COLUMNS
+    ]
+    if unsupported:
+        raise ValueError(f"unsupported judgment feature: {unsupported[0]}")
+    expected = [
+        "theta_gap",
+        *(FEATURE_COLUMNS.get(feature, feature) for feature in metadata.get("feature_order", ())),
+        *(["length_difference"] if "length_mean" in posterior else []),
+    ]
+    gate = decision.get("judge_covariate_gate", {}).get("enabled")
+    if type(gate) is not bool:
+        raise ValueError("decision.json lacks a boolean judge-covariate gate")
+    if gate:
+        expected.extend(["judge_theta", "judge_release_days"])
+    expected = list(dict.fromkeys(expected))
+    if names != expected:
+        raise ValueError("judgment support predictor names do not match the selected artifact and judge gate")
+    matrix = np.asarray(support["training_matrix"], dtype=float)
+    ranges = np.asarray(support["training_ranges"], dtype=float)
+    if (
+        matrix.ndim != 2 or matrix.shape[1] != len(names) or len(matrix) < 2
+        or ranges.shape != (len(names), 2)
+        or not np.isfinite(matrix).all() or not np.isfinite(ranges).all()
+        or not np.allclose(ranges[:, 0], matrix.min(axis=0))
+        or not np.allclose(ranges[:, 1], matrix.max(axis=0))
+    ):
+        raise ValueError("judgment support matrix and training ranges are malformed")
+    return names, ranges, build_support_index(
+        matrix, support["nearest_neighbor_threshold"],
+    )
+
+
+def _judgment_presentation(metadata: Mapping[str, Any]) -> int:
+    if metadata.get("presentation_include_reasoning") is not False:
+        raise ValueError(
+            "judgment artifact must declare the supported final-only include_reasoning=false presentation"
+        )
+    max_chars = metadata.get("presentation_max_chars")
+    if not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars <= 0:
+        raise ValueError("judgment artifact must declare positive integer presentation max chars")
+    if metadata.get("presentation_truncate_frac") is not None:
+        raise ValueError("judgment artifact uses unsupported paired truncation")
+    if metadata.get("presentation_truncate_keep") != "first":
+        raise ValueError("judgment artifact must declare supported truncate keep=first")
+    return max_chars
+
+
 def _scenario_left_probabilities(
     artifact: PosteriorArtifact | Mapping[str, Any], presented: pd.DataFrame,
     metadata: pd.DataFrame, capability: dict[str, float], posterior_index: int,
     cache: LatentCache, trial: int,
 ) -> np.ndarray:
+    posterior, artifact_metadata = _artifact_parts(artifact)
+    _judgment_presentation(artifact_metadata)
     if presented.empty:
         return np.empty(0)
-    posterior, artifact_metadata = _artifact_parts(artifact)
-    if artifact_metadata.get("presentation_include_reasoning") is not False:
-        raise ValueError(
-            "judgment artifact must declare the supported final-only include_reasoning=false presentation"
-        )
     draw = {name: _draw_value(values, posterior_index, name) for name, values in posterior.items()}
     maps = artifact_metadata.get("category_maps", {})
     observed_judges = maps.get("judges", {})
@@ -891,7 +1044,8 @@ def _trial_rows(
     base = {
         "trial": trial, "configuration": config.configuration, "mode": config.mode,
         "comparison_id": pd.NA, "judge": pd.NA, "m1": pd.NA, "m2": pd.NA,
-        "model": pd.NA, "reasoning_class": pd.NA, "role": pd.NA, "warning_state": "ok",
+        "model": pd.NA, "reasoning_class": pd.NA, "role": pd.NA,
+        "warning_state": "ok", "reason": "",
     }
     rows: list[dict[str, Any]] = []
 
@@ -903,31 +1057,45 @@ def _trial_rows(
     add("usable_items", usable_items)
     add("judgment_calls", len(presented))
     add("candidate_calls", candidate_calls)
-    def outcomes(frame: pd.DataFrame) -> tuple[float, int]:
+    for metric in ("support_distance", "support_threshold", "outside_training_range", "outside_joint_support"):
+        if metric in presented and not presented.empty:
+            add(metric, float(pd.to_numeric(presented[metric], errors="raise").max()))
+    def outcomes(frame: pd.DataFrame) -> tuple[float, int, str]:
         if frame.empty:
-            return np.nan, 0
+            return np.nan, 0, "no usable judgments"
         tied = frame["m1_theta"].eq(frame["m2_theta"])
         correct = np.where(
             frame["m1_theta"].gt(frame["m2_theta"]), frame["chose_m1"],
             1 - frame["chose_m1"],
         )
-        return (float(np.mean(correct[~tied])) if (~tied).any() else np.nan, int(tied.sum()))
+        if not (~tied).any():
+            return np.nan, int(tied.sum()), "all usable judgments tied"
+        return float(np.mean(correct[~tied])), int(tied.sum()), ""
 
-    accuracy, ties = outcomes(presented)
-    add("choice_accuracy", accuracy, warning_state="ok" if np.isfinite(accuracy) else "unavailable")
+    accuracy, ties, reason = outcomes(presented)
+    add(
+        "choice_accuracy", accuracy,
+        warning_state="ok" if np.isfinite(accuracy) else "unavailable", reason=reason,
+    )
     add("ties", ties)
     for source in comparisons.itertuples(index=False):
         group = presented.loc[presented["comparison_id"].eq(source.comparison_id)]
-        accuracy, ties = outcomes(group)
+        accuracy, ties, reason = outcomes(group)
+        source_reason = getattr(source, "unavailable_reason", "")
+        if group.empty and isinstance(source_reason, str) and source_reason:
+            reason = source_reason
         context = {
             "comparison_id": source.comparison_id, "judge": source.judge,
             "m1": source.m1, "m2": source.m2,
         }
         add("usable_items", len(group) / config.presentations, **context)
         add("judgment_calls", len(group), **context)
+        for metric in ("support_distance", "support_threshold", "outside_training_range", "outside_joint_support"):
+            if metric in group and not group.empty:
+                add(metric, float(pd.to_numeric(group[metric], errors="raise").max()), **context)
         add(
             "choice_accuracy", accuracy, **context,
-            warning_state="ok" if np.isfinite(accuracy) else "unavailable",
+            warning_state="ok" if np.isfinite(accuracy) else "unavailable", reason=reason,
         )
         add("m1_wins", int(group["chose_m1"].sum()), **context)
         if not group.empty:
@@ -939,6 +1107,7 @@ def _trial_rows(
             add(
                 "p_choose_m1", value, **context,
                 warning_state="ok" if np.isfinite(value) else "unavailable",
+                reason="" if np.isfinite(value) else reason,
             )
 
     token_columns = {
@@ -959,13 +1128,12 @@ def _trial_rows(
             add(template.format(role=role), role_usage[column].sum() if column in role_usage else 0,
                 model="__total__", role=role)
     for record in priced.to_dict("records"):
+        missing = record["model"] in missing_prices and pd.isna(record["cost"])
         add(
             "cost", record["cost"], model=record["model"], role=record["role"],
             reasoning_class=record["reasoning_class"],
-            warning_state=(
-                "missing_price"
-                if record["model"] in missing_prices and pd.isna(record["cost"]) else "ok"
-            ),
+            warning_state="missing_price" if missing else "ok",
+            reason=f"missing input or output price for {record['model']}" if missing else "",
         )
     for role in ("candidate", "judge"):
         role_costs = priced.loc[priced["role"].eq(role), "cost"] if not priced.empty else pd.Series(dtype=float)
@@ -976,11 +1144,23 @@ def _trial_rows(
         add(
             "cost", role_cost, model="__total__", role=role,
             warning_state="missing_price" if role_costs.isna().any() else "ok",
+            reason=(
+                "missing input or output price for "
+                + ", ".join(sorted(priced.loc[
+                    priced["role"].eq(role) & priced["cost"].isna(), "model",
+                ].astype(str).unique()))
+                if role_costs.isna().any() else ""
+            ),
         )
     total_cost = priced["cost"].sum() if len(priced) and not priced["cost"].isna().any() else (0.0 if priced.empty else np.nan)
     add(
         "cost", total_cost, model="__total__", role="all",
         warning_state="missing_price" if priced["cost"].isna().any() else "ok",
+        reason=(
+            "missing input or output price for "
+            + ", ".join(sorted(priced.loc[priced["cost"].isna(), "model"].astype(str).unique()))
+            if priced["cost"].isna().any() else ""
+        ),
     )
     return rows
 
@@ -995,7 +1175,10 @@ def simulate(
     decision_path: str | Path, data_hashes: Mapping[str, str], seed: int = 0,
 ) -> SimulationResult:
     """Run fixed-budget posterior-predictive trials with shared latent effects."""
-    require_decision(decision_path, data_hashes)
+    decision = require_decision(decision_path, data_hashes)
+    _, judgment_metadata = _artifact_parts(judgment_artifact)
+    presentation_max_chars = _judgment_presentation(judgment_metadata)
+    support_names, support_ranges, support_index = _decision_support(decision, judgment_artifact)
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ValueError("seed must be an integer")
     items = [_canonical_item(item) for item in item_ids]
@@ -1055,18 +1238,61 @@ def simulate(
         predictable_mask = selected.get(
             "predictable", pd.Series(True, index=selected.index),
         ).fillna(False).astype(bool)
+        if "unavailable_reason" not in selected:
+            selected["unavailable_reason"] = ""
+        capability_warnings = []
+        for row in selected.index[predictable_mask]:
+            missing = sorted(set(selected.loc[row, ["judge", "m1", "m2"]]) - set(models))
+            if not missing:
+                continue
+            selected.at[row, "predictable"] = False
+            selected.at[row, "unavailable_reason"] = f"missing capability draw: {', '.join(missing)}"
+            capability_warnings.extend({
+                "code": "missing_capability_draw", "trial": trial, "row": int(row),
+                "source_row": pd.NA, "model": model,
+                "message": f"missing capability draw: {model}",
+            } for model in missing)
+        if capability_warnings:
+            warning_frames.append(pd.DataFrame(capability_warnings))
+        predictable_mask = selected.get(
+            "predictable", pd.Series(True, index=selected.index),
+        ).fillna(False).astype(bool)
         predictable = selected.loc[predictable_mask]
-        required_models = set(predictable[["judge", "m1", "m2"]].to_numpy().ravel())
-        if missing := sorted(required_models - set(models)):
-            raise ValueError(f"capability draws lack models: {', '.join(missing)}")
         capability = dict(zip(models, draws[capability_index]))
         attempted = rng.choice(np.asarray(items), config.attempted_items, replace=False).tolist()
         cells = _candidate_cells(
             predictable, attempted, metadata, observed, capability, irt_parts,
             capability_index, rng, candidate_token_artifact, candidate_index, cache, trial,
         )
+        cells["response_chars"] = cells["response_chars"].clip(upper=presentation_max_chars)
         usable = _usable_rows(predictable, attempted, cells)
         presented = _presentation_metadata(counterbalance(usable, config.presentations, rng), cells, metadata)
+        if not presented.empty:
+            raw_support = _raw_judgment_features(
+                presented, metadata, capability, support_names,
+            )
+            support = support_index.query(raw_support.to_numpy(float))
+            outside_range = (
+                raw_support.to_numpy(float) < support_ranges[:, 0]
+            ) | (
+                raw_support.to_numpy(float) > support_ranges[:, 1]
+            )
+            presented["support_distance"] = support["distance"].to_numpy(float)
+            presented["support_threshold"] = support_index.threshold
+            presented["outside_training_range"] = outside_range.any(axis=1).astype(float)
+            presented["outside_joint_support"] = support["outside_support"].to_numpy(float)
+            for code, message in (
+                ("outside_training_range", "judgment predictors are outside their training ranges"),
+                ("outside_joint_support", "judgment predictors are outside joint training support"),
+            ):
+                comparison_ids = sorted(
+                    presented.loc[presented[code].astype(bool), "comparison_id"].unique()
+                )
+                if comparison_ids:
+                    warning_frames.append(pd.DataFrame([{
+                        "code": code, "trial": trial, "row": int(comparison_id),
+                        "source_row": pd.NA, "model": pd.NA, "message": message,
+                    } for comparison_id in comparison_ids]))
         probabilities = _scenario_left_probabilities(
             judgment_artifact, presented, metadata, capability, judgment_index, cache, trial,
         )
@@ -1106,7 +1332,7 @@ def simulate(
         "configuration": config.configuration, "mode": config.mode,
         "metric": "judgment_call_upper_bound", "value": upper_bound,
         "p5": np.nan, "p50": np.nan, "p95": np.nan,
-        "n_trials": config.trials, "exact": True, "warning_state": "ok",
+        "n_trials": config.trials, "exact": True, "warning_state": "ok", "reason": "",
     })
     summary = pd.concat([summary, pd.DataFrame([exact])], ignore_index=True)
     warnings = pd.concat(warning_frames, ignore_index=True) if warning_frames else pd.DataFrame(columns=_WARNING_COLUMNS)

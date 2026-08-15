@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from itertools import product
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.spatial.distance import cdist
+from scipy.spatial import cKDTree
 from scipy.stats import kendalltau
 
 from mc_cost.model import JUDGMENT_SPECS, JudgmentSpec
@@ -316,26 +317,44 @@ def validate_tokens(
     return prediction_frame, summary, pd.DataFrame(length_rows)
 
 
-def support_distance(training: Any, query: Any) -> pd.DataFrame:
-    """Nearest-neighbour distance with training-only scaling and LOO threshold."""
-    training, query = np.asarray(training, dtype=float), np.asarray(query, dtype=float)
-    if training.ndim != 2 or query.ndim != 2 or training.shape[1] != query.shape[1]:
-        raise ValueError("training and query must be two-dimensional with matching features")
-    if len(training) < 2 or not np.isfinite(training).all() or not np.isfinite(query).all():
-        raise ValueError("support distance requires finite queries and at least two finite training rows")
+@dataclass(frozen=True)
+class SupportIndex:
+    mean: np.ndarray
+    scale: np.ndarray
+    tree: cKDTree
+    threshold: float
+
+    def query(self, values: Any) -> pd.DataFrame:
+        values = np.asarray(values, dtype=float)
+        if values.ndim != 2 or values.shape[1] != len(self.mean) or not np.isfinite(values).all():
+            raise ValueError("support queries must be finite and match training features")
+        distances = np.asarray(self.tree.query((values - self.mean) / self.scale, k=1)[0])
+        return pd.DataFrame({
+            "distance": distances, "threshold": self.threshold,
+            "outside_support": distances > self.threshold,
+        })
+
+
+def build_support_index(training: Any, threshold: float | None = None) -> SupportIndex:
+    """Build a scaled cKDTree and its training-only nearest-neighbour threshold."""
+    training = np.asarray(training, dtype=float)
+    if training.ndim != 2 or len(training) < 2 or not training.shape[1] or not np.isfinite(training).all():
+        raise ValueError("support distance requires at least two finite training rows")
     mean, scale = training.mean(axis=0), training.std(axis=0)
     scale[scale == 0] = 1.0
-    standardized_training = (training - mean) / scale
-    training_distances = cdist(standardized_training, standardized_training)
-    np.fill_diagonal(training_distances, np.inf)
-    loo = training_distances.min(axis=1)
-    threshold = float(np.quantile(loo, 0.95))
-    distances = cdist((query - mean) / scale, standardized_training).min(axis=1)
-    return pd.DataFrame({
-        "distance": distances,
-        "threshold": threshold,
-        "outside_support": distances > threshold,
-    })
+    tree = cKDTree((training - mean) / scale)
+    loo = np.asarray(tree.query(tree.data, k=2)[0])[:, 1]
+    computed = float(np.quantile(loo, 0.95))
+    if threshold is not None:
+        threshold = float(threshold)
+        if not np.isfinite(threshold) or threshold < 0 or not np.isclose(threshold, computed):
+            raise ValueError("support threshold does not match the training matrix")
+    return SupportIndex(mean, scale, tree, computed if threshold is None else threshold)
+
+
+def support_distance(training: Any, query: Any) -> pd.DataFrame:
+    """Nearest-neighbour distance with training-only scaling and LOO threshold."""
+    return build_support_index(training).query(query)
 
 
 def _reference_scores(values: Any) -> dict[str, float]:
@@ -563,7 +582,13 @@ def decision_payload(
             "condition_number": float(np.linalg.cond(matrix)),
             "correlations": correlation_rows,
         },
-        "support_threshold": threshold,
+        "judgment_support": {
+            "coordinate_system": "raw",
+            "predictor_names": names,
+            "training_matrix": matrix.tolist(),
+            "training_ranges": np.column_stack([matrix.min(axis=0), matrix.max(axis=0)]).tolist(),
+            "nearest_neighbor_threshold": threshold,
+        },
         "data_hashes": hashes,
         "validation_timestamp": timestamp,
     })

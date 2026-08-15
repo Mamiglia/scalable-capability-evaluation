@@ -45,6 +45,7 @@ class TestJudgeTask:
         assert task.metadata["name_major"] == "gemma-26b"
         assert task.metadata["name_minor"] == "gemma-2b"
         assert task.metadata["benchmark_name"] == "gpqa_diamond"
+        assert task.metadata["max_length"] == 12000
 
         mock_build_dataset.assert_called_once_with(
             major_path=Path("data/major/1.eval"),

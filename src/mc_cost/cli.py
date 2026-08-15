@@ -295,7 +295,13 @@ def _prepare(args: argparse.Namespace, config: dict[str, Any]) -> None:
     attempts, judgment_counts, judgment_eligibility = prepare_mc_gpqa(logs, catalogue)
     judgment_exclusions = list(attempts.attrs.get("exclusions", []))
     judgments = prepare_judgments(attempts, catalogue, items)
-    candidates = candidate_token_rows(root_paths, catalogue, items, skip_incomplete=True)
+    max_chars = pd.to_numeric(judgments["presentation_max_chars"], errors="coerce")
+    if max_chars.isna().any() or max_chars.nunique() != 1:
+        raise CliError("judgment logs must declare one presentation_max_chars value")
+    candidates = candidate_token_rows(
+        root_paths, catalogue, items, skip_incomplete=True,
+        presentation_max_chars=int(max_chars.iloc[0]),
+    )
     candidate_counts = dict(candidates.attrs.get("accounting", {}))
     candidate_exclusions = list(candidates.attrs.get("exclusions", []))
     judges = judge_token_rows(judgments)
@@ -362,7 +368,6 @@ def _tag_judgment_artifact(
             "include_length": spec.include_length,
             "source_hashes": source_hashes,
             "conditional_judges": conditional_judges,
-            "presentation_include_reasoning": False,
         },
         artifact.diagnostics,
     )
@@ -570,6 +575,11 @@ def _selected_artifact_matches(
         and artifact.metadata.get("include_length") is spec.include_length
         and artifact.metadata.get("conditional_judges") is conditional_judges
         and artifact.metadata.get("presentation_include_reasoning") is False
+        and isinstance(artifact.metadata.get("presentation_max_chars"), int)
+        and not isinstance(artifact.metadata.get("presentation_max_chars"), bool)
+        and artifact.metadata["presentation_max_chars"] > 0
+        and artifact.metadata.get("presentation_truncate_frac") is None
+        and artifact.metadata.get("presentation_truncate_keep") == "first"
     )
 
 
@@ -603,13 +613,26 @@ def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
     ]
     judge_gate = choose_judge_gate(conditional, pooled)
     spec = JUDGMENT_SPECS[selected["selected"]]
+    scales = _load_scales(sources["scales"])
     predictor_names = ["theta_gap", *(
         FEATURE_COLUMNS.get(feature, feature) for feature in spec.global_features
     )]
     if spec.include_length:
         predictor_names.append("length_difference")
+    support_frame = judgments.copy()
+    if judge_gate["enabled"]:
+        if "judge_release_day" not in judgments:
+            raise CliError("judgments lack judge_release_day for conditional support")
+        support_frame = judgments.assign(judge_release_days=judgments["judge_release_day"])
+        predictor_names.extend(["judge_theta", "judge_release_days"])
     predictor_names = list(dict.fromkeys(predictor_names))
-    predictors = judgments[predictor_names].apply(pd.to_numeric, errors="raise").to_numpy(float)
+    for name in predictor_names:
+        if name in scales:
+            support_frame[name] = (
+                pd.to_numeric(support_frame[name], errors="raise") * scales[name]["scale"]
+                + scales[name]["mean"]
+            )
+    predictors = support_frame[predictor_names].apply(pd.to_numeric, errors="raise").to_numpy(float)
     support = support_distance(predictors, predictors[:1])
     token_coverage = pd.concat([candidate_summary, judge_summary], ignore_index=True)
     payload = decision_payload(
@@ -627,7 +650,7 @@ def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
     ):
         full_data = encode_judgments(
             judgments, catalogue, spec,
-            training_scales=_load_scales(sources["scales"]), source_hashes=hashes,
+            training_scales=scales, source_hashes=hashes,
         )
         refitted_artifact = _tag_judgment_artifact(
             fit_judgment_model(
@@ -872,17 +895,21 @@ def _scenario_name(resolved: dict[str, Any]) -> str:
 
 def _comparison_source(
     resolved: dict[str, Any], defaults: dict[str, Any], catalogue: pd.DataFrame,
-    manual: Path | None = None,
+    manual: Path | None = None, *, capability_models,
 ):
     if manual is not None:
-        return manual_comparisons(catalogue, pd.read_csv(manual))
+        return manual_comparisons(
+            catalogue, pd.read_csv(manual), capability_models=capability_models,
+        )
     automatic = AutomaticConfig(
         j=int(resolved["judges"]), m=int(resolved["anchors"]), n=int(resolved["comparators"]),
         attempted_items=int(resolved["items"]), presentations=int(resolved["presentations"]),
         selected_judges=tuple(defaults.get("selected_judges", ())),
         require_stronger=bool(resolved.get("require_stronger", True)),
     )
-    return lambda rng: automatic_comparisons(catalogue, automatic, rng)
+    return lambda rng: automatic_comparisons(
+        catalogue, automatic, rng, capability_models=capability_models,
+    )
 
 
 def _call_simulation(comparisons, resolved: dict[str, Any], inputs: dict[str, Any]):
@@ -911,6 +938,7 @@ def _simulate_command(args: argparse.Namespace, config: dict[str, Any]) -> None:
         resolved["manual_comparisons"] = _records(pd.read_csv(args.manual))
     comparisons = _comparison_source(
         resolved, _simulation_defaults(config), inputs["catalogue"], args.manual,
+        capability_models=inputs["capability_models"],
     )
     result = _call_simulation(comparisons, resolved, inputs)
     identity = {"config": resolved, "source_hashes": inputs["source_hashes"]}
@@ -935,8 +963,69 @@ def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
     return json.loads(frame.to_json(orient="records"))
 
 
+def _dashboard_scenarios(
+    dashboard: dict[str, Any], defaults: dict[str, Any],
+) -> list[tuple[int, int, int, int, int, bool]]:
+    keys = (
+        "judge_counts", "anchor_counts", "comparator_counts",
+        "attempted_item_counts", "presentation_counts",
+    )
+    axes = []
+    for key in keys:
+        values = dashboard.get(key)
+        if (
+            not isinstance(values, list) or not values
+            or any(not isinstance(value, int) or isinstance(value, bool) or value < 1 for value in values)
+        ):
+            raise CliError(f"dashboard.{key} must be a nonempty list of positive integers")
+        axes.append(sorted(set(values)))
+    strengths = dashboard.get("strength_filters", [bool(defaults.get("require_stronger", True))])
+    if (
+        not isinstance(strengths, list) or not strengths
+        or any(type(value) is not bool for value in strengths)
+    ):
+        raise CliError("dashboard.strength_filters must be a nonempty list of booleans")
+    strengths = list(dict.fromkeys(strengths))
+    mode = dashboard.get("grid_mode", "one_at_a_time")
+    if mode == "cartesian":
+        scenarios = list(product(*axes, strengths))
+    elif mode != "one_at_a_time":
+        raise CliError("dashboard.grid_mode must be one_at_a_time or cartesian")
+    else:
+        baseline = tuple([*(axis[0] for axis in axes), strengths[0]])
+        scenarios = [baseline]
+        for index, values in enumerate([*axes, strengths]):
+            for value in values[1:]:
+                scenario = list(baseline)
+                scenario[index] = value
+                scenarios.append(tuple(scenario))
+    joint_keys = (
+        "judges", "anchors", "comparators", "attempted_items",
+        "presentations", "require_stronger",
+    )
+    joint = dashboard.get("joint_scenarios", [])
+    if not isinstance(joint, list):
+        raise CliError("dashboard.joint_scenarios must be a list of exact scenario objects")
+    for index, row in enumerate(joint):
+        if not isinstance(row, dict) or set(row) != set(joint_keys):
+            raise CliError(
+                f"dashboard.joint_scenarios[{index}] must contain exactly: "
+                + ", ".join(joint_keys)
+            )
+        if any(
+            not isinstance(row[key], int) or isinstance(row[key], bool) or row[key] < 1
+            for key in joint_keys[:-1]
+        ) or type(row["require_stronger"]) is not bool:
+            raise CliError(
+                f"dashboard.joint_scenarios[{index}] requires positive integer counts "
+                "and boolean require_stronger"
+            )
+        scenarios.append(tuple(row[key] for key in joint_keys))
+    return list(dict.fromkeys(scenarios))
+
+
 def _dashboard_manual_bank(
-    catalogue: pd.DataFrame, configured: Any, *, seed: int, limit: Any,
+    catalogue: pd.DataFrame, configured: Any, *, seed: int, limit: Any, capability_models,
 ) -> tuple[list[dict[str, str]], dict[str, Any] | None]:
     if not isinstance(configured, list):
         raise CliError("dashboard.manual_triples must be a list")
@@ -945,7 +1034,9 @@ def _dashboard_manual_bank(
 
     explicit = []
     if configured:
-        comparisons, _ = manual_comparisons(catalogue, pd.DataFrame(configured))
+        comparisons, _ = manual_comparisons(
+            catalogue, pd.DataFrame(configured), capability_models=capability_models,
+        )
         for record in _records(comparisons):
             identity = {key: record.get(key) for key in _MANUAL_COLUMNS}
             if any(not isinstance(identity[key], str) or not identity[key] for key in _MANUAL_COLUMNS):
@@ -954,48 +1045,69 @@ def _dashboard_manual_bank(
                 )
             explicit.append({**identity, "manual_source": "configured"})
 
-    eligible = catalogue.loc[prediction_eligible(catalogue)]
+    eligible = catalogue.loc[prediction_eligible(catalogue, capability_models)]
     classes = eligible.set_index("model_id")["reasoning_class"].to_dict()
     default_models = sorted(
         str(model) for model, reasoning_class in classes.items()
         if isinstance(reasoning_class, str) and reasoning_class in {"reasoning", "non_reasoning"}
     )
-    defaults = [
-        {
-            "judge": judge, "m1": m1, "m2": m2,
-            "judge_reasoning_class": classes[judge],
-            "m1_reasoning_class": classes[m1],
-            "m2_reasoning_class": classes[m2],
-        }
-        for judge, m1, m2 in product(default_models, repeat=3)
-        if m1 != m2
-    ]
-    defaults = [{**row, "manual_source": "deterministic_default_sample"} for row in defaults]
     key = lambda row: tuple(row[name] for name in _MANUAL_COLUMNS)
     explicit_by_key = {key(row): row for row in explicit}
-    defaults_by_key = {key(row): row for row in defaults}
-    candidates = [defaults_by_key[name] for name in sorted(defaults_by_key.keys() - explicit_by_key.keys())]
-    if len(candidates) > limit:
-        indexes = np.random.default_rng(seed).choice(len(candidates), limit, replace=False)
-        sampled = [candidates[int(index)] for index in indexes]
-    else:
-        sampled = candidates
+    model_count = len(default_models)
+    default_count = model_count * model_count * max(model_count - 1, 0)
+
+    def default_row(index: int) -> dict[str, str]:
+        judge_index, remainder = divmod(index, model_count * (model_count - 1))
+        m1_index, compressed_m2 = divmod(remainder, model_count - 1)
+        m2_index = compressed_m2 + int(compressed_m2 >= m1_index)
+        judge, m1, m2 = (
+            default_models[judge_index], default_models[m1_index], default_models[m2_index],
+        )
+        return {
+            "judge": judge, "m1": m1, "m2": m2,
+            "judge_reasoning_class": classes[judge],
+            "m1_reasoning_class": classes[m1], "m2_reasoning_class": classes[m2],
+            "manual_source": "deterministic_default_sample",
+        }
+
+    def is_default(identity: tuple[str, ...]) -> bool:
+        judge, m1, m2, judge_class, m1_class, m2_class = identity
+        return (
+            judge in classes and m1 in classes and m2 in classes and m1 != m2
+            and (judge_class, m1_class, m2_class) == (classes[judge], classes[m1], classes[m2])
+        )
+
+    overlap = sum(is_default(identity) for identity in explicit_by_key)
+    candidate_count = 0 if limit == 0 else min(default_count, limit + overlap)
+    indexes = (
+        np.random.default_rng(seed).choice(default_count, candidate_count, replace=False)
+        if candidate_count and candidate_count < default_count else range(candidate_count)
+    )
+    sampled = []
+    for index in indexes:
+        row = default_row(int(index))
+        if key(row) not in explicit_by_key:
+            sampled.append(row)
+            if len(sampled) == limit:
+                break
     exported_by_key = {**explicit_by_key, **{key(row): row for row in sampled}}
-    all_by_key = {**defaults_by_key, **explicit_by_key}
-    omitted = [
-        {column: all_by_key[name][column] for column in _MANUAL_COLUMNS}
-        for name in sorted(all_by_key.keys() - exported_by_key.keys())
-    ]
+    total_count = default_count + sum(not is_default(identity) for identity in explicit_by_key)
+    omitted_count = total_count - len(exported_by_key)
     warning = None
-    if omitted:
+    if omitted_count:
+        omitted_hash = hashlib.sha256(json.dumps({
+            "models": [[model, classes[model]] for model in default_models],
+            "excluded": [list(identity) for identity in sorted(exported_by_key) if is_default(identity)],
+            "rule": "judge,m1,m2; m1 != m2",
+        }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         warning = {
             "code": "manual_bank_truncated",
             "message": (
-                f"exported {len(exported_by_key)} of {len(all_by_key)} exact manual identities; "
+                f"exported {len(exported_by_key)} of {total_count} exact manual identities; "
                 "add an omitted identity to dashboard.manual_triples and rerun mc-cost export-dashboard"
             ),
-            "total_count": len(all_by_key), "exported_count": len(exported_by_key),
-            "omitted_count": len(omitted), "omitted_identities": omitted,
+            "total_count": total_count, "exported_count": len(exported_by_key),
+            "omitted_count": omitted_count, "omitted_population_hash": omitted_hash,
         }
     return [exported_by_key[name] for name in sorted(exported_by_key)], warning
 
@@ -1104,7 +1216,10 @@ def _dashboard_records(
     scenario_status = "observed" if scenario_observed else "predicted"
     support_warnings = [
         row for row in _records(result.warnings)
-        if row.get("code") in {"missing_prediction_metadata", "out_of_support"}
+        if row.get("code") in {
+            "missing_prediction_metadata", "out_of_support",
+            "outside_training_range", "outside_joint_support",
+        }
     ]
     scenario_extrapolation = not scenario_observed or bool(support_warnings)
     support_evidence = [
@@ -1163,30 +1278,31 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
     selection_catalogue = _dashboard_selection_catalogue(inputs["catalogue"], dashboard)
     trials = args.trials if args.trials is not None else int(defaults.get("trials", 1000))
     seed = args.seed if args.seed is not None else int(defaults.get("seed", 0))
-    keys = (
-        "judge_counts", "anchor_counts", "comparator_counts",
-        "attempted_item_counts", "presentation_counts",
+    scenarios = _dashboard_scenarios(dashboard, defaults)
+    manual_identities, truncation_warning = _dashboard_manual_bank(
+        selection_catalogue, dashboard.get("manual_triples", []), seed=seed,
+        limit=dashboard.get("manual_triple_limit", 0),
+        capability_models=inputs["capability_models"],
     )
-    grid = []
-    for key in keys:
-        values = dashboard.get(key)
-        if (
-            not isinstance(values, list) or not values
-            or any(not isinstance(value, int) or isinstance(value, bool) or value < 1 for value in values)
-        ):
-            raise CliError(f"dashboard.{key} must be a nonempty list of positive integers")
-        grid.append(sorted(set(values)))
-    strength_filters = dashboard.get("strength_filters", [bool(defaults.get("require_stronger", True))])
-    if (
-        not isinstance(strength_filters, list) or not strength_filters
-        or any(type(value) is not bool for value in strength_filters)
-    ):
-        raise CliError("dashboard.strength_filters must be a nonempty list of booleans")
+    cap = dashboard.get("max_judgment_calls", 2_000_000)
+    if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
+        raise CliError("dashboard.max_judgment_calls must be a positive integer")
+    planned = trials * sum(
+        judges * anchors * comparators * items * presentations
+        for judges, anchors, comparators, items, presentations, _ in scenarios
+    )
+    planned += (
+        trials * len(manual_identities) * int(defaults.get("attempted_items"))
+        * int(defaults.get("presentations", 2))
+    )
+    if planned > cap:
+        raise CliError(
+            f"dashboard planned {planned} presented judgments, above "
+            f"dashboard.max_judgment_calls={cap}; reduce trials/grid/manual triples or raise the cap"
+        )
 
     automatic, manual, ranking_rows, warnings = [], [], [], []
-    for judges, anchors, comparators, items, presentations, require_stronger in product(
-        *grid, sorted(set(strength_filters)),
-    ):
+    for judges, anchors, comparators, items, presentations, require_stronger in scenarios:
         resolved = {
             "mode": "automatic", "trials": trials, "items": items,
             "presentations": presentations, "reuse_responses": bool(defaults.get("reuse_responses", True)),
@@ -1200,7 +1316,11 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
         )
         try:
             result = _call_simulation(
-                _comparison_source(resolved, defaults, selection_catalogue), resolved, inputs,
+                _comparison_source(
+                    resolved, defaults, selection_catalogue,
+                    capability_models=inputs["capability_models"],
+                ),
+                resolved, inputs,
             )
         except ValueError as error:
             message = str(error)
@@ -1217,10 +1337,6 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
         warnings.extend(warning_rows)
         warnings.extend(recovery_warnings)
 
-    manual_identities, truncation_warning = _dashboard_manual_bank(
-        selection_catalogue, dashboard.get("manual_triples", []), seed=seed,
-        limit=dashboard.get("manual_triple_limit", 0),
-    )
     if truncation_warning:
         warnings.append(truncation_warning)
     for exported_identity in manual_identities:
@@ -1238,7 +1354,10 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
             resolved, dashboard, require_stronger=None,
             manual_identity=identity, manual_source=manual_source,
         )
-        comparisons = manual_comparisons(selection_catalogue, pd.DataFrame([identity]))
+        comparisons = manual_comparisons(
+            selection_catalogue, pd.DataFrame([identity]),
+            capability_models=inputs["capability_models"],
+        )
         result = _call_simulation(comparisons, resolved, inputs)
         scenario_rows, warning_rows = _dashboard_records(result, context, inputs["catalogue"])
         recovery_rows, recovery_warnings = dashboard_ranking_recovery(

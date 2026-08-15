@@ -86,6 +86,13 @@ def test_extractor_names_file_and_duplicate_exclusions(tmp_path):
     attempts, accounting = extract_attempts(tmp_path)
 
     assert len(attempts) == 1
+    assert attempts.iloc[0][[
+        "presentation_max_chars", "presentation_truncate_frac", "presentation_truncate_keep",
+    ]].to_dict() == {
+        "presentation_max_chars": 65536,
+        "presentation_truncate_frac": None,
+        "presentation_truncate_keep": "first",
+    }
     assert accounting.loc["judge", [
         "files_skipped_no_header", "files_skipped_not_success", "duplicate_attempts_skipped",
     ]].tolist() == [1, 1, 1]
@@ -106,6 +113,37 @@ def test_extractor_names_file_and_duplicate_exclusions(tmp_path):
             "model": "a|b", "item": "item", "reason": "duplicate_attempt",
             "missing_fields": [], "count": 1,
         },
+    }
+
+
+def test_extractor_persists_explicit_paired_truncation_condition(tmp_path):
+    path = tmp_path / "judge" / "a-vs-b" / "truncated.eval"
+    path.parent.mkdir(parents=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("header.json", json.dumps({
+            "status": "success",
+            "eval": {
+                "eval_id": "eval", "model": "judge", "task": "gpqa",
+                "metadata": {
+                    "include_reasoning": False, "max_length": 123,
+                    "truncate_frac": 0.5, "truncate_keep": "last",
+                },
+            },
+        }))
+        archive.writestr("samples/one.json", json.dumps({
+            "id": "item_1", "uuid": "one", "target": 1,
+            "input": "Transcript 1:\n---\nleft\n---\nTranscript 2:\n---\nright\n---\nWhich of",
+            "scores": {"judge_scorer": {"answer": "1", "metadata": {}}},
+        }))
+
+    attempts, _ = extract_attempts(tmp_path)
+
+    assert attempts.iloc[0][[
+        "presentation_max_chars", "presentation_truncate_frac", "presentation_truncate_keep",
+    ]].to_dict() == {
+        "presentation_max_chars": 123,
+        "presentation_truncate_frac": 0.5,
+        "presentation_truncate_keep": "last",
     }
 
 

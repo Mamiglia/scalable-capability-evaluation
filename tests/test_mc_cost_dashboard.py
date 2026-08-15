@@ -56,6 +56,11 @@ def test_dashboard_payload_requires_six_field_manual_identity_and_ordered_finite
     }
     validate_dashboard_payload(minimal_payload(manual=[row]))
 
+    with pytest.raises(ValueError, match="warning_state"):
+        validate_dashboard_payload(minimal_payload(manual=[{
+            **row, "warning_state": "made_up",
+        }]))
+
     with pytest.raises(ValueError, match="six-field"):
         validate_dashboard_payload(minimal_payload(manual=[{
             key: value for key, value in row.items() if key != "m2_reasoning_class"
@@ -102,6 +107,7 @@ def test_dashboard_payload_requires_numeric_exact_values_and_only_all_null_unava
 def test_dashboard_payload_allows_only_explicitly_unavailable_null_quantiles():
     identity = {
         "mode": "manual", "metric": "cost", "warning_state": "missing_price",
+        "reason": "missing input or output price for a",
         "judge": "j", "m1": "a", "m2": "b",
         "judge_reasoning_class": "non_reasoning",
         "m1_reasoning_class": "reasoning", "m2_reasoning_class": "non_reasoning",
@@ -110,8 +116,15 @@ def test_dashboard_payload_allows_only_explicitly_unavailable_null_quantiles():
 
     validate_dashboard_payload(minimal_payload(manual=[identity]))
 
-    with pytest.raises(ValueError, match="all null|unavailable"):
-        validate_dashboard_payload(minimal_payload(manual=[{**identity, "warning_state": "ok"}]))
+    for invalid in (
+        {**identity, "warning_state": "ok"},
+        {**identity, "warning_state": "made_up"},
+        {**identity, "reason": ""},
+        {key: value for key, value in identity.items() if key != "reason"},
+        {**identity, "warning_state": None, "valid": False},
+    ):
+        with pytest.raises(ValueError, match="all-null|unavailable|reason"):
+            validate_dashboard_payload(minimal_payload(manual=[invalid]))
 
 
 def test_dashboard_builder_sorts_every_row_array_and_derives_scaling_rows():
@@ -208,13 +221,15 @@ def test_dashboard_ranking_recovery_uses_trial_theta_and_stable_component_member
         "model_id": ["a", "b", "c", "d", "e"], "theta": [4.0, 3.0, 2.0, 1.0, 0.0],
     })
 
-    recovery, warnings = dashboard_ranking_recovery(result, catalogue, {"J": 1})
+    recovery, warnings = dashboard_ranking_recovery(
+        result, catalogue, {"J": 1, "presentations": 1},
+    )
 
-    by_members = {row["component_models"]: row for row in recovery}
-    assert set(by_members) == {"a|b", "c|d", "c|e"}
-    assert by_members["a|b"]["p50"] == pytest.approx(0.0)
-    assert by_members["a|b"]["n_trials"] == 2
-    assert by_members["c|d"]["n_trials"] == by_members["c|e"]["n_trials"] == 1
+    assert len(recovery) == 1
+    row = recovery[0]
+    assert row["component_models"] == "trial-local components"
+    assert row["p50"] == pytest.approx(0.5)
+    assert row["n_trials"] == 2
     assert {
         reason for row in recovery for reason in row["partial_reasons"]
     } >= {"self comparison has no ranking edge", "no usable judgment calls"}
@@ -223,6 +238,55 @@ def test_dashboard_ranking_recovery_uses_trial_theta_and_stable_component_member
         row["message"] for row in warnings if row["code"] == "ranking_recovery_partial"
     }
     assert partial_messages == {"self comparison has no ranking edge", "no usable judgment calls"}
+
+
+def test_dashboard_ranking_recovery_normalizes_repeated_presentations():
+    base = []
+    base.extend(ranking_rows(0, 0, "a", "b", 8, 3.0, 2.0, calls=10))
+    base.extend(ranking_rows(0, 1, "b", "c", 7, 2.0, 1.0, calls=10))
+    doubled = pd.DataFrame(base).copy()
+    doubled.loc[doubled.metric == "judgment_calls", "value"] *= 2
+    doubled.loc[doubled.metric == "m1_wins", "value"] *= 2
+    catalogue = pd.DataFrame({"model_id": ["a", "b", "c"]})
+
+    once, _ = dashboard_ranking_recovery(
+        SimulationResult(pd.DataFrame(base), pd.DataFrame(), pd.DataFrame()),
+        catalogue, {"presentations": 1},
+    )
+    twice, _ = dashboard_ranking_recovery(
+        SimulationResult(doubled, pd.DataFrame(), pd.DataFrame()),
+        catalogue, {"presentations": 2},
+    )
+
+    for key in ("p5", "p50", "p95", "valid", "recovery_type"):
+        assert once[0][key] == twice[0][key]
+
+
+def test_dashboard_ranking_recovery_keeps_fractional_normalized_evidence():
+    rows = []
+    rows.extend(ranking_rows(0, 0, "a", "b", 1, 2.0, 1.0, calls=1))
+    rows.extend(ranking_rows(0, 1, "b", "c", 0, 1.0, 0.0, calls=1))
+
+    recovery, _ = dashboard_ranking_recovery(
+        SimulationResult(pd.DataFrame(rows), pd.DataFrame(), pd.DataFrame()),
+        pd.DataFrame({"model_id": ["a", "b", "c"]}),
+        {"presentations": 2},
+    )
+
+    assert recovery[0]["valid"] is True
+    assert recovery[0]["n_finite_trials"] == 1
+
+
+@pytest.mark.parametrize("presentations", [None, 0, -1, True])
+def test_dashboard_ranking_recovery_requires_positive_presentations(presentations):
+    result = SimulationResult(pd.DataFrame(columns=[
+        "trial", "comparison_id", "m1", "m2", "metric", "value",
+    ]), pd.DataFrame(), pd.DataFrame())
+
+    with pytest.raises(ValueError, match="presentations"):
+        dashboard_ranking_recovery(
+            result, pd.DataFrame({"model_id": []}), {"presentations": presentations},
+        )
 
 
 def test_dashboard_markup_has_accessible_native_controls_and_local_plotly():
@@ -252,6 +316,8 @@ def test_dashboard_assets_keep_existing_viewer_separate_and_support_dark_mode():
     assert 'fetch("data/mc_cost.json")' in script
     assert "Plotly.react" in script
     assert "mc-cost export-dashboard --config configs/mc_cost/default.json" in script
+    assert "dashboard.joint_scenarios" in script
+    assert "max_judgment_calls" in script
     assert "partial_reasons" in script
     assert "<th>Candidate calls</th>" in (ROOT / "interactive_viewer/mc_cost.html").read_text()
     assert "<th>Judge calls</th>" in (ROOT / "interactive_viewer/mc_cost.html").read_text()

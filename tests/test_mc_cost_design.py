@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from mc_cost.catalogue import build_capability_draws, build_catalogue, pool_enabled
+from mc_cost.cli import _dashboard_scenarios
 from mc_cost.design import AutomaticConfig, automatic_comparisons, manual_comparisons
 
 
@@ -59,6 +60,19 @@ def test_automatic_rejects_comparator_count_that_depends_on_missing_family():
         automatic_comparisons(models, config, np.random.default_rng(3))
 
 
+def test_automatic_roles_are_limited_to_exact_capability_draw_models():
+    draw_models = {"j1", "a", "old-weak"}
+    comparisons = automatic_comparisons(
+        catalogue(),
+        AutomaticConfig(j=1, m=1, n=2, attempted_items=1, selected_judges=("j1",)),
+        np.random.default_rng(3), capability_models=draw_models,
+    )
+
+    assert set(comparisons[["judge", "m1", "m2"]].to_numpy().ravel()) <= draw_models
+    assert comparisons["m1"].unique().tolist() == ["a"]
+    assert set(comparisons["m2"]) == {"j1", "old-weak"}
+
+
 def test_manual_retains_duplicates_and_warns_without_blocking():
     rows = pd.DataFrame([{"judge": "j2", "m1": "old-weak", "m2": "a"}] * 2)
     comparisons, warnings = manual_comparisons(catalogue(), rows)
@@ -90,6 +104,29 @@ def test_manual_keeps_known_identity_with_missing_prediction_metadata():
     comparisons, warnings = manual_comparisons(models, rows)
     assert comparisons.loc[0, "predictable"] == False
     assert "missing_prediction_metadata" in set(warnings["code"])
+
+
+def test_manual_family_and_capability_draw_gaps_remain_explicit_but_unpredictable():
+    models = catalogue()
+    models.loc[models.model_id.eq("old-weak"), "family"] = pd.NA
+    rows = pd.DataFrame([
+        {"judge": "j1", "m1": "a", "m2": "old-strong"},
+        {
+            "judge": "j1", "m1": "a", "m2": "old-weak",
+            "m2_reasoning_class": "reasoning",
+        },
+    ])
+
+    comparisons, warnings = manual_comparisons(
+        models, rows, capability_models={"j1", "a", "old-weak"},
+    )
+
+    assert comparisons["predictable"].tolist() == [False, False]
+    assert comparisons["unavailable_reason"].tolist() == [
+        "missing capability draw: m2 old-strong",
+        "missing prediction metadata: m2.family",
+    ]
+    assert set(warnings["code"]) >= {"missing_capability_draw", "missing_prediction_metadata"}
 
 
 def test_manual_uses_reasoning_override_and_rejects_bad_schema_or_identity():
@@ -199,6 +236,15 @@ def test_default_dashboard_grid_and_advertised_scenario_fit_real_explicit_pools(
     metadata = models.set_index("model_id")
 
     assert config["dashboard"]["judge_counts"] == list(range(1, len(eligible_judges) + 1))
+    assert config["dashboard"]["grid_mode"] == "one_at_a_time"
+    assert config["dashboard"]["manual_triple_limit"] == 0
+    assert config["dashboard"]["max_judgment_calls"] == 2_000_000
+    scenarios = _dashboard_scenarios(config["dashboard"], config["simulation"])
+    assert (3, 8, 4, 10, 1, True) in scenarios
+    assert config["simulation"]["trials"] * sum(
+        judges * anchors * comparators * items * presentations
+        for judges, anchors, comparators, items, presentations, _ in scenarios
+    ) < config["dashboard"]["max_judgment_calls"]
     for seed in range(5):
         comparisons = automatic_comparisons(
             models,

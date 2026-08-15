@@ -21,6 +21,7 @@ from inspect_ai.model import ChatMessageAssistant, ModelUsage
 from inspect_ai.scorer import Score
 
 import mc_cost.cli as cli
+import mc_cost.simulation as simulation
 from mc_cost.cli import main, write_run_config
 from mc_cost.data import JUDGMENT_COLUMNS
 from mc_cost.model import JUDGMENT_SPECS, PosteriorArtifact, load_artifact, save_artifact
@@ -277,6 +278,17 @@ def refresh_artifact_provenance(output):
 def write_valid_decision(output, hashes, *, selected="baseline", gate=False):
     validation = output / "validation"
     validation.mkdir(exist_ok=True)
+    support_names = [
+        "theta_gap",
+        *(cli.FEATURE_COLUMNS.get(feature, feature) for feature in JUDGMENT_SPECS[selected].global_features),
+        *(["length_difference"] if JUDGMENT_SPECS[selected].include_length else []),
+        *(["judge_theta", "judge_release_days"] if gate else []),
+    ]
+    support_matrix = np.vstack([
+        np.zeros(len(support_names)), np.eye(len(support_names)) * 1_000_000,
+        -np.eye(len(support_names)) * 1_000_000,
+    ])
+    threshold = float(cli.support_distance(support_matrix, support_matrix[:1]).iloc[0]["threshold"])
     (validation / "decision.json").write_text(json.dumps({
         "selected_judgment_spec": selected,
         "judgment_spec": {
@@ -285,6 +297,15 @@ def write_valid_decision(output, hashes, *, selected="baseline", gate=False):
         },
         "data_hashes": hashes,
         "judge_covariate_gate": {"enabled": gate},
+        "judgment_support": {
+            "coordinate_system": "raw",
+            "predictor_names": support_names,
+            "training_matrix": support_matrix.tolist(),
+            "training_ranges": np.column_stack([
+                support_matrix.min(axis=0), support_matrix.max(axis=0),
+            ]).tolist(),
+            "nearest_neighbor_threshold": threshold,
+        },
         "validation_timestamp": "2026-08-15T00:00:00Z",
     }))
     write_generation(output, "validation/manifest.json", ["validation/decision.json"])
@@ -428,8 +449,10 @@ def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monke
     attempts = pd.DataFrame([{
         "chosen_left": 1, "judge": "j", "item": "i", "left_model": "a", "right_model": "b",
         "length_difference": 0.2, "same_model_family": 0, "self_comparison": 0,
-        "reasoning_difference": 0, "left_chars": 10, "right_chars": 8,
-        "include_reasoning": False,
+            "reasoning_difference": 0, "left_chars": 10, "right_chars": 8,
+            "include_reasoning": False,
+            "presentation_max_chars": 65536, "presentation_truncate_frac": None,
+            "presentation_truncate_keep": "first",
         "judge_input_tokens": 20, "judge_output_tokens": 4,
         "judge_reasoning_tokens": 0, "judge_total_tokens": 24,
     }])
@@ -588,6 +611,8 @@ def pipeline_artifacts(tmp_path, *, dashboard=None):
     judgments["chosen_left"] = [0, 1]
     judgments["include_reasoning"] = False
     judgments["major_is_left"] = [False, True]
+    judgments["judge_theta"] = 0.0
+    judgments["judge_release_day"] = 1461.0
     judgments.loc[1, [
         "theta_gap", "oversight", "release_gap_days", "relative_release_days", "difficulty",
         "theta_gap_x_oversight", "theta_gap_x_difficulty", "length_difference",
@@ -607,12 +632,16 @@ def pipeline_artifacts(tmp_path, *, dashboard=None):
         output / "token_judge.parquet", index=False,
     )
     scales = json.dumps({
-        column: {"mean": 0.0, "scale": 1.0}
-        for column in (
-            "theta_gap", "oversight", "difficulty", "theta_gap_x_oversight",
-            "theta_gap_x_difficulty", "same_family_x_theta_gap", "reasoning_difference",
-            "release_gap_days", "relative_release_days", "length_difference",
-        )
+        "theta_gap": {"mean": 2.0, "scale": 3.0},
+        **{
+            column: {"mean": 0.0, "scale": scale}
+            for column, scale in zip((
+                "oversight", "difficulty", "theta_gap_x_oversight",
+                "theta_gap_x_difficulty", "same_family_x_theta_gap",
+                "reasoning_difference", "release_gap_days", "relative_release_days",
+                "length_difference",
+            ), range(4, 13))
+        },
     })
     (output / "scales.json").write_text(scales)
     (output / "judgment_standardization.json").write_text(scales)
@@ -656,6 +685,9 @@ def pipeline_artifacts(tmp_path, *, dashboard=None):
                 "include_length": JUDGMENT_SPECS[name].include_length,
                 "conditional_judges": False,
                 "presentation_include_reasoning": False,
+                "presentation_max_chars": 65536,
+                "presentation_truncate_frac": None,
+                "presentation_truncate_keep": "first",
             })
         else:
             metadata["role"] = name.removesuffix("_token")
@@ -719,7 +751,14 @@ def test_validate_writes_held_out_tables_and_hash_bound_decision(tmp_path, monke
     monkeypatch.setattr(cli, "encode_judgments", lambda *args, **kwargs: object())
     monkeypatch.setattr(cli, "fit_judgment_model", lambda data, **kwargs: PosteriorArtifact(
         {"draw": np.array([1.0])},
-        {"source_hashes": hashes, "conditional_judges": kwargs["conditional_judges"]}, {},
+        {
+            "source_hashes": hashes,
+            "conditional_judges": kwargs["conditional_judges"],
+            "presentation_include_reasoning": False,
+            "presentation_max_chars": 65536,
+            "presentation_truncate_frac": None,
+            "presentation_truncate_keep": "first",
+        }, {},
     ))
 
     assert main(["validate", "--config", str(config), "--seed", "11"]) == 0
@@ -728,6 +767,33 @@ def test_validate_writes_held_out_tables_and_hash_bound_decision(tmp_path, monke
     assert decision["selected_judgment_spec"] == "core"
     assert decision["judge_covariate_gate"]["enabled"] is True
     assert decision["data_hashes"] == hashes
+    assert decision["judgment_support"]["predictor_names"][-2:] == [
+        "judge_theta", "judge_release_days",
+    ]
+    support = decision["judgment_support"]
+    assert support["coordinate_system"] == "raw"
+    assert support["training_matrix"][0] == [
+        2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1461.0,
+    ]
+    artifact = {
+        "posterior": {"length_mean": np.array([0.0])},
+        "feature_order": list(JUDGMENT_SPECS["core"].global_features),
+    }
+    names, _, support_index = simulation._decision_support(decision, artifact)
+    raw_query = simulation._raw_judgment_features(
+        pd.DataFrame([{
+            "left_model": "a", "right_model": "b", "judge": "j",
+            "difficulty": 0.0, "left_chars": 10, "right_chars": 10,
+        }]),
+        pd.DataFrame([
+            {"model_id": "j", "release_day": 1461.0, "family": "j"},
+            {"model_id": "a", "release_day": 1827.0, "family": "a"},
+            {"model_id": "b", "release_day": 1096.0, "family": "b"},
+        ]).set_index("model_id"),
+        {"j": 0.0, "a": 1.0, "b": -1.0}, names,
+    )
+    queried = support_index.query(raw_query.to_numpy(float)).iloc[0]
+    assert queried.distance == 0.0 and not queried.outside_support
     selected_artifact = load_artifact(output / "model/core")
     assert selected_artifact.metadata["conditional_judges"] is True
     assert selected_artifact.metadata["feature_order"] == list(JUDGMENT_SPECS["core"].global_features)
@@ -772,6 +838,9 @@ def test_real_judgment_callback_encodes_target_free_held_out_rows(monkeypatch):
     ])
     rows = pd.DataFrame([{column: 0 for column in JUDGMENT_COLUMNS} for _ in range(2)])
     rows["include_reasoning"] = False
+    rows["presentation_max_chars"] = 65536
+    rows["presentation_truncate_frac"] = None
+    rows["presentation_truncate_keep"] = "first"
     rows[["judge", "item", "left_model", "right_model"]] = ["j1", "i", "a", "b"]
     rows.loc[1, "judge"] = "j2"
     rows.loc[1, [
@@ -892,12 +961,18 @@ def test_simulate_refuses_mixed_model_generation(tmp_path, monkeypatch, capsys):
     assert "model generation" in capsys.readouterr().err
 
 
-def test_simulate_enforces_selected_artifact_spec_metadata(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("changes", [
+    {"feature_order": ["oversight_sd"]},
+    {"presentation_max_chars": None},
+])
+def test_simulate_enforces_selected_artifact_spec_metadata(
+    tmp_path, monkeypatch, capsys, changes,
+):
     config, output, hashes = pipeline_artifacts(tmp_path)
     artifact = load_artifact(output / "model/baseline")
     save_artifact(
         PosteriorArtifact(
-            artifact.posterior, {**artifact.metadata, "feature_order": ["oversight_sd"]},
+            artifact.posterior, {**artifact.metadata, **changes},
             artifact.diagnostics,
         ),
         output / "model/baseline",
@@ -1052,6 +1127,70 @@ def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path,
     assert payload["source_hashes"]["decision"]
 
 
+def test_dashboard_scenarios_default_to_one_axis_at_a_time_with_cartesian_opt_in():
+    dashboard = {
+        "judge_counts": [1, 2, 3], "anchor_counts": [1, 2, 4, 8],
+        "comparator_counts": [1, 2, 4, 8],
+        "attempted_item_counts": [10, 25, 50, 100, 198],
+        "presentation_counts": [1, 2], "strength_filters": [True, False],
+        "joint_scenarios": [{
+            "judges": 3, "anchors": 8, "comparators": 4,
+            "attempted_items": 10, "presentations": 1, "require_stronger": True,
+        }],
+    }
+
+    one_at_a_time = cli._dashboard_scenarios(dashboard, {})
+    cartesian = cli._dashboard_scenarios({**dashboard, "grid_mode": "cartesian"}, {})
+
+    assert len(one_at_a_time) == 16
+    assert one_at_a_time[0] == (1, 1, 1, 10, 1, True)
+    assert (3, 8, 4, 10, 1, True) in one_at_a_time
+    assert len(set(one_at_a_time)) == len(one_at_a_time)
+    assert len(cartesian) == 960
+
+
+@pytest.mark.parametrize("joint_scenarios", [
+    {},
+    [{}],
+    [{
+        "judges": 1, "anchors": 1, "comparators": 1,
+        "attempted_items": 1, "presentations": 1, "require_stronger": "yes",
+    }],
+    [{
+        "judges": True, "anchors": 1, "comparators": 1,
+        "attempted_items": 1, "presentations": 1, "require_stronger": True,
+    }],
+])
+def test_dashboard_scenarios_reject_malformed_exact_joint_rows(joint_scenarios):
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "joint_scenarios": joint_scenarios,
+    }
+
+    with pytest.raises(cli.CliError, match="joint_scenarios"):
+        cli._dashboard_scenarios(dashboard, {})
+
+
+def test_export_dashboard_rejects_planned_work_before_simulation(tmp_path, monkeypatch, capsys):
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "joint_scenarios": [{
+            "judges": 1, "anchors": 1, "comparators": 1,
+            "attempted_items": 4, "presentations": 1, "require_stronger": True,
+        }],
+        "manual_triples": [], "manual_triple_limit": 0, "max_judgment_calls": 3,
+    }
+    config, output, hashes = pipeline_artifacts(tmp_path, dashboard=dashboard)
+    write_valid_decision(output, hashes)
+    monkeypatch.setattr(cli, "simulate", lambda *_args, **_kwargs: pytest.fail("simulation ran"))
+
+    assert main(["export-dashboard", "--config", str(config), "--trials", "1"]) == 2
+    error = capsys.readouterr().err
+    assert "planned" in error and "max_judgment_calls" in error
+
+
 def test_export_dashboard_keeps_unavailable_metrics_and_warnings(tmp_path, monkeypatch):
     dashboard = {
         "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
@@ -1159,7 +1298,9 @@ def test_dashboard_records_restore_manual_identity_after_real_summary_nulls():
         {"model_id": "b", "theta": -1.0, "reasoning_class": "non_reasoning",
          "observed_judge": False, "observed_candidate": False},
     ])
-    result = SimulationResult(pd.DataFrame(), summary, pd.DataFrame(columns=["code", "message"]))
+    result = SimulationResult(pd.DataFrame(), summary, pd.DataFrame([{
+        "code": "outside_joint_support", "message": "outside joint support",
+    }]))
 
     rows, _ = cli._dashboard_records(result, identity, catalogue)
 
@@ -1167,6 +1308,7 @@ def test_dashboard_records_restore_manual_identity_after_real_summary_nulls():
     assert rows[0]["row_prediction_status"] == "observed"
     assert rows[0]["scenario_prediction_status"] == "predicted"
     assert rows[0]["scenario_extrapolation"] is True
+    assert "outside_joint_support: outside joint support" in rows[0]["support_evidence"]
 
 
 def test_export_dashboard_applies_configured_pool_columns_and_keeps_resolved_metadata(
@@ -1268,23 +1410,70 @@ def test_export_dashboard_samples_default_manual_bank_with_truncation_warning_de
     warning = next(row for row in payload["warnings"] if row["code"] == "manual_bank_truncated")
     assert warning["total_count"] == 19
     assert warning["exported_count"] == 2
-    assert warning["omitted_count"] == len(warning["omitted_identities"]) == 17
+    assert warning["omitted_count"] == 17
+    assert len(warning["omitted_population_hash"]) == 64
+    assert "omitted_identities" not in warning
     assert calls == ["automatic", "manual", "manual"] * 2
 
 
-def test_default_manual_bank_excludes_self_and_prediction_ineligible_models():
+def test_manual_bank_zero_limit_never_materializes_default_triples(monkeypatch):
+    catalogue = pd.DataFrame([{
+        "model_id": f"m{index}", "theta": float(index), "release": "2025-01-01",
+        "family": "m", "reasoning_class": "non_reasoning",
+    } for index in range(1000)])
+    monkeypatch.setattr(cli, "product", lambda *_args, **_kwargs: pytest.fail("materialized product"))
+
+    rows, warning = cli._dashboard_manual_bank(
+        catalogue, [], seed=7, limit=0,
+        capability_models=set(catalogue["model_id"]),
+    )
+
+    assert rows == []
+    assert warning["total_count"] == 1000 * 1000 * 999
+    assert warning["exported_count"] == 0
+    assert warning["omitted_count"] == warning["total_count"]
+
+
+def test_default_manual_bank_excludes_self_and_models_without_capability_draws():
     catalogue = pd.DataFrame([
         {"model_id": "j", "theta": 0.0, "release": "2024-01-01", "family": "j", "reasoning_class": "non_reasoning"},
         {"model_id": "a", "theta": 1.0, "release": "2025-01-01", "family": "a", "reasoning_class": "reasoning"},
         {"model_id": "b", "theta": -1.0, "release": "2023-01-01", "family": "b", "reasoning_class": "non_reasoning"},
         {"model_id": "missing", "theta": None, "release": None, "family": "missing", "reasoning_class": "reasoning"},
+        {"model_id": "point-only", "theta": 0.5, "release": "2024-06-01", "family": "point", "reasoning_class": "reasoning"},
     ])
 
-    rows, _ = cli._dashboard_manual_bank(catalogue, [], seed=0, limit=1000)
+    rows, _ = cli._dashboard_manual_bank(
+        catalogue, [], seed=0, limit=1000, capability_models={"j", "a", "b"},
+    )
 
     assert rows
     assert all(row["m1"] != row["m2"] for row in rows)
-    assert all("missing" not in (row["judge"], row["m1"], row["m2"]) for row in rows)
+    assert all(
+        {row["judge"], row["m1"], row["m2"]} <= {"j", "a", "b"}
+        for row in rows
+    )
+
+
+def test_cli_automatic_source_uses_exact_capability_draw_models():
+    catalogue = pd.DataFrame([
+        {"model_id": "j", "theta": 0.0, "release": "2024-01-01", "family": "j", "reasoning_class": "non_reasoning", "judge_pool": True, "candidate_pool": False},
+        {"model_id": "a", "theta": 1.0, "release": "2025-01-01", "family": "a", "reasoning_class": "reasoning", "judge_pool": False, "candidate_pool": True},
+        {"model_id": "b", "theta": -1.0, "release": "2023-01-01", "family": "b", "reasoning_class": "non_reasoning", "judge_pool": False, "candidate_pool": False},
+        {"model_id": "point-only", "theta": -0.5, "release": "2023-06-01", "family": "p", "reasoning_class": "reasoning", "judge_pool": False, "candidate_pool": False},
+    ])
+    resolved = {
+        "judges": 1, "anchors": 1, "comparators": 2, "items": 1,
+        "presentations": 1, "require_stronger": True,
+    }
+    source = cli._comparison_source(
+        resolved, {"selected_judges": ["j"]}, catalogue,
+        capability_models={"j", "a", "b"},
+    )
+
+    comparisons = source(np.random.default_rng(1))
+
+    assert set(comparisons[["judge", "m1", "m2"]].to_numpy().ravel()) <= {"j", "a", "b"}
 
 
 def test_project_registers_mc_cost_entry_point():

@@ -1,10 +1,11 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
 from .catalogue import pool_enabled
+from .data import normalize_family
 
 
 @dataclass(frozen=True)
@@ -18,22 +19,32 @@ class AutomaticConfig:
     require_stronger: bool = True
 
 
-def prediction_eligible(catalogue: pd.DataFrame) -> pd.Series:
+def prediction_eligible(
+    catalogue: pd.DataFrame, capability_models: Collection[str] | None = None,
+) -> pd.Series:
     required = {"theta", "release", "family", "reasoning_class"}
+    if capability_models is not None:
+        required.add("model_id")
     if missing := sorted(required - set(catalogue)):
         raise ValueError(f"catalogue lacks prediction metadata columns: {', '.join(missing)}")
     theta = pd.to_numeric(catalogue["theta"], errors="coerce")
     release = pd.to_datetime(catalogue["release"], errors="coerce")
-    family = catalogue["family"].map(lambda value: isinstance(value, str) and bool(value.strip()))
-    return pd.Series(
+    family = catalogue["family"].map(normalize_family).notna()
+    eligible = pd.Series(
         np.isfinite(theta) & release.notna()
         & family
         & catalogue["reasoning_class"].isin({"reasoning", "non_reasoning"}),
         index=catalogue.index,
     )
+    if capability_models is not None:
+        eligible &= catalogue["model_id"].astype(str).isin(set(map(str, capability_models)))
+    return eligible
 
 
-def automatic_comparisons(catalogue: pd.DataFrame, config: AutomaticConfig, rng) -> pd.DataFrame:
+def automatic_comparisons(
+    catalogue: pd.DataFrame, config: AutomaticConfig, rng, *,
+    capability_models: Collection[str] | None = None,
+) -> pd.DataFrame:
     required = {
         "model_id", "release", "theta", "family", "reasoning_class", "judge_pool", "candidate_pool",
     }
@@ -60,7 +71,7 @@ def automatic_comparisons(catalogue: pd.DataFrame, config: AutomaticConfig, rng)
     models["theta_value"] = pd.to_numeric(models["theta"], errors="coerce")
     models["judge_enabled"] = models["judge_pool"].map(pool_enabled)
     models["candidate_enabled"] = models["candidate_pool"].map(pool_enabled)
-    models["prediction_eligible"] = prediction_eligible(models)
+    models["prediction_eligible"] = prediction_eligible(models, capability_models)
     valid_judges = models.loc[models["judge_enabled"] & models["prediction_eligible"]]
     if selected_judges:
         selected = list(selected_judges)
@@ -107,7 +118,10 @@ def automatic_comparisons(catalogue: pd.DataFrame, config: AutomaticConfig, rng)
     )
 
 
-def manual_comparisons(catalogue: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def manual_comparisons(
+    catalogue: pd.DataFrame, rows: pd.DataFrame, *,
+    capability_models: Collection[str] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     required = {"judge", "m1", "m2"}
     optional = {"judge_reasoning_class", "m1_reasoning_class", "m2_reasoning_class"}
     columns = list(rows.columns)
@@ -119,6 +133,7 @@ def manual_comparisons(catalogue: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.
     models = catalogue.copy().set_index("model_id", drop=False)
     models["release_day"] = pd.to_datetime(models.get("release", pd.Series(index=models.index, dtype=object)), errors="coerce")
     models["theta_value"] = pd.to_numeric(models.get("theta", pd.Series(index=models.index, dtype=object)), errors="coerce")
+    draw_models = None if capability_models is None else set(map(str, capability_models))
     records, warnings = [], []
     for output_row, (source_row, row) in enumerate(rows.iterrows()):
         identities = {role: row[role] for role in ("judge", "m1", "m2")}
@@ -136,7 +151,7 @@ def manual_comparisons(catalogue: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.
                 raise ValueError(f"{role}_reasoning_class must be reasoning or non_reasoning")
             classes[role] = value
 
-        missing = []
+        missing, missing_draws = [], []
         for role, model in identities.items():
             metadata = models.loc[model]
             if not np.isfinite(metadata["theta_value"]):
@@ -145,12 +160,24 @@ def manual_comparisons(catalogue: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.
                 missing.append(f"{role}.release")
             if pd.isna(classes[role]):
                 missing.append(f"{role}.reasoning_class")
-        predictable = not missing
+            if pd.isna(normalize_family(metadata.get("family", pd.NA))):
+                missing.append(f"{role}.family")
+            if draw_models is not None and str(model) not in draw_models:
+                missing_draws.append(f"{role} {model}")
+        reasons = []
+        if missing:
+            reasons.append(f"missing prediction metadata: {', '.join(missing)}")
+        if missing_draws:
+            reasons.append(f"missing capability draw: {', '.join(missing_draws)}")
+        predictable = not reasons
         records.append({**identities, **{f"{role}_reasoning_class": classes[role] for role in identities},
-                        "predictable": predictable})
+                        "predictable": predictable, "unavailable_reason": "; ".join(reasons)})
         if missing:
             warnings.append({"code": "missing_prediction_metadata", "row": output_row, "source_row": source_row,
                              "message": f"missing prediction metadata: {', '.join(missing)}"})
+        if missing_draws:
+            warnings.append({"code": "missing_capability_draw", "row": output_row, "source_row": source_row,
+                             "message": f"missing capability draw: {', '.join(missing_draws)}"})
 
         judge, m1, m2 = (models.loc[identities[role]] for role in ("judge", "m1", "m2"))
         violations = []
@@ -181,6 +208,6 @@ def manual_comparisons(catalogue: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.
                                  "message": f"{role} is outside the automatic {pool} support"})
     return (
         pd.DataFrame(records, columns=["judge", "m1", "m2", "judge_reasoning_class", "m1_reasoning_class",
-                                       "m2_reasoning_class", "predictable"]),
+                                       "m2_reasoning_class", "predictable", "unavailable_reason"]),
         pd.DataFrame(warnings, columns=["code", "row", "source_row", "message"]),
     )

@@ -71,6 +71,7 @@ def judge_task(
             "require_both_correct": require_both_correct,
             "include_reverse": include_reverse,
             "include_reasoning": include_reasoning,
+            "max_length": max_length,
             "truncate_frac": truncate_frac,
             "truncate_keep": truncate_keep,
             "experiment_name": experiment_name,

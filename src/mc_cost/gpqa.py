@@ -33,6 +33,7 @@ TRANSCRIPTS = re.compile(
     r"Transcript (?:B|2):\s*\n---\n(.*?)\n---\n\s*Which of",
     re.DOTALL,
 )
+LEGACY_PRESENTATION_MAX_CHARS = 65536
 
 
 def model_family(name: str) -> str:
@@ -152,6 +153,18 @@ def extract_attempts(
                 eval_id = header["eval"].get("eval_id")
                 eval_metadata = header["eval"].get("metadata") or {}
                 include_reasoning = bool(eval_metadata.get("include_reasoning"))
+                try:
+                    presentation_max_chars = int(
+                        eval_metadata.get("max_length", LEGACY_PRESENTATION_MAX_CHARS)
+                    )
+                except (TypeError, ValueError):
+                    raise ValueError("invalid judgment presentation max_length") from None
+                if presentation_max_chars <= 0:
+                    raise ValueError("judgment presentation max_length must be positive")
+                truncate_frac = eval_metadata.get("truncate_frac")
+                if truncate_frac is None and condition.startswith("truncated_"):
+                    truncate_frac = int(condition.removeprefix("truncated_")) / 100
+                truncate_keep = eval_metadata.get("truncate_keep", "first")
                 phase_match = re.search(r"(?:phase-|_p)([12])", str(path))
                 for name in archive.namelist():
                     if not name.startswith("samples/") or not name.endswith(".json"):
@@ -209,6 +222,9 @@ def extract_attempts(
                         ),
                         "self_comparison": int(left_model == right_model),
                         "include_reasoning": include_reasoning,
+                        "presentation_max_chars": presentation_max_chars,
+                        "presentation_truncate_frac": truncate_frac,
+                        "presentation_truncate_keep": truncate_keep,
                         "major_is_left": major_left, "answer": answer,
                         "confidence": confidence, "left_chars": len(left_text),
                         "right_chars": len(right_text),

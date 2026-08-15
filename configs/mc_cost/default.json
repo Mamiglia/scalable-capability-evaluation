@@ -20,14 +20,26 @@
     "seed": 0
   },
   "dashboard": {
+    "grid_mode": "one_at_a_time",
     "judge_counts": [1, 2, 3],
     "anchor_counts": [1, 2, 4, 8],
     "comparator_counts": [1, 2, 4, 8],
     "attempted_item_counts": [10, 25, 50, 100, 198],
     "presentation_counts": [1, 2],
+    "joint_scenarios": [
+      {
+        "judges": 3,
+        "anchors": 8,
+        "comparators": 4,
+        "attempted_items": 10,
+        "presentations": 1,
+        "require_stronger": true
+      }
+    ],
     "judge_pool_column": "judge_pool",
     "candidate_pool_column": "candidate_pool",
     "manual_triples": [],
-    "manual_triple_limit": 500
+    "manual_triple_limit": 0,
+    "max_judgment_calls": 2000000
   }
 }

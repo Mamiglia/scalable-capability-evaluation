@@ -31,6 +31,10 @@ CONTINUOUS_JUDGMENT_COLUMNS = [
 ]
 
 
+def normalize_family(value):
+    return value.strip() if isinstance(value, str) and value.strip() else pd.NA
+
+
 def _short_model(slug: str) -> str:
     return slug.removeprefix("openrouter/").split("/")[-1]
 
@@ -81,9 +85,7 @@ def _catalogue_metadata(catalogue: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("duplicate model_id in catalogue")
     frame["theta"] = pd.to_numeric(frame["theta"], errors="coerce")
     frame["release_day"] = _release_days(frame["release"])
-    frame["family"] = frame["family"].map(
-        lambda value: value.strip() if isinstance(value, str) and value.strip() else pd.NA
-    )
+    frame["family"] = frame["family"].map(normalize_family)
     return frame.set_index("model_id", drop=False)
 
 
@@ -155,8 +157,15 @@ def _exclusion_rows(exclusions: Counter) -> list[dict]:
 
 def candidate_token_rows(
     log_roots, catalogue: pd.DataFrame, items: pd.DataFrame, *, skip_incomplete: bool = False,
+    presentation_max_chars: int = 65536,
 ) -> pd.DataFrame:
     """Extract one valid candidate-generation usage row per model/item/epoch."""
+    if (
+        not isinstance(presentation_max_chars, int)
+        or isinstance(presentation_max_chars, bool)
+        or presentation_max_chars <= 0
+    ):
+        raise ValueError("presentation_max_chars must be a positive integer")
     metadata = _catalogue_metadata(catalogue)
     aliases = catalogue_aliases(catalogue)
     difficulty = _gpqa_items(items).set_index(["benchmark", "item"])["difficulty"]
@@ -243,7 +252,8 @@ def candidate_token_rows(
                 reasoning_tokens = tokens["reasoning"]
                 rows.append({
                     "role": "candidate", "benchmark": benchmark, "model": model, "item": item, "epoch": epoch,
-                    "response_chars": len(final_transcript),
+                    "response_chars": min(len(final_transcript), presentation_max_chars),
+                    "uncapped_response_chars": len(final_transcript),
                     "full_response_chars": len(full_transcript),
                     "generated_reasoning": int(full_transcript != final_transcript),
                     "correct": _sample_correct(sample),

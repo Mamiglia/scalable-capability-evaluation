@@ -18,15 +18,49 @@ from mc_cost.simulation import (
 )
 from mc_cost.simulation import simulate as core_simulate
 from mc_cost.validation import write_decision
+from mc_cost.validation import support_distance
 
 
 DATA_HASHES = {"judgments": "abc", "candidate_tokens": "def", "judge_tokens": "ghi"}
 _DECISION_DIRECTORY = tempfile.TemporaryDirectory()
 DECISION_PATH = Path(_DECISION_DIRECTORY.name) / "decision.json"
-write_decision(DECISION_PATH, {"data_hashes": DATA_HASHES})
+
+
+def support_decision(path, names, matrix, *, gate=False, coordinate_system="raw"):
+    matrix = np.asarray(matrix, dtype=float)
+    threshold = float(support_distance(matrix, matrix[:1]).iloc[0]["threshold"])
+    write_decision(path, {
+        "data_hashes": DATA_HASHES,
+        "judge_covariate_gate": {"enabled": gate},
+        "judgment_support": {
+            "coordinate_system": coordinate_system,
+            "predictor_names": list(names), "training_matrix": matrix.tolist(),
+            "training_ranges": np.column_stack([matrix.min(axis=0), matrix.max(axis=0)]).tolist(),
+            "nearest_neighbor_threshold": threshold,
+        },
+    })
+
+
+support_decision(DECISION_PATH, ["theta_gap"], [[-1_000_000], [0], [1_000_000]])
 
 
 def simulate(*args, **kwargs):
+    artifact = kwargs.get("judgment_artifact")
+    if artifact is None and len(args) > 8:
+        artifact = args[8]
+    if artifact is not None:
+        metadata = artifact.metadata if hasattr(artifact, "metadata") else artifact
+        posterior = artifact.posterior if hasattr(artifact, "posterior") else artifact["posterior"]
+        names = [
+            "theta_gap",
+            *(simulation.FEATURE_COLUMNS.get(feature, feature) for feature in metadata.get("feature_order", ())),
+            *(["length_difference"] if "length_mean" in posterior else []),
+        ]
+        matrix = np.vstack([
+            np.zeros(len(names)), np.eye(len(names)) * 1_000_000,
+            -np.eye(len(names)) * 1_000_000,
+        ])
+        support_decision(DECISION_PATH, names, matrix)
     kwargs.setdefault("decision_path", DECISION_PATH)
     kwargs.setdefault("data_hashes", DATA_HASHES)
     return core_simulate(*args, **kwargs)
@@ -69,6 +103,9 @@ def judgment_artifact(*, observed_judge=True, judge_scale=0.0):
     return {
         "posterior": posterior,
         "presentation_include_reasoning": False,
+        "presentation_max_chars": 65536,
+        "presentation_truncate_frac": None,
+        "presentation_truncate_keep": "first",
         "feature_order": [],
         "category_maps": {
             "judges": judges, "models": {"a": 0}, "items": {"i1": 0, "i2": 1},
@@ -183,6 +220,65 @@ def test_simulation_refuses_stale_decision_before_any_work(tmp_path):
     assert not called
 
 
+def test_simulation_fails_closed_on_missing_or_malformed_support(tmp_path):
+    decision = tmp_path / "decision.json"
+    write_decision(decision, {"data_hashes": DATA_HASHES})
+    with pytest.raises(ValueError, match="judgment support"):
+        core_simulation_call(
+            pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+            decision_path=decision, data_hashes=DATA_HASHES,
+        )
+
+    support_decision(decision, ["wrong_name"], [[-1], [0], [1]])
+    with pytest.raises(ValueError, match="predictor names"):
+        core_simulation_call(
+            pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+            decision_path=decision, data_hashes=DATA_HASHES,
+        )
+
+    support_decision(decision, ["theta_gap"], [[-1], [0], [1]], coordinate_system="standardized")
+    with pytest.raises(ValueError, match="coordinate_system.*raw"):
+        core_simulation_call(
+            pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+            decision_path=decision, data_hashes=DATA_HASHES,
+        )
+
+
+def _support_simulation(tmp_path, training):
+    decision = tmp_path / "decision.json"
+    support_decision(decision, ["theta_gap", "oversight"], training)
+    artifact = judgment_artifact()
+    artifact["feature_order"] = ["oversight_sd"]
+    artifact["training_scales"]["oversight"] = {"mean": 0.0, "scale": 1.0}
+    artifact["posterior"]["global_beta"] = np.array([[0.0]])
+    return core_simulate(
+        pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+        SimulationConfig(trials=1, attempted_items=1, presentations=2, mode="manual"),
+        item_ids=["i1"], observed_cells=observed_cells(),
+        capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+        irt=irt(), judgment_artifact=artifact,
+        candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+        catalogue=catalogue(), decision_path=decision, data_hashes=DATA_HASHES, seed=1,
+    )
+
+
+def test_simulation_support_warns_for_range_and_joint_extrapolation(tmp_path):
+    in_support = _support_simulation(tmp_path, [[-1, .5], [0, 0], [1, .5], [0, 1]])
+    assert not set(in_support.warnings["code"]) & {
+        "outside_training_range", "outside_joint_support",
+    }
+
+    outside_range = _support_simulation(tmp_path, [[-.1, 0], [0, .1], [.1, 0]])
+    assert "outside_training_range" in set(outside_range.warnings["code"])
+    assert metric(outside_range, "outside_training_range", comparison_id=0) == [1.0]
+
+    diagonal = [[value, value / 2] for value in np.linspace(-2, 2, 9)]
+    joint = _support_simulation(tmp_path, diagonal)
+    assert "outside_training_range" not in set(joint.warnings["code"])
+    assert "outside_joint_support" in set(joint.warnings["code"])
+    assert metric(joint, "outside_joint_support", comparison_id=0) == [1.0]
+
+
 def run_simulation(*, trials=1, reuse_responses=False, comparisons=None, artifact=None, seed=4):
     comparisons = comparisons if comparisons is not None else pd.DataFrame([
         {"judge": "j", "m1": "a", "m2": "b"},
@@ -259,8 +355,43 @@ def test_summary_uses_p5_median_p95_and_all_group_keys():
     assert row["n_trials"] == 5 and row["configuration"] == "c" and row["warning_state"] == "ok"
 
 
+def test_summary_collapses_mixed_states_and_counts_finite_trials():
+    trials = pd.DataFrame({
+        "trial": [0, 1, 2], "configuration": ["c"] * 3, "metric": ["cost"] * 3,
+        "value": [1.0, np.nan, 3.0],
+        "warning_state": ["ok", "missing_price", "ok"],
+        "reason": ["", "missing input or output price for b", ""],
+    })
+
+    summary = summarize_trials(trials)
+
+    assert len(summary) == 1
+    row = summary.iloc[0]
+    assert row[["p5", "p50", "p95"]].notna().all() and row.p50 == 2.0
+    assert row.n_trials == 3 and row.n_finite_trials == 2
+    assert row.warning_state == "partial"
+    assert row.reason == "missing input or output price for b"
+
+
+def test_summary_all_unavailable_retains_null_quantiles_and_named_reason():
+    trials = pd.DataFrame({
+        "trial": [0, 1], "metric": ["choice_accuracy"] * 2, "value": [np.nan, np.nan],
+        "warning_state": ["unavailable", "unavailable"],
+        "reason": ["no usable judgments", "all usable judgments tied"],
+    })
+
+    row = summarize_trials(trials).iloc[0]
+
+    assert row[["p5", "p50", "p95"]].isna().all()
+    assert row.n_trials == 2 and row.n_finite_trials == 0
+    assert row.warning_state == "unavailable"
+    assert row.reason == "all usable judgments tied; no usable judgments"
+
+
 def test_trial_output_contains_every_required_metric():
-    assert set(TRIAL_METRICS) <= set(run_simulation().trials["metric"])
+    result = run_simulation()
+    assert set(TRIAL_METRICS) <= set(result.trials["metric"])
+    assert "reason" in result.trials and "reason" in result.summary
 
 
 def test_latent_cache_reuses_within_trial_and_redraws_when_trial_changes():
@@ -429,20 +560,22 @@ def test_final_only_candidate_lengths_drive_judgment_features_and_judge_input(mo
         return np.full(len(presented), 0.5)
 
     monkeypatch.setattr(simulation, "_scenario_left_probabilities", probabilities)
+    artifact = judgment_artifact()
+    artifact["presentation_max_chars"] = 12
     got = simulate(
         pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
         SimulationConfig(trials=1, attempted_items=1, presentations=1, mode="manual"),
         item_ids=["i1"], observed_cells=observed,
         capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
-        irt=irt(), judgment_artifact=judgment_artifact(),
+        irt=irt(), judgment_artifact=artifact,
         candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
         catalogue=catalogue(), seed=4,
     )
 
     presented = presented_rows[0]
-    assert sorted(presented[["left_chars", "right_chars"]].iloc[0]) == [11, 13]
+    assert sorted(presented[["left_chars", "right_chars"]].iloc[0]) == [11, 12]
     assert presented[["left_visible_reasoning", "right_visible_reasoning"]].eq(0).all(axis=None)
-    assert metric(got, "judge_input_tokens", model="j", role="judge") == [24.0]
+    assert metric(got, "judge_input_tokens", model="j", role="judge") == [23.0]
 
 
 def test_manual_rows_keep_raw_probability_and_ties_out_of_accuracy():
@@ -462,6 +595,9 @@ def test_manual_rows_keep_raw_probability_and_ties_out_of_accuracy():
     assert tied.trials.query(
         "metric == 'choice_accuracy' and comparison_id.isnull()"
     )["warning_state"].tolist() == ["unavailable"]
+    assert tied.trials.query(
+        "metric == 'choice_accuracy' and comparison_id.isnull()"
+    )["reason"].tolist() == ["all usable judgments tied"]
     assert len(metric(tied, "p_choose_m1", comparison_id=0)) == 1
 
 
@@ -522,6 +658,46 @@ def test_simulation_rejects_non_final_or_undeclared_judgment_presentation(condit
         )
 
 
+def test_empty_presentation_still_rejects_unsupported_judgment_condition():
+    artifact = judgment_artifact()
+    artifact["presentation_include_reasoning"] = True
+
+    with pytest.raises(ValueError, match="final-only|include_reasoning=false"):
+        simulate(
+            pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+            SimulationConfig(trials=1, attempted_items=1, presentations=1, mode="manual"),
+            item_ids=["i2"], observed_cells=observed_cells().assign(correct=0),
+            capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+            irt=irt(), judgment_artifact=artifact,
+            candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+            catalogue=catalogue(), seed=4,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("presentation_max_chars", None, "max chars"),
+        ("presentation_truncate_frac", 0.5, "paired truncation"),
+        ("presentation_truncate_keep", "last", "truncate keep"),
+    ],
+)
+def test_simulation_rejects_undeclared_or_paired_truncation(field, value, message):
+    artifact = judgment_artifact()
+    artifact[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        simulate(
+            pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+            SimulationConfig(trials=1, attempted_items=1, presentations=1, mode="manual"),
+            item_ids=["i2"], observed_cells=observed_cells().assign(correct=0),
+            capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+            irt=irt(), judgment_artifact=artifact,
+            candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+            catalogue=catalogue(), seed=4,
+        )
+
+
 def test_unpredictable_manual_row_stays_named_with_nan_probability_and_exact_bound():
     prices = catalogue()
     prices.loc[prices.model_id == "b", "reasoning_class"] = pd.NA
@@ -544,6 +720,25 @@ def test_unpredictable_manual_row_stays_named_with_nan_probability_and_exact_bou
     ]
     assert set(unavailable) == {"unavailable"}
     assert got.summary.query("metric == 'judgment_call_upper_bound'").iloc[0]["value"] == 2
+
+
+def test_direct_missing_capability_draw_becomes_named_unavailable_comparison():
+    got = simulate(
+        pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+        SimulationConfig(trials=1, attempted_items=1, presentations=2, mode="manual"),
+        item_ids=["i1"], observed_cells=observed_cells(),
+        capability_models=["j", "a"], capability_draws=np.array([[0.0, 1.0]]),
+        irt=irt(), judgment_artifact=judgment_artifact(),
+        candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+        catalogue=catalogue(), seed=1,
+    )
+
+    unavailable = got.trials.query(
+        "comparison_id == 0 and metric in ['choice_accuracy', 'p_choose_m1']"
+    )
+    assert unavailable["value"].isna().all()
+    assert set(unavailable["reason"]) == {"missing capability draw: b"}
+    assert got.warnings.query("code == 'missing_capability_draw'")["model"].tolist() == ["b"]
 
 
 def test_one_cache_reuses_unseen_judge_within_trial_and_redraws_across_cycled_posterior():
@@ -731,6 +926,11 @@ def test_missing_constituent_price_propagates_to_total_cost():
     )
     assert np.isnan(metric(got, "cost", model="__total__", role="all")[0])
     assert got.warnings.query("code == 'missing_price'")["model"].tolist() == ["b"]
+    unavailable = got.trials.query("metric == 'cost' and warning_state == 'missing_price'")
+    assert set(unavailable["reason"]) == {"missing input or output price for b"}
+    assert set(got.summary.query(
+        "metric == 'cost' and warning_state == 'missing_price'"
+    )["reason"]) == {"missing input or output price for b"}
 
 
 def test_zero_use_unpriced_planned_configuration_costs_zero_without_suppressing_total():
@@ -752,13 +952,36 @@ def test_zero_use_unpriced_planned_configuration_costs_zero_without_suppressing_
     assert got.warnings.query("code == 'missing_price'").empty
 
 
-def test_required_family_feature_rejects_missing_catalogue_metadata():
+def test_family_feature_normalizes_catalogue_values_like_training():
     artifact = judgment_artifact()
     artifact["feature_order"] = ["same_family_x_theta_gap_sd"]
     artifact["training_scales"]["same_family_x_theta_gap"] = {"mean": 0.0, "scale": 1.0}
     artifact["posterior"]["global_beta"] = np.array([[1.0]])
     models = catalogue()
-    models.loc[models.model_id == "b", "family"] = pd.NA
+    models.loc[models.model_id == "a", "family"] = " x "
+    models.loc[models.model_id == "b", "family"] = "x"
+
+    got = simulate(
+        pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),
+        SimulationConfig(trials=1, attempted_items=1, presentations=1, mode="manual"),
+        item_ids=["i1"], observed_cells=observed_cells(),
+        capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+        irt=irt(), judgment_artifact=artifact,
+        candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+        catalogue=models, seed=1,
+    )
+
+    assert np.isclose(metric(got, "p_choose_m1", comparison_id=0)[0], expit(2.0))
+
+
+@pytest.mark.parametrize("family", [pd.NA, "  "])
+def test_required_family_feature_rejects_missing_catalogue_metadata(family):
+    artifact = judgment_artifact()
+    artifact["feature_order"] = ["same_family_x_theta_gap_sd"]
+    artifact["training_scales"]["same_family_x_theta_gap"] = {"mean": 0.0, "scale": 1.0}
+    artifact["posterior"]["global_beta"] = np.array([[1.0]])
+    models = catalogue()
+    models.loc[models.model_id == "b", "family"] = family
     with pytest.raises(ValueError, match="family"):
         simulate(
             pd.DataFrame([{"judge": "j", "m1": "a", "m2": "b"}]),

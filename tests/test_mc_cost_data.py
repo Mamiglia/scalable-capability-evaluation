@@ -211,9 +211,12 @@ def test_candidate_rows_keep_final_and_full_transcript_lengths_separate(monkeypa
         "item": "i", "difficulty": 0.4,
     }])
 
-    row = candidate_token_rows(["unused"], catalogue, items).iloc[0]
+    row = candidate_token_rows(
+        ["unused"], catalogue, items, presentation_max_chars=5,
+    ).iloc[0]
 
-    assert row.response_chars == len("final answer")
+    assert row.response_chars == 5
+    assert row.uncapped_response_chars == len("final answer")
     assert row.full_response_chars > row.response_chars
     assert row.generated_reasoning == 1
     assert row.visible_reasoning == 0
