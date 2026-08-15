@@ -14,6 +14,7 @@ import contextlib
 import pathlib
 import re
 
+import numpy as np
 import pandas as pd
 import torch
 
@@ -251,27 +252,41 @@ def _verdicts(model, tokenizer, kept, holder, positions_fn):
     return pd.DataFrame(out, columns=["pair_uid", "order", "l1", "l2", "gap", "pick", "label"])
 
 
-def run_token_ablation(model, tokenizer, df, c, mode, baseline="mean", fine=False):
+def _metrics(df, single_order):
+    """Verdict metrics. Default reuses adapter_ablate.metrics (drops pairs missing an order);
+    single_order computes per-row metrics directly (for the --order recency split, where every
+    pair carries only one order)."""
+    if not single_order:
+        return adapter_ablate.metrics(df)
+    sgap = df["gap"].to_numpy() * np.where(df["label"].to_numpy() == 1, 1.0, -1.0)
+    return {"acc": (df["pick"] == df["label"]).mean(),
+            "pos_term": 2 * (df["pick"] == 1).mean() - 1,
+            "content_gap": float(sgap.mean()),
+            "pick_weaker_acc": (df["pick"] == 3 - df["label"]).mean()}
+
+
+def run_token_ablation(model, tokenizer, df, c, mode, baseline="mean", fine=False, single_order=False):
     """mode='ft': keep the LoRA only at each token-group (vs LoRA-nowhere=base and LoRA-everywhere
     =full) -> sufficiency/necessity of each group's LoRA-write. mode='base': ablate each
     token-group (vs intact) -> the base verdict's dependence on each group; `baseline` picks the
-    ablation value (mean|zero). `fine` adds transcript head/tail groups. Returns a tidy df,
-    one row per (group, metric)."""
+    ablation value (mean|zero). `fine` adds transcript head/tail groups. `single_order` uses
+    per-order metrics (for the --order recency split). Returns a tidy df, one row per (group, metric)."""
     kept = _kept_rows(df, tokenizer, c, fine=fine)
     assert kept, "no rows within max_input_tokens"
     holder = _Holder()
+    mm = lambda d: _metrics(d, single_order)  # noqa: E731 - metric closure reused per condition
     group_names = list(kept[0][1])
     metric_keys = ["pos_term", "content_gap", "acc", "pick_weaker_acc"]
 
     rows = []
     if mode == "ft":
         with lora_at_positions(model, holder):
-            none_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder, lambda g, s: set()))
-            full_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder, lambda g, s: set(range(s))))
+            none_m = mm(_verdicts(model, tokenizer, kept, holder, lambda g, s: set()))
+            full_m = mm(_verdicts(model, tokenizer, kept, holder, lambda g, s: set(range(s))))
             for gn in group_names:
-                only_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder,
+                only_m = mm(_verdicts(model, tokenizer, kept, holder,
                                                           lambda g, s, gn=gn: set(g[gn])))
-                minus_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder,
+                minus_m = mm(_verdicts(model, tokenizer, kept, holder,
                                                            lambda g, s, gn=gn: set(range(s)) - set(g[gn])))
                 for mk in metric_keys:
                     rows.append(dict(group=gn, metric=mk, none=none_m[mk], full=full_m[mk],
@@ -280,9 +295,9 @@ def run_token_ablation(model, tokenizer, df, c, mode, baseline="mean", fine=Fals
                                      necessity=full_m[mk] - minus_m[mk]))
     else:
         with mean_ablate(model, holder, baseline=baseline):
-            intact_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder, lambda g, s: set()))
+            intact_m = mm(_verdicts(model, tokenizer, kept, holder, lambda g, s: set()))
             for gn in group_names:
-                ablate_m = adapter_ablate.metrics(_verdicts(model, tokenizer, kept, holder,
+                ablate_m = mm(_verdicts(model, tokenizer, kept, holder,
                                                             lambda g, s, gn=gn: set(g[gn])))
                 for mk in metric_keys:
                     rows.append(dict(group=gn, metric=mk, intact=intact_m[mk], ablate=ablate_m[mk],
@@ -300,6 +315,8 @@ def main():
     p.add_argument("--ablate-baseline", choices=["mean", "zero"], default="mean",
                    help="base probe: mean (on-manifold) or zero (off-manifold) ablation value")
     p.add_argument("--fine", action="store_true", help="add transcript head/tail groups")
+    p.add_argument("--order", type=int, default=None, choices=[0, 1],
+                   help="restrict to one slot order (recency check); metrics computed per-order")
     p.add_argument("--out", required=True)
     args = p.parse_args()
 
@@ -310,8 +327,11 @@ def main():
         model, tokenizer, _ = verdicts.load_model(args.model, None, c)
 
     df = wbpairs.load_pairs(c, split=c["verdicts"]["eval_split"], limit=args.limit)
+    if args.order is not None:
+        df = df[df["order"] == args.order]
     out = run_token_ablation(model, tokenizer, df, c, args.mode,
-                             baseline=args.ablate_baseline, fine=args.fine)
+                             baseline=args.ablate_baseline, fine=args.fine,
+                             single_order=args.order is not None)
     path = pathlib.Path(args.out)
     path.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(path, index=False)

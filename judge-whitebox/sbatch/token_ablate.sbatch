@@ -28,6 +28,7 @@ if [ "$MODE" = "ft" ]; then ARGS+=(--adapter "${WB_ADAPTER:?set WB_ADAPTER for m
 [ -n "${WB_LIMIT:-}" ] && ARGS+=(--limit "$WB_LIMIT")
 [ -n "${WB_BASELINE:-}" ] && ARGS+=(--ablate-baseline "$WB_BASELINE")
 [ -n "${WB_FINE:-}" ] && ARGS+=(--fine)
+[ -n "${WB_ORDER:-}" ] && ARGS+=(--order "$WB_ORDER")
 
 echo "=== token_ablate $MNAME $MODE $(date) ==="
 python token_ablate.py "${ARGS[@]}"
