@@ -711,7 +711,7 @@ def pipeline_artifacts(tmp_path, *, dashboard=None):
     return config, output, hashes
 
 
-def test_validate_writes_held_out_tables_and_hash_bound_decision(tmp_path, monkeypatch):
+def test_validate_writes_held_out_tables_and_hash_bound_decision(tmp_path, monkeypatch, capsys):
     config, output, hashes = pipeline_artifacts(tmp_path)
     calls = []
     folds = pd.DataFrame([
@@ -807,6 +807,20 @@ def test_validate_writes_held_out_tables_and_hash_bound_decision(tmp_path, monke
     replay = pd.read_csv(output / "validation/posterior_predictive_replay.csv")
     assert replay.loc[replay["check"].eq("position_effect"), "valid"].all()
     assert replay.loc[replay["check"].eq("aggregate_choice_rate"), "n_draws"].tolist() == [2]
+
+    judgments = pd.read_parquet(output / "judgments.parquet").drop(
+        columns=["judge_theta", "judge_release_day"],
+    )
+    judgments.to_parquet(output / "judgments.parquet", index=False)
+    write_generation(output, "prepare.manifest.json", PREPARE_FILES)
+    hashes.clear()
+    hashes.update(refresh_artifact_provenance(output))
+
+    assert main(["validate", "--config", str(config), "--seed", "11"]) == 2
+    error = capsys.readouterr().err
+    assert "judgments lack conditional support predictors" in error
+    assert "judge_theta" in error
+    assert "judge_release_day" in error
 
 
 def test_validate_refuses_stale_full_token_artifact_before_decision(tmp_path, monkeypatch, capsys):

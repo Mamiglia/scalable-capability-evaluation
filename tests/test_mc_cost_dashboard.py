@@ -277,6 +277,27 @@ def test_dashboard_ranking_recovery_keeps_fractional_normalized_evidence():
     assert recovery[0]["n_finite_trials"] == 1
 
 
+@pytest.mark.parametrize(
+    ("wins", "left_theta", "right_theta"),
+    [(8, 1.0, 1.0), (5, 2.0, 1.0)],
+)
+def test_dashboard_ranking_recovery_names_constant_rank_failure(
+    wins, left_theta, right_theta,
+):
+    rows = ranking_rows(
+        0, 0, "a", "b", wins, left_theta, right_theta, calls=10,
+    )
+
+    recovery, _ = dashboard_ranking_recovery(
+        SimulationResult(pd.DataFrame(rows), pd.DataFrame(), pd.DataFrame()),
+        pd.DataFrame({"model_id": ["a", "b"]}),
+        {"presentations": 1},
+    )
+
+    assert recovery[0]["valid"] is False
+    assert recovery[0]["reason"] == "constant fitted or generating-theta ranks"
+
+
 @pytest.mark.parametrize("presentations", [None, 0, -1, True])
 def test_dashboard_ranking_recovery_requires_positive_presentations(presentations):
     result = SimulationResult(pd.DataFrame(columns=[
@@ -323,6 +344,21 @@ def test_dashboard_assets_keep_existing_viewer_separate_and_support_dark_mode():
     assert "<th>Judge calls</th>" in (ROOT / "interactive_viewer/mc_cost.html").read_text()
     assert "@media (prefers-color-scheme: dark)" in styles
     assert "@media (max-width:" in styles
+
+
+def test_dashboard_reuses_availability_details_across_views():
+    script = (ROOT / "interactive_viewer/mc_cost.js").read_text()
+    availability_body = script.split("function availability(", 1)[1].split("\n}", 1)[0]
+
+    assert script.count("function availability(") == 1
+    assert "detail.textContent = availability(" in script
+    assert "customdata: points.map((row) => availability(row," in script
+    assert 'row.warning_state !== "ok"' in availability_body
+    assert "Number.isFinite(row.n_finite_trials)" in availability_body
+    assert "Number.isFinite(row.n_trials)" in availability_body
+    assert "row.n_finite_trials < row.n_trials" in availability_body
+    assert "if (row.reason)" in availability_body
+    assert 'theme.xaxis.title = "Trial-local connected components"' in script
 
 
 def test_dashboard_badges_never_invent_support_for_a_missing_scenario():

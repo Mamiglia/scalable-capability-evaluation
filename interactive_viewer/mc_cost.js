@@ -28,12 +28,24 @@ function number(value, digits = 2) {
   return value === null || value === undefined ? "—" : Number(value).toLocaleString(undefined, {maximumFractionDigits: digits});
 }
 
+function availability(row, render) {
+  if (!row) return "not exported";
+  const parts = [render()];
+  if (row.warning_state && row.warning_state !== "ok") parts.push(`state: ${row.warning_state}`);
+  if (Number.isFinite(row.n_finite_trials) && Number.isFinite(row.n_trials)
+      && row.n_finite_trials < row.n_trials) {
+    parts.push(`${row.n_finite_trials}/${row.n_trials} finite trials`);
+  }
+  if (row.reason) parts.push(row.reason);
+  return parts.join(" · ");
+}
+
 function interval(row, currency = false) {
-  if (!row) return "—";
+  if (!row) return "not exported";
   const format = currency
     ? (value) => value === null ? "—" : Number(value).toLocaleString(undefined, {style: "currency", currency: "USD", maximumFractionDigits: 4})
     : (value) => number(value);
-  return [row.p5, row.p50, row.p95].map(format).join(" / ");
+  return availability(row, () => [row.p5, row.p50, row.p95].map(format).join(" / "));
 }
 
 function plotTheme() {
@@ -63,7 +75,7 @@ function bandPlot(id, rows, xKey, xTitle, yTitle) {
   return Plotly.react(id, [
     {x, y: points.map((row) => row.p5), mode: "lines", line: {width: 0}, hoverinfo: "skip"},
     {x, y: points.map((row) => row.p95), mode: "lines", line: {width: 0}, fill: "tonexty", fillcolor: "rgba(37,111,191,.18)", hoverinfo: "skip"},
-    {x, y: points.map((row) => row.p50), mode: "lines+markers", line: {color: "#256fbf", width: 2}, marker: {size: 7}, customdata: points.map((row) => [row.p5, row.p95]), hovertemplate: "%{x}<br>p50 %{y:.3f}<br>p5–p95 %{customdata[0]:.3f}–%{customdata[1]:.3f}<extra></extra>"},
+    {x, y: points.map((row) => row.p50), mode: "lines+markers", line: {color: "#256fbf", width: 2}, marker: {size: 7}, customdata: points.map((row) => availability(row, () => `p50 ${number(row.p50, 3)}; p5–p95 ${number(row.p5, 3)}–${number(row.p95, 3)}`)), hovertemplate: "%{x}<br>%{customdata}<extra></extra>"},
   ], theme, plotConfig);
 }
 
@@ -188,10 +200,16 @@ function summaryItem(label, row, exact = false, currency = false) {
   name.textContent = label;
   const value = document.createElement("span");
   value.className = "value";
-  value.textContent = exact ? number(row?.value, 0) : row ? (currency ? interval(row, true).split(" / ")[1] : number(row.p50)) : "—";
+  const format = currency
+    ? (item) => item === null ? "—" : Number(item).toLocaleString(undefined, {style: "currency", currency: "USD", maximumFractionDigits: 4})
+    : (item) => number(item);
+  value.textContent = exact ? number(row?.value, 0) : row ? format(row.p50) : "—";
   const detail = document.createElement("span");
   detail.className = "interval";
-  detail.textContent = exact ? "exact pre-filter maximum" : row ? `p5–p95 ${currency ? interval(row, true) : `${number(row.p5)}–${number(row.p95)}`}` : "not exported";
+  detail.textContent = availability(
+    row,
+    () => exact ? "exact pre-filter maximum" : `p5–p95 ${format(row.p5)}–${format(row.p95)}`,
+  );
   item.append(name, value, detail);
   return item;
 }
@@ -357,7 +375,7 @@ function renderRanking(rows) {
     }
     const theme = plotTheme();
     theme.showlegend = true;
-    theme.xaxis.title = "Stable connected-component membership";
+    theme.xaxis.title = "Trial-local connected components";
     theme.yaxis.title = "Kendall τ";
     theme.yaxis.range = [-1, 1];
     Plotly.react("ranking-plot", traces, theme, plotConfig);

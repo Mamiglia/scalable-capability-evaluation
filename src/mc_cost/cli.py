@@ -621,8 +621,11 @@ def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
         predictor_names.append("length_difference")
     support_frame = judgments.copy()
     if judge_gate["enabled"]:
-        if "judge_release_day" not in judgments:
-            raise CliError("judgments lack judge_release_day for conditional support")
+        missing = sorted({"judge_theta", "judge_release_day"} - set(judgments))
+        if missing:
+            raise CliError(
+                "judgments lack conditional support predictors: " + ", ".join(missing)
+            )
         support_frame = judgments.assign(judge_release_days=judgments["judge_release_day"])
         predictor_names.extend(["judge_theta", "judge_release_days"])
     predictor_names = list(dict.fromkeys(predictor_names))

@@ -67,6 +67,17 @@ def test_judgment_model_declares_pooled_judge_and_model_effects():
     assert trace["obs"]["value"].shape == (2,)
 
 
+def test_judgment_model_centers_two_item_effects():
+    data = tiny_data()._replace(item=jnp.array([0, 1]), num_items=2)
+
+    trace = handlers.trace(handlers.seed(judgment_model, 2)).get_trace(data, True)
+    effects = np.asarray(trace["item_effects"]["value"])
+
+    assert effects.shape == (2,)
+    assert effects.sum() == pytest.approx(0.0, abs=1e-6)
+    assert not np.allclose(effects, 0.0)
+
+
 def test_swapping_candidates_negates_content_but_keeps_position_term():
     posterior = {
         "judge_effects": np.array([[[0.3, 1.5]]]),

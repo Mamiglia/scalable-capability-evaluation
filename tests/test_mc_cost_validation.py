@@ -256,6 +256,21 @@ def test_support_index_uses_ckdtree_and_matches_public_query_contract():
     )
 
 
+def test_support_index_is_duplicate_invariant_for_interpolated_queries():
+    distinct = np.array([[0.0], [2.0], [4.0]])
+    duplicated = np.repeat(distinct, [20, 1, 1], axis=0)
+
+    expected = support_distance(distinct, np.array([[1.0]])).iloc[0]
+    actual = support_distance(duplicated, np.array([[1.0]])).iloc[0]
+
+    assert actual.distance == pytest.approx(expected.distance)
+    assert actual.threshold == pytest.approx(expected.threshold)
+    assert actual.threshold > 0
+    assert not actual.outside_support
+    with pytest.raises(ValueError, match="distinct"):
+        build_support_index(np.array([[1.0], [1.0]]))
+
+
 def test_ranking_recovery_labels_theta_and_runs_lomo_on_connected_component():
     votes = pd.DataFrame([
         {"fit": "gpqa", "major": a, "minor": b, "item_id": f"i{i}", "picked_major": 1}

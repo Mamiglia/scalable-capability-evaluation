@@ -340,14 +340,19 @@ def build_support_index(training: Any, threshold: float | None = None) -> Suppor
     training = np.asarray(training, dtype=float)
     if training.ndim != 2 or len(training) < 2 or not training.shape[1] or not np.isfinite(training).all():
         raise ValueError("support distance requires at least two finite training rows")
+    training = np.unique(training, axis=0)
+    if len(training) < 2:
+        raise ValueError("support distance requires at least two distinct training coordinates")
     mean, scale = training.mean(axis=0), training.std(axis=0)
     scale[scale == 0] = 1.0
     tree = cKDTree((training - mean) / scale)
     loo = np.asarray(tree.query(tree.data, k=2)[0])[:, 1]
     computed = float(np.quantile(loo, 0.95))
+    if not np.isfinite(computed) or computed <= 0:
+        raise ValueError("support threshold must be finite and positive")
     if threshold is not None:
         threshold = float(threshold)
-        if not np.isfinite(threshold) or threshold < 0 or not np.isclose(threshold, computed):
+        if not np.isfinite(threshold) or threshold <= 0 or not np.isclose(threshold, computed):
             raise ValueError("support threshold does not match the training matrix")
     return SupportIndex(mean, scale, tree, computed if threshold is None else threshold)
 

@@ -46,6 +46,12 @@ uv run python -m http.server 8000 -d interactive_viewer
 The dashboard is at `http://localhost:8000/mc_cost.html`. The browser only reads
 precomputed results; it does not fit or approximate the model.
 
+The explicit `simulate` command above saves a separate 100-item run using the
+configured two presentations. Dashboard export independently simulates its
+bounded configured grid, whose default joint scenario is J=3, M=8, N=4 with
+10 items and one presentation; it does not enlarge that default to match the
+separate saved run.
+
 ## Inputs and reruns
 
 - `configs/mc_cost/default.json` selects all source paths and holds fit,

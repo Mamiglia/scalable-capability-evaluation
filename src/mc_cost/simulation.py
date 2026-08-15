@@ -267,18 +267,20 @@ def dashboard_ranking_recovery(
         for part in fitted_components:
             strengths = part["strengths"]
             matched = sorted(set(strengths) & set(theta))
-            tau = (
-                float(kendalltau(
-                    [strengths[model] for model in matched],
-                    [theta[model] for model in matched],
-                ).statistic)
-                if len(matched) >= 2 else np.nan
-            )
+            if len(matched) < 2:
+                trial_reasons.add("fewer than 2 matched generating-theta models")
+                continue
+            fitted_ranks = [strengths[model] for model in matched]
+            reference_ranks = [theta[model] for model in matched]
+            if len(set(fitted_ranks)) < 2 or len(set(reference_ranks)) < 2:
+                trial_reasons.add("constant fitted or generating-theta ranks")
+                continue
+            tau = float(kendalltau(fitted_ranks, reference_ranks).statistic)
             if np.isfinite(tau):
                 weight = sum(float(values[1]) for values in part["pair_wins"].values())
                 trial_components.append((tau, weight))
             else:
-                trial_reasons.add("fewer than 2 matched generating-theta models")
+                trial_reasons.add("undefined Kendall tau for nonconstant ranks")
         valid = [(tau, weight) for tau, weight in trial_components if weight > 0]
         raw.append({
             "trial": int(trial),
