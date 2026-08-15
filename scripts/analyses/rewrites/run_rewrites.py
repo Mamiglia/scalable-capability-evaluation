@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from functools import partial
 import time
 from pathlib import Path
 
@@ -78,13 +79,15 @@ def call_haiku(prompt: str) -> tuple[str, int]:
     return proc.stdout, 0
 
 
-def call_codex(prompt: str) -> tuple[str, int]:
+def call_codex(prompt: str, reasoning_effort: str = "") -> tuple[str, int]:
     """-s read-only or it blocks on an approval; --ignore-user-config skips MCP servers."""
     with tempfile.NamedTemporaryFile("r", suffix=".txt", delete=False) as tmp:
         out_file = Path(tmp.name)
+    effort = ["-c", f'model_reasoning_effort="{reasoning_effort}"'] if reasoning_effort else []
     try:
         proc = subprocess.run(
-            ["codex", "exec", "-s", "read-only", "--ignore-user-config", "-o", str(out_file), prompt],
+            ["codex", "exec", "-s", "read-only", "--ignore-user-config", *effort,
+             "-o", str(out_file), prompt],
             capture_output=True, text=True, timeout=CLI_TIMEOUT_S, cwd=ROOT,
         )
         if proc.returncode != 0:
@@ -149,15 +152,23 @@ def main() -> None:
     ap.add_argument("--max-batch-words", type=int, default=MAX_BATCH_WORDS)
     ap.add_argument("--workers", type=int, default=N_WORKERS)
     ap.add_argument("--attempts", type=int, default=BATCH_ATTEMPTS)
+    ap.add_argument("--reasoning-effort", default="", help="codex only, e.g. low")
+    ap.add_argument("--out", help="write here instead of the default file for this rewriter")
+    ap.add_argument("--match", help="only rewrite the (model, item_id) keys present in this jsonl")
     args = ap.parse_args()
 
-    out_path = OUT_PATHS[args.rewriter]
+    out_path = Path(args.out) if args.out else OUT_PATHS[args.rewriter]
     out_path.parent.mkdir(parents=True, exist_ok=True)
     call = CALLERS[args.rewriter]
+    if args.reasoning_effort:
+        call = partial(call, reasoning_effort=args.reasoning_effort)
 
     originals = [json.loads(l) for l in ORIGINALS.read_text().splitlines() if l.strip()]
     done = done_keys(out_path)
     todo = [r for r in originals if (r["model"], r["item_id"]) not in done]
+    if args.match:
+        keep = done_keys(Path(args.match))
+        todo = [r for r in todo if (r["model"], r["item_id"]) in keep]
     if args.limit:
         todo = todo[: args.limit]
     batches = make_batches(todo, args.batch_size, args.max_batch_words)
