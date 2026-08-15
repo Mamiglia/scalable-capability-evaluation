@@ -231,7 +231,7 @@ def test_metrics_order_even_odd_hand_computed(capsys):
     assert out["acc"] == pytest.approx((df["pick"] == df["label"]).mean())
     assert out["pos_term"] == pytest.approx(2 * (df["pick"] == 1).mean() - 1)
     assert out["pick_weaker_acc"] == pytest.approx((df["pick"] == 3 - df["label"]).mean())
-    assert "1" in capsys.readouterr().out  # p3 excluded, count printed
+    assert "excluded 1 pair_uid" in capsys.readouterr().out  # p3 excluded, count printed
 
 
 class ToyCausalModel(nn.Module):
@@ -279,7 +279,10 @@ class ToyVerdictsTokenizer:
         return {"1": [11], "2": [22]}[text]
 
 
-def test_verdicts_under_runs_under_toggle_and_returns_expected_columns():
+def test_verdicts_under_calls_toggle_with_the_given_active_layers(monkeypatch):
+    """A no-op toggle would still leave columns/scaling looking right, so prove the scoping is
+    live by spying on adapter_ablate.toggle itself (delegating to the real one, so restore
+    behaviour is still exercised) rather than only checking post-call side effects."""
     peft_toy, _ = _toy_peft_model_with_base(n_layers=2)
     model = ToyCausalModel(peft_toy)
     tokenizer = ToyVerdictsTokenizer()
@@ -293,8 +296,17 @@ def test_verdicts_under_runs_under_toggle_and_returns_expected_columns():
     originals = {(m, name): v for mods in adapter_ablate.lora_layers(model).values()
                  for m in mods for name, v in m.scaling.items()}
 
+    real_toggle = adapter_ablate.toggle
+    calls = []
+
+    def spy_toggle(model_arg, active_layers):
+        calls.append(active_layers)
+        return real_toggle(model_arg, active_layers)
+    monkeypatch.setattr(adapter_ablate, "toggle", spy_toggle)
+
     out = adapter_ablate.verdicts_under(model, tokenizer, df, active_layers={0}, c=c)
 
+    assert calls == [{0}]  # toggle called exactly once, with the active_layers we passed
     assert set(out.columns) == {"pair_uid", "order", "l1", "l2", "gap", "pick", "label"}
     assert len(out) == 2
     assert (out["gap"] == out["l1"] - out["l2"]).all()
