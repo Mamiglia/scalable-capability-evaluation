@@ -77,9 +77,21 @@ def transcript_chars(d):
 
 
 def reasoning_ok(d, model, item):
-    """True if this transcript clears the floor; unknown transcripts are kept."""
-    chars = transcript_chars(d).get((model, item))
-    return chars is None or chars >= MIN_REASONING_CHARS
+    """True if this transcript clears the floor.
+
+    A model with transcripts exported but none for this item did not answer it
+    correctly, so the item is not part of a both-correct pair and does not count.
+    A model with no transcripts exported at all cannot be checked, so it is kept.
+    """
+    chars = transcript_chars(d)
+    if model not in _models_with_transcripts(d):
+        return True
+    return chars.get((model, item), 0) >= MIN_REASONING_CHARS
+
+
+@lru_cache(maxsize=None)
+def _models_with_transcripts(d):
+    return {model for model, _ in transcript_chars(d)}
 
 
 def models_without_reasoning(dirs, suffixes):
@@ -115,10 +127,16 @@ def refit_runs(d):
     The exported run stats are over every item, so per-transcript filtering has to
     re-tally them from the item-level verdicts. Keys are (judge, major, minor) with
     major and minor as the pair file names them, before any reorientation.
+
+    Self-pairs are left as exported: with one model on both sides there is no major
+    to pick, so some exports leave picked_major unset. They are drawn as gap-0
+    markers and enter no fit, so nothing measured depends on them.
     """
     stats = {}
     for pf in glob.glob(str(d / "pairs/*__full.json")):
         major, minor, _ = Path(pf).stem.split("__")
+        if major == minor:
+            continue
         tally = defaultdict(lambda: [0, 0, 0, 0])  # picked major, picked slot 1, parsed, items
         for item, judges in json.load(open(pf)).items():
             if not (reasoning_ok(d, major, item) and reasoning_ok(d, minor, item)):
@@ -159,7 +177,7 @@ def load():
             if excluded(r["major"]) or excluded(r["minor"]) or excluded(r["judge"]):
                 continue
             r = dict(r)
-            if REASONING_MODE == "per_transcript":
+            if REASONING_MODE == "per_transcript" and not r["is_self"]:
                 refit = refit_runs(d).get((r["judge"], r["major"], r["minor"]))
                 if refit is None:  # nothing left of this pair once the thin items go
                     continue
