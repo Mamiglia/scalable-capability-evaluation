@@ -5,7 +5,10 @@ Same conversion pattern as scripts/analyses/style_capability/answers_to_evals.py
 clone each covered item's original sample (question/choices/target unchanged),
 swap in the rewrite as a mockllm completion scored by choice(), drop items the
 model doesn't need. require_both_correct still works on the built store because
-the rewrite keeps the original answer letter.
+the rewrite keeps the original answer letter - checked at build time (see
+rewrite_answer_letter): a rewrite whose final answer line is missing or
+doesn't match the original's target is dropped, not silently kept, since the
+rewrite QC (word-ratio floor) does not check this.
 
 Parameterised by --rewriter, so a not-yet-landed set (e.g. gpt, currently only a
 10-row pilot) is one command away and simply refuses to run until its jsonl has
@@ -17,6 +20,7 @@ Usage:
 """
 import argparse
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -43,7 +47,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts/fine-tuning"))  # prep_pairs pair-construction helpers
 
 from configs.experiment import SYSTEM_PROMPT  # noqa: E402
-from judge.util import first_correct_by_id  # noqa: E402
+from judge.util import extract_score, first_correct_by_id  # noqa: E402
 
 # any manipulations config names the same fixed 50-pair x 15-item subset
 SUBSET_CONFIG = ROOT / "scripts/pairwise-newjudges/configs/manipulations/trunc_first_10.yaml"
@@ -57,7 +61,13 @@ STORE_ROOT = ROOT / "data/rewrites"
 MANIP_DIR = ROOT / "scripts/pairwise-newjudges/configs/manipulations"
 PARQUET_DIR = ROOT / "judge_results/rewrites"
 MODELS_CSV = ROOT / "judge_results/judge_ft/models_ft.csv"
-MAX_LENGTH = 65536
+
+# last literal "ANSWER: <letter>" anywhere in the text - same marker
+# strip_answer()/choice()'s own template rely on; case-sensitive, matching
+# every original transcript's actual convention (verified: 0 false positives
+# across all 1227 originals, which use assorted trailing markdown/punctuation
+# after the letter but always this literal marker before it).
+ANSWER_RE = re.compile(r"ANSWER:\s*([A-Za-z])")
 
 
 def subset_keys(cfg: dict) -> set[tuple[str, str]]:
@@ -83,27 +93,70 @@ def load_rewrites(path: Path) -> dict[tuple[str, str], str]:
     return {(r["model"], r["item_id"]): strip_role_prefix(r["rewritten"]) for r in rows}
 
 
-def build_model_store(model: str, items: list[str], rewrites: dict, out_dir: Path) -> int:
-    """Clone model's epoch-gpqa log: keep only `items`, swap in rewrites text."""
+def rewrite_answer_letter(text: str) -> str | None:
+    """Last 'ANSWER: <letter>' in the rewrite, or None if it has no such
+    marker at all (e.g. "Final Answer: B" - a different string, not this
+    one). Deliberately tolerant of what follows the letter (markdown,
+    trailing punctuation, code fences) since real transcripts use all of
+    these; only the marker+letter itself is required."""
+    matches = list(ANSWER_RE.finditer(text))
+    return matches[-1].group(1).upper() if matches else None
+
+
+def build_model_store(model: str, items: list[str], rewrites: dict,
+                       out_dir: Path) -> tuple[list[str], list[dict]]:
+    """Clone model's epoch-gpqa log: keep only `items` whose rewrite carries a
+    well-formed final answer matching the original's target, swap in that
+    text, drop the rest. Returns (built_items, bad) - bad lists every item
+    dropped for a missing/mismatched answer, never silently kept.
+
+    rewrite_answer_letter is a regex, not the judge pipeline's actual scorer,
+    so it can itself be fooled (e.g. a rewrite reading "Final Answer: ANSWER:
+    A" passes the letter check but trips choice()'s own parser into reading
+    the literal word "ANSWER" as the answer, scoring "I"). So after building,
+    the written log is read back and re-checked against extract_score - the
+    same both-correct signal the rest of the pipeline trusts - and anything
+    that still isn't "C" is dropped and the store rebuilt without it, rather
+    than shipped on the strength of the regex alone."""
     log = read_eval_log(str(SOURCE_DIR / f"{model}.eval"))
     correct = first_correct_by_id(log)
-    samples, outputs = [], []
+    bad, keep = [], []
     for item in sorted(items):
         group = correct.get(item)
         if not group:
             raise ValueError(f"no correct epoch for {model}/{item} in {SOURCE_DIR}")
         s = group[0]
-        samples.append(Sample(id=item, input=s.input, choices=list(s.choices), target=s.target))
-        outputs.append(ModelOutput.from_content("mockllm/model", rewrites[(model, item)]))
-    task = Task(dataset=MemoryDataset(samples), solver=multiple_choice(),
-                scorer=choice(), name="gpqa_diamond")
-    with tempfile.TemporaryDirectory() as tmp:
-        inspect_eval(task, model=get_model("mockllm/model", custom_outputs=outputs),
-                     log_dir=tmp, display="none")
-        [produced] = Path(tmp).glob("*.eval")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(produced), str(out_dir / f"{model}.eval"))
-    return len(samples)
+        got = rewrite_answer_letter(rewrites[(model, item)])
+        if got != s.target.upper():
+            bad.append(dict(model=model, item=item, target=s.target, got=got,
+                             reason="answer letter missing or mismatched"))
+            continue
+        keep.append(item)
+
+    while keep:
+        samples, outputs = [], []
+        for item in keep:
+            s = correct[item][0]
+            samples.append(Sample(id=item, input=s.input, choices=list(s.choices), target=s.target))
+            outputs.append(ModelOutput.from_content("mockllm/model", rewrites[(model, item)]))
+        task = Task(dataset=MemoryDataset(samples), solver=multiple_choice(),
+                    scorer=choice(), name="gpqa_diamond")
+        with tempfile.TemporaryDirectory() as tmp:
+            inspect_eval(task, model=get_model("mockllm/model", custom_outputs=outputs),
+                         log_dir=tmp, display="none")
+            [produced] = Path(tmp).glob("*.eval")
+            written = read_eval_log(str(produced))
+            failed = {s.id for s in written.samples if not extract_score(s)}
+            if not failed:
+                out_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(produced), str(out_dir / f"{model}.eval"))
+                break
+        for item in failed:
+            bad.append(dict(model=model, item=item, target=correct[item][0].target,
+                             got=rewrite_answer_letter(rewrites[(model, item)]),
+                             reason="letter matched but scored incorrect by the real scorer"))
+        keep = [i for i in keep if i not in failed]
+    return keep, bad
 
 
 def filtered_sample_ids(cfg: dict, covered: set) -> dict[str, list[str]]:
@@ -126,7 +179,7 @@ def write_config(cfg: dict, condition: str, models: list[str], sample_ids: dict)
         "comparisons": cfg["comparisons"],
         "sample_ids": sample_ids,
         "include_reasoning": False,
-        "max_length": MAX_LENGTH,
+        "max_length": cfg["max_length"],
         "system_prompt": SYSTEM_PROMPT,
     }
     path = MANIP_DIR / f"{condition}.yaml"
@@ -136,25 +189,39 @@ def write_config(cfg: dict, condition: str, models: list[str], sample_ids: dict)
 
 def write_pairs_parquet(cfg: dict, condition: str, models: list[str],
                          sample_ids: dict, store_dir: Path) -> tuple[Path, pd.DataFrame]:
+    """Both-correct guard here is load_model_log's own extract_score filter
+    (prep_pairs.py) - the same check src/judge/dataset.py's build_dataset
+    applies via eligible(). That filter only drops what inspect's own
+    scorer marked incorrect; it does not re-run rewrite_answer_letter, so a
+    rewrite that fools the fuzzy choice() scorer (as build_model_store's
+    check exists to catch before this point) would still pass it. Any
+    (model, item) load_model_log drops is skipped here rather than raising
+    a bare KeyError, and the count is reported - never a silent drop."""
     from prep_pairs import check_counterbalance, load_model_log, make_pair_rows
 
     caps = pd.read_csv(MODELS_CSV).set_index("model").logit
     cache_dir = STORE_ROOT / f"cache_{condition}"
     meta = {}
     for m in models:
-        df = load_model_log(str(store_dir / f"{m}.eval"), cache_dir, MAX_LENGTH)
+        df = load_model_log(str(store_dir / f"{m}.eval"), cache_dir, cfg["max_length"])
         for r in df.itertuples():
             meta[(m, r.item)] = dict(text=r.text, options=r.options, question=r.question)
 
-    rows = []
+    rows, skipped = [], []
     for major, minor in cfg["comparisons"]:
         for item in sample_ids[f"{major}-vs-{minor}"]:
+            if (major, item) not in meta or (minor, item) not in meta:
+                skipped.append((major, minor, item))
+                continue
             a = dict(model=major, cap=float(caps[major]), **meta[(major, item)])
             b = dict(model=minor, cap=float(caps[minor]), **meta[(minor, item)])
             rows.extend(make_pair_rows(item, a, b, question=meta[(major, item)]["question"]))
+    if skipped:
+        print(f"  {len(skipped)} pair-item(s) skipped from the parquet - not both-correct "
+              f"in the built store (e.g. {skipped[:3]})")
 
     pairs = pd.DataFrame(rows)
-    pairs["split"] = condition  # no train/eval split here; tags rows by condition, like pairs_self/selfpref
+    pairs["split"] = condition  # required by the reference schema; value unverified, no consumer yet
     check_counterbalance(pairs)
     out_path = PARQUET_DIR / f"pairs_gpqa_{condition}.parquet"
     pairs.to_parquet(out_path)
@@ -174,6 +241,13 @@ def _self_check() -> None:
     assert sids["b-vs-c"] == ["i3"], sids  # i2 dropped on both pairs
 
     assert strip_role_prefix("[Assistant]: x") == "x"  # normalise_prefix reused, not duplicated
+
+    assert rewrite_answer_letter("reasoning...\n\nANSWER: B") == "B"
+    assert rewrite_answer_letter("reasoning...\n\nANSWER: C\n```") == "C"  # code-fenced, still fine
+    assert rewrite_answer_letter("reasoning...\n\n**ANSWER: D**") == "D"  # bold, still fine
+    assert rewrite_answer_letter("reasoning...\n\nFinal Answer: B") is None  # no literal "ANSWER:"
+    assert rewrite_answer_letter("no answer line at all") is None
+
     print("self-check OK")
 
 
@@ -214,13 +288,22 @@ def main() -> int:
 
     out_dir = STORE_ROOT / condition
     n_built = 0
+    all_bad = []
     for model, items in sorted(by_model.items()):
-        n = build_model_store(model, items, rewrites, out_dir)
-        n_built += n
-        print(f"  {model}: {n} items -> {out_dir / f'{model}.eval'}")
+        built, bad = build_model_store(model, items, rewrites, out_dir)
+        n_built += len(built)
+        all_bad.extend(bad)
+        print(f"  {model}: {len(built)} items -> {out_dir / f'{model}.eval'}")
+
+    if all_bad:
+        print(f"\n{len(all_bad)} cell(s) dropped: the rewrite's final answer didn't hold up "
+              f"(the word-ratio QC does not check this):")
+        for c in all_bad:
+            print(f"  {c['model']}/{c['item']}: target={c['target']} got={c['got']} ({c['reason']})")
+        covered -= {(c["model"], c["item"]) for c in all_bad}
     assert n_built == len(covered), f"built {n_built} sample-slots, expected {len(covered)}"
 
-    models = sorted(by_model)
+    models = sorted({m for m, _ in covered})
     sids = filtered_sample_ids(cfg, covered)
     cfg_path = write_config(cfg, condition, models, sids)
     print(f"wrote {cfg_path}")
