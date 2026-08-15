@@ -7,6 +7,7 @@ from numpyro import handlers
 from mc_cost.model import (
     CORE_FEATURES,
     GLOBAL_FEATURES,
+    JUDGMENT_SPECS,
     JudgmentData,
     JudgmentSpec,
     PosteriorArtifact,
@@ -27,6 +28,26 @@ TRAINING_SCALES = {
         "same_family_x_theta_gap", "reasoning_difference",
     )
 }
+
+
+def test_judgment_spec_declares_exact_sanctioned_feature_order():
+    assert {
+        name: (spec.global_features, spec.include_length)
+        for name, spec in JUDGMENT_SPECS.items()
+    } == {
+        "baseline": ((), False),
+        "core": ((
+            "oversight_sd", "difficulty_sd", "theta_gap_x_oversight_sd",
+            "theta_gap_x_difficulty_sd", "same_family_x_theta_gap_sd",
+            "self_comparison", "reasoning_difference_sd",
+        ), True),
+        "core_release": ((
+            "oversight_sd", "difficulty_sd", "theta_gap_x_oversight_sd",
+            "theta_gap_x_difficulty_sd", "same_family_x_theta_gap_sd",
+            "self_comparison", "reasoning_difference_sd", "release_gap_days_sd",
+            "relative_release_days_sd",
+        ), True),
+    }
 
 
 def tiny_data():

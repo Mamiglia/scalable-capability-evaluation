@@ -135,16 +135,28 @@ def _judgment_fold(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     train, test = frame.loc[train_mask].copy(), frame.loc[~train_mask].copy()
     probabilities = _probabilities(
-        fit_predict(train, test, spec, population == "conditional"), len(test),
+        fit_predict(
+            train, test.drop(columns="chosen_left"), spec, population == "conditional",
+        ),
+        len(test),
     )
     observed = _binary(test, "chosen_left")
     clipped = np.clip(probabilities, 1e-12, 1 - 1e-12)
     fold = f"{validation}:{held_out}"
-    predictions = [{
-        "spec": spec_name, "validation": validation, "population": population,
-        "fold": fold, "held_out": held_out, "source_row": source_row,
-        "observed": int(actual), "probability": float(probability),
-    } for source_row, actual, probability in zip(test.index, observed, probabilities)]
+    predictions = []
+    for (source_row, held_row), actual, probability in zip(
+        test.iterrows(), observed, probabilities,
+    ):
+        context = {
+            column: held_row[column]
+            for column in ("length_difference", "difficulty", "correct", "visible_reasoning")
+            if column in test
+        }
+        predictions.append({
+            "spec": spec_name, "validation": validation, "population": population,
+            "fold": fold, "held_out": held_out, "source_row": source_row,
+            "observed": int(actual), "probability": float(probability), **context,
+        })
     metrics = {
         "spec": spec_name, "validation": validation, "population": population,
         "fold": fold, "held_out": held_out, "n_rows": len(test),
@@ -242,7 +254,10 @@ def validate_tokens(
             & rows["reasoning_class"].eq(reasoning_class)
         )
         train, test = rows.loc[~held_mask].copy(), rows.loc[held_mask].copy()
-        predicted = _prediction_frame(fit_predict(train, test, role), test, _TOKEN_OUTCOMES[role])
+        predictors = test.drop(columns=list(_TOKEN_OUTCOMES[role]))
+        predicted = _prediction_frame(
+            fit_predict(train, predictors, role), predictors, _TOKEN_OUTCOMES[role],
+        )
         for position, (source_row, record) in enumerate(test.iterrows()):
             context = {
                 "role": role, "reasoning_class": reasoning_class, "model": model,
@@ -430,6 +445,26 @@ def ranking_recovery(
                 ),
                 "lomo_reason": lomo_reason,
             })
+        graph_models = {model for pair in pair_wins for model in pair}
+        for model in sorted(set(ref.index) - graph_models):
+            component_id = f"{fit_name}:isolated:{model}"
+            reason = "reference model has no comparison edge"
+            results.append({
+                "fit": fit_name, "component": component_id,
+                "component_models": model, "matched_models": "",
+                "n_models": 1, "n_matched_models": 0, "n_votes": 0,
+                "kendall_tau": np.nan, "recovery_type": recovery_type,
+                "reference": (
+                    "fitted_posterior" if generating_theta is not None else "observed_full_data"
+                ),
+                "valid": False, "reason": reason, "lomo_mae": np.nan,
+                "lomo_reason": reason,
+            })
+            warning_rows.append({
+                "code": "isolated_reference_model", "fit": fit_name,
+                "components": component_id,
+                "message": f"reference model {model} has no comparison edge",
+            })
     result_columns = [
         "fit", "component", "component_models", "matched_models", "n_models",
         "n_matched_models", "n_votes", "kendall_tau", "recovery_type", "reference",
@@ -538,7 +573,8 @@ def require_decision(path: str | Path, data_hashes: Mapping[str, str]) -> dict[s
 
 _REPLAY_COLUMNS = [
     "check", "slice", "observed_choice_rate", "predicted_mean", "p5", "p50", "p95",
-    "n_observations", "n_draws", "valid", "passed", "reason", "reference",
+    "calibration_error", "n_observations", "n_draws", "valid", "passed", "reason",
+    "reference",
 ]
 
 
@@ -546,7 +582,8 @@ def _failed_replay(check: str, reason: str) -> dict[str, Any]:
     return {
         "check": check, "slice": "", "observed_choice_rate": np.nan,
         "predicted_mean": np.nan, "p5": np.nan, "p50": np.nan, "p95": np.nan,
-        "n_observations": 0, "n_draws": 0, "valid": False, "passed": False,
+        "calibration_error": np.nan, "n_observations": 0, "n_draws": 0,
+        "valid": False, "passed": False,
         "reason": reason, "reference": "fitted_posterior",
     }
 
@@ -566,9 +603,31 @@ def _replay_groups(frame: pd.DataFrame, check: str, grouping: Sequence[str]) -> 
             "slice": "|".join(f"{name}={value}" for name, value in zip(grouping, values)) or "all",
             "observed_choice_rate": observed_rate, "predicted_mean": float(by_draw.mean()),
             "p5": float(lower), "p50": float(median), "p95": float(upper),
-            "n_observations": len(observed), "n_draws": len(by_draw),
+            "calibration_error": np.nan, "n_observations": len(observed), "n_draws": len(by_draw),
             "valid": True, "passed": passed,
             "reason": "" if passed else "observed rate outside 90% replay interval",
+            "reference": "fitted_posterior",
+        })
+    return rows
+
+
+def _calibration_groups(
+    frame: pd.DataFrame, check: str, grouping: Sequence[str],
+) -> list[dict[str, Any]]:
+    rows = []
+    unique = frame.drop_duplicates("row_id")
+    for values, group in unique.groupby(list(grouping), sort=True, dropna=False):
+        values = values if isinstance(values, tuple) else (values,)
+        observed = float(group["observed_choice"].mean())
+        predicted = float(group["probability"].mean())
+        rows.append({
+            "check": check,
+            "slice": "|".join(f"{name}={value}" for name, value in zip(grouping, values)),
+            "observed_choice_rate": observed, "predicted_mean": predicted,
+            "p5": np.nan, "p50": np.nan, "p95": np.nan,
+            "calibration_error": observed - predicted,
+            "n_observations": len(group), "n_draws": 0,
+            "valid": True, "passed": True, "reason": "",
             "reference": "fitted_posterior",
         })
     return rows
@@ -588,6 +647,11 @@ def posterior_predictive_replay(frame: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("replay rows must be unique by row_id and draw")
     if rows.groupby("row_id")["observed_choice"].nunique().gt(1).any():
         raise ValueError("observed_choice must be constant within row_id")
+    if "probability" in rows:
+        probability = pd.to_numeric(rows["probability"], errors="raise")
+        if not probability.between(0, 1).all() or rows.groupby("row_id")["probability"].nunique().gt(1).any():
+            raise ValueError("probability must be one finite value in [0, 1] per row_id")
+        rows["probability"] = probability
     output = _replay_groups(rows, "aggregate_choice_rate", ())
 
     def add_raw(check: str, column: str) -> None:
@@ -632,6 +696,9 @@ def posterior_predictive_replay(frame: pd.DataFrame) -> pd.DataFrame:
         if column not in rows:
             output.append(_failed_replay(check, f"missing column: {column}"))
             continue
+        if "probability" not in rows:
+            output.append(_failed_replay(check, "missing column: probability"))
+            continue
         group_column = column
         if binned:
             unique = rows.drop_duplicates("row_id").set_index("row_id")
@@ -641,7 +708,7 @@ def posterior_predictive_replay(frame: pd.DataFrame) -> pd.DataFrame:
                 continue
             group_column = f"_{check}"
             rows[group_column] = rows["row_id"].map(bands)
-        output.extend(_replay_groups(rows, check, (length_key, group_column)))
+        output.extend(_calibration_groups(rows, check, (length_key, group_column)))
     return pd.DataFrame(output, columns=_REPLAY_COLUMNS)
 
 
@@ -684,6 +751,8 @@ def compare_downsamples(
                 required = {"interval_width", "ranking_recovery"}
                 if missing := required - set(values):
                     raise ValueError(f"downsample results lack columns: {', '.join(sorted(missing))}")
+                if values.empty:
+                    raise ValueError("downsample callback returned no rows")
                 for position, row in values.reset_index(drop=True).iterrows():
                     replicate = row.get("replicate", position)
                     for metric in ("interval_width", "ranking_recovery"):

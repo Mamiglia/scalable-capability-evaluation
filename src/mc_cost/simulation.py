@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -13,6 +14,7 @@ from scipy.special import expit
 from mc_cost.data import RELEASE_EPOCH
 from mc_cost.model import FEATURE_COLUMNS, JudgmentData, PosteriorArtifact, left_logits
 from mc_cost.tokens import draw_token_usage, draw_transcript_lengths
+from mc_cost.validation import require_decision
 
 
 TRIAL_METRICS = (
@@ -726,9 +728,10 @@ def simulate(
     judgment_artifact: PosteriorArtifact | Mapping[str, Any],
     candidate_token_artifact: PosteriorArtifact | Mapping[str, Any],
     judge_token_artifact: PosteriorArtifact | Mapping[str, Any], catalogue: pd.DataFrame,
-    seed: int = 0,
+    decision_path: str | Path, data_hashes: Mapping[str, str], seed: int = 0,
 ) -> SimulationResult:
     """Run fixed-budget posterior-predictive trials with shared latent effects."""
+    require_decision(decision_path, data_hashes)
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ValueError("seed must be an integer")
     items = [_canonical_item(item) for item in item_ids]

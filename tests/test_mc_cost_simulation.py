@@ -1,4 +1,6 @@
 import copy
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -11,9 +13,22 @@ from mc_cost.simulation import (
     TRIAL_METRICS,
     cost_rows,
     counterbalance,
-    simulate,
     summarize_trials,
 )
+from mc_cost.simulation import simulate as core_simulate
+from mc_cost.validation import write_decision
+
+
+DATA_HASHES = {"judgments": "abc", "candidate_tokens": "def", "judge_tokens": "ghi"}
+_DECISION_DIRECTORY = tempfile.TemporaryDirectory()
+DECISION_PATH = Path(_DECISION_DIRECTORY.name) / "decision.json"
+write_decision(DECISION_PATH, {"data_hashes": DATA_HASHES})
+
+
+def simulate(*args, **kwargs):
+    kwargs.setdefault("decision_path", DECISION_PATH)
+    kwargs.setdefault("data_hashes", DATA_HASHES)
+    return core_simulate(*args, **kwargs)
 
 
 def catalogue():
@@ -122,6 +137,48 @@ def observed_cells():
         {"model": "a", "item": "i2", "correct": 1, "response_chars": 12,
          "visible_reasoning": 0},
     ])
+
+
+def core_simulation_call(comparisons, **decision):
+    return core_simulate(
+        comparisons,
+        SimulationConfig(trials=1, attempted_items=1, presentations=1, mode="manual"),
+        item_ids=["i1"], observed_cells=observed_cells(),
+        capability_models=["j", "a", "b"], capability_draws=np.array([[0.0, 1.0, 0.0]]),
+        irt=irt(), judgment_artifact=judgment_artifact(),
+        candidate_token_artifact=candidate_artifact(), judge_token_artifact=judge_token_artifact(),
+        catalogue=catalogue(), seed=1, **decision,
+    )
+
+
+def test_simulation_refuses_absent_decision_before_any_work(tmp_path):
+    called = False
+
+    def comparisons(_rng):
+        nonlocal called
+        called = True
+        return pd.DataFrame()
+
+    with pytest.raises(FileNotFoundError, match="decision.json"):
+        core_simulation_call(
+            comparisons, decision_path=tmp_path / "decision.json", data_hashes=DATA_HASHES,
+        )
+    assert not called
+
+
+def test_simulation_refuses_stale_decision_before_any_work(tmp_path):
+    decision = tmp_path / "decision.json"
+    write_decision(decision, {"data_hashes": {**DATA_HASHES, "judgments": "stale"}})
+    called = False
+
+    def comparisons(_rng):
+        nonlocal called
+        called = True
+        return pd.DataFrame()
+
+    with pytest.raises(ValueError, match="data hash mismatch"):
+        core_simulation_call(comparisons, decision_path=decision, data_hashes=DATA_HASHES)
+    assert not called
 
 
 def run_simulation(*, trials=1, reuse_responses=False, comparisons=None, artifact=None, seed=4):

@@ -1,6 +1,10 @@
 import numpy as np
 import pandas as pd
 import pytest
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 from mc_cost.model import JUDGMENT_SPECS
 from mc_cost.validation import (
@@ -16,6 +20,25 @@ from mc_cost.validation import (
     validate_tokens,
     write_decision,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_lomo_helper_imports_without_untracked_scores_module(tmp_path):
+    isolated = tmp_path / "irt_proxy"
+    isolated.mkdir()
+    shutil.copy2(ROOT / "scripts" / "irt_proxy" / "metrics.py", isolated / "metrics.py")
+
+    imported = subprocess.run(
+        [sys.executable, "-c", "from metrics import lomo_predictions"],
+        cwd=tmp_path,
+        env={"PYTHONPATH": str(isolated)},
+        capture_output=True,
+        text=True,
+    )
+
+    assert imported.returncode == 0, imported.stderr
 
 
 def test_judge_covariates_require_improvement_beyond_one_se():
@@ -40,10 +63,14 @@ def test_ranking_recovery_returns_component_results_and_warning():
         {"fit": "gpqa", "major": "a", "minor": "b", "item_id": "i1", "picked_major": 1},
         {"fit": "gpqa", "major": "c", "minor": "d", "item_id": "i1", "picked_major": 1},
     ])
-    reference = pd.DataFrame({"model": ["a", "b", "c", "d"], "score": [4, 3, 2, 1]})
+    reference = pd.DataFrame({"model": ["a", "b", "c", "d", "e"], "score": [4, 3, 2, 1, 0]})
     results, warnings = ranking_recovery(votes, reference)
-    assert results["component"].nunique() == 2
+    assert results.loc[results["n_votes"].gt(0), "component"].nunique() == 2
+    isolated = results[results["component_models"].eq("e")].iloc[0]
+    assert not isolated["valid"]
+    assert isolated["reason"] == "reference model has no comparison edge"
     assert "disconnected_graph" in set(warnings["code"])
+    assert "isolated_reference_model" in set(warnings["code"])
 
 
 def test_judgment_spec_uses_paired_one_se_and_simplest_order():
@@ -84,10 +111,16 @@ def test_cross_validation_holds_out_judges_and_candidate_configurations():
         {"judge": "j1", "left_model": "c", "right_model": "a", "chosen_left": 0},
         {"judge": "j2", "left_model": "b", "right_model": "c", "chosen_left": 1},
         {"judge": "j2", "left_model": "a", "right_model": "c", "chosen_left": 1},
-    ])
+    ]).assign(
+        length_difference=[-2.0, -1.0, 1.0, 2.0],
+        difficulty=[-1.0, 0.0, 1.0, 2.0],
+        correct=[0, 1, 0, 1],
+        visible_reasoning=[0, 0, 1, 1],
+    )
     calls = []
 
     def fit_predict(train, test, spec, conditional_judges):
+        assert "chosen_left" not in test
         calls.append((train.copy(), test.copy(), spec, conditional_judges))
         return np.full(len(test), 0.75 if conditional_judges else 0.5)
 
@@ -103,6 +136,7 @@ def test_cross_validation_holds_out_judges_and_candidate_configurations():
     }
     assert choose_judgment_spec(folds)["selected"] in JUDGMENT_SPECS
     assert predictions["probability"].between(0, 1).all()
+    assert {"length_difference", "difficulty", "correct", "visible_reasoning"} <= set(predictions)
     for train, test, _spec, _conditional in calls:
         if test["judge"].nunique() == 1 and test["judge"].iloc[0] not in set(train["judge"]):
             continue
@@ -128,14 +162,21 @@ def test_token_validation_holds_exact_configuration_and_reports_length_strata():
         ])
     ])
     held = []
+    expected_targets = {
+        "r1": {"input_tokens": 10, "output_tokens": 20, "reasoning_tokens": 5, "response_chars": 100},
+        "r2": {"input_tokens": 11, "output_tokens": 21, "reasoning_tokens": 6, "response_chars": 110},
+        "n1": {"input_tokens": 12, "output_tokens": 22, "reasoning_tokens": 0, "response_chars": 120},
+        "n2": {"input_tokens": 13, "output_tokens": 23, "reasoning_tokens": 0, "response_chars": 130},
+    }
 
     def fit_predict(train, test, role):
+        assert not set(expected_targets["r1"]) & set(test)
         key = tuple(test[["model", "role", "reasoning_class"]].iloc[0])
         held.append(key)
         assert not train[["model", "role", "reasoning_class"]].eq(key).all(axis=1).any()
         result = {}
         for outcome in ("input_tokens", "output_tokens", "reasoning_tokens", "response_chars"):
-            actual = np.log1p(test[outcome].to_numpy(float))
+            actual = np.log1p([expected_targets[model][outcome] for model in test["model"]])
             result[f"{outcome}_mean"] = actual + 0.1
             result[f"{outcome}_p5"] = actual - 0.2
             result[f"{outcome}_p95"] = actual + 0.2
@@ -216,6 +257,7 @@ def test_decision_writer_is_deterministic_and_hash_bound(tmp_path):
 def _replay_frame():
     observations = pd.DataFrame({
         "row_id": range(4), "observed_choice": [0, 1, 0, 1],
+        "probability": [0.1, 0.9, 0.2, 0.8],
         "judge": ["j1", "j1", "j2", "j2"], "m1_is_left": [0, 1, 0, 1],
         "theta_gap": [-2.0, -1.0, 1.0, 2.0], "oversight": [-1.0, 0.0, 1.0, 2.0],
         "difficulty": [-1.0, 0.0, 1.0, 2.0], "release_gap_days": [-10, -5, 5, 10],
@@ -238,6 +280,12 @@ def test_posterior_replay_keeps_all_declared_slices_and_failed_reasons():
         "length_by_visible_reasoning",
     } <= set(replay["check"])
     assert replay["reference"].eq("fitted_posterior").all()
+    length_calibration = replay[replay["check"].str.startswith("length_by_")]
+    assert set(length_calibration["predicted_mean"].round(1)) == {0.1, 0.2, 0.8, 0.9}
+    assert np.allclose(
+        length_calibration["calibration_error"],
+        length_calibration["observed_choice_rate"] - length_calibration["predicted_mean"],
+    )
     failed_input = _replay_frame().drop(columns="oversight")
     failed = posterior_predictive_replay(failed_input)
     row = failed[failed["check"].eq("oversight")].iloc[0]
@@ -272,3 +320,28 @@ def test_configured_grid_compares_empirical_and_posterior_deterministically():
     assert set(first["reference"]) == {"observed_full_data", "fitted_posterior"}
     assert set(first["metric"]) == {"interval_width", "ranking_recovery"}
     assert len(first) == 2 * 1 * 1 * 2 * 2 * 2 * 2
+
+
+def test_empty_downsample_result_retains_both_references_and_metrics():
+    grid = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [10],
+    }
+
+    def empty(_cell, _rng):
+        return pd.DataFrame(columns=["interval_width", "ranking_recovery"])
+
+    def posterior(_cell, _rng):
+        return pd.DataFrame({"interval_width": [0.2], "ranking_recovery": [0.8]})
+
+    got = compare_downsamples(grid, empty, posterior)
+
+    assert set(zip(got["reference"], got["metric"])) == {
+        ("observed_full_data", "interval_width"),
+        ("observed_full_data", "ranking_recovery"),
+        ("fitted_posterior", "interval_width"),
+        ("fitted_posterior", "ranking_recovery"),
+    }
+    failed = got[got["reference"].eq("observed_full_data")]
+    assert not failed["valid"].any()
+    assert set(failed["reason"]) == {"downsample callback returned no rows"}

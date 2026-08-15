@@ -20,9 +20,10 @@ from mc_cost.data import RELEASE_EPOCH
 
 
 GLOBAL_FEATURES = (
-    "oversight_sd", "release_gap_days_sd", "relative_release_days_sd",
-    "difficulty_sd", "theta_gap_x_oversight_sd", "theta_gap_x_difficulty_sd",
-    "same_family_x_theta_gap_sd", "self_comparison", "reasoning_difference_sd",
+    "oversight_sd", "difficulty_sd", "theta_gap_x_oversight_sd",
+    "theta_gap_x_difficulty_sd", "same_family_x_theta_gap_sd",
+    "self_comparison", "reasoning_difference_sd", "release_gap_days_sd",
+    "relative_release_days_sd",
 )
 BASELINE_FEATURES = ()
 CORE_FEATURES = tuple(
