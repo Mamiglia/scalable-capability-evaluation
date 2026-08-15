@@ -19,6 +19,8 @@ from prepare_gpqa import model_family, standardise
 
 LEFT_POSITION = 1
 STANDARDISED = ("length_difference", "capability_difference")
+# Columns of the style-rates file that are not lexicon categories.
+STYLE_KEYS = ("model", "item", "n_chars")
 # Defaults are resolved against the repo root: a stale pre-length-fix copy of
 # verdicts.csv sits under another script's directory, and a CWD-relative default
 # would silently read it.
@@ -26,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VERDICTS = ROOT / "judge_results" / "judging_variations" / "verdicts.csv"
 CAPABILITY_CONFIG = ROOT / "scripts" / "analyses" / "judge-elo" / "configs" / "gpqa.yaml"
 CONDITION_CONFIGS = ROOT / "analyses" / "judge-variation" / "configs"
+STYLE_RATES = ROOT / "analysis" / "hibayes" / "style_rates.csv"
 
 
 def load_capabilities(config_path: Path, field: str) -> dict[str, float]:
@@ -61,12 +64,47 @@ def check_conditions(bench: str, conditions: Sequence[str], config_dir: Path) ->
             )
 
 
+def add_style_differences(frame: pd.DataFrame, style_rates: pd.DataFrame) -> list[str]:
+    """Attach left-minus-right style-rate columns; return the difference names.
+
+    n_chars is checked against the lengths the judge saw, so a rates file built
+    from a different epoch or a text-only/reasoning mix cannot pass silently.
+    """
+    categories = [column for column in style_rates.columns if column not in STYLE_KEYS]
+    if not categories:
+        raise ValueError(f"Style rates have no category columns, only {list(style_rates.columns)}")
+    rates = style_rates.set_index(["model", "item"])
+
+    for side in ("left", "right"):
+        keys = pd.MultiIndex.from_arrays([frame[f"{side}_model"], frame["item"]])
+        missing = keys[~keys.isin(rates.index)].unique()
+        if len(missing):
+            raise ValueError(f"No style rates for {len(missing)} {side} transcripts, e.g. {missing[:3].tolist()}")
+        matched = rates.reindex(keys)
+        mismatched = (matched["n_chars"].to_numpy() != frame[f"{side}_chars"].to_numpy()).sum()
+        if mismatched:
+            raise ValueError(
+                f"{mismatched} {side} transcripts differ in length from the ones the judge saw; "
+                "the style rates were measured on different text"
+            )
+        for category in categories:
+            frame[f"{side}_{category}"] = matched[category].to_numpy()
+
+    differences = []
+    for category in categories:
+        name = f"{category}_difference"
+        frame[name] = frame[f"left_{category}"] - frame[f"right_{category}"]
+        differences.append(name)
+    return differences
+
+
 def build(
     verdicts: pd.DataFrame,
     capabilities: dict[str, float],
     bench: str,
     conditions: Sequence[str],
     condition_configs: Path = CONDITION_CONFIGS,
+    style_rates: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     """Verdict rows -> one model row per parsed verdict, with the GLM columns."""
     check_conditions(bench, conditions, condition_configs)
@@ -127,10 +165,13 @@ def build(
             "self_comparison": (left_model == right_model).astype(int),
         }
     )
-    standardise(frame, STANDARDISED)
+    columns = list(STANDARDISED)
+    if style_rates is not None:
+        columns += add_style_differences(frame, style_rates)
+    standardise(frame, columns)
     # The shared standardise() guards a zero scale but not a NaN one, which is what a
     # single-row or all-missing frame gives; NaN predictors would fit silently.
-    scaled = [f"{column}_sd" for column in STANDARDISED]
+    scaled = [f"{column}_sd" for column in columns]
     if not np.isfinite(frame[scaled].to_numpy()).all():
         raise ValueError(f"Standardised columns are not finite: {scaled}")
     counts["model_rows"] = len(frame)
@@ -146,6 +187,8 @@ def main() -> None:
     parser.add_argument("--condition-configs", type=Path, default=CONDITION_CONFIGS)
     parser.add_argument("--bench", default="gpqa")
     parser.add_argument("--conditions", nargs="+", default=["a_baseline"])
+    parser.add_argument("--style-rates", type=Path, default=STYLE_RATES,
+                        help="Per-transcript style rates from style_rates.py")
     parser.add_argument("--out", type=Path, default=ROOT / "analysis" / "hibayes" / "gpqa_glm.csv")
     args = parser.parse_args()
     print(f"Reading {args.verdicts}")
@@ -156,6 +199,7 @@ def main() -> None:
         args.bench,
         args.conditions,
         args.condition_configs,
+        pd.read_csv(args.style_rates),
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.out, index=False)

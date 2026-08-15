@@ -8,8 +8,12 @@ set -euo pipefail
 #     "hibayes @ git+https://github.com/UKGovernmentBEIS/hibayes"
 HIBAYES_VENV=analysis/hibayes/.venv
 
+# Output directory, so a new fit does not overwrite one being compared against.
+OUT=${1:-analysis/hibayes/run}
+
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$PWD/analysis/hibayes/.cache}"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-$XDG_CACHE_HOME/matplotlib}"
 
+.venv/bin/python scripts/hibayes/style_rates.py
 .venv/bin/python scripts/hibayes/prepare_from_verdicts.py
-"$HIBAYES_VENV/bin/hibayes-full" --config scripts/hibayes/config.yaml --out analysis/hibayes/run --no-tui
+"$HIBAYES_VENV/bin/hibayes-full" --config scripts/hibayes/config.yaml --out "$OUT" --no-tui

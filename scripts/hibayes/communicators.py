@@ -19,6 +19,12 @@ PLOT_LABELS = {
     "length_difference_sd": "Length difference (1 SD)",
     "position_bias_left": "Left-position bias",
     "same_model_family": "Same model family",
+    "personal_pronouns_difference_sd": "Personal pronouns (1 SD)",
+    "hedging_difference_sd": "Hedging (1 SD)",
+    "backtracking_difference_sd": "Backtracking (1 SD)",
+    "uncertainty_difference_sd": "Uncertainty (1 SD)",
+    "confidence_difference_sd": "Confidence (1 SD)",
+    "questions_difference_sd": "Questions (1 SD)",
 }
 
 
