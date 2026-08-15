@@ -213,8 +213,9 @@ def test_toggle_restores_scaling_even_if_block_raises():
     assert all(m.scaling[name] == v for (m, name), v in originals.items())  # restored
 
 
-def test_metrics_order_even_odd_hand_computed(capsys):
-    """Two pair_uids with both orders, plus a third with only order 0 (excluded, printed)."""
+def test_metrics_order_even_and_content_gap_hand_computed(capsys):
+    """Two pair_uids with both orders, plus a third with only order 0 (excluded from every
+    metric under M2, count printed)."""
     rows = [
         dict(pair_uid="p1", order=0, l1=3.0, l2=1.0, pick=1, label=1),
         dict(pair_uid="p1", order=1, l1=1.0, l2=4.0, pick=2, label=1),
@@ -227,13 +228,46 @@ def test_metrics_order_even_odd_hand_computed(capsys):
 
     out = adapter_ablate.metrics(df)
 
-    # hand-computed: p1 gaps (2.0, -3.0), p2 gaps (-2.0, 1.0); p3 excluded (no order 1)
+    # hand-computed on the both-orders subset (p1, p2 only; p3 excluded throughout)
+    both = df[df["pair_uid"] != "p3"]
+    # p1 gaps (2.0, -3.0), p2 gaps (-2.0, 1.0)
     assert out["order_even"] == pytest.approx(((2.0 + -3.0) / 2 + (-2.0 + 1.0) / 2) / 2)
-    assert out["order_odd"] == pytest.approx(((2.0 - -3.0) / 2 + (-2.0 - 1.0) / 2) / 2)
-    assert out["acc"] == pytest.approx((df["pick"] == df["label"]).mean())
-    assert out["pos_term"] == pytest.approx(2 * (df["pick"] == 1).mean() - 1)
-    assert out["pick_weaker_acc"] == pytest.approx((df["pick"] == 3 - df["label"]).mean())
+    # sgap = gap * (+1 if label==1 else -1): p1 (2.0, -3.0), p2 (2.0, -1.0)
+    assert out["content_gap"] == pytest.approx(((2.0 + -3.0) / 2 + (2.0 + -1.0) / 2) / 2)
+    assert out["acc"] == pytest.approx((both["pick"] == both["label"]).mean())
+    assert out["pos_term"] == pytest.approx(2 * (both["pick"] == 1).mean() - 1)
+    assert out["pick_weaker_acc"] == pytest.approx((both["pick"] == 3 - both["label"]).mean())
     assert "excluded 1 pair_uid" in capsys.readouterr().out  # p3 excluded, count printed
+
+
+def test_metrics_content_gap_oriented_by_capability_not_slot():
+    """I1: content_gap must track the capability `label`, not a fixed slot sign. Same two-pair,
+    both-orders structure in both cases; only which model wins (capable vs slot-1) differs."""
+    # (a) judge always prefers the CAPABLE model: gap sign follows label in both orders, so it
+    # flips sign between order 0 and order 1 of the same pair (the capable model's slot flips
+    # when order swaps text_1/text_2). content_gap must read clearly positive.
+    capable_wins = pd.DataFrame([
+        dict(pair_uid="p1", order=0, gap=2.0, pick=1, label=1),
+        dict(pair_uid="p1", order=1, gap=-3.0, pick=2, label=2),
+        dict(pair_uid="p2", order=0, gap=-2.0, pick=2, label=2),
+        dict(pair_uid="p2", order=1, gap=1.0, pick=1, label=1),
+    ])
+    out_a = adapter_ablate.metrics(capable_wins)
+    # sgap = gap * (+1 if label==1 else -1): p1 (2.0, 3.0), p2 (2.0, 1.0)
+    assert out_a["content_gap"] == pytest.approx(((2.0 + 3.0) / 2 + (2.0 + 1.0) / 2) / 2)
+    assert out_a["content_gap"] > 1.0  # clearly positive
+
+    # (b) judge always prefers slot 1, regardless of capability: gap sign is fixed by slot (same
+    # sign in both orders of a pair), uncorrelated with label. This is exactly the old bug's
+    # shape -- content_gap must read ~0, with no real capability tracking to find.
+    slot1_wins = pd.DataFrame([
+        dict(pair_uid="p1", order=0, gap=2.0, pick=1, label=1),
+        dict(pair_uid="p1", order=1, gap=2.0, pick=1, label=2),
+        dict(pair_uid="p2", order=0, gap=3.0, pick=1, label=2),
+        dict(pair_uid="p2", order=1, gap=3.0, pick=1, label=1),
+    ])
+    out_b = adapter_ablate.metrics(slot1_wins)
+    assert out_b["content_gap"] == pytest.approx(0.0, abs=1e-9)
 
 
 class ToyCausalModel(nn.Module):
@@ -323,10 +357,10 @@ def test_run_ablation_four_conditions_and_derived_metrics(monkeypatch):
     all_layers = frozenset({0, 1})
     group = {0}
     known = {
-        frozenset(): dict(acc=0.1, pos_term=0.2, order_even=0.3, order_odd=0.4, pick_weaker_acc=0.5),
-        frozenset({0}): dict(acc=0.6, pos_term=0.5, order_even=0.4, order_odd=0.3, pick_weaker_acc=0.2),
-        all_layers: dict(acc=0.9, pos_term=0.8, order_even=0.7, order_odd=0.6, pick_weaker_acc=0.5),
-        frozenset({1}): dict(acc=0.3, pos_term=0.3, order_even=0.3, order_odd=0.3, pick_weaker_acc=0.3),
+        frozenset(): dict(acc=0.1, pos_term=0.2, order_even=0.3, content_gap=0.4, pick_weaker_acc=0.5),
+        frozenset({0}): dict(acc=0.6, pos_term=0.5, order_even=0.4, content_gap=0.3, pick_weaker_acc=0.2),
+        all_layers: dict(acc=0.9, pos_term=0.8, order_even=0.7, content_gap=0.6, pick_weaker_acc=0.5),
+        frozenset({1}): dict(acc=0.3, pos_term=0.3, order_even=0.3, content_gap=0.3, pick_weaker_acc=0.3),
     }
     calls = []
 
@@ -374,7 +408,7 @@ def test_run_ablation_hoists_base_and_full_across_groups(monkeypatch):
         calls.append(frozenset(active_layers))
         return frozenset(active_layers)
     monkeypatch.setattr(adapter_ablate, "verdicts_under", stub_verdicts_under)
-    flat_metrics = dict(acc=0.0, pos_term=0.0, order_even=0.0, order_odd=0.0, pick_weaker_acc=0.0)
+    flat_metrics = dict(acc=0.0, pos_term=0.0, order_even=0.0, content_gap=0.0, pick_weaker_acc=0.0)
     monkeypatch.setattr(adapter_ablate, "metrics", lambda key: flat_metrics)
 
     adapter_ablate.run_ablation(model, None, pd.DataFrame(), groups=groups, c={})

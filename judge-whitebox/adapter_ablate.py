@@ -28,6 +28,10 @@ def load_unmerged(model_name, adapter, c):
 
     model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.bfloat16)
     model = PeftModel.from_pretrained(model, adapter)
+    # toggle's "scaling=0 => base-only" identity assumes plain LoRA; DoRA also renormalises by a
+    # learned magnitude that doesn't vanish when scaling goes to 0, so it would break the toggle.
+    assert not model.peft_config["default"].use_dora, \
+        "adapter_ablate assumes plain LoRA; DoRA breaks the scaling toggle"
 
     device = verdicts.pick_device()
     model.to(device)
@@ -116,23 +120,32 @@ def verdicts_under(model, tokenizer, df, active_layers, c, invert=False):
 
 
 def metrics(df):
-    """Verdict metrics from a verdicts_under-shaped df. order_even/order_odd average and
-    anti-average the two orders' gap per pair_uid; pairs missing an order are excluded, with
-    the excluded count printed. pick_weaker_acc is the meaningful number when df came from an
-    invert=True run, but is always returned."""
-    acc = (df["pick"] == df["label"]).mean()
-    pos_term = 2 * (df["pick"] == 1).mean() - 1
-    pick_weaker_acc = (df["pick"] == 3 - df["label"]).mean()
-
+    """Verdict metrics from a verdicts_under-shaped df, all computed on the both-orders-present
+    subset (a pair_uid missing an order is excluded from every metric, keeping orders balanced),
+    with the excluded count printed. order_even averages the two orders' gap per pair_uid (the
+    slot prior, unoriented). content_gap orients gap by the capability `label` before averaging
+    (+ toward the capable slot), so slot/alphabetical order can't cancel out real
+    capability-tracking, unlike a fixed-sign order term would. pick_weaker_acc is the meaningful
+    number when df came from an invert=True run, but is always returned."""
     by_order = df.groupby(["pair_uid", "order"])["gap"].mean().unstack("order").reindex(columns=[0, 1])
     both = by_order.dropna()
     n_excluded = len(by_order) - len(both)
     if n_excluded:
-        print(f"excluded {n_excluded} pair_uid(s) missing an order from order_even/odd")
-    order_even = ((both[0] + both[1]) / 2).mean()
-    order_odd = ((both[0] - both[1]) / 2).mean()
+        print(f"excluded {n_excluded} pair_uid(s) missing an order from metrics")
+    df = df[df["pair_uid"].isin(both.index)]
 
-    return dict(acc=acc, pos_term=pos_term, order_even=order_even, order_odd=order_odd,
+    acc = (df["pick"] == df["label"]).mean()
+    pos_term = 2 * (df["pick"] == 1).mean() - 1
+    pick_weaker_acc = (df["pick"] == 3 - df["label"]).mean()
+
+    order_even = ((both[0] + both[1]) / 2).mean()
+
+    sgap = df["gap"].to_numpy() * np.where(df["label"].to_numpy() == 1, 1.0, -1.0)
+    by = df.assign(_sgap=sgap).groupby(["pair_uid", "order"])["_sgap"].mean() \
+            .unstack("order").reindex(columns=[0, 1]).dropna()
+    content_gap = float(((by[0] + by[1]) / 2).mean())
+
+    return dict(acc=acc, pos_term=pos_term, order_even=order_even, content_gap=content_gap,
                 pick_weaker_acc=pick_weaker_acc)
 
 
