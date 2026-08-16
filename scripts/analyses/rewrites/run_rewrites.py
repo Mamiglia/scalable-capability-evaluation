@@ -90,14 +90,15 @@ def call_haiku(prompt: str) -> tuple[str, int]:
     return proc.stdout, 0
 
 
-def call_codex(prompt: str, reasoning_effort: str = "") -> tuple[str, int]:
+def call_codex(prompt: str, reasoning_effort: str = "", model: str = "") -> tuple[str, int]:
     """-s read-only or it blocks on an approval; --ignore-user-config skips MCP servers."""
     with tempfile.NamedTemporaryFile("r", suffix=".txt", delete=False) as tmp:
         out_file = Path(tmp.name)
+    model_arg = ["-m", model] if model else []
     effort = ["-c", f'model_reasoning_effort="{reasoning_effort}"'] if reasoning_effort else []
     try:
         proc = subprocess.run(
-            ["codex", "exec", "-s", "read-only", "--ignore-user-config", *effort,
+            ["codex", "exec", "-s", "read-only", "--ignore-user-config", *model_arg, *effort,
              "-o", str(out_file), prompt],
             capture_output=True, text=True, timeout=CLI_TIMEOUT_S, cwd=ROOT,
         )
@@ -164,25 +165,38 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=N_WORKERS)
     ap.add_argument("--attempts", type=int, default=BATCH_ATTEMPTS)
     ap.add_argument("--reasoning-effort", default="", help="codex only, e.g. low")
+    ap.add_argument("--model", default="", help="codex model override")
     ap.add_argument("--out", help="write here instead of the default file for this rewriter")
     ap.add_argument("--match", help="only rewrite the (model, item_id) keys present in this jsonl")
+    ap.add_argument("--instruction", type=Path, default=INSTRUCTION_PATH)
+    ap.add_argument("--shard", default="0/1", help="i/n: process every n-th todo key")
     args = ap.parse_args()
+
+    try:
+        shard_i, shard_n = map(int, args.shard.split("/"))
+    except ValueError:
+        ap.error("--shard must be i/n")
+    if shard_n < 1 or not 0 <= shard_i < shard_n:
+        ap.error("--shard requires n > 0 and 0 <= i < n")
+    if shard_n > 1 and not args.out:
+        ap.error("--out is required with multiple shards")
 
     out_path = Path(args.out) if args.out else OUT_PATHS[args.rewriter]
     out_path.parent.mkdir(parents=True, exist_ok=True)
     call = CALLERS[args.rewriter]
-    if args.reasoning_effort:
-        call = partial(call, reasoning_effort=args.reasoning_effort)
+    if args.reasoning_effort or args.model:
+        call = partial(call, reasoning_effort=args.reasoning_effort, model=args.model)
 
-    instruction, instruction_hash = load_instruction()
-    print(f"instruction {INSTRUCTION_PATH.name} sha256:{instruction_hash}", flush=True)
+    instruction, instruction_hash = load_instruction(args.instruction)
+    print(f"instruction {args.instruction.name} sha256:{instruction_hash}", flush=True)
 
     originals = [json.loads(l) for l in ORIGINALS.read_text().splitlines() if l.strip()]
-    done = done_keys(out_path)
-    todo = [r for r in originals if (r["model"], r["item_id"]) not in done]
     if args.match:
         keep = done_keys(Path(args.match))
-        todo = [r for r in todo if (r["model"], r["item_id"]) in keep]
+        originals = [r for r in originals if (r["model"], r["item_id"]) in keep]
+    todo = originals[shard_i::shard_n]
+    done = done_keys(out_path)
+    todo = [r for r in todo if (r["model"], r["item_id"]) not in done]
     if args.limit:
         todo = todo[: args.limit]
     batches = make_batches(todo, args.batch_size, args.max_batch_words)
