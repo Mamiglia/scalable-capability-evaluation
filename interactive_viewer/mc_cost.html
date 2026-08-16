@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Monte Carlo judging cost simulator</title>
+  <title>Judging cost calculator</title>
   <link rel="stylesheet" href="mc_cost.css" />
   <script src="plotly.min.js"></script>
 </head>
@@ -11,15 +11,73 @@
   <header class="page-header">
     <a href="index.html" class="back-link">← Judge-pilot viewer</a>
     <div>
-      <p class="eyebrow">Posterior-predictive planning</p>
-      <h1>Monte Carlo judging cost simulator</h1>
-      <p class="lede">Compare exact, precomputed designs for pairwise judging. Accuracy, token use,
-        cost, and ranking recovery come from the validated Python simulator—not browser-side estimates.</p>
+      <p class="eyebrow">Upload-driven planning</p>
+      <h1>Judging cost calculator</h1>
+      <p class="lede">Upload judge/model pairs to estimate candidate and judge tokens, cost,
+        mutually-correct items, and length-adjusted judging accuracy.</p>
     </div>
     <p id="data-status" class="data-status" role="status">Loading exported scenarios…</p>
   </header>
 
   <main>
+    <section class="card calculator-card" aria-labelledby="calculator-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">Calculator</p><h2 id="calculator-heading">Sample a judging design</h2></div>
+        <button id="download-calculator" type="button" class="secondary-button" disabled>Download results CSV</button>
+      </div>
+      <div class="calculator-controls">
+        <div class="field">
+          <label for="calculator-condition">Condition</label>
+          <select id="calculator-condition"><option value="oversight">Oversight</option><option value="all">All models</option></select>
+        </div>
+        <div class="field">
+          <label for="calculator-judges">Judges (J): <output id="calculator-judges-value">5</output></label>
+          <input id="calculator-judges" type="range" min="1" max="20" step="1" value="5" />
+        </div>
+        <div class="field">
+          <label for="calculator-anchors">Newer/stronger anchors (N): <output id="calculator-anchors-value">5</output></label>
+          <input id="calculator-anchors" type="range" min="1" max="20" step="1" value="5" />
+        </div>
+        <div class="field">
+          <label for="calculator-comparators">Comparators per anchor (M): <output id="calculator-comparators-value">5</output></label>
+          <input id="calculator-comparators" type="range" min="1" max="20" step="1" value="5" />
+        </div>
+        <div class="field">
+          <label for="calculator-items">Items per pair: <output id="calculator-items-value">100</output></label>
+          <input id="calculator-items" type="range" min="1" max="500" step="1" value="100" />
+        </div>
+        <div class="field">
+          <label for="calculator-repeats">Repeats / epochs: <output id="calculator-repeats-value">1</output></label>
+          <input id="calculator-repeats" type="range" min="1" max="20" step="1" value="1" />
+        </div>
+        <div class="field">
+          <label for="gap-sensitivity">Capability-gap sensitivity: <span id="gap-sensitivity-value">1.0× fitted slope</span></label>
+          <input id="gap-sensitivity" type="range" min="0" max="2" step="0.05" value="1" />
+        </div>
+        <div class="field">
+          <label for="comparison-upload">Optional exact CSV or JSON</label>
+          <input id="comparison-upload" type="file" accept=".csv,.json,text/csv,application/json" />
+        </div>
+      </div>
+      <p class="caption">Oversight samples N models newer and stronger than each judge, then M older comparators per anchor. All models removes those restrictions. Uploads override the sampler and require <code>judge,m1,m2,items</code>; optional:
+        <code>repeats</code>/<code>epochs</code> and per-role <code>theta</code>, <code>reasoning_class</code>,
+        <code>release</code>, <code>price_in</code>, <code>price_out</code> overrides. Prices are USD per million tokens.</p>
+      <div id="calculator-status" class="guidance neutral" role="status">Loading calculator data…</div>
+      <div class="plot-heading calculator-plot-heading">
+        <div><p class="eyebrow">Selected condition</p><h2>Capability-gap curve</h2><p class="caption">One length-adjusted curve for the selected model pool. The 90% band combines fitted-model uncertainty with the selected J × N × M × items × repeats design size.</p></div>
+      </div>
+      <div id="gap-curves" class="plot" role="img" aria-label="Judging accuracy by capability gap and oversight condition"></div>
+      <details id="calculator-comparison-details" class="calculator-comparison-details">
+        <summary>Show sampled comparisons</summary>
+        <div id="calculator-table-scroll" class="table-scroll calculator-table-scroll">
+          <table id="calculator-results" class="results-table">
+            <thead><tr><th>Comparison</th><th>Items × repeats</th><th>Candidate output tokens</th><th>Judge tokens</th><th>Mutually correct items</th><th>Judging accuracy</th><th>Candidate cost</th><th>Judge cost</th><th>Total cost</th><th>Source</th></tr></thead>
+            <tbody><tr><td colspan="10" class="empty-cell">Loading sampled comparisons.</td></tr></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
     <aside id="validation-banner" class="validation-banner" role="status"></aside>
     <section class="card controls-card" aria-labelledby="design-heading">
       <div class="section-heading">
@@ -122,6 +180,7 @@
       <td><button type="button" class="remove-row" aria-label="Remove comparison">Remove</button></td>
     </tr>
   </template>
+  <script src="mc_cost_calculator.js"></script>
   <script src="mc_cost.js"></script>
 </body>
 </html>

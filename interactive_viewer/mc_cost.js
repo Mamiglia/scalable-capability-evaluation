@@ -10,7 +10,7 @@ const tokenMetrics = {
   judge_input_tokens: "input", judge_output_tokens: "output",
   judge_ordinary_output_tokens: "ordinary", judge_reasoning_tokens: "reasoning",
 };
-const state = {data: null};
+const state = {data: null, calculatorData: null, calculatorRows: [], calculatorResults: [], calculatorUploaded: false};
 
 function option(select, value, label = value) {
   const item = document.createElement("option");
@@ -456,6 +456,148 @@ function renderValidation() {
   banner.textContent = state.data.validation.message;
 }
 
+function calculatorSensitivity() {
+  return Number(byId("gap-sensitivity").value);
+}
+
+function calculatorConfig() {
+  return {
+    condition: byId("calculator-condition").value,
+    judges: Number(byId("calculator-judges").value),
+    anchors: Number(byId("calculator-anchors").value),
+    comparators: Number(byId("calculator-comparators").value),
+    items: Number(byId("calculator-items").value),
+    repeats: Number(byId("calculator-repeats").value),
+    seed: 0,
+  };
+}
+
+function tokenRange(stats, name) {
+  return `${number(stats[`${name}_mean`], 0)} ± ${number(stats[`${name}_sd`], 0)}`;
+}
+
+function costRange(row, name) {
+  const format = (value) => Number(value).toLocaleString(undefined, {
+    style: "currency", currency: "USD", maximumFractionDigits: 4,
+  });
+  return `${format(row[name])} (${format(row[`${name}_low`])}–${format(row[`${name}_high`])})`;
+}
+
+function renderGapCurve(catalogue) {
+  if (!state.calculatorData || !state.calculatorRows.length) return emptyPlot("gap-curves", "No sampled comparisons.");
+  const trace = McCostCalculator.gapCurve(
+    state.calculatorData, catalogue, state.calculatorRows, calculatorSensitivity(),
+    calculatorConfig().condition,
+  );
+  const color = calculatorConfig().condition === "oversight"
+    ? {line: "#2563eb", fill: "rgba(37,99,235,.32)"}
+    : {line: "#ea580c", fill: "rgba(234,88,12,.32)"};
+  const traces = [
+    {x: trace.x, y: trace.p5, mode: "lines", line: {width: 0}, hoverinfo: "skip", showlegend: false},
+    {x: trace.x, y: trace.p95, mode: "lines", line: {width: 0}, fill: "tonexty", fillcolor: color.fill, hoverinfo: "skip", showlegend: false},
+    {x: trace.x, y: trace.y, name: trace.name, mode: "lines", line: {width: 2, color: color.line},
+      customdata: trace.p5.map((low, i) => [low, trace.p95[i]]),
+      hovertemplate: "Gap %{x:.1f}<br>Accuracy %{y:.1%}<br>90% interval %{customdata[0]:.1%}–%{customdata[1]:.1%}<extra>%{fullData.name}</extra>"},
+  ];
+  const theme = plotTheme();
+  theme.showlegend = true;
+  theme.xaxis.title = "Candidate capability gap |θ₁ − θ₂|";
+  theme.yaxis.title = "Judging accuracy";
+  const minimum = Math.min(...trace.p5), maximum = Math.max(...trace.p95);
+  const padding = Math.max(.03, (maximum - minimum) * .12);
+  theme.yaxis.range = [Math.max(0, minimum - padding), Math.min(1, maximum + padding)];
+  Plotly.react("gap-curves", traces, theme, plotConfig);
+}
+
+function renderCalculator() {
+  byId("gap-sensitivity-value").textContent = `${number(calculatorSensitivity(), 2)}× fitted slope`;
+  for (const name of ["judges", "anchors", "comparators", "items", "repeats"]) {
+    byId(`calculator-${name}-value`).textContent = byId(`calculator-${name}`).value;
+  }
+  if (!state.calculatorData) return;
+  const catalogue = new Map(state.calculatorData.catalogue.map((model) => [model.model_id, model]));
+  try {
+    if (!state.calculatorUploaded) {
+      state.calculatorRows = McCostCalculator.sampleDesign([...catalogue.values()], calculatorConfig());
+    }
+    renderGapCurve(catalogue);
+  } catch (error) {
+    state.calculatorRows = [];
+    state.calculatorResults = [];
+    byId("calculator-status").textContent = error.message;
+    emptyPlot("gap-curves", error.message);
+    return;
+  }
+  state.calculatorResults = state.calculatorRows.map((row) => {
+    try { return McCostCalculator.estimateComparison(row, state.calculatorData, catalogue, calculatorSensitivity()); }
+    catch (error) { return {...row, error: error.message}; }
+  });
+  const body = byId("calculator-results").tBodies[0];
+  body.replaceChildren();
+  for (const result of state.calculatorResults) {
+    const tr = document.createElement("tr");
+    if (result.error) {
+      const cell = document.createElement("td"); cell.colSpan = 10; cell.textContent = `${result.judge}: ${result.m1} vs ${result.m2} — ${result.error}`;
+      tr.append(cell); body.append(tr); continue;
+    }
+    const values = [
+      `${result.judge}: ${result.m1} vs ${result.m2}`,
+      `${result.items} × ${result.repeats}`,
+      `${result.m1}: ${tokenRange(result.m1_length, "output")} · ${result.m2}: ${tokenRange(result.m2_length, "output")}`,
+      `input ${number(result.judge_input_tokens, 0)} · output ${tokenRange(result.judge_length, "output")}`,
+      `${number(result.mutually_correct, 1)} (${number(result.mutually_correct_low, 1)}–${number(result.mutually_correct_high, 1)})`,
+      `${number(result.judging_accuracy * 100, 1)}% (${number(result.judging_accuracy_low * 100, 1)}–${number(result.judging_accuracy_high * 100, 1)}%)`,
+      costRange(result, "candidate_cost"), costRange(result, "judge_cost"), costRange(result, "total_cost"),
+      `M1 ${result.m1_length.source}; M2 ${result.m2_length.source}; judge ${result.judge_length.source}`,
+    ];
+    for (const value of values) { const cell = document.createElement("td"); cell.textContent = value; tr.append(cell); }
+    body.append(tr);
+  }
+  const failures = state.calculatorResults.filter((row) => row.error).length;
+  const valid = state.calculatorResults.filter((row) => !row.error);
+  const totalCost = valid.reduce((sum, row) => sum + row.total_cost, 0);
+  const costLow = Math.max(0, totalCost - Math.hypot(...valid.map((row) => row.total_cost - row.total_cost_low)));
+  const costHigh = totalCost + Math.hypot(...valid.map((row) => row.total_cost_high - row.total_cost));
+  const format = (value) => value.toLocaleString(undefined, {style: "currency", currency: "USD", maximumFractionDigits: 2});
+  const calls = valid.reduce((sum, row) => sum + row.items * row.repeats, 0);
+  byId("calculator-status").textContent = failures
+    ? `${valid.length} rows calculated; ${failures} need metadata overrides.`
+    : `${state.calculatorUploaded ? "Uploaded" : calculatorConfig().condition === "oversight" ? "Oversight" : "All"}: ${valid.length} pairs, ${calls.toLocaleString()} judgments; estimated total ${format(totalCost)} (${format(costLow)}–${format(costHigh)}).`;
+  byId("download-calculator").disabled = !state.calculatorResults.some((row) => !row.error);
+}
+
+function downloadCalculator() {
+  const columns = [
+    "judge", "m1", "m2", "items", "repeats", "capability_gap", "oversight",
+    "m1_accuracy", "m1_accuracy_low", "m1_accuracy_high", "m2_accuracy", "m2_accuracy_low", "m2_accuracy_high",
+    "mutually_correct", "mutually_correct_low", "mutually_correct_high",
+    "judging_accuracy", "judging_accuracy_low", "judging_accuracy_high",
+    "candidate_cost", "candidate_cost_low", "candidate_cost_high", "judge_cost", "judge_cost_low", "judge_cost_high",
+    "total_cost", "total_cost_low", "total_cost_high",
+  ];
+  const csv = [columns.join(","), ...state.calculatorResults.filter((row) => !row.error).map((row) =>
+    columns.map((key) => `"${String(row[key]).replaceAll('"', '""')}"`).join(",")
+  )].join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"}));
+  link.download = "judging-cost-estimates.csv";
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+async function loadCalculator() {
+  try {
+    const response = await fetch("data/mc_cost_calculator.json");
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    state.calculatorData = await response.json();
+    byId("calculator-status").textContent = "Ready. Upload CSV or JSON comparisons.";
+    renderCalculator();
+  } catch (error) {
+    byId("calculator-status").textContent = `Calculator data unavailable: ${error.message}`;
+    emptyPlot("gap-curves", "Generate data/mc_cost_calculator.json first.");
+  }
+}
+
 async function load() {
   try {
     const response = await fetch("data/mc_cost.json");
@@ -478,5 +620,29 @@ for (const id of ["mode", "judge-pool", "anchor-pool", "comparator-pool", "judge
   byId(id).addEventListener("change", render);
 }
 byId("add-manual-row").addEventListener("click", () => { addManualRow(); render(); });
+byId("comparison-upload").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    state.calculatorRows = McCostCalculator.parseComparisons(await file.text(), file.name);
+    state.calculatorUploaded = true;
+    renderCalculator();
+  } catch (error) {
+    state.calculatorRows = [];
+    state.calculatorResults = [];
+    state.calculatorUploaded = false;
+    byId("calculator-status").textContent = `Upload error: ${error.message}`;
+  }
+});
+for (const id of ["calculator-condition", "calculator-judges", "calculator-anchors", "calculator-comparators", "calculator-items", "calculator-repeats"]) {
+  byId(id).addEventListener("input", () => {
+    state.calculatorUploaded = false;
+    byId("comparison-upload").value = "";
+    renderCalculator();
+  });
+}
+byId("gap-sensitivity").addEventListener("input", renderCalculator);
+byId("download-calculator").addEventListener("click", downloadCalculator);
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+loadCalculator();
 load();

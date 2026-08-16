@@ -70,6 +70,15 @@ main { display: grid; gap: 16px; padding-bottom: 48px; }
 .caption { margin: .2rem 0 0; color: var(--muted); font-size: .84rem; }
 
 .control-grid { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap: 14px; }
+.calculator-controls { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr); gap: 14px; }
+.calculator-card { border-top: 4px solid var(--accent); }
+.calculator-card .secondary-button { margin-top: 0; }
+.calculator-card input[type="range"] { padding-inline: 0; }
+.calculator-plot-heading { margin-top: 22px; }
+.calculator-comparison-details { margin-top: 18px; }
+.calculator-comparison-details summary { cursor: pointer; color: var(--accent); font-weight: 700; }
+.calculator-table-scroll { max-height: 360px; margin-top: 10px; overflow: auto; }
+.calculator-table-scroll th { position: sticky; z-index: 1; top: 0; background: var(--surface); }
 .field { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
 .field.compact { width: min(220px, 100%); }
 .field label { color: var(--muted); font-size: .72rem; font-weight: 700; letter-spacing: .045em; text-transform: uppercase; }
@@ -82,6 +91,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible
 .remove-row { min-height: 34px; padding: 5px 9px; background: transparent; color: var(--bad); }
 .pool-note { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: .84rem; }
 .guidance { margin-top: 14px; padding: 12px 14px; background: var(--warn-soft); border-left: 4px solid var(--warn); border-radius: 5px; overflow-wrap: anywhere; }
+.guidance.neutral { background: var(--surface-2); border-left-color: var(--accent); color: var(--muted); }
 
 .summary-grid { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 10px; }
 .summary-item { padding: 13px 14px; background: var(--surface-2); border-radius: 8px; }
@@ -125,7 +135,7 @@ td { font-size: .84rem; font-variant-numeric: tabular-nums; }
   .data-status { text-align: left; }
   .card { padding: 15px; }
   .section-heading, .plot-heading { align-items: stretch; flex-direction: column; }
-  .control-grid, .summary-grid, .plots-grid { grid-template-columns: 1fr; }
+  .control-grid, .calculator-controls, .summary-grid, .plots-grid { grid-template-columns: 1fr; }
   .field.compact { width: 100%; }
   .plot { height: 330px; }
 }
