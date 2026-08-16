@@ -1,4 +1,4 @@
-"""Generate the fixed campaign subset and the 8 truncation-condition configs.
+"""Generate the fixed campaign subset and the 6 truncation-condition configs.
 
 One subset of GPQA pairs and items, reused by every manipulation condition,
 so all comparisons stay within-pair and within-item. Sampling is fixed-seed
@@ -45,18 +45,15 @@ COVERAGE_JUDGES = ["qwen3-8b", "qwen3-32b", "gpt-oss-120b"]
 # rerunning this file with no edits reproduces the live subset.
 EXCLUDE_ANSWER_MODEL_PATTERN: str | None = r"-flash|-low"
 
-# (condition name, truncate_keep, truncate_frac). The _100 conditions are the
-# length-matching controls: frac=1.0 cuts only the longer transcript, down to
-# the shorter one's length, from the front (first) or the back (end).
+# (condition name, truncate_keep, truncate_frac). The existing full-transcript
+# a_baseline condition is the shared 100% point and is not regenerated here.
 TRUNCATION_CONDITIONS = [
     ("trunc_first_10", "first", 0.10),
     ("trunc_first_50", "first", 0.50),
     ("trunc_first_90", "first", 0.90),
-    ("trunc_first_100", "first", 1.00),
     ("trunc_end_10", "last", 0.10),
     ("trunc_end_50", "last", 0.50),
     ("trunc_end_90", "last", 0.90),
-    ("trunc_end_100", "last", 1.00),
 ]
 
 

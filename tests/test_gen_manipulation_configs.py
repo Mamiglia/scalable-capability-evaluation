@@ -8,10 +8,15 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts" / "pairwise-newjudg
 from gen_manipulation_configs import (
     COVERAGE_JUDGES,
     ITEMS_PER_PAIR,
+    TRUNCATION_CONDITIONS,
     covered_items,
     filtered_comparisons,
     sample_pair_items,
 )
+
+
+def test_100_percent_is_the_existing_untruncated_baseline():
+    assert {frac for _, _, frac in TRUNCATION_CONDITIONS} == {0.1, 0.5, 0.9}
 
 
 def _row(item_id, judge, order, parse_ok=True):

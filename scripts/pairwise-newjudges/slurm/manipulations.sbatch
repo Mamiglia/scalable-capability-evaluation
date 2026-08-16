@@ -8,13 +8,13 @@
 #SBATCH --open-mode=append
 #SBATCH --output=%x-%j.out
 
-# Judging campaign over transcript-manipulation conditions (truncation +
-# paraphrase), local vLLM judges only - no API cost. Adapted from
+# Judging campaign for one explicit transcript-manipulation condition,
+# local vLLM judges only - no API cost. Adapted from
 # scripts/analyses/direct-judge/slurm/serve_and_score.sbatch.
 #
-# usage: sbatch -J <name> --array=0-2 manipulations.sbatch
+# usage: sbatch -J <name> --array=0-2 --export=ALL,CONFIG=configs/manipulations/<name>.yaml manipulations.sbatch
 # Array index picks the judge - one array task per judge, each serving its
-# own vllm and judging every condition below in turn. Condition logs land
+# own vllm and judging only CONFIG. Condition logs land
 # under $PROJ/repo/logs/pairwise-newjudges/manipulations/ (run.py resolves
 # against the repo root); pair dirs with a success log are skipped, so a
 # requeued or re-launched task resumes rather than redoing finished pairs.
@@ -27,12 +27,12 @@ VLLM_BIN=${VLLM_BIN:-$BASE/code/judge_ft/venv/bin/vllm}  # reused read-only, own
 
 # Explicit judge list, one array task each - not indexed off whatever is on
 # disk. Override a weights dir at submit time if the staged path differs,
-# e.g. sbatch --export=ALL,WEIGHTS_GPT_OSS_120B=/other/path ...
-JUDGES=(qwen3-8b qwen3-32b gpt-oss-120b)
+# e.g. sbatch --export=ALL,WEIGHTS_GPT_OSS_20B=/other/path ...
+JUDGES=(qwen3-8b qwen3-32b gpt-oss-20b)
 WEIGHTS_DIRS=(
   "${WEIGHTS_QWEN3_8B:-$BASE/models/Qwen3-8B}"
   "${WEIGHTS_QWEN3_32B:-$BASE/models/Qwen3-32B}"
-  "${WEIGHTS_GPT_OSS_120B:-$BASE/models/gpt-oss-120b}"
+  "${WEIGHTS_GPT_OSS_20B:-$BASE/models/gpt-oss-20b}"
 )
 MODES=(native native gptoss)
 
@@ -41,21 +41,10 @@ JUDGE=${JUDGES[$SLURM_ARRAY_TASK_ID]}
 WEIGHTS=${WEIGHTS_DIRS[$SLURM_ARRAY_TASK_ID]}
 MODE=${MODES[$SLURM_ARRAY_TASK_ID]}
 
-# Explicit condition list - gains one line when paraphrase_gpt.yaml lands.
-# Not a glob over configs/manipulations/*.yaml: a glob's scope would silently
-# depend on the order files land on disk.
-CONFIGS=(
-  configs/manipulations/trunc_first_10.yaml
-  configs/manipulations/trunc_first_50.yaml
-  configs/manipulations/trunc_first_90.yaml
-  configs/manipulations/trunc_first_100.yaml
-  configs/manipulations/trunc_end_10.yaml
-  configs/manipulations/trunc_end_50.yaml
-  configs/manipulations/trunc_end_90.yaml
-  configs/manipulations/trunc_end_100.yaml
-  configs/manipulations/paraphrase_haiku.yaml
-  # configs/manipulations/paraphrase_gpt.yaml   # add once the rewriter quota decision lands
-)
+# Requiring one path prevents a resumed/new campaign from silently picking up
+# old configs or whatever else happens to be present in the directory.
+: "${CONFIG:?submit with --export=ALL,CONFIG=configs/manipulations/<condition>.yaml}"
+CONFIGS=("$CONFIG")
 
 source "$VENV/bin/activate"
 export PYTHONPATH="$PROJ/repo/src"
