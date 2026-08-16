@@ -43,7 +43,7 @@
           <input id="calculator-comparators" type="range" min="1" max="20" step="1" value="5" />
         </div>
         <div class="field">
-          <label for="calculator-items">Items per pair: <output id="calculator-items-value">100</output></label>
+          <label for="calculator-items">Items per pair: <output id="calculator-items-value">100</output> <span id="calculator-items-estimate"></span></label>
           <input id="calculator-items" type="range" min="1" max="500" step="1" value="100" />
         </div>
         <div class="field">
@@ -51,8 +51,8 @@
           <input id="calculator-repeats" type="range" min="1" max="20" step="1" value="1" />
         </div>
         <div class="field">
-          <label for="gap-sensitivity">Capability-gap sensitivity: <span id="gap-sensitivity-value">1.0× fitted slope</span></label>
-          <input id="gap-sensitivity" type="range" min="0" max="2" step="0.05" value="1" />
+          <label for="judge-accuracy">Judge accuracy: <output id="judge-accuracy-value">60.0% Acc at 10% ΔECI</output> <span id="judge-accuracy-default"></span></label>
+          <input id="judge-accuracy" type="range" min="50" max="99.9" step="0.1" value="60" />
         </div>
         <div class="field">
           <label for="comparison-upload">Optional exact CSV or JSON</label>
@@ -60,11 +60,11 @@
         </div>
       </div>
       <p class="caption">Oversight samples N models newer and stronger than each judge, then M older comparators per anchor. All models removes those restrictions. Uploads override the sampler and require <code>judge,m1,m2,items</code>; optional:
-        <code>repeats</code>/<code>epochs</code> and per-role <code>theta</code>, <code>reasoning_class</code>,
+        <code>repeats</code>/<code>epochs</code> and per-role <code>theta</code>, <code>eci</code>, <code>reasoning_class</code>,
         <code>release</code>, <code>price_in</code>, <code>price_out</code> overrides. Prices are USD per million tokens.</p>
       <div id="calculator-status" class="guidance neutral" role="status">Loading calculator data…</div>
       <div class="plot-heading calculator-plot-heading">
-        <div><p class="eyebrow">Selected condition</p><h2>Capability-gap curve</h2><p class="caption">One length-adjusted curve for the selected model pool. The 90% band combines fitted-model uncertainty with the selected J × N × M × items × repeats design size.</p></div>
+        <div><p class="eyebrow">Selected condition</p><h2>Relative ECI-gap curve</h2><p class="caption">One length-adjusted curve for the selected model pool. The 95% band includes observed judge and model-pair heterogeneity plus coin-toss sampling for the selected design. Token and cost totals use observed GPQA lengths where available and reasoning-class GPQA estimates otherwise.</p></div>
       </div>
       <div id="gap-curves" class="plot" role="img" aria-label="Judging accuracy by capability gap and oversight condition"></div>
       <details id="calculator-comparison-details" class="calculator-comparison-details">

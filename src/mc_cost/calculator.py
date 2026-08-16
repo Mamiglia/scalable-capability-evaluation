@@ -58,36 +58,71 @@ def _correctness_fit(catalogue: pd.DataFrame, candidates: pd.DataFrame) -> dict:
 
 
 def _fit_accuracy(frame: pd.DataFrame) -> dict:
-    predictors = ("capability_gap", "gap_x_oversight", "length_difference")
+    predictors = ("capability_gap", "length_difference")
     x = frame[list(predictors)].to_numpy(dtype=float)
     y = frame["correct"].to_numpy(dtype=int)
     if not len(frame) or len(np.unique(y)) < 2:
-        coefficients = np.zeros(3)
-        covariance = np.eye(3) * 1e6
+        coefficients = np.zeros(2)
+        covariance = np.eye(2) * 1e6
     else:
         fit = LogisticRegression(
             C=np.inf, fit_intercept=False, solver="lbfgs", max_iter=2_000,
         ).fit(x, y)
         coefficients = fit.coef_[0]
         p = fit.predict_proba(x)[:, 1]
-        covariance = np.linalg.pinv(x.T @ (p * (1 - p) * x.T).T)
+        covariance = np.linalg.pinv(x.T @ ((p * (1 - p))[:, None] * x))
+    judge_gap = []
+    if "judge" in frame:
+        for _, rows in frame.groupby("judge"):
+            if len(np.unique(rows["correct"])) < 2:
+                continue
+            fit = LogisticRegression(
+                C=np.inf, fit_intercept=False, solver="lbfgs", max_iter=2_000,
+            ).fit(rows[list(predictors)].to_numpy(dtype=float), rows["correct"])
+            judge_gap.append(float(fit.coef_[0, 0]))
+    judge_gap_sd = float(np.std(judge_gap, ddof=1)) if len(judge_gap) > 1 else 0.0
+    pair = (
+        frame["model_pair"].astype(str)
+        if "model_pair" in frame
+        else frame[["left_model", "right_model"]].astype(str).agg("::".join, axis=1)
+    )
+    predicted = 1 / (1 + np.exp(-np.clip(x @ coefficients, -700, 700)))
+    pair_residuals = pd.Series(y - predicted, index=frame.index).groupby(pair).mean()
+    pair_residual_sd = float(pair_residuals.std(ddof=1)) if len(pair_residuals) > 1 else 0.0
+    eta = float(coefficients[0]) * 0.1
+    se = 0.1 * float(np.sqrt(max(0, covariance[0, 0] + judge_gap_sd ** 2)))
+    probability = lambda value: float(1 / (1 + np.exp(-np.clip(value, -700, 700))))
     return {
         "coefficients": dict(zip(
             predictors, map(float, coefficients), strict=True,
         )),
         "covariance": covariance.tolist(),
         "n": int(len(frame)),
+        "judge_gap_sd": judge_gap_sd,
+        "pair_residual_sd": pair_residual_sd,
+        "accuracy_at_10pct_eci": {
+            "mean": probability(eta),
+            "low": probability(eta - 1.959963984540054 * se),
+            "high": probability(eta + 1.959963984540054 * se),
+        },
     }
 
 
-def _accuracy_glm(judgments: pd.DataFrame) -> dict:
-    required = [
-        "chosen_left", "left_theta", "right_theta", "judge_theta", "left_chars", "right_chars",
+def _accuracy_glm(judgments: pd.DataFrame, catalogue: pd.DataFrame) -> dict:
+    eci = catalogue.set_index("model_id")["eci"]
+    frame = judgments.assign(
+        left_eci=judgments["left_model"].map(eci),
+        right_eci=judgments["right_model"].map(eci),
+    ).dropna(subset=["chosen_left", "left_eci", "right_eci", "left_chars", "right_chars"])
+    frame = frame.loc[
+        frame["left_eci"].ne(frame["right_eci"])
+        & frame["left_eci"].gt(0) & frame["right_eci"].gt(0)
     ]
-    frame = judgments.dropna(subset=required).copy()
-    frame = frame.loc[frame["left_theta"].ne(frame["right_theta"])]
-    stronger_left = frame["left_theta"].gt(frame["right_theta"]).to_numpy()
-    gap = (frame["left_theta"] - frame["right_theta"]).abs().to_numpy(dtype=float)
+    stronger_left = frame["left_eci"].gt(frame["right_eci"]).to_numpy()
+    gap = (
+        (frame["left_eci"] - frame["right_eci"]).abs()
+        / frame[["left_eci", "right_eci"]].min(axis=1)
+    ).to_numpy(dtype=float)
     length = np.where(stronger_left, 1.0, -1.0) * (
         np.log1p(frame["left_chars"].to_numpy(dtype=float))
         - np.log1p(frame["right_chars"].to_numpy(dtype=float))
@@ -95,12 +130,28 @@ def _accuracy_glm(judgments: pd.DataFrame) -> dict:
     correct = np.where(stronger_left, frame["chosen_left"], 1 - frame["chosen_left"]).astype(int)
     frame = frame.assign(
         capability_gap=gap,
-        gap_x_oversight=gap * (
-            (frame["left_theta"] + frame["right_theta"]) / 2 - frame["judge_theta"]
-        ),
         length_difference=length, correct=correct,
     )
     return _fit_accuracy(frame)
+
+
+def _candidate_accuracy_default(
+    catalogue: pd.DataFrame, candidates: pd.DataFrame, fit: dict,
+) -> dict[str, float]:
+    observed = candidates.groupby("model", sort=False)["correct"].mean()
+    values = []
+    for row in catalogue.dropna(subset=["theta"]).itertuples():
+        value = observed.get(row.model_id, np.nan)
+        if not np.isfinite(value):
+            value = 1 / (1 + np.exp(-(fit["intercept"] + fit["theta"] * row.theta)))
+        values.append(float(value))
+    if not values:
+        values = [0.5]
+    return {
+        "mean": float(np.mean(values)),
+        "low": float(np.quantile(values, 0.025)),
+        "high": float(np.quantile(values, 0.975)),
+    }
 
 
 def build_calculator_payload(
@@ -127,9 +178,10 @@ def build_calculator_payload(
         - pd.to_numeric(judge_frame["transcript_chars"], errors="coerce") / 4
     ).clip(lower=0)
     judge_columns = ("input_overhead", "output_tokens")
+    correctness_fit = _correctness_fit(catalogue, candidates)
     catalogue_columns = [
         column for column in (
-            "model_id", "display_name", "theta", "release", "reasoning_class", "price_in", "price_out",
+            "model_id", "display_name", "theta", "eci", "release", "reasoning_class", "price_in", "price_out",
         ) if column in catalogue
     ]
     return {
@@ -143,6 +195,9 @@ def build_calculator_payload(
             judge_frame, "model", judge_columns, "observed_gpqa_judging",
         ),
         "judge_defaults": _class_defaults(judge_frame, judge_columns),
-        "correctness_fit": _correctness_fit(catalogue, candidates),
-        "accuracy_glm": _accuracy_glm(judgments),
+        "correctness_fit": correctness_fit,
+        "candidate_accuracy_default": _candidate_accuracy_default(
+            catalogue, candidates, correctness_fit,
+        ),
+        "accuracy_glm": _accuracy_glm(judgments, catalogue),
     }

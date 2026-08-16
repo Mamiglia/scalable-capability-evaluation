@@ -456,8 +456,8 @@ function renderValidation() {
   banner.textContent = state.data.validation.message;
 }
 
-function calculatorSensitivity() {
-  return Number(byId("gap-sensitivity").value);
+function calculatorJudgeAccuracy() {
+  return Number(byId("judge-accuracy").value) / 100;
 }
 
 function calculatorConfig() {
@@ -486,7 +486,7 @@ function costRange(row, name) {
 function renderGapCurve(catalogue) {
   if (!state.calculatorData || !state.calculatorRows.length) return emptyPlot("gap-curves", "No sampled comparisons.");
   const trace = McCostCalculator.gapCurve(
-    state.calculatorData, catalogue, state.calculatorRows, calculatorSensitivity(),
+    state.calculatorData, catalogue, state.calculatorRows, calculatorJudgeAccuracy(),
     calculatorConfig().condition,
   );
   const color = calculatorConfig().condition === "oversight"
@@ -497,11 +497,12 @@ function renderGapCurve(catalogue) {
     {x: trace.x, y: trace.p95, mode: "lines", line: {width: 0}, fill: "tonexty", fillcolor: color.fill, hoverinfo: "skip", showlegend: false},
     {x: trace.x, y: trace.y, name: trace.name, mode: "lines", line: {width: 2, color: color.line},
       customdata: trace.p5.map((low, i) => [low, trace.p95[i]]),
-      hovertemplate: "Gap %{x:.1f}<br>Accuracy %{y:.1%}<br>90% interval %{customdata[0]:.1%}–%{customdata[1]:.1%}<extra>%{fullData.name}</extra>"},
+      hovertemplate: "Relative ΔECI %{x:.1%}<br>Accuracy %{y:.1%}<br>95% interval %{customdata[0]:.1%}–%{customdata[1]:.1%}<extra>%{fullData.name}</extra>"},
   ];
   const theme = plotTheme();
   theme.showlegend = true;
-  theme.xaxis.title = "Candidate capability gap |θ₁ − θ₂|";
+  theme.xaxis.title = "Relative ΔECI: |ECI₁ − ECI₂| / min(ECI₁, ECI₂)";
+  theme.xaxis.tickformat = ".0%";
   theme.yaxis.title = "Judging accuracy";
   const minimum = Math.min(...trace.p5), maximum = Math.max(...trace.p95);
   const padding = Math.max(.03, (maximum - minimum) * .12);
@@ -510,11 +511,15 @@ function renderGapCurve(catalogue) {
 }
 
 function renderCalculator() {
-  byId("gap-sensitivity-value").textContent = `${number(calculatorSensitivity(), 2)}× fitted slope`;
+  byId("judge-accuracy-value").textContent = `${number(100 * calculatorJudgeAccuracy(), 1)}% Acc at 10% ΔECI`;
   for (const name of ["judges", "anchors", "comparators", "items", "repeats"]) {
     byId(`calculator-${name}-value`).textContent = byId(`calculator-${name}`).value;
   }
   if (!state.calculatorData) return;
+  const fitted = state.calculatorData.accuracy_glm.accuracy_at_10pct_eci;
+  byId("judge-accuracy-default").textContent = `(fitted default: ${number(100 * fitted.mean, 1)}% [${number(100 * fitted.low, 1)}, ${number(100 * fitted.high, 1)}])`;
+  const overlap = McCostCalculator.expectedOverlap(state.calculatorData, calculatorConfig().items);
+  byId("calculator-items-estimate").textContent = `(est: ${number(overlap.mean, 0)} [${number(overlap.low, 0)}, ${number(overlap.high, 0)}])`;
   const catalogue = new Map(state.calculatorData.catalogue.map((model) => [model.model_id, model]));
   try {
     if (!state.calculatorUploaded) {
@@ -529,7 +534,7 @@ function renderCalculator() {
     return;
   }
   state.calculatorResults = state.calculatorRows.map((row) => {
-    try { return McCostCalculator.estimateComparison(row, state.calculatorData, catalogue, calculatorSensitivity()); }
+    try { return McCostCalculator.estimateComparison(row, state.calculatorData, catalogue, calculatorJudgeAccuracy()); }
     catch (error) { return {...row, error: error.message}; }
   });
   const body = byId("calculator-results").tBodies[0];
@@ -568,7 +573,7 @@ function renderCalculator() {
 
 function downloadCalculator() {
   const columns = [
-    "judge", "m1", "m2", "items", "repeats", "capability_gap", "oversight",
+    "judge", "m1", "m2", "items", "repeats", "delta_eci",
     "m1_accuracy", "m1_accuracy_low", "m1_accuracy_high", "m2_accuracy", "m2_accuracy_low", "m2_accuracy_high",
     "mutually_correct", "mutually_correct_low", "mutually_correct_high",
     "judging_accuracy", "judging_accuracy_low", "judging_accuracy_high",
@@ -590,6 +595,8 @@ async function loadCalculator() {
     const response = await fetch("data/mc_cost_calculator.json");
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
     state.calculatorData = await response.json();
+    const fitted = state.calculatorData.accuracy_glm.accuracy_at_10pct_eci.mean;
+    byId("judge-accuracy").value = Math.min(99.9, Math.max(50, 100 * fitted));
     byId("calculator-status").textContent = "Ready. Upload CSV or JSON comparisons.";
     renderCalculator();
   } catch (error) {
@@ -641,7 +648,7 @@ for (const id of ["calculator-condition", "calculator-judges", "calculator-ancho
     renderCalculator();
   });
 }
-byId("gap-sensitivity").addEventListener("input", renderCalculator);
+byId("judge-accuracy").addEventListener("input", renderCalculator);
 byId("download-calculator").addEventListener("click", downloadCalculator);
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
 loadCalculator();

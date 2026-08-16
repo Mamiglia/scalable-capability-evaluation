@@ -2,7 +2,8 @@
   "use strict";
 
   const sigmoid = (x) => 1 / (1 + Math.exp(-x));
-  const Z90 = 1.6448536269514722;
+  const logit = (p) => Math.log(p / (1 - p));
+  const Z95 = 1.959963984540054;
   const number = (value, fallback = null) => value === "" || value == null ? fallback : Number(value);
 
   function csvRows(text) {
@@ -84,7 +85,8 @@
     }
     if (!["all", "oversight"].includes(config.condition)) throw new Error("condition must be all or oversight");
     const models = catalogue.filter((model) =>
-      Number.isFinite(model.theta) && Number.isFinite(model.price_in) &&
+      Number.isFinite(model.theta) && Number.isFinite(model.eci) && model.eci > 0 &&
+      Number.isFinite(model.price_in) &&
       Number.isFinite(model.price_out) && Number.isFinite(releaseOrdinal(model.release)) &&
       ["reasoning", "non_reasoning"].includes(model.reasoning_class)
     );
@@ -94,7 +96,7 @@
     );
     const anchors = (judge) => models.filter((anchor) =>
       anchor.model_id !== judge.model_id &&
-      (config.condition === "all" || (anchor.theta > judge.theta &&
+      (config.condition === "all" || (anchor.eci > judge.eci &&
         releaseOrdinal(anchor.release) > releaseOrdinal(judge.release))) &&
       comparators(judge, anchor).length >= config.comparators
     );
@@ -119,14 +121,16 @@
     const metadata = {
       model_id: row[role],
       theta: value("theta", model?.theta),
+      eci: value("eci", model?.eci),
       release: row[`${role}_release`] || model?.release,
       reasoning_class: row[`${role}_reasoning_class`] || model?.reasoning_class,
       price_in: value("price_in", model?.price_in),
       price_out: value("price_out", model?.price_out),
     };
-    if (![metadata.theta, metadata.price_in, metadata.price_out].every(Number.isFinite) ||
+    if (![metadata.theta, metadata.eci, metadata.price_in, metadata.price_out].every(Number.isFinite) ||
+        metadata.eci <= 0 ||
         !["reasoning", "non_reasoning"].includes(metadata.reasoning_class)) {
-      throw new Error(`${row[role]} is missing theta, reasoning_class, or input/output pricing`);
+      throw new Error(`${row[role]} is missing theta, ECI, reasoning_class, or input/output pricing`);
     }
     return metadata;
   }
@@ -139,15 +143,15 @@
     const stats = data.candidate_models[model.model_id];
     if (Number.isFinite(stats?.accuracy)) {
       const n = Math.max(1, number(stats.n, 1));
-      const denominator = 1 + Z90 ** 2 / n;
-      const center = (stats.accuracy + Z90 ** 2 / (2 * n)) / denominator;
-      const half = Z90 * Math.sqrt(stats.accuracy * (1 - stats.accuracy) / n + Z90 ** 2 / (4 * n ** 2)) / denominator;
+      const denominator = 1 + Z95 ** 2 / n;
+      const center = (stats.accuracy + Z95 ** 2 / (2 * n)) / denominator;
+      const half = Z95 * Math.sqrt(stats.accuracy * (1 - stats.accuracy) / n + Z95 ** 2 / (4 * n ** 2)) / denominator;
       return {mean: stats.accuracy, low: Math.max(0, center - half), high: Math.min(1, center + half)};
     }
     const x = [1, model.theta];
     const eta = data.correctness_fit.intercept + data.correctness_fit.theta * model.theta;
     const se = Math.sqrt(quadraticVariance(x, data.correctness_fit.covariance));
-    return {mean: sigmoid(eta), low: sigmoid(eta - Z90 * se), high: sigmoid(eta + Z90 * se)};
+    return {mean: sigmoid(eta), low: sigmoid(eta - Z95 * se), high: sigmoid(eta + Z95 * se)};
   }
 
   function quadraticVariance(x, covariance) {
@@ -173,7 +177,16 @@
 
   const visible = (stats, suffix) => stats[`visible_${suffix}`] ?? stats[`output_${suffix}`];
 
-  function estimateComparison(row, data, catalogue, sensitivity) {
+  function expectedOverlap(data, items) {
+    const value = data.candidate_accuracy_default;
+    const overlap = (accuracy) => Math.round(items * accuracy ** 2 * 1e12) / 1e12;
+    return {mean: overlap(value.mean), low: overlap(value.low), high: overlap(value.high)};
+  }
+
+  function estimateComparison(row, data, catalogue, judgeAccuracy) {
+    if (!(judgeAccuracy >= 0.5 && judgeAccuracy < 1)) {
+      throw new Error("judge accuracy must be between 50% and 100%");
+    }
     const judge = modelMetadata("judge", row, catalogue);
     const m1 = modelMetadata("m1", row, catalogue);
     const m2 = modelMetadata("m2", row, catalogue);
@@ -186,7 +199,7 @@
       tokenCost(m2, m2Length.input_mean, m2Length.output_mean)
     );
     const candidateCost = calls * candidateCostPerCall;
-    const candidateCostHalf = Z90 * Math.sqrt(calls) * Math.hypot(
+    const candidateCostHalf = Z95 * Math.sqrt(calls) * Math.hypot(
       tokenCostSd(m1, m1Length.input_sd, m1Length.output_sd),
       tokenCostSd(m2, m2Length.input_sd, m2Length.output_sd),
     );
@@ -194,7 +207,7 @@
     const candidateCostHigh = candidateCost + candidateCostHalf;
     const judgeInput = judgeLength.input_overhead_mean + visible(m1Length, "mean") + visible(m2Length, "mean");
     const judgeCost = calls * tokenCost(judge, judgeInput, judgeLength.output_mean);
-    const judgeCostHalf = Z90 * Math.sqrt(calls) * tokenCostSd(
+    const judgeCostHalf = Z95 * Math.sqrt(calls) * tokenCostSd(
       judge, Math.hypot(
         judgeLength.input_overhead_sd, visible(m1Length, "sd"), visible(m2Length, "sd"),
       ), judgeLength.output_sd,
@@ -202,25 +215,29 @@
     const judgeCostLow = Math.max(0, judgeCost - judgeCostHalf);
     const judgeCostHigh = judgeCost + judgeCostHalf;
     const p1 = candidateAccuracy(m1, data), p2 = candidateAccuracy(m2, data);
-    const gap = Math.abs(m1.theta - m2.theta);
-    const oversight = (m1.theta + m2.theta) / 2 - judge.theta;
-    const strongerSign = m1.theta >= m2.theta ? 1 : -1;
+    const deltaEci = Math.abs(m1.eci - m2.eci) / Math.min(m1.eci, m2.eci);
+    const strongerSign = m1.eci >= m2.eci ? 1 : -1;
     const lengthDifference = strongerSign * (
       Math.log1p(4 * visible(m1Length, "mean")) - Math.log1p(4 * visible(m2Length, "mean"))
     );
     const fit = data.accuracy_glm;
-    const x = [sensitivity * gap, sensitivity * gap * oversight, lengthDifference];
-    const eta = fit.coefficients.capability_gap * x[0] +
-      fit.coefficients.gap_x_oversight * x[1] + fit.coefficients.length_difference * x[2];
+    const x = [0, lengthDifference];
+    const eta = logit(judgeAccuracy) / 0.1 * deltaEci +
+      fit.coefficients.length_difference * lengthDifference;
     const se = Math.sqrt(quadraticVariance(x, fit.covariance));
     const accuracy = sigmoid(eta);
-    const accuracyHalf = Z90 * Math.sqrt(
-      (accuracy * (1 - accuracy) * se) ** 2 + accuracy * (1 - accuracy) / calls,
+    const judgeVariance = (
+      accuracy * (1 - accuracy) * deltaEci * Number(fit.judge_gap_sd || 0)
+    ) ** 2;
+    const pairVariance = Number(fit.pair_residual_sd || 0) ** 2;
+    const accuracyHalf = Z95 * Math.sqrt(
+      (accuracy * (1 - accuracy) * se) ** 2 + judgeVariance + pairVariance +
+      accuracy * (1 - accuracy) / calls,
     );
     const mutuallyCorrect = row.items * p1.mean * p2.mean;
-    const mutualHalf = Z90 * Math.sqrt(row.items * p1.mean * p2.mean * (1 - p1.mean * p2.mean));
+    const mutualHalf = Z95 * Math.sqrt(row.items * p1.mean * p2.mean * (1 - p1.mean * p2.mean));
     return {
-      ...row, capability_gap: gap, oversight,
+      ...row, delta_eci: deltaEci,
       judging_accuracy: accuracy,
       judging_accuracy_low: Math.max(0, accuracy - accuracyHalf),
       judging_accuracy_high: Math.min(1, accuracy + accuracyHalf),
@@ -239,33 +256,25 @@
     };
   }
 
-  function gapCurve(data, catalogue, rows, sensitivity, condition) {
+  function gapCurve(data, catalogue, rows, judgeAccuracy, condition) {
     if (!rows.length) throw new Error("The selected design has no comparisons");
-    const design = rows.map((row) => {
-      const judge = modelMetadata("judge", row, catalogue);
-      const m1 = modelMetadata("m1", row, catalogue);
-      const m2 = modelMetadata("m2", row, catalogue);
-      return {oversight: (m1.theta + m2.theta) / 2 - judge.theta, calls: row.items * row.repeats};
-    });
-    const totalCalls = design.reduce((sum, row) => sum + row.calls, 0);
+    if (!(judgeAccuracy >= 0.5 && judgeAccuracy < 1)) {
+      throw new Error("judge accuracy must be between 50% and 100%");
+    }
+    const judgeCount = new Set(rows.map((row) => row.judge)).size;
+    const pairCount = new Set(rows.map((row) => [row.m1, row.m2].sort().join("\u0000"))).size;
+    const totalCalls = rows.reduce((sum, row) => sum + row.items * row.repeats, 0);
     const fit = data.accuracy_glm;
-    const x = Array.from({length: 31}, (_, i) => i / 10);
+    const x = Array.from({length: 31}, (_, i) => i / 100);
     const values = x.map((gap) => {
-      const predictions = design.map((row) => {
-        const predictors = [sensitivity * gap, sensitivity * gap * row.oversight, 0];
-        const eta = fit.coefficients.capability_gap * predictors[0] +
-          fit.coefficients.gap_x_oversight * predictors[1];
-        return {p: sigmoid(eta), predictors, calls: row.calls};
-      });
-      const mean = predictions.reduce((sum, row) => sum + row.calls * row.p, 0) / totalCalls;
-      const gradient = [0, 1, 2].map((index) => predictions.reduce(
-        (sum, row) => sum + row.calls * row.p * (1 - row.p) * row.predictors[index], 0,
-      ) / totalCalls);
-      const modelVariance = quadraticVariance(gradient, fit.covariance);
-      const samplingVariance = predictions.reduce(
-        (sum, row) => sum + row.calls * row.p * (1 - row.p), 0,
-      ) / totalCalls ** 2;
-      const half = Z90 * Math.sqrt(modelVariance + samplingVariance);
+      const mean = sigmoid(logit(judgeAccuracy) / 0.1 * gap);
+      const judgeVariance = (
+        mean * (1 - mean) * gap * Number(fit.judge_gap_sd || 0)
+      ) ** 2 / judgeCount;
+      const pairVariance = Number(fit.pair_residual_sd || 0) ** 2 / pairCount;
+      const half = Z95 * Math.sqrt(
+        judgeVariance + pairVariance + mean * (1 - mean) / totalCalls,
+      );
       return [mean, Math.max(0, mean - half), Math.min(1, mean + half)];
     });
     return {
@@ -275,7 +284,7 @@
     };
   }
 
-  const api = {estimateComparison, gapCurve, parseComparisons, sampleDesign};
+  const api = {estimateComparison, expectedOverlap, gapCurve, parseComparisons, sampleDesign};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.McCostCalculator = api;
 })(typeof window === "undefined" ? globalThis : window);
