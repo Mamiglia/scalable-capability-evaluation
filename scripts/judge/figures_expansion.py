@@ -32,11 +32,13 @@ from statistics import median
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
+from matplotlib.ticker import MaxNLocator
 from scipy.optimize import curve_fit
-from scipy.stats import beta as beta_dist
-from scipy.stats import t as t_dist
+from scipy.stats import beta as beta_dist, spearmanr, t as student_t, ttest_1samp
+from sklearn.isotonic import IsotonicRegression
 
 from judge.dataset import is_effort_variant, strip_answer
+from mc_cost.gpqa import model_family
 
 DATA = Path("interactive_viewer/data")
 MODEL_SET_CSV = Path("configs/comparisons/model_set.csv")
@@ -50,8 +52,7 @@ BENCHES = []       # series names, in dataset order (same bench pools across dat
 DIRS = {}          # series -> list of viewer dataset dirs
 GAP_AXIS = "eci"   # model-meta key the gap and pair orientation use
 GAP_LABEL = "capability gap (ECI)"
-EXCLUDE = set()    # lowercased name fragments; matching models are dropped from
-                   # every role, as answer models and as judges
+EXCLUDE = set()    # lowercased name fragments; matching answer models are dropped
 EXCLUDE_EXACT = set()  # whole lowercased names the reasoning filter dropped
 REASONING_MODE = "none"
 MIN_REASONING_CHARS = 0
@@ -108,7 +109,7 @@ def models_without_reasoning(dirs, suffixes):
 
 
 def series_name(dataset):
-    if dataset == "gpqa-pilot-rd2":
+    if dataset == "gpqa-pilot-rd2" or dataset.endswith("-gpqa"):
         return "gpqa"
     s = dataset.replace("data-expansion-", "")
     if s.startswith("aime"):
@@ -170,11 +171,14 @@ def load():
         idx = json.load(open(d / "index.json"))
         for m, meta in idx["models"].items():
             (dropped if excluded(m) else kept).add(m)
-            models.setdefault(s, {}).setdefault(m, meta)
+            saved = models.setdefault(s, {}).setdefault(m, dict(meta))
+            for key, value in meta.items():
+                if saved.get(key) in (None, "") and value not in (None, ""):
+                    saved[key] = value
         for r in idx["runs"]:
             if r.get("frac", "full") != "full":
                 continue
-            if excluded(r["major"]) or excluded(r["minor"]) or excluded(r["judge"]):
+            if excluded(r["major"]) or excluded(r["minor"]):
                 continue
             r = dict(r)
             if REASONING_MODE == "per_transcript" and not r["is_self"]:
@@ -194,6 +198,8 @@ def load():
             r["eval"] = s
             r["gap"] = abs(a - b) if a is not None and b is not None else None
             r["rel_gap_months"] = _month_gap(M.get("release"), N.get("release"))
+            r["_major_meta"], r["_minor_meta"] = M, N
+            r["_judge_meta"] = idx["models"].get(r["judge"])
             # ECI gap kept alongside the gap axis; score re-aligned to the
             # ECI-stronger member where the two orderings disagree
             ea, eb = M.get("eci"), N.get("eci")
@@ -210,13 +216,12 @@ def load():
 
 
 def assert_nothing_excluded_plotted(rows):
-    """Stop the run if an excluded name reached the answer models or the judges."""
+    """Stop the run if an excluded name reached the answer-model pool."""
     members = {m for r in rows for m in (r["major"], r["minor"])}
-    judges = set(JUDGE_ORDER) | {r["judge"] for r in rows}
-    for role, names in (("answer models", members), ("judges", judges)):
-        bad = sorted(n for n in names if excluded(n))
-        assert not bad, f"excluded names reached the plotted {role}: {bad}"
-        print(f"plotted {role}: {len(names)}, none matching {sorted(EXCLUDE) or 'nothing'}")
+    bad = sorted(n for n in members if excluded(n))
+    assert not bad, f"excluded names reached the plotted answer models: {bad}"
+    print(f"plotted answer models: {len(members)}, none matching {sorted(EXCLUDE) or 'nothing'}")
+    print(f"plotted judges: {len({r['judge'] for r in rows})} (answer-model exclusions do not apply)")
 
 
 def _month_gap(a, b):
@@ -258,6 +263,8 @@ def style(ax):
     ax.set_axisbelow(True)
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
+    for s in ("left", "bottom"):
+        ax.spines[s].set_position(("outward", 5))
 
 
 def save(fig, out, name, dpi=150):
@@ -311,7 +318,6 @@ def fig_model_accuracy(models, out):
     save(fig, out, "0_model_accuracy")
 
 
-GAP_CURVE_BINS = 4       # gap bins behind the judges-averaged panel
 MANUSCRIPT_DPI = 300
 MEAN_COLOUR = "#222"     # neutral: the palette already encodes judge identity
 GAP_CURVE_RC = {"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
@@ -319,7 +325,7 @@ GAP_CURVE_RC = {"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
 
 
 def _gap_curve(ax, rows, key, series, colors, fit=True):
-    """Per-run scatter plus one sigmoid fit per series."""
+    """Per-run scatter plus a sigmoid fit or connected empirical series."""
     style(ax)
     ax.axhline(0.5, ls="--", c="#8a8a86", lw=0.8)
     for s in series:
@@ -331,51 +337,320 @@ def _gap_curve(ax, rows, key, series, colors, fit=True):
         ys = np.array([r["score"] for r in rs], float)
         ns = np.array([max(r["n_items"], 1) for r in rs], float)
         ax.scatter(xs, ys, s=3, color=colors[s], alpha=0.35, linewidths=0)
-        if fit and len(rs) >= 4:
+        if not fit:
+            order = np.argsort(xs)
+            ax.plot(xs[order], ys[order], color=colors[s], lw=1, marker="o", ms=2)
+        elif len(rs) >= 4:
             f = fit_sigmoid(xs, ys, ns)
             if f:
                 gx = np.linspace(min(xs.min(), 0), xs.max(), 100)
                 ax.plot(gx, sigmoid(gx, *f), color=colors[s], lw=1)
 
 
-def _judge_mean_band(ax, rows, key):
+def _gap_bin_edges(gaps, reference=None):
+    """Automatic bins, optionally reusing a wider reference data set's width."""
+    gaps = np.unique(np.asarray(gaps, float))
+    reference = gaps if reference is None else np.unique(np.asarray(reference, float))
+    edges = np.histogram_bin_edges(reference, bins="auto")
+    used = np.flatnonzero((edges[:-1] <= gaps.max()) & (edges[1:] >= gaps.min()))
+    return edges[used[0]:used[-1] + 2]
+
+
+def _bootstrap_mean_ci(rates, draws=10_000):
+    """Deterministic percentile CI over judges, bounded by observed rates."""
+    rates = np.asarray(rates, float)
+    samples = rates[np.random.default_rng(0).integers(len(rates), size=(draws, len(rates)))]
+    return np.quantile(samples.mean(axis=1), [0.025, 0.975])
+
+
+def _judge_mean_band(ax, rows, key, reference_gaps=None, include_self=False,
+                     per_judge_colors=None, fit_mean=False):
     """Accuracy binned along the gap axis, averaged over judges.
 
     Judges are the replication unit: per-judge rate within each bin, then mean
-    and t-based 95% CI across judges. Returns how many judges contributed.
+    and percentile-bootstrap 95% CI across judges. Returns how many judges contributed.
     """
     style(ax)
     ax.axhline(0.5, ls="--", c="#8a8a86", lw=0.8)
-    rs = [r for r in rows if not r["is_self"] and r.get(key) is not None
-          and r["score"] is not None]
+    rs = [r for r in rows if (include_self or not r["is_self"])
+          and r.get(key) is not None and r["score"] is not None]
     if not rs:
         return 0
-    edges = np.linspace(min(r[key] for r in rs), max(r[key] for r in rs), GAP_CURVE_BINS + 1)
-    cx, mu, lo, hi, judges = [], [], [], [], set()
-    for i, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
-        last = i == GAP_CURVE_BINS - 1
+    cx, mu, lo, hi, fit_weights, judges = [], [], [], [], [], set()
+    per_judge_points = defaultdict(list)
+
+    def append_bin(bin_rows, x):
         per_judge = defaultdict(lambda: [0.0, 0.0])
-        for r in rs:
-            inside = a <= r[key] <= b if last else a <= r[key] < b
-            if inside:
-                w = max(r["n_items"], 1)
-                per_judge[r["judge"]][0] += r["score"] * w
-                per_judge[r["judge"]][1] += w
-        rates = np.array([c / n for c, n in per_judge.values()])
+        for r in bin_rows:
+            w = max(r["n_items"], 1)
+            per_judge[r["judge"]][0] += r["score"] * w
+            per_judge[r["judge"]][1] += w
+        rate_by_judge = {j: c / n for j, (c, n) in per_judge.items()}
+        rates = np.array(list(rate_by_judge.values()))
         if len(rates) < 2:
-            continue
-        judges |= set(per_judge)
-        half = t_dist.ppf(0.975, len(rates) - 1) * float(rates.std(ddof=1)) / np.sqrt(len(rates))
-        cx.append((a + b) / 2)
+            return
+        judges.update(per_judge)
+        for judge, rate in rate_by_judge.items():
+            per_judge_points[judge].append((x, rate))
+        cx.append(x)
         mu.append(float(rates.mean()))
-        lo.append(mu[-1] - half)
-        hi.append(mu[-1] + half)
+        fit_weights.append(len(rates))
+        a_ci, b_ci = _bootstrap_mean_ci(rates)
+        lo.append(a_ci)
+        hi.append(b_ci)
+
+    if include_self:
+        append_bin([r for r in rs if r["is_self"]], 0.0)
+    nonself = [r for r in rs if not r["is_self"]]
+    if nonself:
+        edges = _gap_bin_edges([r[key] for r in nonself], reference=reference_gaps)
+        for i, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
+            last = i == len(edges) - 2
+            bin_rows = [r for r in nonself
+                        if (a <= r[key] <= b if last else a <= r[key] < b)]
+            if bin_rows:
+                append_bin(bin_rows, float(np.mean(np.unique([r[key] for r in bin_rows]))))
     ax.fill_between(cx, lo, hi, color=MEAN_COLOUR, alpha=0.18, linewidth=0)
-    ax.plot(cx, mu, color=MEAN_COLOUR, lw=1, marker="o", ms=3)
+    for judge, points in per_judge_points.items():
+        if per_judge_colors is None or judge not in per_judge_colors:
+            continue
+        xs, ys = zip(*points)
+        color = per_judge_colors[judge]
+        ax.plot(xs, ys, color=color, lw=0.7, marker="o", ms=2, alpha=0.8,
+                clip_on=False, zorder=2)
+        if xs[0] == 0:
+            ax.scatter([0], [ys[0]], s=12, facecolors="white", edgecolors=color,
+                       linewidths=0.6, clip_on=False, zorder=4)
+    fitted = fit_sigmoid(np.asarray(cx), np.asarray(mu), np.asarray(fit_weights)) \
+        if fit_mean and len(cx) >= 4 else None
+    if fitted:
+        ax.scatter(cx, mu, color=MEAN_COLOUR, s=9, clip_on=False, zorder=4)
+        gx = np.linspace(min(cx), max(cx), 100)
+        ax.plot(gx, sigmoid(gx, *fitted), color=MEAN_COLOUR, lw=1.2, zorder=3)
+    else:
+        ax.plot(cx, mu, color=MEAN_COLOUR, lw=1.2, marker="o", ms=3,
+                clip_on=False, zorder=3)
     return len(judges)
 
 
-def _gap_curve_panels(rows, key, xlab, series, colors, labelfn, left_tag, self_pairs=True):
+def _zero_gap_self_comparison(rows):
+    """Matched per-judge fitted accuracy at gap zero and observed self accuracy."""
+    result = []
+    judges = sorted({r["judge"] for r in rows if r["eval"] == "gpqa"})
+    for judge in judges:
+        cross = [r for r in rows if r["eval"] == "gpqa" and r["judge"] == judge
+                 and not r["is_self"] and r.get("gap") is not None and r["score"] is not None]
+        selfs = [r for r in rows if r["eval"] == "gpqa" and r["judge"] == judge
+                 and r["is_self"] and r["score"] is not None]
+        if len({r["gap"] for r in cross}) < 4 or not selfs:
+            continue
+        fit = fit_sigmoid(
+            np.asarray([r["gap"] for r in cross]),
+            np.asarray([r["score"] for r in cross]),
+            np.asarray([max(r["n_items"], 1) for r in cross]))
+        if fit is None:
+            continue
+        total = sum(max(r["n_items"], 1) for r in selfs)
+        observed = sum(r["score"] * max(r["n_items"], 1) for r in selfs) / total
+        fitted = float(sigmoid(0.0, *fit))
+        result.append({"judge": judge, "fitted_gap0": fitted,
+                       "self_accuracy": observed, "delta": fitted - observed,
+                       "n_self_runs": len(selfs)})
+    return result
+
+
+def _family_gap_cells(rows, reference_gaps):
+    """Within/across-family rates in matched judge × capability-gap bins."""
+    cross = [r for r in rows if r["eval"] == "gpqa" and not r["is_self"]
+             and r.get("gap") is not None and r["score"] is not None]
+    within = [r for r in cross if model_family(r["major"]) == model_family(r["minor"])]
+    if not within:
+        return []
+    common = [r for r in cross if r["gap"] <= max(r["gap"] for r in within)]
+    edges = _gap_bin_edges([r["gap"] for r in common], reference=reference_gaps)
+    cells = []
+    for i, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
+        last = i == len(edges) - 2
+        block = [r for r in common
+                 if (a <= r["gap"] <= b if last else a <= r["gap"] < b)]
+        if not block:
+            continue
+        x = float(np.mean(np.unique([r["gap"] for r in block])))
+        tally = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0]))
+        for r in block:
+            kind = ("within" if model_family(r["major"]) == model_family(r["minor"])
+                    else "across")
+            w = max(r["n_items"], 1)
+            tally[r["judge"]][kind][0] += r["score"] * w
+            tally[r["judge"]][kind][1] += w
+        for judge, rates in tally.items():
+            if not {"within", "across"} <= set(rates):
+                continue
+            w = rates["within"][0] / rates["within"][1]
+            a_rate = rates["across"][0] / rates["across"][1]
+            cells.append({"bin": i, "gap": x, "judge": judge, "within": w,
+                          "across": a_rate, "delta": w - a_rate})
+    return sorted(cells, key=lambda r: (r["bin"], r["judge"]))
+
+
+def _family_delta_slopes(cells):
+    """Linear change in within-minus-across accuracy across bins, per judge."""
+    slopes = []
+    for judge in sorted({r["judge"] for r in cells}):
+        rs = [r for r in cells if r["judge"] == judge]
+        if len({r["gap"] for r in rs}) < 2:
+            continue
+        slope = float(np.polyfit([r["gap"] for r in rs], [r["delta"] for r in rs], 1)[0])
+        slopes.append({"judge": judge, "slope": slope, "n_bins": len(rs)})
+    return slopes
+
+
+def _family_judge_means(cells):
+    """Give every judge equal weight in the overall matched family contrast."""
+    means = []
+    for judge in sorted({r["judge"] for r in cells}):
+        values = [r["delta"] for r in cells if r["judge"] == judge]
+        means.append({"judge": judge, "delta": float(np.mean(values)),
+                      "n_bins": len(values)})
+    return means
+
+
+def _fit_forecast_threshold(points):
+    """Opponent accuracy where a judge is equally likely to choose the target."""
+    ordered = sorted(points)
+    x = np.asarray([p[0] for p in ordered], float)
+    y = np.asarray([p[1] for p in ordered], float)
+    w = np.asarray([p[2] for p in ordered], float)
+    if len(x) < 3:
+        return None
+    fitted = IsotonicRegression(increasing=False).fit_transform(x, y, sample_weight=w)
+    if fitted.min() > 0.5 or fitted.max() < 0.5:
+        return None
+    equal = np.flatnonzero(np.isclose(fitted, 0.5))
+    if len(equal):
+        return float(np.mean(x[equal]))
+    above, below = np.flatnonzero(fitted > 0.5), np.flatnonzero(fitted < 0.5)
+    if not len(above) or not len(below) or above[-1] >= below[0]:
+        return None
+    i, j = above[-1], below[0]
+    return float(x[i] + (0.5 - fitted[i]) * (x[j] - x[i])
+                 / (fitted[j] - fitted[i]))
+
+
+def _forecast_rank_cells(rows, min_opponents=4):
+    """Held-out target rank estimates from each judge's opponent comparisons."""
+    pool, grouped = {}, {}
+    for r in rows:
+        if r.get("eval") != "gpqa" or r["is_self"] or r["score"] is None:
+            continue
+        for model, meta in ((r["major"], r["_major_meta"]),
+                            (r["minor"], r["_minor_meta"])):
+            if meta.get("accuracy") is not None:
+                pool[model] = float(meta["accuracy"])
+        judge_release = (r.get("_judge_meta") or {}).get("release")
+        weight = max(1, 2 * r["n_items"] * (1 - r["noanswer_rate"]))
+        for target, opponent, target_meta, opponent_meta, preference in (
+            (r["major"], r["minor"], r["_major_meta"], r["_minor_meta"], r["score"]),
+            (r["minor"], r["major"], r["_minor_meta"], r["_major_meta"], 1 - r["score"]),
+        ):
+            gap = _month_gap(target_meta.get("release"), judge_release)
+            actual = target_meta.get("accuracy")
+            opponent_accuracy = opponent_meta.get("accuracy")
+            if (target == r["judge"] or gap is None or gap <= 0
+                    or actual is None or opponent_accuracy is None):
+                continue
+            cell = grouped.setdefault((r["judge"], target), {
+                "actual_accuracy": float(actual), "release_gap_months": gap,
+                "opponents": defaultdict(lambda: [0.0, 0.0, 0.0]),
+            })
+            edge = cell["opponents"][opponent]
+            edge[0] += preference * weight
+            edge[1] += weight
+            edge[2] = float(opponent_accuracy)
+
+    estimates = []
+    for (judge, target), cell in grouped.items():
+        points = [(accuracy, chosen / weight, weight)
+                  for chosen, weight, accuracy in cell["opponents"].values()]
+        actual = cell["actual_accuracy"]
+        n_stronger = sum(accuracy > actual for accuracy, _, _ in points)
+        n_weaker = sum(accuracy < actual for accuracy, _, _ in points)
+        if len(points) < min_opponents or not n_stronger or not n_weaker:
+            continue
+        estimated = _fit_forecast_threshold(points)
+        if estimated is None:
+            continue
+        comparison_pool = [accuracy for model, accuracy in pool.items() if model != target]
+
+        def rank(accuracy):
+            return 1 + sum(a > accuracy for a in comparison_pool) + \
+                   0.5 * sum(np.isclose(a, accuracy) for a in comparison_pool)
+
+        actual_rank, estimated_rank = rank(actual), rank(estimated)
+        absolute_error = abs(estimated_rank - actual_rank)
+        loo = []
+        for i in range(len(points)):
+            threshold = _fit_forecast_threshold(points[:i] + points[i + 1:])
+            if threshold is not None:
+                loo.append(abs(rank(threshold) - actual_rank))
+        estimates.append({
+            "judge": judge, "target": target,
+            "release_gap_months": cell["release_gap_months"],
+            "n_opponents": len(points), "n_stronger": n_stronger,
+            "n_weaker": n_weaker, "estimated_accuracy": estimated,
+            "actual_accuracy": actual, "estimated_rank": estimated_rank,
+            "actual_rank": actual_rank, "rank_error": estimated_rank - actual_rank,
+            "absolute_rank_error": absolute_error,
+            "loo_lo": min(loo) if loo else np.nan,
+            "loo_hi": max(loo) if loo else np.nan,
+        })
+    return sorted(estimates, key=lambda r: (r["release_gap_months"], r["judge"], r["target"]))
+
+
+def _mean_t_ci(values, min_n=3):
+    """Mean and t-based 95% CI over replication units above the requested N."""
+    values = np.asarray(values, float)
+    mean = float(values.mean())
+    if len(values) < min_n:
+        return mean, np.nan, np.nan
+    sem = float(values.std(ddof=1) / np.sqrt(len(values)))
+    half = float(student_t.ppf(0.975, len(values) - 1) * sem)
+    return mean, mean - half, mean + half
+
+
+def _write_csv(path, rows):
+    if not rows:
+        return
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_model_inventory(rows, models, out):
+    """Write the GPQA judge/evaluated-model roster in CSV and Markdown."""
+    gpqa = [r for r in rows if r["eval"] == "gpqa"]
+    judges = {r["judge"] for r in gpqa}
+    evaluated = {m for r in gpqa for m in (r["major"], r["minor"])}
+    inventory = []
+    for model in sorted(judges | evaluated):
+        accuracy = models.get("gpqa", {}).get(model, {}).get("accuracy")
+        inventory.append({
+            "model": model,
+            "used_as_judge": "Y" if model in judges else "N",
+            "evaluated": "Y" if model in evaluated else "N",
+            "gpqa_accuracy": f"{accuracy:.3f}" if accuracy is not None else "—",
+        })
+    _write_csv(out / "0_model_inventory.csv", inventory)
+    header = "| Model | Used as judge | Evaluated | GPQA accuracy |\n|---|:---:|:---:|---:|\n"
+    body = "".join(f"| {r['model']} | {r['used_as_judge']} | {r['evaluated']} | "
+                   f"{r['gpqa_accuracy']} |\n" for r in inventory)
+    (out / "0_model_inventory.md").write_text(header + body)
+
+
+def _gap_curve_panels(rows, key, xlab, series, colors, labelfn, left_tag,
+                      self_pairs=True, fit=True, reference_gaps=None,
+                      mean_self_pairs=False):
     """Per-series panel beside the judges-averaged panel, one legend below both."""
     present = [s for s in series
                if any(r["_series"] == s and not r["is_self"] and r.get(key) is not None
@@ -385,19 +660,20 @@ def _gap_curve_panels(rows, key, xlab, series, colors, labelfn, left_tag, self_p
     if len(drawn) < len(rows):
         print(f"    {len(rows) - len(drawn)} runs outside the plotted series, skipped")
     fig, axs = plt.subplots(1, 2, figsize=(5.5, 3.4), sharex=True, sharey=True)
-    _gap_curve(axs[0], drawn, key, present, colors)
+    _gap_curve(axs[0], drawn, key, present, colors, fit=fit)
     if self_pairs:
         for r in drawn:
             if r["is_self"] and r["score"] is not None:
                 axs[0].scatter([0], [r["score"]], marker="o", facecolors="none",
                                edgecolors=colors.get(r["_series"], "#999"),
                                s=12, linewidths=0.6, zorder=5)
-    n_judges = _judge_mean_band(axs[1], drawn, key)
+    n_judges = _judge_mean_band(axs[1], drawn, key, reference_gaps=reference_gaps,
+                                include_self=mean_self_pairs)
     for ax, tag in zip(axs, (left_tag, "judges averaged")):
         ax.set_xlabel(xlab)
         ax.set_ylim(0, 1.02)
         ax.set_yticks([0, 0.5, 1])
-        ax.locator_params(axis="x", nbins=5)
+        ax.locator_params(axis="x", nbins=4)
         ax.set_title(tag, fontsize=7, loc="left", color="#555")
     axs[0].set_ylabel("judge accuracy")
     h = [plt.Line2D([], [], color=colors[s], lw=1, label=labelfn(s)) for s in present]
@@ -408,7 +684,7 @@ def _gap_curve_panels(rows, key, xlab, series, colors, labelfn, left_tag, self_p
           plt.Line2D([], [], color=MEAN_COLOUR, lw=1, marker="o", ms=3,
                      label="mean over judges"),
           plt.Rectangle((0, 0), 1, 1, color=MEAN_COLOUR, alpha=0.18,
-                        label="95% CI over judges")]
+                        label="95% bootstrap CI over judges")]
     fig.legend(handles=h, loc="lower center", ncol=2, frameon=False,
                handlelength=1.4, columnspacing=1.2, handletextpad=0.5)
     legend_rows = (len(h) + 1) // 2
@@ -416,34 +692,68 @@ def _gap_curve_panels(rows, key, xlab, series, colors, labelfn, left_tag, self_p
     return fig, n_judges
 
 
+def _judge_gap_curve(rows, key, xlab, series, colors, labelfn):
+    """One panel: binned judge lines over the fitted judge mean and CI."""
+    present = [s for s in series
+               if any(r["_series"] == s and not r["is_self"]
+                      and r.get(key) is not None and r["score"] is not None for r in rows)]
+    drawn = [r for r in rows if r["_series"] in present]
+    if len(drawn) < len(rows):
+        print(f"    {len(rows) - len(drawn)} runs outside the plotted series, skipped")
+    fig, ax = plt.subplots(figsize=(1.8, 4.2))
+    n_judges = _judge_mean_band(
+        ax, drawn, key, include_self=True,
+        per_judge_colors=colors, fit_mean=True)
+    values = [r[key] for r in drawn if not r["is_self"] and r.get(key) is not None]
+    xmin, xmax = min(0, min(values)), max(0, max(values))
+    ticks = MaxNLocator(nbins=4, steps=[1, 2, 2.5, 5, 10]).tick_values(xmin, xmax)
+    ax.set(xlabel=xlab[:1].upper() + xlab[1:], ylabel="Judge accuracy",
+           xlim=(ticks[0], ticks[-1]), ylim=(0, 1))
+    ax.set_xticks(ticks)
+    ax.set_yticks([0, 0.5, 1])
+    compact = lambda label: (label.replace(" A3B Instruct", "")
+                             .replace(" Flash-Lite", " FL")
+                             .replace(" Instruct", ""))
+    handles = [plt.Line2D([], [], color=colors[s], lw=0.7, marker="o", ms=2,
+                          label=compact(labelfn(s))) for s in present]
+    handles += [
+        plt.Line2D([], [], ls="", marker="o", mfc="white", mec="#555", ms=4,
+                   label="self-pairs"),
+        plt.Line2D([], [], ls="--", color="#8a8a86", lw=0.8, label="chance"),
+        plt.Line2D([], [], color=MEAN_COLOUR, lw=1.2, marker="o", ms=3,
+                   label="mean"),
+        plt.Rectangle((0, 0), 1, 1, color=MEAN_COLOUR, alpha=0.18,
+                      label="95% CI"),
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=1, frameon=False,
+               handlelength=1.4, handletextpad=0.5)
+    fig.subplots_adjust(left=0.31, right=0.96, bottom=0.66, top=0.97)
+    return fig, n_judges
+
+
 def fig_gap_curves(rows, models, out):
     # 2a by judge (pooled evals), 2a-eval by eval; same pair by release gap (2b)
-    specs = [("2a_gap_curve_by_capability", "gap", GAP_LABEL),
-             ("2b_gap_curve_by_release", "rel_gap_months", "release gap (months)")]
+    gap_label = ("ECI gap" if GAP_AXIS == "eci" else
+                 "GPQA accuracy gap" if BENCHES == ["gpqa"] else "Accuracy gap")
+    specs = [("2a_gap_curve_by_capability", "gap", gap_label),
+             ("2b_gap_curve_by_release", "rel_gap_months", "Release gap (months)")]
     if GAP_AXIS != "eci":
-        specs.append(("2a_gap_curve_by_capability_eci", "eci_gap", "capability gap (ECI)"))
-    ecis = {}
-    for j in JUDGE_ORDER:
-        if j in JUDGE_ONLY:
-            ecis[j] = JUDGE_ONLY[j][1]
-        else:
-            m = models.get("gpqa", {}).get(j) or next((mm[j] for mm in models.values() if j in mm), {})
-            ecis[j] = m.get("eci")
-    ranked = sorted((j for j, e in ecis.items() if e), key=lambda j: ecis[j])
-    jcolors = {j: plt.cm.viridis(i / max(len(ranked) - 1, 1)) for i, j in enumerate(ranked)}
-    jcolors |= {j: "#999" for j, e in ecis.items() if not e}
+        specs.append(("2a_gap_curve_by_capability_eci", "eci_gap", "ECI gap"))
     with plt.rc_context(GAP_CURVE_RC):
         for name, key, xlab in specs:
             for split, series, colors, labelfn, suffix in [
-                ("judge", JUDGE_ORDER, jcolors, lambda j: jlabel(models, j), ""),
+                ("judge", JUDGE_ORDER, JUDGE_COLORS, lambda j: jlabel(models, j), ""),
                 ("eval", list(EVAL_COLORS), EVAL_COLORS, lambda e: e, "_by_eval"),
             ]:
                 rs = [dict(r, _series=(r["judge"] if split == "judge" else r["eval"]),
                            score=(r["score_eci"] if key == "eci_gap" else r["score"]))
                       for r in rows]
-                fig, n_judges = _gap_curve_panels(
-                    rs, key, xlab, series, colors, labelfn,
-                    "per judge" if split == "judge" else "per eval")
+                if split == "judge":
+                    fig, n_judges = _judge_gap_curve(
+                        rs, key, xlab, series, colors, labelfn)
+                else:
+                    fig, n_judges = _gap_curve_panels(
+                        rs, key, xlab, series, colors, labelfn, "per eval")
                 save(fig, out, name + suffix, dpi=MANUSCRIPT_DPI)
                 print(f"    CI unit = judges, n = {n_judges}")
 
@@ -456,6 +766,280 @@ def fig_weak_judge(rows, models, out):
                                           self_pairs=False)
         save(fig, out, "2d_gap_curve_weak_judge_by_eval", dpi=MANUSCRIPT_DPI)
         print(f"    CI unit = judges, n = {n_judges}")
+
+
+def _oversight_rows(rows, models):
+    """GPQA pairs with a newer, stronger-than-judge focal and older counterpart."""
+    gpqa = models.get("gpqa", {})
+    selected = []
+    for r in rows:
+        if r["eval"] != "gpqa" or r["is_self"] or r["score"] is None:
+            continue
+        a = r.get("_major_meta") or gpqa.get(r["major"])
+        b = r.get("_minor_meta") or gpqa.get(r["minor"])
+        judge = r.get("_judge_meta") or gpqa.get(r["judge"])
+        if any(m is None or m.get("accuracy") is None or not m.get("release")
+               for m in (a, b, judge)):
+            continue
+
+        def qualifies(focal, other):
+            return (focal["accuracy"] > judge["accuracy"]
+                    and _month_gap(focal["release"], judge["release"]) > 0
+                    and _month_gap(focal["release"], other["release"]) > 0)
+
+        if (a["accuracy"] == b["accuracy"]
+                or not (qualifies(a, b) or qualifies(b, a))):
+            continue
+        selected.append(dict(r, gap=abs(a["accuracy"] - b["accuracy"]),
+                             score=r["score"] if a["accuracy"] > b["accuracy"]
+                             else 1 - r["score"], _series=r["judge"]))
+    return selected
+
+
+def fig_oversight(rows, models, out):
+    rs = _oversight_rows(rows, models)
+    if not rs:
+        print("  SKIPPED 2e_gap_curve_oversight_by_judge: no eligible runs")
+        return
+    present = {r["judge"] for r in rs}
+    controls = [dict(r, gap=0.0, _series=r["judge"]) for r in rows
+                if r["eval"] == "gpqa" and r["is_self"] and r["score"] is not None
+                and r["judge"] in present]
+    judges = [j for j in JUDGE_ORDER if j in present] + sorted(present - set(JUDGE_ORDER))
+    colors = {j: JUDGE_COLORS.get(j, plt.cm.tab10(i % 10)) for i, j in enumerate(judges)}
+    labels = {m: meta.get("label", m) for m, meta in models.get("gpqa", {}).items()}
+    all_gpqa_gaps = [r["gap"] for r in rows if r["eval"] == "gpqa" and not r["is_self"]
+                     and r.get("gap") is not None and r["score"] is not None]
+    with plt.rc_context(GAP_CURVE_RC):
+        fig, ax = plt.subplots(figsize=(1.8, 4.2))
+        n_judges = _judge_mean_band(
+            ax, rs + controls, "gap", reference_gaps=all_gpqa_gaps,
+            include_self=True, per_judge_colors=colors, fit_mean=True)
+        ax.set(xlabel="GPQA accuracy gap", ylabel="Judge accuracy", ylim=(0, 1))
+        ax.set_yticks([0, 0.5, 1])
+        ax.set_xlim(0, 0.2)
+        ax.set_xticks([0, 0.1, 0.2])
+        compact = lambda label: (label.replace(" A3B Instruct", "")
+                                 .replace(" Flash-Lite", " FL")
+                                 .replace(" Instruct", ""))
+        handles = [plt.Line2D([], [], color=colors[j], lw=0.7, marker="o", ms=2,
+                              label=compact(labels.get(j, j))) for j in judges]
+        handles += [
+            plt.Line2D([], [], ls="", marker="o", mfc="white", mec="#555", ms=4,
+                       label="self-pairs"),
+            plt.Line2D([], [], ls="--", color="#8a8a86", lw=0.8, label="chance"),
+            plt.Line2D([], [], color=MEAN_COLOUR, lw=1.2, marker="o", ms=3,
+                       label="mean"),
+            plt.Rectangle((0, 0), 1, 1, color=MEAN_COLOUR, alpha=0.18,
+                          label="95% CI"),
+        ]
+        fig.legend(handles=handles, loc="lower center", ncol=1, frameon=False,
+                   handlelength=1.4, handletextpad=0.5)
+        fig.subplots_adjust(left=0.31, right=0.96, bottom=0.66, top=0.97)
+        save(fig, out, "2e_gap_curve_oversight_by_judge", dpi=MANUSCRIPT_DPI)
+    print(f"    oversight runs = {len(rs)}; self-pair controls = {len(controls)}; "
+          f"CI unit = judges, n = {n_judges}")
+
+
+def fig_zero_gap_self(rows, out):
+    comparisons = _zero_gap_self_comparison(rows)
+    if len(comparisons) < 3:
+        print("  SKIPPED 2g_zero_gap_vs_self_pair: fewer than 3 matched judges")
+        return
+    _write_csv(out / "2g_zero_gap_vs_self_pair.csv", comparisons)
+    fitted = np.asarray([r["fitted_gap0"] for r in comparisons])
+    observed = np.asarray([r["self_accuracy"] for r in comparisons])
+    deltas = fitted - observed
+    delta_mean, delta_lo, delta_hi = _mean_t_ci(deltas)
+    p = float(ttest_1samp(deltas, 0, alternative="greater").pvalue)
+
+    with plt.rc_context(GAP_CURVE_RC):
+        fig, ax = plt.subplots(figsize=(1.6, 3.8))
+        style(ax)
+        ax.axhline(0.5, ls="--", c="#8a8a86", lw=0.8)
+        judges = [j for j in JUDGE_ORDER if any(r["judge"] == j for r in comparisons)] + \
+                 sorted({r["judge"] for r in comparisons} - set(JUDGE_ORDER))
+        colors = {j: JUDGE_COLORS.get(j, plt.cm.tab10(i % 10))
+                  for i, j in enumerate(judges)}
+        for row in comparisons:
+            color = colors[row["judge"]]
+            ax.plot([0, 1], [row["fitted_gap0"], row["self_accuracy"]],
+                    color=color, lw=0.7, alpha=0.8, zorder=2)
+            ax.scatter([0], [row["fitted_gap0"]], color=color, s=7,
+                       clip_on=False, zorder=3)
+            ax.scatter([1], [row["self_accuracy"]], facecolors="white",
+                       edgecolors=color, s=9, linewidths=0.7, clip_on=False, zorder=3)
+        means = []
+        for x, values in enumerate((fitted, observed)):
+            mean, lo, hi = _mean_t_ci(values)
+            means.append(mean)
+            ax.errorbar(x, mean, yerr=[[mean - lo], [hi - mean]], fmt="none",
+                        color=MEAN_COLOUR, elinewidth=1, capsize=0,
+                        clip_on=False, zorder=4)
+        ax.plot([0, 1], means, color=MEAN_COLOUR, lw=1.6, marker="o", ms=3.5,
+                clip_on=False, zorder=5)
+        ax.set_xticks([0, 1], ["Fitted\ngap 0", "Self-pair"])
+        ax.set(xlim=(0, 1), ylabel="Judge accuracy", ylim=(0, 1))
+        ax.set_yticks([0, 0.5, 1])
+        handles = [plt.Line2D([], [], color=colors[j], lw=0.7, marker="o", ms=2,
+                              label=j) for j in judges]
+        handles += [
+            plt.Line2D([], [], ls="", marker="o", mfc="white", mec="#555", ms=4,
+                       label="self-pairs"),
+            plt.Line2D([], [], color=MEAN_COLOUR, lw=1.6, marker="o", ms=3.5,
+                       label="mean ± 95% CI"),
+        ]
+        fig.legend(handles=handles, loc="lower center", ncol=1, frameon=False,
+                   handlelength=1.3, handletextpad=0.4)
+        fig.tight_layout(rect=[0, 0.40, 1, 1])
+        save(fig, out, "2g_zero_gap_vs_self_pair", dpi=MANUSCRIPT_DPI)
+    print(f"    fitted gap-0 minus self-pair = {delta_mean:+.3f} "
+          f"[{delta_lo:+.3f}, {delta_hi:+.3f}], one-sided paired t p={p:.4g}, "
+          f"n={len(comparisons)} judges")
+
+
+def fig_family_gap(rows, out):
+    reference = [r["gap"] for r in rows if r["eval"] == "gpqa" and not r["is_self"]
+                 and r.get("gap") is not None and r["score"] is not None]
+    cells = _family_gap_cells(rows, reference)
+    if not cells:
+        print("  SKIPPED 2h_family_gap: no matched judge × gap-bin cells")
+        return
+    _write_csv(out / "2h_family_gap.csv", cells)
+    summaries = []
+    for bin_id in sorted({r["bin"] for r in cells}):
+        block = [r for r in cells if r["bin"] == bin_id]
+        entry = {"bin": bin_id, "gap": block[0]["gap"], "n": len(block), "rows": block}
+        for key in ("within", "across", "delta"):
+            entry[key], entry[f"{key}_lo"], entry[f"{key}_hi"] = _mean_t_ci(
+                [r[key] for r in block], min_n=2)
+        summaries.append(entry)
+
+    with plt.rc_context(GAP_CURVE_RC):
+        fig, (ax, dx) = plt.subplots(2, 1, figsize=(2.8, 3.8), sharex=True,
+                                     gridspec_kw={"height_ratios": [2, 1], "hspace": 0.12})
+        style(ax)
+        style(dx)
+        ax.axhline(0.5, ls="--", c="#8a8a86", lw=0.8)
+        dx.axhline(0, ls="--", c="#8a8a86", lw=0.8)
+        x = np.asarray([s["gap"] for s in summaries])
+        for key, color, label in (("across", "#777", "Across family"),
+                                  ("within", MEAN_COLOUR, "Within family")):
+            mean = np.asarray([s[key] for s in summaries])
+            lo = np.clip(np.asarray([s[f"{key}_lo"] for s in summaries]), 0, 1)
+            hi = np.clip(np.asarray([s[f"{key}_hi"] for s in summaries]), 0, 1)
+            ci = np.isfinite(lo) & np.isfinite(hi)
+            ax.errorbar(x[ci], mean[ci], yerr=[mean[ci] - lo[ci], hi[ci] - mean[ci]],
+                        fmt="none", color=color, elinewidth=0.8, capsize=0, alpha=0.7)
+            ax.plot(x, mean, color=color, lw=1, marker="o", ms=3, label=label)
+        delta = np.asarray([s["delta"] for s in summaries])
+        dlo = np.asarray([s["delta_lo"] for s in summaries])
+        dhi = np.asarray([s["delta_hi"] for s in summaries])
+        ci = np.isfinite(dlo) & np.isfinite(dhi)
+        dx.errorbar(x[ci], delta[ci], yerr=[delta[ci] - dlo[ci], dhi[ci] - delta[ci]],
+                    fmt="none", color=MEAN_COLOUR, elinewidth=0.8, capsize=0, alpha=0.7)
+        dx.plot(x, delta, color=MEAN_COLOUR, lw=1, marker="o", ms=3)
+        for s in summaries:
+            if s["n"] >= 3:
+                continue
+            ax.scatter([s["gap"] - 0.002] * s["n"], [r["across"] for r in s["rows"]],
+                       s=6, color="#777", alpha=0.65)
+            ax.scatter([s["gap"] + 0.002] * s["n"], [r["within"] for r in s["rows"]],
+                       s=6, color=MEAN_COLOUR, alpha=0.65)
+            dx.scatter([s["gap"]] * s["n"], [r["delta"] for r in s["rows"]],
+                       s=6, color=MEAN_COLOUR, alpha=0.65)
+        ax.set(ylabel="Judge accuracy", ylim=(0, 1))
+        ax.set_yticks([0, 0.5, 1])
+        dx.set(xlabel="GPQA accuracy gap", ylabel="Within − across",
+               xlim=(0, 0.3), ylim=(-0.4, 0.4))
+        dx.set_xticks([0, 0.1, 0.2, 0.3])
+        dx.set_yticks([-0.4, 0, 0.4])
+        handles = [
+            plt.Line2D([], [], color=MEAN_COLOUR, lw=1, marker="o", ms=3,
+                       label="Within family"),
+            plt.Line2D([], [], color="#777", lw=1, marker="o", ms=3,
+                       label="Across family"),
+            plt.Line2D([], [], color="#888", lw=0.8, label="95% CI over judges"),
+        ]
+        fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False,
+                   handlelength=1.3, columnspacing=1, handletextpad=0.4)
+        fig.subplots_adjust(left=0.30, right=0.97, top=0.98, bottom=0.23, hspace=0.1)
+        save(fig, out, "2h_family_gap", dpi=MANUSCRIPT_DPI)
+
+    judge_means = _family_judge_means(cells)
+    mean, lo, hi = _mean_t_ci([r["delta"] for r in judge_means])
+    p = float(ttest_1samp([r["delta"] for r in judge_means], 0).pvalue)
+    print(f"    judge-balanced within-across difference = {mean:+.3f} "
+          f"[{lo:+.3f}, {hi:+.3f}], two-sided t p={p:.4g}, "
+          f"n={len(judge_means)} judges")
+    slopes = _family_delta_slopes(cells)
+    if len(slopes) >= 3:
+        mean, lo, hi = _mean_t_ci([r["slope"] for r in slopes])
+        p = float(ttest_1samp([r["slope"] for r in slopes], 0).pvalue)
+        print(f"    within-across delta slope per 0.1 gap = {mean / 10:+.3f} "
+              f"[{lo / 10:+.3f}, {hi / 10:+.3f}], "
+              f"two-sided t p={p:.4g}, n={len(slopes)} judges")
+    print("    matched judge counts by gap bin: " +
+          ", ".join(f"{s['gap']:.3f}: {s['n']}" for s in summaries))
+
+
+def fig_forecasting(rows, out):
+    cells = _forecast_rank_cells(rows)
+    if len(cells) < 3:
+        print("  SKIPPED 2i_forecasting_rank_error: fewer than 3 bracketed cells")
+        return
+    _write_csv(out / "2i_forecasting_rank_error.csv", cells)
+    judges = [j for j in JUDGE_ORDER if any(r["judge"] == j for r in cells)] + \
+             sorted({r["judge"] for r in cells} - set(JUDGE_ORDER))
+    colors = {j: JUDGE_COLORS.get(j, plt.cm.tab10(i % 10))
+              for i, j in enumerate(judges)}
+    xmax = max(3, int(np.ceil(max(r["release_gap_months"] for r in cells) / 3) * 3))
+    upper = max(r["loo_hi"] if np.isfinite(r["loo_hi"])
+                else r["absolute_rank_error"] for r in cells)
+    ymax = max(5, int(np.ceil(upper / 5) * 5))
+
+    with plt.rc_context(GAP_CURVE_RC):
+        fig, ax = plt.subplots(figsize=(1.8, 4.0))
+        style(ax)
+        for judge in judges:
+            rs = sorted((r for r in cells if r["judge"] == judge),
+                        key=lambda r: r["release_gap_months"])
+            x = np.asarray([r["release_gap_months"] for r in rs])
+            y = np.asarray([r["absolute_rank_error"] for r in rs])
+            ax.plot(x, y, color=colors[judge], lw=0.7, marker="o", ms=3,
+                    alpha=0.8, zorder=3)
+            finite = np.asarray([np.isfinite(r["loo_lo"]) and np.isfinite(r["loo_hi"])
+                                 for r in rs])
+            if finite.any():
+                lo = np.asarray([r["loo_lo"] for r in rs])[finite]
+                hi = np.asarray([r["loo_hi"] for r in rs])[finite]
+                ax.errorbar(x[finite], y[finite], yerr=[y[finite] - lo, hi - y[finite]],
+                            fmt="none", color=colors[judge], elinewidth=0.8,
+                            capsize=0, alpha=0.7, zorder=2)
+        x = np.asarray([r["release_gap_months"] for r in cells], float)
+        y = np.asarray([r["absolute_rank_error"] for r in cells], float)
+        slope, intercept = np.polyfit(x, y, 1)
+        gx = np.asarray([x.min(), x.max()])
+        ax.plot(gx, intercept + slope * gx, color=MEAN_COLOUR, lw=1.6, zorder=4)
+        ax.set(xlabel="Release gap (months)", ylabel="Absolute rank error",
+               xlim=(0, xmax), ylim=(0, ymax))
+        ax.set_xticks(np.arange(0, xmax + 0.1, 3))
+        ystep = 5 if ymax <= 20 else 10
+        ax.set_yticks(np.append(np.arange(0, ymax, ystep), ymax))
+        handles = [plt.Line2D([], [], color=colors[j], lw=0.7, marker="o", ms=3,
+                              label=j) for j in judges]
+        handles += [
+            plt.Line2D([], [], color="#888", lw=0.8,
+                       label="Leave-one-opponent-out range"),
+            plt.Line2D([], [], color=MEAN_COLOUR, lw=1.6, label="Pooled linear fit"),
+        ]
+        fig.legend(handles=handles, loc="lower center", ncol=1, frameon=False,
+                   handlelength=1.3, handletextpad=0.4)
+        fig.subplots_adjust(left=0.31, right=0.96, bottom=0.66, top=0.97)
+        save(fig, out, "2i_forecasting_rank_error", dpi=MANUSCRIPT_DPI)
+    rho = spearmanr(x, y).statistic
+    print(f"    forecasting cells = {len(cells)} across {len(judges)} judges; "
+          f"pooled slope = {slope:+.3f} rank positions/month; Spearman rho = {rho:+.3f}")
 
 
 def fig_judge_pair_heatmap(rows, models, out, bench):
@@ -495,10 +1079,11 @@ def fig_judge_pair_heatmap(rows, models, out, bench):
 
 def _grid_meta(models):
     """shortname -> (eci, release in months, label), grid members only."""
-    g = {}
+    g, design = {}, _design_grid()
     for mm in models.values():
         for m, meta in mm.items():
-            if meta["arm"] == "A" and meta.get("eci") and meta.get("release"):
+            if (meta["arm"] == "A" and meta.get("eci") and meta.get("release")
+                    and meta["label"] in design):
                 y, mo = str(meta["release"]).split("-")[:2]
                 g[m] = (meta["eci"], int(y) * 12 + int(mo), meta["label"])
     return g
@@ -895,8 +1480,6 @@ def fig_item_difficulty(models, out):
                         continue
                     k = solved.get(item, 0)
                     for j, cell in judges.items():
-                        if excluded(j):
-                            continue
                         for o in cell["orders"]:
                             if o and o["picked_major"] is not None:
                                 acc[k][1] += 1
@@ -956,7 +1539,7 @@ def main():
                     help="capability measure for the gap axis and pair orientation")
     ap.add_argument("--exclude-members", nargs="*", default=[],
                     help="drop models whose name contains any of these "
-                         "(case-insensitive), as answer models and as judges")
+                         "(case-insensitive) from the answer-model pool")
     ap.add_argument("--reasoning-config", type=Path, default=REASONING_CONFIG,
                     help="defaults for the transcript filter")
     ap.add_argument("--reasoning-filter", choices=REASONING_MODES,
@@ -984,13 +1567,17 @@ def main():
           f"effort suffixes {list(suffixes) or 'none'}")
     print(f"dropped whole: {', '.join(sorted(thin)) or 'none'}")
 
-    JUDGE_ORDER[:] = [j for j in JUDGE_ORDER if not excluded(j)]
     rows, models = load()
     assert_nothing_excluded_plotted(rows)
     print(f"{len(rows)} runs loaded; writing to {args.out_dir}")
+    write_model_inventory(rows, models, args.out_dir)
     fig_model_accuracy(models, args.out_dir)
     fig_gap_curves(rows, models, args.out_dir)
     fig_weak_judge(rows, models, args.out_dir)
+    fig_oversight(rows, models, args.out_dir)
+    fig_zero_gap_self(rows, args.out_dir)
+    fig_family_gap(rows, args.out_dir)
+    fig_forecasting(rows, args.out_dir)
     fig_cap_release_plane(rows, models, args.out_dir)
     fig_control_pairs(rows, models, args.out_dir)
     for b in BENCHES:
