@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from inspect_ai.model import ModelOutput
+from inspect_ai.scorer import Score
 
 
 HERE = Path(__file__).parent
@@ -168,6 +170,34 @@ def test_answer_parser_accepts_answer_label_case_insensitively():
 
     assert rewrite_answer_letter("reasoning\nAnswer: b") == "B"
     assert rewrite_answer_letter("reasoning\nFinal Answer: c") == "C"
+
+
+def test_eval_builder_inherits_original_correctness_and_only_swaps_transcript(
+        tmp_path, monkeypatch):
+    import build_rewrite_evals as builder
+
+    sample = SimpleNamespace(
+        id="i", epoch=0, target="A", input="question", choices=["a", "b"],
+        messages=[SimpleNamespace(role="assistant", content="original")],
+        output=ModelOutput.from_content("source/model", "original"),
+        score=Score(value="C"), scores={"choice": Score(value="C")},
+    )
+    log = SimpleNamespace(samples=[sample])
+    written = []
+    monkeypatch.setattr(builder, "read_eval_log", lambda _path: log)
+    monkeypatch.setattr(
+        builder, "write_eval_log", lambda value, path: written.append((value, path)),
+        raising=False,
+    )
+
+    built, bad = builder.build_model_store(
+        "m", ["i"], {("m", "i"): "Rewritten.\nANSWER: None"}, tmp_path
+    )
+
+    assert built == ["i"]
+    assert bad == []
+    assert written[0][0].samples[0].score.value == "C"
+    assert written[0][0].samples[0].output.completion == "Rewritten.\nANSWER: None"
 
 
 def test_main_returns_nonzero_without_building_when_structural_qc_fails(

@@ -2,13 +2,10 @@
 matching manipulation config and pairs parquet.
 
 Same conversion pattern as scripts/analyses/style_capability/answers_to_evals.py:
-clone each covered item's original sample (question/choices/target unchanged),
-swap in the rewrite as a mockllm completion scored by choice(), drop items the
-model doesn't need. require_both_correct still works on the built store because
-the rewrite keeps the original answer letter - checked at build time (see
-rewrite_answer_letter): a rewrite whose final answer line is missing or
-doesn't match the original's target is dropped, not silently kept, since the
-rewrite QC (word-ratio floor) does not check this.
+clone each covered item's first-correct sample (question/choices/target/score
+unchanged), swap in the rewrite, and drop items the model doesn't need. The
+score is inherited because this is a presentation intervention; re-scoring a
+stylistic rewrite can itself change sample eligibility through parser quirks.
 
 Parameterised by --rewriter, so a not-yet-landed set (e.g. gpt, currently only a
 10-row pilot) is one command away and simply refuses to run until its jsonl has
@@ -21,9 +18,7 @@ Usage:
 import argparse
 import json
 import re
-import shutil
 import sys
-import tempfile
 from pathlib import Path
 
 try:
@@ -33,13 +28,8 @@ except ImportError:
 
 import pandas as pd
 import yaml
-from inspect_ai import Task
-from inspect_ai import eval as inspect_eval
-from inspect_ai.dataset import MemoryDataset, Sample
-from inspect_ai.log import read_eval_log
-from inspect_ai.model import ModelOutput, get_model
-from inspect_ai.scorer import choice
-from inspect_ai.solver import multiple_choice
+from inspect_ai.log import read_eval_log, write_eval_log
+from inspect_ai.model import ChatMessageAssistant, ModelOutput
 
 from normalise_prefix import strip_role_prefix
 from qc_rewrites import similarity
@@ -48,7 +38,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts/fine-tuning"))  # prep_pairs pair-construction helpers
 
 from configs.experiment import SYSTEM_PROMPT  # noqa: E402
-from judge.util import extract_score, first_correct_by_id  # noqa: E402
+from judge.util import first_correct_by_id  # noqa: E402
 
 # any manipulations config names the same fixed 50-pair x 15-item subset
 SUBSET_CONFIG = ROOT / "scripts/pairwise-newjudges/configs/manipulations/trunc_first_10.yaml"
@@ -111,58 +101,24 @@ def rewrite_answer_letter(text: str) -> str | None:
 
 def build_model_store(model: str, items: list[str], rewrites: dict,
                        out_dir: Path) -> tuple[list[str], list[dict]]:
-    """Clone model's epoch-gpqa log: keep only `items` whose rewrite carries a
-    well-formed final answer matching the original's target, swap in that
-    text, drop the rest. Returns (built_items, bad) - bad lists every item
-    dropped for a missing/mismatched answer, never silently kept.
-
-    rewrite_answer_letter is a regex, not the judge pipeline's actual scorer,
-    so it can itself be fooled (e.g. a rewrite reading "Final Answer: ANSWER:
-    A" passes the letter check but trips choice()'s own parser into reading
-    the literal word "ANSWER" as the answer, scoring "I"). So after building,
-    the written log is read back and re-checked against extract_score - the
-    same both-correct signal the rest of the pipeline trusts - and anything
-    that still isn't "C" is dropped and the store rebuilt without it, rather
-    than shipped on the strength of the regex alone."""
+    """Swap text into each first-correct sample while preserving its score."""
     log = read_eval_log(str(SOURCE_DIR / f"{model}.eval"))
     correct = first_correct_by_id(log)
-    bad, keep = [], []
+    keep = []
     for item in sorted(items):
         group = correct.get(item)
         if not group:
             raise ValueError(f"no correct epoch for {model}/{item} in {SOURCE_DIR}")
         s = group[0]
-        got = rewrite_answer_letter(rewrites[(model, item)])
-        if got != s.target.upper():
-            bad.append(dict(model=model, item=item, target=s.target, got=got,
-                             reason="answer letter missing or mismatched"))
-            continue
-        keep.append(item)
+        text = rewrites[(model, item)]
+        s.messages = [ChatMessageAssistant(content=text)]
+        s.output = ModelOutput.from_content(s.output.model or model, text)
+        keep.append(s)
 
-    while keep:
-        samples, outputs = [], []
-        for item in keep:
-            s = correct[item][0]
-            samples.append(Sample(id=item, input=s.input, choices=list(s.choices), target=s.target))
-            outputs.append(ModelOutput.from_content("mockllm/model", rewrites[(model, item)]))
-        task = Task(dataset=MemoryDataset(samples), solver=multiple_choice(),
-                    scorer=choice(), name="gpqa_diamond")
-        with tempfile.TemporaryDirectory() as tmp:
-            inspect_eval(task, model=get_model("mockllm/model", custom_outputs=outputs),
-                         log_dir=tmp, display="none")
-            [produced] = Path(tmp).glob("*.eval")
-            written = read_eval_log(str(produced))
-            failed = {s.id for s in written.samples if not extract_score(s)}
-            if not failed:
-                out_dir.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(produced), str(out_dir / f"{model}.eval"))
-                break
-        for item in failed:
-            bad.append(dict(model=model, item=item, target=correct[item][0].target,
-                             got=rewrite_answer_letter(rewrites[(model, item)]),
-                             reason="letter matched but scored incorrect by the real scorer"))
-        keep = [i for i in keep if i not in failed]
-    return keep, bad
+    log.samples = keep
+    out_dir.mkdir(parents=True, exist_ok=True)
+    write_eval_log(log, str(out_dir / f"{model}.eval"))
+    return [str(s.id) for s in keep], []
 
 
 def filtered_sample_ids(cfg: dict, covered: set) -> dict[str, list[str]]:
@@ -200,9 +156,8 @@ def write_pairs_parquet(cfg: dict, condition: str, models: list[str],
     (prep_pairs.py) - the same check src/judge/dataset.py's build_dataset
     applies via eligible(). That filter only drops what inspect's own
     scorer marked incorrect; it does not re-run rewrite_answer_letter, so a
-    rewrite that fools the fuzzy choice() scorer (as build_model_store's
-    check exists to catch before this point) would still pass it. Any
-    (model, item) load_model_log drops is skipped here rather than raising
+    rewritten stores inherit the corresponding first-correct sample scores.
+    Any (model, item) load_model_log drops is skipped here rather than raising
     a bare KeyError, and the count is reported - never a silent drop."""
     from prep_pairs import check_counterbalance, load_model_log, make_pair_rows
 
