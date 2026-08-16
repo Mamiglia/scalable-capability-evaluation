@@ -1,6 +1,138 @@
 """Tests for the judge fine-tuning scripts."""
 
 
+def test_prepare_rows_uses_directional_accuracy_and_log_length_gaps():
+    import pandas as pd
+    from length_bias_glm import prepare_rows
+
+    pairs = pd.DataFrame([dict(
+        pair_uid="p", order=0, item="i", model_1="strong", model_2="weak",
+        text_1="one two three four five six seven eight", text_2="one two",
+    )])
+    verdicts = pd.DataFrame([dict(
+        pair_uid="p", order=0, item="i", model_1="strong", model_2="weak",
+        logit_1=2.0, logit_2=1.0,
+    )])
+    rows = prepare_rows(
+        verdicts, pairs, pd.Series({"strong": 0.7, "weak": 0.5}), fine_tuned=True)
+
+    assert rows.loc[0, "choose_1"] == 1
+    assert abs(rows.loc[0, "accuracy_gap"] - 2.0) < 1e-12  # per 10 percentage points
+    assert abs(rows.loc[0, "length_gap"] - 2.0) < 1e-12    # log2(8 / 2)
+    assert rows.loc[0, "fine_tuned"] == 1
+
+
+def test_clustered_glm_recovers_checkpoint_specific_length_effects():
+    import numpy as np
+    import pandas as pd
+    from length_bias_glm import fit_clustered_logit, summarize_fit
+
+    rng = np.random.default_rng(7)
+    n = 12_000
+    frame = pd.DataFrame({
+        "item": np.repeat(np.arange(120), n // 120),
+        "accuracy_gap": rng.normal(size=n),
+        "length_gap": rng.normal(size=n),
+        "fine_tuned": rng.integers(0, 2, size=n),
+    })
+    x = np.column_stack([
+        np.ones(n), frame.accuracy_gap, frame.length_gap, frame.fine_tuned,
+        frame.accuracy_gap * frame.fine_tuned,
+        frame.length_gap * frame.fine_tuned,
+    ])
+    truth = np.array([0.1, 0.7, 0.6, -0.2, 0.4, -0.8])
+    frame["choose_1"] = rng.binomial(1, 1 / (1 + np.exp(-(x @ truth))))
+
+    beta, cov = fit_clustered_logit(frame)
+    table = summarize_fit(beta, cov, "test judge", len(frame), frame.item.nunique())
+    length = table[table.effect == "Length (2× longer)"].iloc[0]
+
+    assert np.allclose(beta, truth, atol=0.12)
+    assert abs(length.base_estimate - truth[2]) < 0.12
+    assert abs(length.ft_estimate - (truth[2] + truth[5])) < 0.12
+    assert length.change < -0.6
+    assert np.linalg.eigvalsh(cov).min() > -1e-10
+
+
+def test_coefficient_plot_matches_main_glm_orientation(tmp_path, monkeypatch):
+    import xml.etree.ElementTree as ET
+    from matplotlib.axes import Axes
+    import pandas as pd
+    from length_bias_glm import REGRESSORS, plot_coefficients
+
+    errorbars = []
+    original_errorbar = Axes.errorbar
+
+    def record_errorbar(self, *args, **kwargs):
+        errorbars.append(kwargs.copy())
+        return original_errorbar(self, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "errorbar", record_errorbar)
+
+    rows = []
+    for judge in ("Qwen3-8B", "Llama-3.2-3B"):
+        for index, (predictor, effect, group) in enumerate(REGRESSORS):
+            value = -3.0 if predictor == "truth_side" else 0.05 * index
+            rows.append(dict(judge=judge, predictor=predictor, effect=effect, group=group,
+                             base_estimate=value, base_ci_low=value - 0.2,
+                             base_ci_high=value + 0.2, ft_estimate=value / 2,
+                             ft_ci_low=value / 2 - 0.2, ft_ci_high=value / 2 + 0.2))
+    stub = tmp_path / "coefficients"
+    plot_coefficients(pd.DataFrame(rows), stub)
+
+    root = ET.parse(stub.with_suffix(".svg")).getroot()
+    texts = ["".join(node.itertext()) for node in root.iter()
+             if node.tag.rsplit("}", 1)[-1] == "text"]
+    width = float(root.attrib["width"].removesuffix("pt"))
+    height = float(root.attrib["height"].removesuffix("pt"))
+    labels = [label for _, label, _ in REGRESSORS]
+    assert all(texts.count(label) >= 1 for label in labels)
+    assert texts.count("Style") == 1
+    assert labels[0] == "Capability gap" and labels.index("Position") < labels.index("Pronouns")
+    label_nodes = [node for node in root.iter()
+                   if node.tag.rsplit("}", 1)[-1] == "text"]
+    assert all(any("".join(node.itertext()) == label and
+                       "rotate(-90" in node.attrib.get("transform", "")
+                       for node in label_nodes) for label in labels)
+    assert texts.count("−3.5") == 1 and texts.count("3.5") == 1
+    assert "Coefficient (log-odds)" in texts
+    legend_labels = ("Qwen base", "Qwen FT", "Llama base", "Llama FT")
+    assert all(label in texts for label in legend_labels)
+    raw = stub.with_suffix(".svg").read_text()
+    assert "#2a78d6" in raw and "#4a3aa7" in raw
+    assert len(errorbars) == 4 * len(REGRESSORS)
+    assert all(call.get("barsabove") is True and call.get("capsize") == 0
+               and call.get("elinewidth") == 1 and 3 <= call.get("ms") <= 4
+               for call in errorbars)
+    assert 308 <= width <= 322
+    assert width / height > 1.6
+    assert height <= 205
+
+
+def test_full_glm_results_markdown_includes_estimates_changes_and_p_values():
+    import pandas as pd
+    from length_bias_glm import format_results_markdown
+
+    table = pd.DataFrame([dict(
+        judge="Qwen3-8B", effect="Length (2× longer)",
+        base_estimate=0.10, base_ci_low=0.01, base_ci_high=0.18,
+        ft_estimate=-0.07, ft_ci_low=-0.16, ft_ci_high=0.02,
+        change=-0.17, change_ci_low=-0.26, change_ci_high=-0.08,
+        p_change=0.00058, n_rows=18000, n_items=40,
+    )])
+
+    result = format_results_markdown(table)
+
+    assert "Base β [95% CI]" in result
+    assert "Fine-tuned β [95% CI]" in result
+    assert "Δβ [95% CI]" in result and "p(Δ)" in result
+    assert "+0.100 [+0.010, +0.180]" in result
+    assert "5.80e-04" in result
+    assert "18,000 verdicts" in result and "40 held-out items" in result
+    assert "Hierarchical Bayesian" in result and "95% credible intervals" in result
+    assert "Unpenalized" not in result
+
+
 def test_prompts_match_src():
     from configs.experiment import SYSTEM_PROMPT
     from judge.dataset import USER_PROMPT, OPTIONS_BLOCK
