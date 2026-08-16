@@ -144,6 +144,25 @@ def test_answer_labels_exclude_explanatory_prose():
     ]
 
 
+def test_answer_labels_exclude_uppercase_marker_embedded_in_prose():
+    prepare = load_prepare()
+
+    assert prepare._answer_lines(
+        "The required format is $LETTER, ANSWER: D, although no option matches."
+    ) == []
+    assert prepare._answer_lines(r"\boxed{\text{ANSWER: B}}") == [
+        r"\boxed{\text{ANSWER: B}}"
+    ]
+
+
+def test_structural_qc_ignores_trailing_space_removed_from_answer_line():
+    prepare = load_prepare()
+
+    assert prepare.structural_failure(
+        "Reasoning.\n**ANSWER: C** \n", "Reworded reasoning.\n**ANSWER: C**"
+    ) is None
+
+
 def test_answer_parser_accepts_answer_label_case_insensitively():
     from build_rewrite_evals import rewrite_answer_letter
 

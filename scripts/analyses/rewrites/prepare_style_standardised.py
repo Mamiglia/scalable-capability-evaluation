@@ -44,7 +44,7 @@ TARGETED_CATEGORIES = ("personal_pronouns", "hedging", "backtracking")
 # Preserve actual answer labels, not prose such as "why B is the correct answer:".
 # Uppercase ANSWER is also accepted inside the corpus's LaTeX wrappers.
 ANSWER_LINE_RE = re.compile(
-    r"\bANSWER\s*:"
+    r"(?i:^\s*(?:\\\[\s*)?(?:\\boxed\{\s*)?\\text\{\s*answer\s*:)"
     r"|(?i:^\s*(?:\[assistant\]:\s*)?(?:#{1,6}\s*)?(?:✅\s*)?"
     r"(?:\*\*)?(?:\d+\.\s*)?(?:\*\*)?"
     r"(?:(?:final|correct)\s+)?answer\s*:\s*(?:\*\*)?)",
@@ -136,7 +136,8 @@ def structural_failure(original: str, rewritten: str) -> str | None:
     got = _answer_lines(rewritten)
     if len(wanted) != len(got):
         return "answer_line_count_changed"
-    if any(a.encode("utf-8") != b.encode("utf-8") for a, b in zip(wanted, got)):
+    if any(a.rstrip().encode("utf-8") != b.rstrip().encode("utf-8")
+           for a, b in zip(wanted, got)):
         return "answer_lines_changed"
     if _has_content_after_final_answer(original) != _has_content_after_final_answer(rewritten):
         return "final_answer_trailing_content_changed"
