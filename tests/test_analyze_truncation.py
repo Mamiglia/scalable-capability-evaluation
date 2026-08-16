@@ -302,3 +302,15 @@ def test_gap_figure_has_three_conditions_frozen_glm_and_editable_svg(tmp_path):
     assert any(line.get_linestyle() == "--" for line in fig.axes[0].lines)
     assert fig.legends and not fig.legends[0].get_frame_on()
     assert "<text" in path.read_text()
+
+
+def test_write_plot_outputs_writes_figures_and_source_tables(tmp_path):
+    load_script().write_plot_outputs(figure_cells(), tmp_path)
+
+    assert {
+        "overall_by_judge.csv", "overall_summary.csv", "gap_by_judge.csv",
+        "gap_estimates.csv", "overall_accuracy.png", "overall_accuracy.svg",
+        "gap_curves_90.png", "gap_curves_90.svg",
+    } == {path.name for path in tmp_path.iterdir()}
+    assert "<text" in (tmp_path / "overall_accuracy.svg").read_text()
+    assert "<text" in (tmp_path / "gap_curves_90.svg").read_text()

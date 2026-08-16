@@ -22,7 +22,7 @@ from mc_cost.gpqa import model_family
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/hibayes"))
-from style_features import feature_rates  # noqa: E402
+from style_features import feature_rates, load_lexicon  # noqa: E402
 
 
 plt.rcParams.update({
@@ -54,6 +54,13 @@ GAP_CONDITIONS = ("original", "first_90", "end_90")
 CONDITION_LABELS = {
     "original": "Original", "first_90": "First 90%", "end_90": "End 90%",
 }
+CAPABILITY_CONFIG = ROOT / "scripts/analyses/judge-elo/configs/gpqa.yaml"
+REFERENCE = ROOT / "analysis/hibayes/gpqa_correctness.csv"
+GLM_DIR = (ROOT / "analysis/hibayes/run_correctness_full/models/"
+           "judge_feature_logistic_model_full")
+GLM_SUMMARY = GLM_DIR / "diagnostics/inference_data_summary.csv"
+GLM_COORDS = ROOT / "analysis/hibayes/run_correctness_full/coords.json"
+STYLE_LEXICON = ROOT / "scripts/hibayes/style_lexicon.yaml"
 
 
 def collect_logs(root: Path, read_log=read_eval_log) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -380,6 +387,25 @@ def make_gap_figure(cells: pd.DataFrame):
     return fig
 
 
+def write_plot_outputs(cells: pd.DataFrame, out: Path) -> None:
+    """Write plot source tables and compact PNG/SVG figures."""
+    out.mkdir(parents=True, exist_ok=True)
+    overall_by_judge, overall = overall_tables(cells)
+    gap_by_judge, gaps = gap_tables(cells)
+    overall_by_judge.to_csv(out / "overall_by_judge.csv", index=False)
+    overall.to_csv(out / "overall_summary.csv", index=False)
+    gap_by_judge.to_csv(out / "gap_by_judge.csv", index=False)
+    gaps.to_csv(out / "gap_estimates.csv", index=False)
+    figures = {
+        "overall_accuracy": make_overall_figure(cells),
+        "gap_curves_90": make_gap_figure(cells),
+    }
+    for name, fig in figures.items():
+        fig.savefig(out / f"{name}.png", dpi=300)
+        fig.savefig(out / f"{name}.svg")
+        plt.close(fig)
+
+
 def _mean_ci(values: pd.Series) -> tuple[float, float, float]:
     values = pd.Series(values, dtype=float)
     mean = float(values.mean())
@@ -468,7 +494,7 @@ def matched_direction_contrasts(rows: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parents[2]
+    root = ROOT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--logs", type=Path,
                         default=root / "logs/pairwise-newjudges/manipulations")
@@ -531,11 +557,37 @@ def main() -> None:
         })
     coverage = pd.DataFrame(coverage)
 
+    shared = experiment_cells(rows)
+    gap_cells = shared[shared.condition.isin(GAP_CONDITIONS)]
+    transcripts = load_transcripts(subset)
+    comparisons = {
+        f"{major}-vs-{minor}": (major, minor) for major, minor in subset["comparisons"]
+    }
+    capabilities = {
+        model: float(value)
+        for model, value in yaml.safe_load(CAPABILITY_CONFIG.read_text())["eci"].items()
+    }
+    reference = pd.read_csv(REFERENCE, usecols=list(SCALED_FEATURES))
+    glm_frame = build_glm_frame(
+        gap_cells, transcripts, comparisons, capabilities, reference,
+        load_lexicon(STYLE_LEXICON),
+    )
+    sys.path.insert(0, str(ROOT / "scripts/analyses/rewrites"))
+    from robustness_analysis import predict_glm
+    glm_frame["predicted"] = predict_glm(glm_frame, GLM_SUMMARY, GLM_COORDS)
+    predictions = collapse_predictions(gap_cells, glm_frame)
+    keys = ["judge", "condition", "pair", "item"]
+    plotted = shared.merge(
+        predictions[keys + ["predicted", "capability_gap"]],
+        on=keys, how="left", validate="one_to_one",
+    )
+
     args.out.mkdir(parents=True, exist_ok=True)
     rows.to_csv(args.out / "verdicts.csv", index=False)
     coverage.to_csv(args.out / "coverage.csv", index=False)
     estimates.to_csv(args.out / "estimates.csv", index=False)
     contrasts.to_csv(args.out / "direction_contrasts.csv", index=False)
+    write_plot_outputs(plotted, args.out)
     print(coverage.to_string(index=False))
     print("\nMatched complete curves:")
     shown = estimates.copy()
@@ -543,6 +595,8 @@ def main() -> None:
                    "delta_ci_low", "delta_ci_high"):
         shown[column] = shown[column].map(lambda value: f"{value:.3f}")
     print(shown.to_string(index=False))
+    print("\nOverall plot summary:")
+    print(pd.read_csv(args.out / "overall_summary.csv").to_string(index=False))
     print("\nMatched end-minus-first contrasts:")
     shown = contrasts.copy()
     for column in ("end_minus_first", "ci_low", "ci_high"):
