@@ -450,15 +450,22 @@ function render() {
   renderWarnings(relevantWarnings(autoRows, manualGroups));
 }
 
+function renderValidation() {
+  const banner = byId("validation-banner");
+  banner.className = `validation-banner ${state.data.validation.status}`;
+  banner.textContent = state.data.validation.message;
+}
+
 async function load() {
   try {
     const response = await fetch("data/mc_cost.json");
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
     state.data = await response.json();
+    renderValidation();
     populateAutomaticControls();
     const firstManual = state.data.manual[0];
     addManualRow(firstManual || null);
-    byId("data-status").textContent = `Validated ${state.data.generated_at} · ${state.data.automatic.length.toLocaleString()} automatic rows · ${state.data.manual.length.toLocaleString()} manual rows`;
+    byId("data-status").textContent = `${state.data.validation.status === "provisional" ? "Provisional" : "Validated"} ${state.data.generated_at} · ${state.data.automatic.length.toLocaleString()} automatic rows · ${state.data.manual.length.toLocaleString()} manual rows`;
     render();
   } catch (error) {
     byId("data-status").textContent = `Dashboard data unavailable: ${error.message}`;

@@ -3,7 +3,9 @@ import pandas as pd
 import pytest
 
 from mc_cost.data import judge_token_rows
-from mc_cost.tokens import _coverage, draw_token_usage, draw_transcript_lengths, fit_token_model
+from mc_cost.tokens import (
+    _coverage, _prepare_frame, draw_token_usage, draw_transcript_lengths, fit_token_model,
+)
 
 
 def test_reasoning_is_a_subset_of_billed_output():
@@ -267,6 +269,20 @@ def test_candidate_reasoning_class_must_agree_with_catalogue_mapping():
             frame, "candidate", reasoning_classes={"think": "non_reasoning"},
             source_hashes={"candidate_tokens": "abc"}, warmup=1, samples=4,
         )
+
+
+def test_unused_catalogue_model_may_lack_reasoning_class():
+    frame = pd.DataFrame([{
+        "role": "candidate", "model": "used", "reasoning_class": "non_reasoning",
+    }])
+    catalogue = pd.DataFrame([
+        {"model_id": "used", "reasoning_class": "non_reasoning"},
+        {"model_id": "unused", "reasoning_class": pd.NA},
+    ])
+
+    prepared = _prepare_frame(frame, "candidate", catalogue)
+
+    assert prepared["reasoning_class"].tolist() == ["non_reasoning"]
 
 
 def test_prediction_row_role_must_match_artifact_role():

@@ -78,6 +78,7 @@ def _reasoning_map(source: Mapping[str, str] | pd.DataFrame | None) -> dict[str,
         if any(pd.isna(model) for model in source):
             raise ValueError("reasoning catalogue contains null model_id")
         result = {str(model): value for model, value in source.items()}
+    result = {model: value for model, value in result.items() if not pd.isna(value)}
     invalid = sorted(model for model, value in result.items() if value not in _CLASSES)
     if invalid:
         raise ValueError(f"invalid reasoning class for models: {', '.join(invalid)}")

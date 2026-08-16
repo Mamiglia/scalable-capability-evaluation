@@ -21,10 +21,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def minimal_payload(**updates):
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": "2026-08-15T00:00:00Z",
         "source_hashes": {},
         "quantiles": [0.05, 0.5, 0.95],
+        "validation": {
+            "status": "validated", "selected_spec": "core_release",
+            "judge_covariates": True, "message": "Held-out validation complete.",
+        },
         "catalogue": [],
         "automatic": [],
         "manual": [],
@@ -43,6 +47,23 @@ def test_dashboard_payload_requires_exact_versioned_schema():
         validate_dashboard_payload(minimal_payload(quantiles=[0.1, 0.5, 0.9]))
     with pytest.raises(ValueError, match="schema fields"):
         validate_dashboard_payload({**minimal_payload(), "formula": "browser-side"})
+
+
+def test_dashboard_payload_requires_explicit_validation_status():
+    provisional = minimal_payload(validation={
+        "status": "provisional", "selected_spec": "core_release",
+        "judge_covariates": True,
+        "message": "Provisional — held-out validation pending.",
+    })
+    validate_dashboard_payload(provisional)
+
+    for invalid in (
+        {key: value for key, value in provisional.items() if key != "validation"},
+        {**provisional, "validation": {**provisional["validation"], "status": "unknown"}},
+        {**provisional, "validation": {**provisional["validation"], "message": ""}},
+    ):
+        with pytest.raises(ValueError, match="validation|schema fields"):
+            validate_dashboard_payload(invalid)
 
 
 def test_dashboard_payload_requires_six_field_manual_identity_and_ordered_finite_quantiles():
@@ -141,6 +162,10 @@ def test_dashboard_builder_sorts_every_row_array_and_derives_scaling_rows():
     payload = dashboard_payload(
         generated_at="2026-08-15T00:00:00Z",
         source_hashes={"decision": "abc"},
+        validation={
+            "status": "validated", "selected_spec": "core_release",
+            "judge_covariates": True, "message": "Held-out validation complete.",
+        },
         catalogue=[{"model_id": "z"}, {"model_id": "a"}],
         automatic=reversed(automatic),
         manual=[],
@@ -149,7 +174,7 @@ def test_dashboard_builder_sorts_every_row_array_and_derives_scaling_rows():
     )
 
     assert list(payload) == [
-        "schema_version", "generated_at", "source_hashes", "quantiles", "catalogue",
+        "schema_version", "generated_at", "source_hashes", "quantiles", "validation", "catalogue",
         "automatic", "manual", "scaling", "ranking_recovery", "warnings",
     ]
     for key in ("catalogue", "automatic", "manual", "scaling", "ranking_recovery", "warnings"):
@@ -317,7 +342,7 @@ def test_dashboard_markup_has_accessible_native_controls_and_local_plotly():
         "comparator-pool", "judge-count", "anchor-count", "comparator-count",
         "attempted-items", "presentations", "strength-filter", "manual-rows",
         "add-manual-row", "run-summary", "accuracy-plot", "scaling-axis", "scaling-plot",
-        "token-table", "manual-results", "ranking-recovery", "warning-list",
+        "token-table", "manual-results", "ranking-recovery", "warning-list", "validation-banner",
     ):
         assert f'id="{control}"' in html
     assert html.count("<label") >= 10
@@ -344,6 +369,15 @@ def test_dashboard_assets_keep_existing_viewer_separate_and_support_dark_mode():
     assert "<th>Judge calls</th>" in (ROOT / "interactive_viewer/mc_cost.html").read_text()
     assert "@media (prefers-color-scheme: dark)" in styles
     assert "@media (max-width:" in styles
+
+
+def test_dashboard_keeps_provisional_status_visible():
+    html = (ROOT / "interactive_viewer/mc_cost.html").read_text()
+    script = (ROOT / "interactive_viewer/mc_cost.js").read_text()
+
+    assert 'id="validation-banner"' in html
+    assert "state.data.validation.status" in script
+    assert "state.data.validation.message" in script
 
 
 def test_dashboard_reuses_availability_details_across_views():

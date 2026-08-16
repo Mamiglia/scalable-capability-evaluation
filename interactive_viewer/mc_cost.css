@@ -63,6 +63,8 @@ h2 { margin-bottom: .2rem; font-size: 1.05rem; line-height: 1.25; }
 .data-status { align-self: end; margin: 0; color: var(--muted); text-align: right; font-size: .85rem; }
 
 main { display: grid; gap: 16px; padding-bottom: 48px; }
+.validation-banner { padding: 11px 14px; background: var(--good-soft); border-left: 4px solid var(--good); border-radius: 5px; color: var(--good); font-weight: 700; }
+.validation-banner.provisional { background: var(--warn-soft); border-left-color: var(--warn); color: var(--warn); }
 .card { min-width: 0; padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
 .section-heading, .plot-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .caption { margin: .2rem 0 0; color: var(--muted); font-size: .84rem; }

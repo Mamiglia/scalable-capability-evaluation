@@ -76,6 +76,8 @@
     {"model_id": "kimi-k2.6", "candidate_pool": true, "observed_candidate": true},
     {"model_id": "qwen3.6-max-preview", "candidate_pool": true},
     {"model_id": "qwen3.6-flash", "candidate_pool": true},
-    {"model_id": "gemini-3.5-flash", "candidate_pool": true}
+    {"model_id": "gemini-3.5-flash", "candidate_pool": true},
+    {"model_id": "claude-2.1", "reasoning_class": "non_reasoning"},
+    {"model_id": "gemma-4-31b-it", "reasoning_class": "reasoning"}
   ]
 }

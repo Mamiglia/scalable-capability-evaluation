@@ -130,6 +130,28 @@ def test_judge_tokens_define_reasoning_as_output_subset():
     assert got.iloc[0].difficulty == 0.4
 
 
+def test_judge_tokens_exclude_reasoning_above_billed_output():
+    rows = pd.DataFrame([
+        {
+            "judge": "j", "item": item, "chosen_left": 1,
+            "left_chars": 100, "right_chars": 200, "log_file": "judge.eval",
+            "judge_input_tokens": 500, "judge_output_tokens": 80,
+            "judge_reasoning_tokens": reasoning, "judge_total_tokens": 580,
+        }
+        for item, reasoning in (("valid", 30), ("invalid", 90))
+    ])
+
+    got = judge_token_rows(rows)
+
+    assert got["item"].tolist() == ["valid"]
+    assert got.attrs["accounting"] == {"invalid_token_accounting": 1}
+    assert got.attrs["exclusions"] == [{
+        "source": "judge_token", "source_log": "judge.eval", "judge": "j",
+        "model": "j", "item": "invalid", "reason": "invalid_token_accounting",
+        "missing_fields": ["output_tokens", "reasoning_tokens"], "count": 1,
+    }]
+
+
 def test_candidate_rows_deduplicate_and_exclude_zero_usage(monkeypatch):
     import mc_cost.data as data
 
@@ -180,6 +202,53 @@ def test_candidate_rows_deduplicate_and_exclude_zero_usage(monkeypatch):
         "model": "candidate", "item": "i", "reason": "duplicate_sample",
         "missing_fields": [], "count": 1,
     }
+
+
+def test_candidate_rows_normalize_separate_reasoning_and_exclude_inconsistent_usage(monkeypatch):
+    import mc_cost.data as data
+
+    def sample(item, usage):
+        return SimpleNamespace(
+            id=f"{item}_1", epoch=1, error=None, model_usage={"m": usage}, scores={},
+            output=SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content="answer"),
+            )]),
+        )
+
+    log = SimpleNamespace(
+        eval=SimpleNamespace(task="gpqa", model="openrouter/candidate"),
+        samples=[
+            sample("valid", SimpleNamespace(
+                input_tokens=10, output_tokens=20, reasoning_tokens=30, total_tokens=60,
+            )),
+            sample("invalid", SimpleNamespace(
+                input_tokens=10, output_tokens=20, reasoning_tokens=30, total_tokens=30,
+            )),
+        ],
+    )
+    monkeypatch.setattr(data, "list_eval_logs", lambda _: [SimpleNamespace(name="one")])
+    monkeypatch.setattr(data, "read_eval_log", lambda _: log)
+    catalogue = pd.DataFrame([{
+        "model_id": "candidate", "theta": 0.5, "release": "2025-01-01",
+        "reasoning_class": "reasoning", "family": "candidate",
+    }])
+    items = pd.DataFrame([
+        {"irt_model": "fixed_3pl", "fit": "gpqa", "benchmark": "gpqa", "item": item,
+         "difficulty": 0.4}
+        for item in ("valid", "invalid")
+    ])
+
+    got = candidate_token_rows(["unused"], catalogue, items)
+
+    assert got[["output_tokens", "reasoning_tokens", "ordinary_output_tokens"]].values.tolist() == [
+        [50, 30, 20],
+    ]
+    assert got.attrs["accounting"]["invalid_token_accounting"] == 1
+    assert got.attrs["exclusions"] == [{
+        "source": "candidate", "source_log": "one", "judge": None,
+        "model": "candidate", "item": "invalid", "reason": "invalid_token_accounting",
+        "missing_fields": ["output_tokens", "reasoning_tokens"], "count": 1,
+    }]
 
 
 def test_candidate_rows_keep_final_and_full_transcript_lengths_separate(monkeypatch):

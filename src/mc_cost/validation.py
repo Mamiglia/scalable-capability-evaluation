@@ -26,6 +26,25 @@ _TOKEN_OUTCOMES = {
 }
 
 
+def _shard_tasks(
+    tasks: Sequence[Any], shard: tuple[int, int, int] | None,
+) -> list[Any]:
+    if shard is None:
+        return list(tasks)
+    if (
+        not isinstance(shard, tuple) or len(shard) != 3
+        or any(type(value) is not int for value in shard)
+    ):
+        raise ValueError("shard must be an (index, count, offset) integer tuple")
+    index, count, offset = shard
+    if count < 1 or not 0 <= index < count or offset < 0:
+        raise ValueError("shard requires count > 0, 0 <= index < count, and offset >= 0")
+    return [
+        task for position, task in enumerate(tasks)
+        if (offset + position) % count == index
+    ]
+
+
 def _standard_error(values: Sequence[float]) -> float:
     values = np.asarray(values, dtype=float)
     return float(values.std(ddof=1) / np.sqrt(len(values))) if len(values) > 1 else 0.0
@@ -169,11 +188,15 @@ def _judgment_fold(
 def cross_validate_judgments(
     frame: pd.DataFrame,
     fit_predict: Callable[[pd.DataFrame, pd.DataFrame, JudgmentSpec, bool], Any],
+    *,
+    shard: tuple[int, int, int] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run the sanctioned specs over leave-one-judge/model-configuration folds.
 
     ``fit_predict`` receives ``(training_rows, held_out_rows, spec,
     conditional_judges)`` and returns one displayed-left probability per held row.
+    ``shard=(index, count, offset)`` selects tasks whose logical ordinal plus
+    ``offset`` is congruent to ``index`` modulo ``count``.
     """
     required = {"judge", "left_model", "right_model", "chosen_left"}
     if missing := required - set(frame):
@@ -181,27 +204,31 @@ def cross_validate_judgments(
     if frame.empty:
         raise ValueError("judgments must contain at least one row")
     _binary(frame, "chosen_left")
-    predictions, folds = [], []
+    judges = sorted(frame["judge"].astype(str).unique())
+    models = sorted(set(frame["left_model"].astype(str)) | set(frame["right_model"].astype(str)))
+    tasks = []
     for spec_name, spec in JUDGMENT_SPECS.items():
-        for judge in sorted(frame["judge"].astype(str).unique()):
-            train = frame["judge"].astype(str).ne(judge).to_numpy()
-            for population in ("conditional", "pooled"):
-                rows, metrics = _judgment_fold(
-                    frame, train, "judge", judge, spec_name, spec, population, fit_predict,
-                )
-                predictions.extend(rows)
-                folds.append(metrics)
-        models = sorted(set(frame["left_model"].astype(str)) | set(frame["right_model"].astype(str)))
-        for model in models:
+        tasks.extend(
+            (spec_name, spec, "judge", judge, population)
+            for judge in judges for population in ("conditional", "pooled")
+        )
+        tasks.extend(
+            (spec_name, spec, "candidate", model, "conditional") for model in models
+        )
+    predictions, folds = [], []
+    for spec_name, spec, validation, held_out, population in _shard_tasks(tasks, shard):
+        if validation == "judge":
+            train = frame["judge"].astype(str).ne(held_out).to_numpy()
+        else:
             train = (
-                frame["left_model"].astype(str).ne(model)
-                & frame["right_model"].astype(str).ne(model)
+                frame["left_model"].astype(str).ne(held_out)
+                & frame["right_model"].astype(str).ne(held_out)
             ).to_numpy()
-            rows, metrics = _judgment_fold(
-                frame, train, "candidate", model, spec_name, spec, "conditional", fit_predict,
-            )
-            predictions.extend(rows)
-            folds.append(metrics)
+        rows, metrics = _judgment_fold(
+            frame, train, validation, held_out, spec_name, spec, population, fit_predict,
+        )
+        predictions.extend(rows)
+        folds.append(metrics)
     return pd.DataFrame(predictions), pd.DataFrame(folds)
 
 
@@ -232,8 +259,10 @@ def validate_tokens(
     frame: pd.DataFrame,
     role: str,
     fit_predict: Callable[[pd.DataFrame, pd.DataFrame, str], pd.DataFrame],
+    *,
+    shard: tuple[int, int, int] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Validate token/length prediction by exact model-role-class configuration."""
+    """Validate token/length configurations using the judgment shard contract."""
     if role not in _TOKEN_OUTCOMES:
         raise ValueError("role must be candidate or judge")
     required = {"model", "reasoning_class", *_TOKEN_OUTCOMES[role]}
@@ -248,7 +277,8 @@ def validate_tokens(
     configurations = rows[["model", "role", "reasoning_class"]].drop_duplicates().sort_values(
         ["model", "role", "reasoning_class"], kind="stable",
     )
-    for model, row_role, reasoning_class in configurations.itertuples(index=False, name=None):
+    tasks = list(configurations.itertuples(index=False, name=None))
+    for model, row_role, reasoning_class in _shard_tasks(tasks, shard):
         held_mask = (
             rows["model"].eq(model) & rows["role"].eq(row_role)
             & rows["reasoning_class"].eq(reasoning_class)
@@ -283,6 +313,20 @@ def validate_tokens(
                     "covered_90": bool(lower <= actual <= upper),
                 })
     prediction_frame = pd.DataFrame(predictions)
+    summary, length = summarize_token_predictions(prediction_frame, role)
+    return prediction_frame, summary, length
+
+
+def summarize_token_predictions(
+    prediction_frame: pd.DataFrame, role: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Recompute global token diagnostics after raw prediction shards are joined."""
+    if role not in _TOKEN_OUTCOMES:
+        raise ValueError("role must be candidate or judge")
+    if prediction_frame.empty:
+        return pd.DataFrame(columns=[
+            "role", "reasoning_class", "outcome", "n", "log_mae", "coverage_90",
+        ]), pd.DataFrame()
     summary = prediction_frame.groupby(
         ["role", "reasoning_class", "outcome"], as_index=False, sort=True,
     ).agg(
@@ -314,7 +358,7 @@ def validate_tokens(
                     "coverage_90": float(group["covered_90"].mean()),
                     "valid": True, "reason": "",
                 })
-    return prediction_frame, summary, pd.DataFrame(length_rows)
+    return summary, pd.DataFrame(length_rows)
 
 
 @dataclass(frozen=True)

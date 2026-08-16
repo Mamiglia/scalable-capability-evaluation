@@ -19,6 +19,7 @@ from mc_cost.validation import (
     require_decision,
     support_distance,
     build_support_index,
+    summarize_token_predictions,
     validate_tokens,
     write_decision,
 )
@@ -186,6 +187,56 @@ def test_cross_validation_retains_each_posterior_probability_draw():
     assert np.allclose(folds["log_loss"], -np.log(0.5))
 
 
+def test_judgment_shards_partition_existing_task_order_and_recombine_exactly():
+    frame = pd.DataFrame([
+        {"judge": "j1", "left_model": "a", "right_model": "b", "chosen_left": 1},
+        {"judge": "j1", "left_model": "c", "right_model": "a", "chosen_left": 0},
+        {"judge": "j2", "left_model": "b", "right_model": "c", "chosen_left": 1},
+        {"judge": "j2", "left_model": "a", "right_model": "c", "chosen_left": 1},
+    ])
+
+    def fit_predict(_train, test, _spec, conditional_judges):
+        return np.full(len(test), 0.75 if conditional_judges else 0.5)
+
+    expected_predictions, expected_folds = cross_validate_judgments(frame, fit_predict)
+    shards = [
+        cross_validate_judgments(frame, fit_predict, shard=(index, 3, 2))
+        for index in range(3)
+    ]
+    predictions = pd.concat([part[0] for part in shards], ignore_index=True)
+    folds = pd.concat([part[1] for part in shards], ignore_index=True)
+    fold_key = ["spec", "validation", "held_out", "population"]
+
+    assert [tuple(part[1].iloc[0][fold_key]) for part in shards] == [
+        ("baseline", "judge", "j1", "pooled"),
+        ("baseline", "judge", "j2", "conditional"),
+        ("baseline", "judge", "j1", "conditional"),
+    ]
+    assert not folds.duplicated(fold_key).any()
+    pd.testing.assert_frame_equal(
+        predictions.sort_values(fold_key + ["source_row", "draw"]).reset_index(drop=True),
+        expected_predictions.sort_values(fold_key + ["source_row", "draw"]).reset_index(drop=True),
+    )
+    pd.testing.assert_frame_equal(
+        folds.sort_values(fold_key).reset_index(drop=True),
+        expected_folds.sort_values(fold_key).reset_index(drop=True),
+    )
+
+
+@pytest.mark.parametrize("shard", [(0, 0, 0), (2, 2, 0), (0, 2, -1)])
+def test_validation_shards_reject_invalid_coordinates(shard):
+    frame = pd.DataFrame([
+        {"judge": "j1", "left_model": "a", "right_model": "b", "chosen_left": 1},
+        {"judge": "j2", "left_model": "b", "right_model": "a", "chosen_left": 0},
+    ])
+
+    with pytest.raises(ValueError, match="shard"):
+        cross_validate_judgments(
+            frame, lambda _train, test, _spec, _conditional: np.full(len(test), 0.5),
+            shard=shard,
+        )
+
+
 def test_token_validation_holds_exact_configuration_and_reports_length_strata():
     frame = pd.DataFrame([
         {
@@ -236,6 +287,61 @@ def test_token_validation_holds_exact_configuration_and_reports_length_strata():
         "release_date_band", "item_difficulty", "correctness", "visible_reasoning",
     }
     assert predictions["covered_90"].all()
+
+
+def test_token_shards_recombine_raw_predictions_before_global_summaries():
+    frame = pd.DataFrame([
+        {
+            "role": "candidate", "model": model, "reasoning_class": reasoning_class,
+            "input_tokens": 10 + row, "output_tokens": 20 + row,
+            "reasoning_tokens": row if reasoning_class == "reasoning" else 0,
+            "response_chars": 100 + 10 * row, "release_day": 100 * row,
+            "difficulty": float(row % 2), "correct": row % 2,
+            "visible_reasoning": int(reasoning_class == "reasoning"),
+        }
+        for row, (model, reasoning_class) in enumerate([
+            ("a", "reasoning"), ("b", "non_reasoning"),
+            ("c", "reasoning"), ("d", "non_reasoning"),
+        ])
+    ])
+    outcomes = ("input_tokens", "output_tokens", "reasoning_tokens", "response_chars")
+
+    def fit_predict(_train, test, _role):
+        result = {}
+        for outcome in outcomes:
+            actual = np.log1p(frame.loc[test.index, outcome].to_numpy(float))
+            result[f"{outcome}_mean"] = actual + 0.1
+            result[f"{outcome}_p5"] = actual - 0.2
+            result[f"{outcome}_p95"] = actual + 0.2
+        return pd.DataFrame(result, index=test.index)
+
+    expected_predictions, expected_summary, expected_length = validate_tokens(
+        frame, "candidate", fit_predict,
+    )
+    shards = [
+        validate_tokens(frame, "candidate", fit_predict, shard=(index, 5, 1))
+        for index in range(5)
+    ]
+    predictions = pd.concat([part[0] for part in shards], ignore_index=True)
+    prediction_key = ["configuration", "source_row", "outcome"]
+
+    assert [
+        None if part[0].empty else part[0].iloc[0]["configuration"] for part in shards
+    ] == [
+        None,
+        "a::candidate:reasoning",
+        "b::candidate:non_reasoning",
+        "c::candidate:reasoning",
+        "d::candidate:non_reasoning",
+    ]
+    assert not predictions.duplicated(prediction_key).any()
+    pd.testing.assert_frame_equal(
+        predictions.sort_values(prediction_key).reset_index(drop=True),
+        expected_predictions.sort_values(prediction_key).reset_index(drop=True),
+    )
+    summary, length = summarize_token_predictions(predictions, "candidate")
+    pd.testing.assert_frame_equal(summary, expected_summary)
+    pd.testing.assert_frame_equal(length, expected_length)
 
 
 def test_support_scaling_and_threshold_do_not_depend_on_queries():

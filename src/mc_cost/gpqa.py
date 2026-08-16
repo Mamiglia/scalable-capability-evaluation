@@ -279,6 +279,7 @@ def prepare_for_mc(
     """Prepare MC attempts on the catalogue's IRT scale, never raw accuracy."""
     data, accounting = extract_attempts(log_root)
     exclusions = list(data.attrs.get("exclusions", []))
+    data.attrs.clear()
     aliases = catalogue_aliases(catalogue)
     identity_columns = ("judge", "left_model", "right_model")
     unresolved = sorted({

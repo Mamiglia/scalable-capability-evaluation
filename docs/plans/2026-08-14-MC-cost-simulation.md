@@ -46,6 +46,27 @@ uv run python -m http.server 8000 -d interactive_viewer
 The dashboard is at `http://localhost:8000/mc_cost.html`. The browser only reads
 precomputed results; it does not fit or approximate the model.
 
+To inspect fitted results while held-out validation is still running, export an
+explicitly labelled preview:
+
+```bash
+uv run mc-cost export-dashboard --config configs/mc_cost/default.json --provisional
+```
+
+This fixes the judgment model to conditional `core_release` and keeps posterior
+and support uncertainty, but the dashboard remains visibly marked
+“Provisional — held-out validation pending.” It is not a model-selection or
+held-out-performance claim.
+
+Production validation can be resumed and distributed with the checked-in Slurm
+scripts. The worker array deterministically partitions every judgment and token
+fold; the reducer refuses missing, duplicate, or hash-stale shards:
+
+```bash
+array_job=$(sbatch --parsable scripts/mc_cost_validation_array_v1.sbatch)
+sbatch --dependency=afterok:"$array_job" scripts/mc_cost_validation_reduce_v1.sbatch
+```
+
 The explicit `simulate` command above saves a separate 100-item run using the
 configured two presentations. Dashboard export independently simulates its
 bounded configured grid, whose default joint scenario is J=3, M=8, N=4 with

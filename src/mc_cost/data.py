@@ -171,6 +171,7 @@ def candidate_token_rows(
     difficulty = _gpqa_items(items).set_index(["benchmark", "item"])["difficulty"]
     rows, seen_logs, seen_samples = [], set(), set()
     excluded_zero_or_error = 0
+    excluded_invalid_accounting = 0
     excluded_incomplete = 0
     excluded_duplicates = 0
     exclusions = Counter()
@@ -212,6 +213,18 @@ def candidate_token_rows(
                         model=model, item=item, reason="zero_usage", missing_fields=[],
                     )
                     continue
+                reasoning_tokens = tokens["reasoning"]
+                output_tokens = tokens["output"]
+                if reasoning_tokens and tokens["total"] == tokens["input"] + output_tokens + reasoning_tokens:
+                    output_tokens += reasoning_tokens
+                if reasoning_tokens > output_tokens:
+                    excluded_invalid_accounting += 1
+                    _exclude(
+                        exclusions, source="candidate", source_log=str(info.name), judge=None,
+                        model=model, item=item, reason="invalid_token_accounting",
+                        missing_fields=["output_tokens", "reasoning_tokens"],
+                    )
+                    continue
                 epoch = getattr(sample, "epoch", None)
                 key = benchmark, model, item, epoch
                 if key in seen_samples:
@@ -249,7 +262,6 @@ def candidate_token_rows(
                     raise ValueError("; ".join(details))
                 final_transcript = extract_transcript(sample, include_reasoning=False)
                 full_transcript = extract_transcript(sample, include_reasoning=True)
-                reasoning_tokens = tokens["reasoning"]
                 rows.append({
                     "role": "candidate", "benchmark": benchmark, "model": model, "item": item, "epoch": epoch,
                     "response_chars": min(len(final_transcript), presentation_max_chars),
@@ -261,13 +273,14 @@ def candidate_token_rows(
                     "difficulty": item_difficulty,
                     "visible_reasoning": 0,
                     "reasoning_class": model_data.get("reasoning_class", pd.NA),
-                    "input_tokens": tokens["input"], "output_tokens": tokens["output"],
-                    "reasoning_tokens": reasoning_tokens, "ordinary_output_tokens": max(tokens["output"] - reasoning_tokens, 0),
+                    "input_tokens": tokens["input"], "output_tokens": output_tokens,
+                    "reasoning_tokens": reasoning_tokens, "ordinary_output_tokens": output_tokens - reasoning_tokens,
                     "total_tokens": tokens["total"],
                 })
     result = pd.DataFrame(rows)
     result.attrs["accounting"] = {
         "zero_usage_or_error": excluded_zero_or_error,
+        "invalid_token_accounting": excluded_invalid_accounting,
         "missing_catalogue_metadata": excluded_incomplete,
         "duplicate_samples": excluded_duplicates,
     }
@@ -278,20 +291,40 @@ def candidate_token_rows(
 def judge_token_rows(judgments: pd.DataFrame) -> pd.DataFrame:
     """Convert observed judge attempts into token-model rows."""
     frame = judgments.copy()
+    input_tokens = pd.to_numeric(frame["judge_input_tokens"], errors="coerce").fillna(0)
     output = pd.to_numeric(frame["judge_output_tokens"], errors="coerce").fillna(0)
     reasoning = pd.to_numeric(frame["judge_reasoning_tokens"], errors="coerce").fillna(0)
+    total = pd.to_numeric(frame["judge_total_tokens"], errors="coerce").fillna(0)
+    separate = reasoning.gt(0) & total.eq(input_tokens + output + reasoning)
+    output = output + reasoning.where(separate, 0)
+    invalid = reasoning.gt(output)
+    exclusions = Counter()
+    for index in frame.index[invalid]:
+        _exclude(
+            exclusions, source="judge_token",
+            source_log=str(frame.at[index, "log_file"]) if "log_file" in frame else "",
+            judge=str(frame.at[index, "judge"]), model=str(frame.at[index, "judge"]),
+            item=str(frame.at[index, "item"]), reason="invalid_token_accounting",
+            missing_fields=["output_tokens", "reasoning_tokens"],
+        )
+    frame, input_tokens, output, reasoning, total = (
+        value.loc[~invalid] for value in (frame, input_tokens, output, reasoning, total)
+    )
     columns = {
         "role": "judge", "model": frame["judge"], "judge": frame["judge"], "item": frame["item"],
         "chosen_left": frame["chosen_left"], "transcript_chars": frame["left_chars"] + frame["right_chars"],
-        "input_tokens": frame["judge_input_tokens"], "output_tokens": output,
+        "input_tokens": input_tokens, "output_tokens": output,
         "reasoning_tokens": reasoning, "ordinary_output_tokens": (output - reasoning).clip(lower=0),
-        "total_tokens": frame["judge_total_tokens"],
+        "total_tokens": total,
     }
     if "difficulty" in frame:
         columns["difficulty"] = frame["difficulty"]
     if "judge_reasoning_class" in frame:
         columns["reasoning_class"] = frame["judge_reasoning_class"]
-    return pd.DataFrame(columns)
+    result = pd.DataFrame(columns).reset_index(drop=True)
+    result.attrs["accounting"] = {"invalid_token_accounting": int(invalid.sum())}
+    result.attrs["exclusions"] = _exclusion_rows(exclusions)
+    return result
 
 
 def standardize_judgments(

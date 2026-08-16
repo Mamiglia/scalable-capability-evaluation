@@ -502,6 +502,7 @@ def test_prepare_calls_raw_boundaries_and_writes_declared_tables(tmp_path, monke
         }],
         "judgment_eligibility": [{"judge": "j", "pairs": 1, "samples": 1, "eligible": True}],
         "candidate_counts": {"missing_catalogue_metadata": 3, "zero_usage_or_error": 0},
+        "judge_token_counts": {"invalid_token_accounting": 0},
         "exclusions": [judgment_exclusion, candidate_exclusion],
     }
     manifest = json.loads((output / "prepare.manifest.json").read_text())
@@ -1079,6 +1080,185 @@ def test_simulate_rejects_artifact_that_disagrees_with_judge_gate(tmp_path, monk
     assert "judge-covariate gate" in capsys.readouterr().err
 
 
+def _empty_validation_shard_callbacks(monkeypatch):
+    calls = []
+
+    def judgments(_frame, _callback, *, shard):
+        calls.append(("judgment", shard))
+        return pd.DataFrame(), pd.DataFrame()
+
+    def tokens(_frame, role, _callback, *, shard):
+        calls.append((role, shard))
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    monkeypatch.setattr(cli, "cross_validate_judgments", judgments)
+    monkeypatch.setattr(cli, "validate_tokens", tokens)
+    return calls
+
+
+def test_validate_shards_cover_each_task_once_and_resume_completed_shards(tmp_path, monkeypatch):
+    config, output, hashes = pipeline_artifacts(tmp_path)
+    calls = _empty_validation_shard_callbacks(monkeypatch)
+
+    for index in range(2):
+        assert main([
+            "validate", "--config", str(config),
+            "--shard-index", str(index), "--shard-count", "2",
+        ]) == 0
+    before_resume = list(calls)
+    assert main([
+        "validate", "--config", str(config),
+        "--shard-index", "0", "--shard-count", "2",
+    ]) == 0
+
+    metadata_paths = sorted(output.glob("validation/shards/*/*/metadata.json"))
+    metadata = [json.loads(path.read_text()) for path in metadata_paths]
+    assert len(metadata) == 2
+    assert sorted(ordinal for item in metadata for ordinal in item["task_ordinals"]) == list(range(14))
+    assert all(item["data_hashes"] == hashes and item["task_total"] == 14 for item in metadata)
+    assert calls == before_resume == [
+        ("judgment", (0, 2, 0)), ("candidate", (0, 2, 12)), ("judge", (0, 2, 13)),
+        ("judgment", (1, 2, 0)), ("candidate", (1, 2, 12)), ("judge", (1, 2, 13)),
+    ]
+
+
+def test_validate_shard_publish_is_atomic_before_manifest(tmp_path, monkeypatch):
+    config, output, _ = pipeline_artifacts(tmp_path)
+    _empty_validation_shard_callbacks(monkeypatch)
+    monkeypatch.setattr(
+        cli, "_write_manifest",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("interrupted")),
+    )
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        main([
+            "validate", "--config", str(config),
+            "--shard-index", "0", "--shard-count", "2",
+        ])
+
+    assert not list(output.glob("validation/shards/*/*/metadata.json"))
+
+
+def test_validate_reducer_rejects_missing_shards(tmp_path, monkeypatch, capsys):
+    config, _, _ = pipeline_artifacts(tmp_path)
+    _empty_validation_shard_callbacks(monkeypatch)
+    assert main([
+        "validate", "--config", str(config),
+        "--shard-index", "0", "--shard-count", "2",
+    ]) == 0
+
+    assert main([
+        "validate", "--config", str(config), "--reduce-shards", "--shard-count", "2",
+    ]) == 2
+    assert "missing validation shard 1 of 2" in capsys.readouterr().err
+
+
+def test_validate_reducer_records_shard_count_in_decision_provenance(tmp_path, monkeypatch):
+    config, output, _ = pipeline_artifacts(tmp_path)
+    judgment_predictions = pd.DataFrame([
+        {
+            "spec": "baseline", "population": "pooled", "validation": "judge",
+            "fold": "judge:j", "held_out": "j", "source_row": 0,
+            "draw": draw, "observed": 0, "probability": probability,
+        }
+        for draw, probability in enumerate((0.4, 0.6))
+    ])
+    judgment_folds = pd.DataFrame([
+        {
+            "spec": spec, "population": population, "validation": "judge",
+            "fold": "judge:j", "held_out": "j", "log_loss": loss,
+        }
+        for spec, loss in (("baseline", 0.5), ("core", 0.6), ("core_release", 0.7))
+        for population in ("conditional", "pooled")
+    ])
+
+    def token_prediction(role, model):
+        return pd.DataFrame([{
+            "role": role, "reasoning_class": "non_reasoning", "model": model,
+            "configuration": f"{model}::{role}:non_reasoning", "source_row": 0,
+            "outcome": "input_tokens", "actual_log": 1.0, "predicted_log": 1.0,
+            "p5_log": 0.5, "p95_log": 1.5, "absolute_log_error": 0.0,
+            "covered_90": True,
+        }])
+
+    monkeypatch.setattr(cli, "_load_validation_shards", lambda *_args: (
+        judgment_predictions, judgment_folds,
+        token_prediction("candidate", "a"), token_prediction("judge", "j"),
+    ))
+
+    assert main([
+        "validate", "--config", str(config), "--reduce-shards", "--shard-count", "2",
+    ]) == 0
+
+    decision = json.loads((output / "validation/decision.json").read_text())
+    assert decision["validation_config"]["shard_count"] == 2
+
+
+@pytest.mark.parametrize("mutation, message", [("duplicate", "duplicate"), ("stale", "stale")])
+def test_validate_reducer_rejects_duplicate_or_stale_shards(
+    tmp_path, monkeypatch, capsys, mutation, message,
+):
+    config, output, _ = pipeline_artifacts(tmp_path)
+    _empty_validation_shard_callbacks(monkeypatch)
+    for index in range(2):
+        assert main([
+            "validate", "--config", str(config),
+            "--shard-index", str(index), "--shard-count", "2",
+        ]) == 0
+    paths = sorted(output.glob("validation/shards/*/*/metadata.json"))
+    changed = json.loads(paths[1].read_text())
+    if mutation == "duplicate":
+        changed["task_ordinals"] = json.loads(paths[0].read_text())["task_ordinals"]
+    else:
+        changed["data_hashes"]["judgments"] = "stale"
+    paths[1].write_text(json.dumps(changed, sort_keys=True))
+    relative = paths[1].parent.relative_to(output)
+    files = [
+        f"{relative}/{name}" for name in (
+            "judgment_predictions.csv", "judgment_folds.csv",
+            "token_candidate_predictions.csv", "token_judge_predictions.csv", "metadata.json",
+        )
+    ]
+    write_generation(output, f"{relative}/manifest.json", files)
+
+    assert main([
+        "validate", "--config", str(config), "--reduce-shards", "--shard-count", "2",
+    ]) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_validate_reducer_rejects_malformed_signed_metadata(tmp_path, monkeypatch, capsys):
+    config, output, _ = pipeline_artifacts(tmp_path)
+    _empty_validation_shard_callbacks(monkeypatch)
+    for index in range(2):
+        assert main([
+            "validate", "--config", str(config),
+            "--shard-index", str(index), "--shard-count", "2",
+        ]) == 0
+    path = sorted(output.glob("validation/shards/*/*/metadata.json"))[1]
+    path.write_text("[]\n")
+    relative = path.parent.relative_to(output)
+    files = [f"{relative}/{name}" for name in cli._VALIDATION_SHARD_FILES]
+    write_generation(output, f"{relative}/manifest.json", files)
+
+    assert main([
+        "validate", "--config", str(config), "--reduce-shards", "--shard-count", "2",
+    ]) == 2
+    assert "invalid validation shard metadata" in capsys.readouterr().err
+
+
+def test_validation_slurm_scripts_bound_parallelism_and_reduce_afterward():
+    root = Path(__file__).resolve().parents[1]
+    worker = root / "scripts/mc_cost_validation_array_v1.sbatch"
+    reducer = root / "scripts/mc_cost_validation_reduce_v1.sbatch"
+    for path in (worker, reducer):
+        assert subprocess.run(["bash", "-n", path], capture_output=True).returncode == 0
+        assert "#SBATCH --requeue" in path.read_text()
+    assert "#SBATCH --array=0-11%8" in worker.read_text()
+    assert '--shard-index "$SLURM_ARRAY_TASK_ID" --shard-count 12' in worker.read_text()
+    assert "--reduce-shards --shard-count 12" in reducer.read_text()
+
+
 def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path, monkeypatch):
     dashboard = {
         "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
@@ -1108,9 +1288,10 @@ def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path,
     payload = json.loads(target.read_text())
     assert calls == ["automatic", "automatic", "manual"]
     assert set(payload) == {
-        "schema_version", "generated_at", "source_hashes", "quantiles", "catalogue",
+        "schema_version", "generated_at", "source_hashes", "quantiles", "validation", "catalogue",
         "automatic", "manual", "scaling", "ranking_recovery", "warnings",
     }
+    assert payload["validation"]["status"] == "validated"
     assert payload["generated_at"] == "2026-08-15T00:00:00Z"
     assert {row["strength_filter"] for row in payload["automatic"]} == {True, False}
     assert {row["mode"] for row in payload["automatic"]} == {"automatic"}
@@ -1139,6 +1320,76 @@ def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path,
         "identity": identity, "limit": 0, "source": "configured",
     }
     assert payload["source_hashes"]["decision"]
+
+
+def test_export_dashboard_provisional_uses_core_release_without_validation(tmp_path, monkeypatch):
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "manual_triple_limit": 0, "manual_triples": [],
+    }
+    config, output, _ = pipeline_artifacts(tmp_path, dashboard=dashboard)
+    artifact = load_artifact(output / "model/core_release")
+    save_artifact(PosteriorArtifact(
+        artifact.posterior,
+        {**artifact.metadata, "conditional_judges": True},
+        artifact.diagnostics,
+    ), output / "model/core_release")
+    write_generation(output, "model/manifest.json", MODEL_FILES)
+    monkeypatch.setattr(cli, "simulate", lambda _comparisons, resolved, **_kwargs: fake_result(
+        resolved.configuration,
+    ))
+    target = tmp_path / "provisional.json"
+
+    assert main([
+        "export-dashboard", "--config", str(config), "--out", str(target),
+        "--trials", "1", "--provisional",
+    ]) == 0
+
+    payload = json.loads(target.read_text())
+    validate_dashboard_payload(payload)
+    assert payload["validation"] == {
+        "status": "provisional", "selected_spec": "core_release",
+        "judge_covariates": True,
+        "message": "Provisional — held-out validation pending.",
+    }
+    decision = json.loads((output / "provisional/decision.json").read_text())
+    assert decision["selected_judgment_spec"] == "core_release"
+    assert decision["judge_covariate_gate"]["enabled"] is True
+    assert decision["judgment_support"]["coordinate_system"] == "raw"
+
+
+def test_provisional_decision_is_reused_after_interrupted_export(tmp_path, monkeypatch):
+    config, output, _ = pipeline_artifacts(tmp_path, dashboard={
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "manual_triple_limit": 0, "manual_triples": [],
+    })
+    artifact = load_artifact(output / "model/core_release")
+    save_artifact(PosteriorArtifact(
+        artifact.posterior, {**artifact.metadata, "conditional_judges": True},
+        artifact.diagnostics,
+    ), output / "model/core_release")
+    write_generation(output, "model/manifest.json", MODEL_FILES)
+    command = [
+        "export-dashboard", "--config", str(config), "--trials", "1", "--provisional",
+        "--out", str(tmp_path / "provisional.json"),
+    ]
+    monkeypatch.setattr(
+        cli, "simulate",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("interrupted")),
+    )
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        main(command)
+    decision_path = output / "provisional/decision.json"
+    first = decision_path.read_bytes()
+    monkeypatch.setattr(
+        cli, "simulate", lambda _comparisons, resolved, **_kwargs: fake_result(resolved.configuration),
+    )
+
+    assert main(command) == 0
+    assert decision_path.read_bytes() == first
 
 
 def test_dashboard_scenarios_default_to_one_axis_at_a_time_with_cartesian_opt_in():

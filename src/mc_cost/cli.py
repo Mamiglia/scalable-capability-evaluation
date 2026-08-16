@@ -54,6 +54,7 @@ from mc_cost.validation import (
     posterior_predictive_replay,
     ranking_recovery,
     require_decision,
+    summarize_token_predictions,
     support_distance,
     validate_tokens,
     write_decision,
@@ -98,6 +99,10 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--warmup", type=_positive)
             command.add_argument("--samples", type=_positive)
             command.add_argument("--chains", type=_positive)
+        elif name == "validate":
+            command.add_argument("--shard-index", type=int)
+            command.add_argument("--shard-count", type=_positive)
+            command.add_argument("--reduce-shards", action="store_true")
         elif name == "simulate":
             command.add_argument("--manual", type=Path)
             command.add_argument("--judges", type=_positive)
@@ -114,6 +119,7 @@ def _parser() -> argparse.ArgumentParser:
         elif name == "export-dashboard":
             command.add_argument("--out", type=Path)
             command.add_argument("--trials", type=_positive)
+            command.add_argument("--provisional", action="store_true")
     return parser
 
 
@@ -305,6 +311,8 @@ def _prepare(args: argparse.Namespace, config: dict[str, Any]) -> None:
     candidate_counts = dict(candidates.attrs.get("accounting", {}))
     candidate_exclusions = list(candidates.attrs.get("exclusions", []))
     judges = judge_token_rows(judgments)
+    judge_token_counts = dict(judges.attrs.get("accounting", {}))
+    judge_token_exclusions = list(judges.attrs.get("exclusions", []))
     accounting = {
         "schema_version": 1,
         "judgment_counts": json.loads(
@@ -314,7 +322,8 @@ def _prepare(args: argparse.Namespace, config: dict[str, Any]) -> None:
             judgment_eligibility.rename_axis("judge").reset_index().to_json(orient="records")
         ),
         "candidate_counts": candidate_counts,
-        "exclusions": judgment_exclusions + candidate_exclusions,
+        "judge_token_counts": judge_token_counts,
+        "exclusions": judgment_exclusions + candidate_exclusions + judge_token_exclusions,
     }
     with _temporary_directory(output.parent) as directory:
         stage = Path(directory)
@@ -583,44 +592,17 @@ def _selected_artifact_matches(
     )
 
 
-def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
-    output = _output(config)
-    sources = _fit_sources(output)
-    hashes = {name: _hash_file(path) for name, path in sources.items()}
-    fitted_artifacts = _fitted_artifacts(output, hashes)
-    catalogue = pd.read_csv(sources["catalogue"])
-    judgments = pd.read_parquet(sources["judgments"])
-    candidates = pd.read_parquet(sources["candidate_tokens"])
-    judges = pd.read_parquet(sources["judge_tokens"])
-    settings = _fit_settings(args, config)
-    if args.seed is not None:
-        settings["seed"] = args.seed
-    rng = np.random.default_rng(settings["seed"])
-    judgment_predictions, judgment_folds = cross_validate_judgments(
-        judgments, _judgment_validator(catalogue, hashes, settings, rng),
-    )
-    candidate_predictions, candidate_summary, candidate_strata = validate_tokens(
-        candidates, "candidate", _token_validator(catalogue, hashes, settings, rng),
-    )
-    judge_predictions, judge_summary, judge_strata = validate_tokens(
-        judges, "judge", _token_validator(catalogue, hashes, settings, rng),
-    )
-    selected = choose_judgment_spec(judgment_folds)
-    selected_folds = judgment_folds.loc[judgment_folds["spec"].eq(selected["selected"])]
-    pooled = selected_folds.loc[selected_folds["population"].eq("pooled")]
-    conditional = selected_folds.loc[
-        selected_folds["population"].eq("conditional") & selected_folds["fold"].isin(pooled["fold"])
-    ]
-    judge_gate = choose_judge_gate(conditional, pooled)
-    spec = JUDGMENT_SPECS[selected["selected"]]
-    scales = _load_scales(sources["scales"])
+def _judgment_support(
+    judgments: pd.DataFrame, spec, conditional_judges: bool,
+    scales: dict[str, dict[str, float]],
+) -> tuple[np.ndarray, list[str], float]:
     predictor_names = ["theta_gap", *(
         FEATURE_COLUMNS.get(feature, feature) for feature in spec.global_features
     )]
     if spec.include_length:
         predictor_names.append("length_difference")
     support_frame = judgments.copy()
-    if judge_gate["enabled"]:
+    if conditional_judges:
         missing = sorted({"judge_theta", "judge_release_day"} - set(judgments))
         if missing:
             raise CliError(
@@ -637,14 +619,233 @@ def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
             )
     predictors = support_frame[predictor_names].apply(pd.to_numeric, errors="raise").to_numpy(float)
     support = support_distance(predictors, predictors[:1])
+    return predictors, predictor_names, float(support["threshold"].iloc[0])
+
+
+_VALIDATION_SHARD_FILES = (
+    "judgment_predictions.csv", "judgment_folds.csv",
+    "token_candidate_predictions.csv", "token_judge_predictions.csv", "metadata.json",
+)
+
+
+def _validation_task_counts(
+    judgments: pd.DataFrame, candidates: pd.DataFrame, judges: pd.DataFrame,
+) -> tuple[int, int, int]:
+    models = set(judgments["left_model"].astype(str)) | set(judgments["right_model"].astype(str))
+    judgment_count = len(JUDGMENT_SPECS) * (
+        2 * judgments["judge"].astype(str).nunique() + len(models)
+    )
+
+    def token_count(frame: pd.DataFrame, role: str) -> int:
+        rows = frame.assign(role=role) if "role" not in frame else frame
+        return len(rows[["model", "role", "reasoning_class"]].drop_duplicates())
+
+    return judgment_count, token_count(candidates, "candidate"), token_count(judges, "judge")
+
+
+def _validation_shard_metadata(
+    hashes: dict[str, str], settings: dict[str, int], index: int, count: int, total: int,
+) -> tuple[str, dict[str, Any]]:
+    identity = {
+        "data_hashes": hashes, "validation_config": settings,
+        "shard_count": count, "task_total": total,
+    }
+    generation = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+    return generation, {
+        "schema_version": 1, **identity, "shard_index": index,
+        "task_ordinals": list(range(index, total, count)),
+    }
+
+
+def _validation_shard_names(generation: str, index: int, count: int) -> tuple[str, list[str]]:
+    relative = f"validation/shards/{generation}/{index:04d}-of-{count:04d}"
+    return relative, [f"{relative}/{name}" for name in _VALIDATION_SHARD_FILES]
+
+
+def _completed_validation_shard(
+    output: Path, relative: str, files: list[str], expected: dict[str, Any],
+) -> bool:
+    manifest = f"{relative}/manifest.json"
+    if not (output / manifest).is_file():
+        return False
+    _verify_generation(output, manifest, files, "validate", "validation shard")
+    try:
+        actual = json.loads((output / relative / "metadata.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        raise CliError("invalid validation shard metadata") from None
+    if actual != expected:
+        raise CliError("stale validation shard metadata")
+    return True
+
+
+def _write_validation_shard(
+    output: Path, relative: str, files: list[str], metadata: dict[str, Any],
+    judgment_predictions: pd.DataFrame, judgment_folds: pd.DataFrame,
+    candidate_predictions: pd.DataFrame, judge_predictions: pd.DataFrame,
+) -> None:
+    frames = {
+        "judgment_predictions.csv": judgment_predictions,
+        "judgment_folds.csv": judgment_folds,
+        "token_candidate_predictions.csv": candidate_predictions,
+        "token_judge_predictions.csv": judge_predictions,
+    }
+    with _temporary_directory(output.parent) as directory:
+        stage = Path(directory) / relative
+        stage.mkdir(parents=True)
+        for name, frame in frames.items():
+            frame.to_csv(stage / name, index=False)
+        _write_json(stage / "metadata.json", metadata)
+        _write_manifest(Path(directory), f"{relative}/manifest.json", files)
+        target = output / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            raise CliError("validation shard target already exists without a valid manifest")
+        stage.rename(target)
+
+
+def _read_shard_csv(path: Path) -> pd.DataFrame:
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
+
+
+def _load_validation_shards(
+    output: Path, hashes: dict[str, str], settings: dict[str, int], count: int,
+    task_counts: tuple[int, int, int],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    total = sum(task_counts)
+    generation, _ = _validation_shard_metadata(hashes, settings, 0, count, total)
+    frames = {name: [] for name in _VALIDATION_SHARD_FILES[:-1]}
+    ordinals = []
+    for index in range(count):
+        relative, files = _validation_shard_names(generation, index, count)
+        manifest = output / relative / "manifest.json"
+        if not manifest.is_file():
+            raise CliError(f"missing validation shard {index} of {count}")
+        _verify_generation(
+            output, str(manifest.relative_to(output)), files, "validate", "validation shard",
+        )
+        metadata = json.loads((output / relative / "metadata.json").read_text())
+        if not isinstance(metadata, dict):
+            raise CliError("invalid validation shard metadata")
+        _, expected = _validation_shard_metadata(hashes, settings, index, count, total)
+        expected.pop("task_ordinals")
+        actual_ordinals = metadata.pop("task_ordinals", None)
+        if not isinstance(actual_ordinals, list) or any(
+            type(ordinal) is not int for ordinal in actual_ordinals
+        ):
+            raise CliError("invalid validation shard metadata")
+        if metadata != expected:
+            raise CliError("stale validation shard metadata")
+        ordinals.extend(actual_ordinals)
+        for name in frames:
+            frames[name].append(_read_shard_csv(output / relative / name))
+    if len(ordinals) != len(set(ordinals)):
+        raise CliError("duplicate validation shard tasks")
+    if sorted(ordinals) != list(range(total)):
+        raise CliError("validation shards do not cover every task")
+
+    def joined(name: str) -> pd.DataFrame:
+        nonempty = [frame for frame in frames[name] if not frame.empty]
+        return pd.concat(nonempty, ignore_index=True) if nonempty else pd.DataFrame()
+
+    return tuple(joined(name) for name in frames)
+
+
+def _validate(args: argparse.Namespace, config: dict[str, Any]) -> None:
+    output = _output(config)
+    sources = _fit_sources(output)
+    hashes = {name: _hash_file(path) for name, path in sources.items()}
+    fitted_artifacts = _fitted_artifacts(output, hashes)
+    catalogue = pd.read_csv(sources["catalogue"])
+    judgments = pd.read_parquet(sources["judgments"])
+    candidates = pd.read_parquet(sources["candidate_tokens"])
+    judges = pd.read_parquet(sources["judge_tokens"])
+    settings = _fit_settings(args, config)
+    if args.seed is not None:
+        settings["seed"] = args.seed
+    rng = np.random.default_rng(settings["seed"])
+    shard_index = getattr(args, "shard_index", None)
+    shard_count = getattr(args, "shard_count", None)
+    reduce_shards = bool(getattr(args, "reduce_shards", False))
+    if reduce_shards:
+        if shard_count is None or shard_index is not None:
+            raise CliError("--reduce-shards requires --shard-count and no --shard-index")
+    elif (shard_index is None) != (shard_count is None):
+        raise CliError("--shard-index and --shard-count must be supplied together")
+    elif shard_index is not None and not 0 <= shard_index < shard_count:
+        raise CliError("--shard-index must satisfy 0 <= index < shard-count")
+
+    task_counts = _validation_task_counts(judgments, candidates, judges)
+    if reduce_shards:
+        (
+            judgment_predictions, judgment_folds,
+            candidate_predictions, judge_predictions,
+        ) = _load_validation_shards(output, hashes, settings, shard_count, task_counts)
+        candidate_summary, candidate_strata = summarize_token_predictions(
+            candidate_predictions, "candidate",
+        )
+        judge_summary, judge_strata = summarize_token_predictions(judge_predictions, "judge")
+    elif shard_index is not None:
+        total = sum(task_counts)
+        generation, metadata = _validation_shard_metadata(
+            hashes, settings, shard_index, shard_count, total,
+        )
+        relative, files = _validation_shard_names(generation, shard_index, shard_count)
+        if _completed_validation_shard(output, relative, files, metadata):
+            return
+        judgment_predictions, judgment_folds = cross_validate_judgments(
+            judgments, _judgment_validator(catalogue, hashes, settings, rng),
+            shard=(shard_index, shard_count, 0),
+        )
+        candidate_predictions, _, _ = validate_tokens(
+            candidates, "candidate", _token_validator(catalogue, hashes, settings, rng),
+            shard=(shard_index, shard_count, task_counts[0]),
+        )
+        judge_predictions, _, _ = validate_tokens(
+            judges, "judge", _token_validator(catalogue, hashes, settings, rng),
+            shard=(shard_index, shard_count, task_counts[0] + task_counts[1]),
+        )
+        _write_validation_shard(
+            output, relative, files, metadata, judgment_predictions, judgment_folds,
+            candidate_predictions, judge_predictions,
+        )
+        return
+    else:
+        judgment_predictions, judgment_folds = cross_validate_judgments(
+            judgments, _judgment_validator(catalogue, hashes, settings, rng),
+        )
+        candidate_predictions, candidate_summary, candidate_strata = validate_tokens(
+            candidates, "candidate", _token_validator(catalogue, hashes, settings, rng),
+        )
+        judge_predictions, judge_summary, judge_strata = validate_tokens(
+            judges, "judge", _token_validator(catalogue, hashes, settings, rng),
+        )
+    selected = choose_judgment_spec(judgment_folds)
+    selected_folds = judgment_folds.loc[judgment_folds["spec"].eq(selected["selected"])]
+    pooled = selected_folds.loc[selected_folds["population"].eq("pooled")]
+    conditional = selected_folds.loc[
+        selected_folds["population"].eq("conditional") & selected_folds["fold"].isin(pooled["fold"])
+    ]
+    judge_gate = choose_judge_gate(conditional, pooled)
+    spec = JUDGMENT_SPECS[selected["selected"]]
+    scales = _load_scales(sources["scales"])
+    predictors, predictor_names, support_threshold = _judgment_support(
+        judgments, spec, bool(judge_gate["enabled"]), scales,
+    )
     token_coverage = pd.concat([candidate_summary, judge_summary], ignore_index=True)
     payload = decision_payload(
         selected_spec=selected["selected"], judge_gate=judge_gate,
         token_coverage=token_coverage, predictors=predictors,
-        predictor_names=predictor_names, support_threshold=float(support["threshold"].iloc[0]),
+        predictor_names=predictor_names, support_threshold=support_threshold,
         data_hashes=hashes, validation_timestamp=datetime.now(timezone.utc).isoformat(),
     )
-    payload["validation_config"] = settings
+    payload["validation_config"] = {
+        **settings, **({"shard_count": shard_count} if reduce_shards else {}),
+    }
     expected_conditional = bool(judge_gate["enabled"])
     selected_artifact = fitted_artifacts[selected["selected"]]
     refitted_artifact = None
@@ -779,16 +980,71 @@ def _capability_inputs(
     return models, draws
 
 
-def _simulation_inputs(config: dict[str, Any]) -> dict[str, Any]:
+def _provisional_decision(
+    output: Path, sources: dict[str, Path], hashes: dict[str, str],
+    fitted: dict[str, PosteriorArtifact],
+) -> tuple[Path, dict[str, Any]]:
+    selected = "core_release"
+    decision_path = output / "provisional/decision.json"
+    manifest = output / "provisional/manifest.json"
+    if manifest.is_file():
+        _verify_generation(
+            output, "provisional/manifest.json", ["provisional/decision.json"],
+            "export-dashboard --provisional", "provisional decision",
+        )
+        decision = require_decision(decision_path, hashes)
+        if (
+            decision.get("validation_status") != "provisional"
+            or decision.get("selected_judgment_spec") != selected
+            or decision.get("judge_covariate_gate", {}).get("enabled") is not True
+        ):
+            raise CliError("existing provisional decision is incompatible with the preview policy")
+        return decision_path, decision
+    if decision_path.exists() or manifest.exists():
+        raise CliError("incomplete provisional decision generation")
+    if not _selected_artifact_matches(fitted[selected], selected, True):
+        raise CliError(
+            "provisional export requires the conditional core_release artifact; rerun `mc-cost fit`"
+        )
+    predictors, predictor_names, threshold = _judgment_support(
+        pd.read_parquet(sources["judgments"]), JUDGMENT_SPECS[selected], True,
+        _load_scales(sources["scales"]),
+    )
+    decision = decision_payload(
+        selected_spec=selected,
+        judge_gate={"enabled": True, "reason": "fixed provisional preview policy"},
+        token_coverage=pd.DataFrame(columns=("role", "reasoning_class", "outcome", "coverage_90")),
+        predictors=predictors, predictor_names=predictor_names, support_threshold=threshold,
+        data_hashes=hashes, validation_timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+    decision["validation_status"] = "provisional"
+    with _temporary_directory(output.parent) as directory:
+        stage = Path(directory) / "provisional"
+        stage.mkdir()
+        write_decision(stage / "decision.json", decision)
+        _write_manifest(
+            Path(directory), "provisional/manifest.json", ["provisional/decision.json"],
+        )
+        target = output / "provisional"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        stage.rename(target)
+    return decision_path, decision
+
+
+def _simulation_inputs(config: dict[str, Any], *, provisional: bool = False) -> dict[str, Any]:
     output = _output(config)
     sources = _fit_sources(output)
     hashes = {name: _hash_file(path) for name, path in sources.items()}
-    decision_path = output / "validation/decision.json"
-    _verify_generation(
-        output, "validation/manifest.json", ["validation/decision.json"],
-        "validate", "validation",
-    )
-    decision = require_decision(decision_path, hashes)
+    fitted = _fitted_artifacts(output, hashes)
+    if provisional:
+        decision_path, decision = _provisional_decision(output, sources, hashes, fitted)
+    else:
+        decision_path = output / "validation/decision.json"
+        _verify_generation(
+            output, "validation/manifest.json", ["validation/decision.json"],
+            "validate", "validation",
+        )
+        decision = require_decision(decision_path, hashes)
     selected = decision.get("selected_judgment_spec")
     if selected not in JUDGMENT_SPECS:
         raise CliError("decision.json does not select a sanctioned judgment specification")
@@ -799,7 +1055,6 @@ def _simulation_inputs(config: dict[str, Any]) -> dict[str, Any]:
     }
     if decision.get("judgment_spec") != expected_spec:
         raise CliError("decision judgment specification does not match the sanctioned selection")
-    fitted = _fitted_artifacts(output, hashes)
     artifacts = {
         "judgment": fitted[selected],
         "candidate_token": fitted["candidate_token"],
@@ -811,7 +1066,7 @@ def _simulation_inputs(config: dict[str, Any]) -> dict[str, Any]:
     if not _selected_artifact_matches(artifacts["judgment"], selected, gate):
         raise CliError(
             "selected judgment specification or judge-covariate gate disagrees with its artifact; "
-            "rerun `mc-cost validate`"
+            f"rerun `mc-cost {'fit' if provisional else 'validate'}`"
         )
 
     irt_path = _require_source(config, "irt_posterior")
@@ -1273,7 +1528,7 @@ def _dashboard_records(
 
 
 def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
-    inputs = _simulation_inputs(config)
+    inputs = _simulation_inputs(config, provisional=args.provisional)
     dashboard = config.get("dashboard")
     if not isinstance(dashboard, dict):
         raise CliError("configuration must contain a dashboard object")
@@ -1375,6 +1630,15 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
     _write_json(target, dashboard_payload(
         generated_at=inputs["decision"].get("validation_timestamp"),
         source_hashes=inputs["source_hashes"], catalogue=_records(inputs["catalogue"]),
+        validation={
+            "status": "provisional" if args.provisional else "validated",
+            "selected_spec": inputs["decision"]["selected_judgment_spec"],
+            "judge_covariates": inputs["decision"]["judge_covariate_gate"]["enabled"],
+            "message": (
+                "Provisional — held-out validation pending."
+                if args.provisional else "Held-out validation complete."
+            ),
+        },
         automatic=automatic, manual=manual, ranking_recovery=ranking_rows, warnings=warnings,
     ))
 

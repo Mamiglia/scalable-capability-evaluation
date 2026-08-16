@@ -148,6 +148,10 @@ def test_extractor_persists_explicit_paired_truncation_condition(tmp_path):
 
 
 def test_mc_prepare_names_dropped_catalogue_metadata_identity(monkeypatch):
+    class UncopyableAuditMetadata:
+        def __deepcopy__(self, _memo):
+            raise AssertionError("unused frame attrs must not be copied per row")
+
     rows = pd.DataFrame([
         {
             "judge": "j", "left_model": "a", "right_model": "b", "model_pair": "a|b",
@@ -165,6 +169,7 @@ def test_mc_prepare_names_dropped_catalogue_metadata_identity(monkeypatch):
             "log_file": "missing.eval",
         },
     ])
+    rows.attrs["unused_audit_metadata"] = UncopyableAuditMetadata()
     accounting = pd.DataFrame({"attempts_kept": [3, 1]}, index=["j", "dropped"])
     monkeypatch.setattr(gpqa, "extract_attempts", lambda _: (rows, accounting))
     catalogue = pd.DataFrame([

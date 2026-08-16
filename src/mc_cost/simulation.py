@@ -36,7 +36,7 @@ _TRIAL_COLUMNS = [
 ]
 _WARNING_COLUMNS = ["code", "trial", "row", "source_row", "model", "message"]
 _DASHBOARD_KEYS = (
-    "schema_version", "generated_at", "source_hashes", "quantiles", "catalogue",
+    "schema_version", "generated_at", "source_hashes", "quantiles", "validation", "catalogue",
     "automatic", "manual", "scaling", "ranking_recovery", "warnings",
 )
 _DASHBOARD_ARRAYS = (
@@ -114,8 +114,8 @@ def validate_dashboard_payload(payload: Mapping[str, Any]) -> None:
     """Validate the complete static-dashboard boundary before publication."""
     if not isinstance(payload, Mapping) or set(payload) != set(_DASHBOARD_KEYS):
         raise ValueError(f"dashboard schema fields must be exactly: {', '.join(_DASHBOARD_KEYS)}")
-    if payload["schema_version"] != 1:
-        raise ValueError("dashboard schema_version must be 1")
+    if payload["schema_version"] != 2:
+        raise ValueError("dashboard schema_version must be 2")
     try:
         generated_at = datetime.fromisoformat(str(payload["generated_at"]).replace("Z", "+00:00"))
     except ValueError:
@@ -130,6 +130,17 @@ def validate_dashboard_payload(payload: Mapping[str, Any]) -> None:
         raise ValueError("dashboard source_hashes must map names to nonempty hashes")
     if payload["quantiles"] != [0.05, 0.5, 0.95]:
         raise ValueError("dashboard quantiles must be [0.05, 0.5, 0.95]")
+    validation = payload["validation"]
+    if (
+        not isinstance(validation, Mapping)
+        or set(validation) != {"status", "selected_spec", "judge_covariates", "message"}
+        or validation.get("status") not in {"validated", "provisional"}
+        or validation.get("selected_spec") not in {"baseline", "core", "core_release"}
+        or type(validation.get("judge_covariates")) is not bool
+        or not isinstance(validation.get("message"), str)
+        or not validation["message"].strip()
+    ):
+        raise ValueError("dashboard validation metadata is invalid")
 
     for name in _DASHBOARD_ARRAYS:
         rows = payload[name]
@@ -177,7 +188,7 @@ def validate_dashboard_payload(payload: Mapping[str, Any]) -> None:
 
 def dashboard_payload(
     *, generated_at: str, source_hashes: Mapping[str, str], catalogue,
-    automatic, manual, ranking_recovery, warnings,
+    validation: Mapping[str, Any], automatic, manual, ranking_recovery, warnings,
 ) -> dict[str, Any]:
     """Build one canonical, formula-free payload for the static viewer."""
     automatic_rows = _dashboard_sort(automatic)
@@ -192,10 +203,11 @@ def dashboard_payload(
         )
     )
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": generated_at,
         "source_hashes": dict(sorted(source_hashes.items())),
         "quantiles": [0.05, 0.5, 0.95],
+        "validation": dict(validation),
         "catalogue": _dashboard_sort(catalogue),
         "automatic": automatic_rows,
         "manual": _dashboard_sort(manual),
