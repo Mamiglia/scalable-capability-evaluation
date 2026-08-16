@@ -67,11 +67,12 @@ PARQUET_DIR = ROOT / "judge_results/rewrites"
 MODELS_CSV = ROOT / "judge_results/judge_ft/models_ft.csv"
 
 # last literal "ANSWER: <letter>" anywhere in the text - same marker
-# strip_answer()/choice()'s own template rely on; case-sensitive, matching
-# every original transcript's actual convention (verified: 0 false positives
+# strip_answer()/choice()'s own template rely on; case-insensitive so preserved
+# variants such as "Answer:" reach the real scorer, matching the QC label rule.
+# This matches every original transcript's actual convention (verified: 0 false positives
 # across all 1227 originals, which use assorted trailing markdown/punctuation
 # after the letter but always this literal marker before it).
-ANSWER_RE = re.compile(r"ANSWER:\s*([A-Za-z])")
+ANSWER_RE = re.compile(r"ANSWER:\s*([A-Za-z])", re.IGNORECASE)
 
 
 def subset_keys(cfg: dict) -> set[tuple[str, str]]:
@@ -98,11 +99,12 @@ def load_rewrites(path: Path) -> dict[tuple[str, str], str]:
 
 
 def rewrite_answer_letter(text: str) -> str | None:
-    """Last 'ANSWER: <letter>' in the rewrite, or None if it has no such
-    marker at all (e.g. "Final Answer: B" - a different string, not this
-    one). Deliberately tolerant of what follows the letter (markdown,
-    trailing punctuation, code fences) since real transcripts use all of
-    these; only the marker+letter itself is required."""
+    """Last case-insensitive 'Answer: <letter>' in the rewrite, or None.
+
+    Deliberately tolerant of a "Final" prefix and of what follows the letter
+    (markdown, trailing punctuation, code fences) since real transcripts use
+    all of these; only the marker+letter itself is required.
+    """
     matches = list(ANSWER_RE.finditer(text))
     return matches[-1].group(1).upper() if matches else None
 
@@ -255,7 +257,7 @@ def _self_check() -> None:
     assert rewrite_answer_letter("reasoning...\n\nANSWER: B") == "B"
     assert rewrite_answer_letter("reasoning...\n\nANSWER: C\n```") == "C"  # code-fenced, still fine
     assert rewrite_answer_letter("reasoning...\n\n**ANSWER: D**") == "D"  # bold, still fine
-    assert rewrite_answer_letter("reasoning...\n\nFinal Answer: B") is None  # no literal "ANSWER:"
+    assert rewrite_answer_letter("reasoning...\n\nFinal Answer: B") == "B"
     assert rewrite_answer_letter("no answer line at all") is None
 
     print("self-check OK")

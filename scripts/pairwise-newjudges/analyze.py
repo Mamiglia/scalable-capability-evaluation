@@ -8,6 +8,7 @@ canonical verdicts.csv) so the analysis session's regen of that file won't wipe 
 Usage:
   uv run python scripts/pairwise-newjudges/analyze.py            # ling only -> verdicts_newjudges.csv
   uv run python scripts/pairwise-newjudges/analyze.py --judges ling-2.6-flash
+  uv run python scripts/pairwise-newjudges/analyze.py --conditions style_standardised_gpt
 """
 import argparse
 import csv
@@ -49,7 +50,7 @@ def _transcript_lengths(log_path, include_reasoning, max_length, epoch_slot=0):
             for item_id, group in groups.items() if len(group) > epoch_slot}
 
 
-def rows_from_pair_dir(pair_dir, bench, judge, cfg):
+def rows_from_pair_dir(pair_dir, bench, judge, cfg, condition=CONDITION):
     major, minor = pair_dir.name.split("-vs-")
     log = next((read_eval_log(str(p)) for p in pair_dir.glob("*.eval")
                 if read_eval_log(str(p), header_only=True).status == "success"), None)
@@ -91,7 +92,7 @@ def rows_from_pair_dir(pair_dir, bench, judge, cfg):
         if picked and lm is not None and ln is not None and lm != ln:
             longer_pos = target if lm > ln else ("2" if target == "1" else "1")
             picked_longer = (picked == longer_pos)
-        yield dict(bench=bench, condition=CONDITION, judge=judge, major=major,
+        yield dict(bench=bench, condition=condition, judge=judge, major=major,
                    minor=minor, item_id=item_id, order=target, picked=picked,
                    picked_major=picked_major,
                    confidence=(sc.metadata or {}).get("confidence", ""),
@@ -112,14 +113,43 @@ def collect(root, judges):
     return rows
 
 
+def collect_manipulations(root, configs, conditions, judges):
+    """Collect condition/judge/pair manipulation logs in verdicts.csv schema."""
+    rows = []
+    for condition in conditions:
+        cfg = yaml.safe_load((configs / f"{condition}.yaml").read_text())
+        if cfg["condition"] != condition:
+            raise ValueError(f"condition mismatch in {condition}.yaml")
+        condition_dir = root / condition
+        if not condition_dir.exists():
+            continue
+        for judge_dir in sorted(p for p in condition_dir.iterdir() if p.is_dir()):
+            if judge_dir.name not in judges:
+                continue
+            for pair_dir in sorted(p for p in judge_dir.iterdir() if p.is_dir()):
+                rows += list(rows_from_pair_dir(
+                    pair_dir, "gpqa", judge_dir.name, cfg, condition=condition
+                ))
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", default=str(ROOT / "logs" / "pairwise-newjudges"))
+    ap.add_argument("--configs", type=Path,
+                    default=HERE / "configs" / "manipulations")
+    ap.add_argument("--conditions", nargs="+",
+                    help="collect manipulation logs laid out as condition/judge/pair")
     ap.add_argument("--judges", nargs="+", default=["ling-2.6-flash"])
     ap.add_argument("--out", default=str(ROOT / "judge_results" / "judging_variations" / "verdicts_newjudges.csv"))
     args = ap.parse_args()
 
-    rows = collect(Path(args.root), set(args.judges))
+    if args.conditions:
+        rows = collect_manipulations(
+            Path(args.root), args.configs, args.conditions, set(args.judges)
+        )
+    else:
+        rows = collect(Path(args.root), set(args.judges))
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", newline="") as f:
