@@ -8,6 +8,7 @@ import types
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 
 
 PATH = Path(__file__).with_name("robustness_analysis.py")
@@ -37,6 +38,50 @@ def test_analysis_is_original_vs_style_standardised_gpt_only():
     assert analysis.CONDITIONS == ("a_baseline", "style_standardised_gpt")
     assert analysis.CONDITION_LABELS == ("Original", "Style-standardised")
     assert set(analysis.STYLE_RATES) == set(analysis.CONDITIONS)
+
+
+def test_load_verdicts_requires_baseline_and_combines_explicit_inputs(tmp_path):
+    baseline_path = tmp_path / "baseline.csv"
+    rewrite_path = tmp_path / "rewrite.csv"
+    rewrite = pd.DataFrame({
+        "condition": ["style_standardised_gpt"] * 3000,
+        "row": range(3000),
+    })
+    rewrite.to_csv(baseline_path, index=False)
+    rewrite.to_csv(rewrite_path, index=False)
+
+    with pytest.raises(ValueError, match="baseline.*a_baseline"):
+        analysis.load_verdicts(baseline_path, rewrite_path)
+
+    pd.DataFrame({
+        "condition": ["a_baseline", "old_rewriter"], "row": [-1, -2],
+    }).to_csv(baseline_path, index=False)
+    pd.DataFrame({"condition": ["a_baseline"], "row": [-1]}).to_csv(
+        rewrite_path, index=False
+    )
+    with pytest.raises(ValueError, match="rewrite.*style_standardised_gpt"):
+        analysis.load_verdicts(baseline_path, rewrite_path)
+
+    rewrite.to_csv(rewrite_path, index=False)
+    loaded = analysis.load_verdicts(baseline_path, rewrite_path)
+
+    assert len(loaded) == 3001
+    assert set(loaded.condition) == set(analysis.CONDITIONS)
+    assert analysis.BASELINE_VERDICTS == (
+        analysis.ROOT / "judge_results/judging_variations/verdicts.csv"
+    )
+    assert analysis.REWRITE_VERDICTS == (
+        analysis.ROOT / "judge_results/robustness/style_standardised_gpt/verdicts_rewrite.csv"
+    )
+
+
+def test_predictor_order_matches_the_frozen_correctness_config():
+    config = yaml.safe_load(
+        (analysis.ROOT / "scripts/hibayes/config_correctness.yaml").read_text()
+    )
+    frozen_order = config["model"]["models"][0]["config"]["predictors"]
+
+    assert analysis.PREDICTORS == tuple(frozen_order)
 
 
 def test_default_yaml_campaign_loads_and_requires_exactly_50_by_30_cells():

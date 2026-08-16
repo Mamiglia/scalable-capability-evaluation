@@ -7,6 +7,13 @@ Each style-rate CSV is keyed by ``model,item`` and contains ``n_chars``,
 ``reasoning_chars`` and the six categories in ``STYLE_CATEGORIES``.  Frozen
 GLM inputs are the baseline correctness frame, posterior summary and coords.
 
+Collect the rewrite-only verdicts separately from the canonical baseline::
+
+  uv run python scripts/pairwise-newjudges/analyze.py \
+    --conditions style_standardised_gpt \
+    --judges qwen3-8b qwen3-32b gpt-oss-20b \
+    --out judge_results/robustness/style_standardised_gpt/verdicts_rewrite.csv
+
 Build the rewrite rates from the actual eval transcripts, preserving the
 ``n_chars`` cross-check used by the analysis::
 
@@ -74,6 +81,10 @@ GLM_DIR = (ROOT / "analysis/hibayes/run_correctness_full/models/"
            "judge_feature_logistic_model_full")
 GLM_SUMMARY = GLM_DIR / "diagnostics/inference_data_summary.csv"
 GLM_COORDS = ROOT / "analysis/hibayes/run_correctness_full/coords.json"
+BASELINE_VERDICTS = ROOT / "judge_results/judging_variations/verdicts.csv"
+REWRITE_VERDICTS = (
+    ROOT / "judge_results/robustness/style_standardised_gpt/verdicts_rewrite.csv"
+)
 
 plt.rcParams.update({
     "font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
@@ -116,6 +127,20 @@ def validate_style_rates(style_rates: pd.DataFrame, path: Path) -> None:
         )
     if style_rates.duplicated(["model", "item"]).any():
         raise ValueError(f"{path} contains duplicate model,item rows")
+
+
+def load_verdicts(baseline_path: Path, rewrite_path: Path) -> pd.DataFrame:
+    """Load only the required condition from each explicit verdict input."""
+    frames = []
+    for label, condition, path in (
+        ("baseline", "a_baseline", baseline_path),
+        ("rewrite", "style_standardised_gpt", rewrite_path),
+    ):
+        frame = pd.read_csv(path)
+        if "condition" not in frame or condition not in set(frame["condition"]):
+            raise ValueError(f"{label} verdict input {path} has no {condition!r} rows")
+        frames.append(frame[frame.condition == condition])
+    return pd.concat(frames, ignore_index=True)
 
 
 def summarise(verdicts: pd.DataFrame, campaign_cells: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -543,14 +568,14 @@ def analyse(verdicts: pd.DataFrame, campaign_cells: dict, out: Path,
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--verdicts", type=Path,
-                        default=Path("judge_results/robustness/style_standardised_gpt/verdicts.csv"))
+    parser.add_argument("--baseline-verdicts", type=Path, default=BASELINE_VERDICTS)
+    parser.add_argument("--rewrite-verdicts", type=Path, default=REWRITE_VERDICTS)
     parser.add_argument("--campaign", type=Path, default=CAMPAIGN)
     parser.add_argument("--out", type=Path,
                         default=Path("judge_results/robustness/style_standardised_gpt"))
     args = parser.parse_args()
     cells = load_campaign(args.campaign)
-    verdicts = pd.read_csv(args.verdicts)
+    verdicts = load_verdicts(args.baseline_verdicts, args.rewrite_verdicts)
     analyse(verdicts, cells, args.out)
 
 
