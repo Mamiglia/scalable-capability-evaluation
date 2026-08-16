@@ -4,6 +4,8 @@ Layout here is bench/judge/pair (no condition dir); all rows are condition a_bas
 Row semantics + schema are copied verbatim from judging-variations analyze.py so these
 rows concatenate cleanly with the 6 canonical judges. Writes a SIDECAR csv (not the
 canonical verdicts.csv) so the analysis session's regen of that file won't wipe these.
+Manipulation mode defaults to its condition/judge/pair root and writes only after the
+complete three-judge campaign grid has been collected.
 
 Usage:
   uv run python scripts/pairwise-newjudges/analyze.py            # ling only -> verdicts_newjudges.csv
@@ -13,7 +15,9 @@ Usage:
 import argparse
 import csv
 import functools
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -29,6 +33,12 @@ FIELDS = ["bench", "condition", "judge", "major", "minor", "item_id", "order",
           "picked", "picked_major", "confidence", "len_major", "len_minor",
           "picked_longer", "parse_ok"]
 CONDITION = "a_baseline"
+CAMPAIGN_JUDGES = ("qwen3-8b", "qwen3-32b", "gpt-oss-20b")
+MANIPULATION_LOG_ROOT = ROOT / "logs" / "pairwise-newjudges" / "manipulations"
+STYLE_REWRITE_VERDICTS = (
+    ROOT / "judge_results" / "robustness" / "style_standardised_gpt"
+    / "verdicts_rewrite.csv"
+)
 
 
 @functools.lru_cache(maxsize=None)
@@ -133,29 +143,101 @@ def collect_manipulations(root, configs, conditions, judges):
     return rows
 
 
+def write_manipulation_verdicts(rows, config, out):
+    """Atomically write only one exact 50-pair campaign grid."""
+    pairs = [f"{major}-vs-{minor}" for major, minor in config["comparisons"]]
+    sample_ids = config["sample_ids"]
+    valid_config = (
+        len(pairs) == 50
+        and len(sample_ids) == 50
+        and set(pairs) == set(sample_ids)
+        and all(len(items) == 30 and len(set(items)) == 30
+                for items in sample_ids.values())
+    )
+    if not valid_config:
+        raise ValueError("Manipulation config must contain exactly 50 pairs × 30 unique items")
+
+    expected = {
+        ("gpqa", config["condition"], judge, major, minor, str(item), str(order))
+        for judge in CAMPAIGN_JUDGES
+        for major, minor in config["comparisons"]
+        for item in sample_ids[f"{major}-vs-{minor}"]
+        for order in (1, 2)
+    }
+    actual = [
+        (row.get("bench"), row.get("condition"), row.get("judge"),
+         row.get("major"), row.get("minor"), str(row.get("item_id")),
+         str(row.get("order")))
+        for row in rows
+    ]
+    unique = set(actual)
+    missing, extra = expected - unique, unique - expected
+    duplicates = len(actual) - len(unique)
+    if len(expected) != 9000 or len(actual) != 9000 or missing or extra or duplicates:
+        raise ValueError(
+            "Refusing to write manipulation verdicts: expected exactly 9,000 unique rows "
+            f"(got {len(actual)} rows/{len(unique)} unique; {len(missing)} missing, "
+            f"{len(extra)} extra, {duplicates} duplicate)"
+        )
+
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", newline="", dir=out.parent, prefix=f".{out.name}.",
+            suffix=".tmp", delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            writer = csv.DictWriter(handle, fieldnames=FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, out)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--root", default=str(ROOT / "logs" / "pairwise-newjudges"))
+    ap.add_argument("--root")
     ap.add_argument("--configs", type=Path,
                     default=HERE / "configs" / "manipulations")
     ap.add_argument("--conditions", nargs="+",
                     help="collect manipulation logs laid out as condition/judge/pair")
-    ap.add_argument("--judges", nargs="+", default=["ling-2.6-flash"])
-    ap.add_argument("--out", default=str(ROOT / "judge_results" / "judging_variations" / "verdicts_newjudges.csv"))
+    ap.add_argument("--judges", nargs="+")
+    ap.add_argument("--out")
     args = ap.parse_args()
 
     if args.conditions:
-        rows = collect_manipulations(
-            Path(args.root), args.configs, args.conditions, set(args.judges)
+        if len(args.conditions) != 1:
+            raise ValueError("Manipulation collection requires exactly one condition")
+        condition = args.conditions[0]
+        root = Path(args.root) if args.root else MANIPULATION_LOG_ROOT
+        judges = set(args.judges or CAMPAIGN_JUDGES)
+        out = Path(args.out) if args.out else (
+            STYLE_REWRITE_VERDICTS if condition == "style_standardised_gpt"
+            else ROOT / "judge_results" / "robustness" / condition / "verdicts_rewrite.csv"
         )
+        rows = collect_manipulations(
+            root, args.configs, args.conditions, judges
+        )
+        config = yaml.safe_load((args.configs / f"{condition}.yaml").read_text())
+        write_manipulation_verdicts(rows, config, out)
     else:
-        rows = collect(Path(args.root), set(args.judges))
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
-        w.writeheader()
-        w.writerows(rows)
+        root = Path(args.root) if args.root else ROOT / "logs" / "pairwise-newjudges"
+        judges = set(args.judges or ["ling-2.6-flash"])
+        out = Path(args.out) if args.out else (
+            ROOT / "judge_results" / "judging_variations" / "verdicts_newjudges.csv"
+        )
+        rows = collect(root, judges)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
     # quick per bench x judge sanity readout
     from collections import Counter
     n = Counter((r["bench"], r["judge"]) for r in rows)
