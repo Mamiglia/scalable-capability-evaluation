@@ -372,12 +372,48 @@ def test_style_delta_figures_are_compact_and_cover_all_six_regressors():
     ):
         assert tuple(figure.get_size_inches()) == pytest.approx((4.3, 1.9))
         assert len(figure.axes) == 3
-        assert {text.get_text() for ax in figure.axes for text in ax.texts} >= {
+        assert {ax.get_title(loc="left") for ax in figure.axes} == {
             analysis.STYLE_LABELS[feature] for feature in features
         }
         assert all(ax.get_xticklabels()[0].get_text() == "Original" for ax in figure.axes)
         assert all(not ax.spines["top"].get_visible() for ax in figure.axes)
         assert figure.legends and not figure.legends[0].get_frame_on()
+
+
+def test_axes_end_at_endpoint_ticks_and_panel_labels_are_above_data():
+    cells = cell_frame()
+    accuracy = analysis.make_accuracy_figure(cells)
+    gap = analysis.make_gap_figure(analysis.gap_summary(cells))
+    pairs = pd.DataFrame([{
+        "condition": condition, "pair": "pair", "major": "major",
+        "minor": "minor", "feature": feature,
+        "delta_major_minus_minor": 0.0, "n_items": 30,
+    } for condition in analysis.CONDITIONS for feature in analysis.TARGETED_STYLE_CATEGORIES])
+    styles = analysis.make_style_delta_figure(
+        pairs, analysis.TARGETED_STYLE_CATEGORIES
+    )
+
+    endpoint_axes = [accuracy.axes[0], *gap.axes, *styles.axes]
+    for ax in endpoint_axes:
+        assert ax.get_xlim() == pytest.approx((ax.get_xticks()[0], ax.get_xticks()[-1]))
+        assert ax.get_ylim() == pytest.approx((ax.get_yticks()[0], ax.get_yticks()[-1]))
+    assert not accuracy.axes[1].spines["bottom"].get_visible()
+
+    titled = [
+        (gap, analysis.CONDITION_LABELS),
+        (styles, tuple(analysis.STYLE_LABELS[name]
+                       for name in analysis.TARGETED_STYLE_CATEGORIES)),
+    ]
+    for figure, expected in titled:
+        figure.canvas.draw()
+        renderer = figure.canvas.get_renderer()
+        for ax, label in zip(figure.axes, expected, strict=True):
+            assert ax.get_title(loc="left") == label
+            title_box = ax._left_title.get_window_extent(renderer)
+            axes_box = ax.get_window_extent(renderer)
+            assert title_box.y0 >= axes_box.y1
+            assert figure.bbox.contains(*title_box.get_points()[0])
+            assert figure.bbox.contains(*title_box.get_points()[1])
 
 
 def test_style_delta_condition_labels_do_not_overlap_or_clip():

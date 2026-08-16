@@ -315,7 +315,7 @@ def _mean_errorbar(ax, x, row, value: str, lo: str, hi: str, scale: float = 1) -
         yerr = [[scale * (row[value] - lower)], [scale * (upper - row[value])]]
     ax.errorbar(
         [x], [scale * row[value]], yerr=yerr, color="#111111", marker="D", ms=4.5,
-        lw=1, capsize=0, linestyle="none", zorder=5,
+        lw=1, capsize=0, linestyle="none", clip_on=False, zorder=5,
     )
 
 
@@ -335,7 +335,8 @@ def make_accuracy_figure(cells: pd.DataFrame):
                 .set_index("condition").reindex(CONDITIONS))
         axes[0].plot(
             x, 100 * rows.accuracy, color=JUDGE_COLORS.get(judge, "#777777"),
-            marker="o", ms=4.2, lw=1, label=JUDGE_LABELS.get(judge, judge), zorder=3,
+            marker="o", ms=4.2, lw=1, clip_on=False,
+            label=JUDGE_LABELS.get(judge, judge), zorder=3,
         )
     for condition_index, condition in enumerate(CONDITIONS):
         row = summary[summary.condition == condition].iloc[0]
@@ -350,7 +351,7 @@ def make_accuracy_figure(cells: pd.DataFrame):
     lower = 5 * math.floor(min(accuracy_bounds) / 5)
     upper = 5 * math.ceil(max(accuracy_bounds) / 5)
     axes[0].set(
-        xlim=(-0.25, len(CONDITIONS) - 0.75), ylim=(lower, upper), xticks=x,
+        xlim=(x[0], x[-1]), ylim=(lower, upper), xticks=x,
         xticklabels=CONDITION_LABELS, yticks=np.arange(lower, upper + 0.1, 5),
         ylabel="Judge accuracy (%)",
     )
@@ -382,6 +383,8 @@ def make_accuracy_figure(cells: pd.DataFrame):
     )
     for ax in axes:
         _style_axes(ax)
+    axes[1].spines["bottom"].set_visible(False)
+    axes[1].tick_params(axis="x", length=0)
 
     handles, labels = axes[0].get_legend_handles_labels()
     handles.append(plt.Line2D([], [], color="#111111", marker="D", ms=4.5,
@@ -530,17 +533,17 @@ def make_style_delta_figure(pairs: pd.DataFrame, features: tuple[str, ...]):
                     .reindex(columns=CONDITIONS).dropna())
         for values in wide.to_numpy():
             ax.plot(x, values, color="#999999", marker="o", ms=2.8,
-                    lw=0.6, alpha=0.24, zorder=2)
+                    lw=0.6, alpha=0.24, clip_on=False, zorder=2)
         ax.plot(x, wide.mean(), color="#111111", marker="D", ms=4.5,
-                lw=1, zorder=4)
+                lw=1, clip_on=False, zorder=4)
         limit = _symmetric_limit(pd.Series(wide.to_numpy().ravel()))
         ax.axhline(0, color="#888888", lw=0.8, ls=(0, (2, 2)), zorder=1)
         ax.set(
-            xlim=(-0.25, 1.25), ylim=(-limit, limit), xticks=x,
+            xlim=(x[0], x[-1]), ylim=(-limit, limit), xticks=x,
             xticklabels=("Original", "Standardised"), yticks=(-limit, 0, limit),
         )
-        ax.text(0.03, 0.97, STYLE_LABELS[feature], transform=ax.transAxes,
-                color="#666666", fontsize=7, va="top")
+        ax.set_title(STYLE_LABELS[feature], loc="left", color="#666666",
+                     fontsize=7, pad=4)
         _style_axes(ax)
         plt.setp(ax.get_xticklabels(), rotation=90, ha="center", va="top")
     axes[0].set_ylabel("Major − minor rate\n(per 1,000 words)")
@@ -553,7 +556,7 @@ def make_style_delta_figure(pairs: pd.DataFrame, features: tuple[str, ...]):
     ]
     fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False,
                bbox_to_anchor=(0.5, -0.01), handlelength=1.4, columnspacing=1.0)
-    fig.subplots_adjust(left=0.21, right=0.985, top=0.97, bottom=0.58, wspace=0.5)
+    fig.subplots_adjust(left=0.21, right=0.985, top=0.88, bottom=0.58, wspace=0.5)
     return fig
 
 
@@ -589,8 +592,7 @@ def make_gap_figure(gaps: pd.DataFrame, by_judge: pd.DataFrame | None = None):
                 linestyle=linestyle, zorder=3,
             )
         ax.axhline(0.5, color="#888888", lw=0.8, ls=":", zorder=1)
-        ax.text(0.03, 0.96, label, transform=ax.transAxes, color="#666666",
-                fontsize=8, va="top")
+        ax.set_title(label, loc="left", color="#666666", fontsize=8, pad=4)
         ax.set(xlim=(0, x_max), ylim=(0.5, 1), xticks=[0, x_max / 2, x_max],
                yticks=[0.5, 0.75, 1])
         _style_axes(ax)
@@ -614,7 +616,7 @@ def make_gap_figure(gaps: pd.DataFrame, by_judge: pd.DataFrame | None = None):
         handles=handles, loc="lower center", ncol=3, frameon=False,
         bbox_to_anchor=(0.5, -0.01), handlelength=1.8, columnspacing=0.8,
     )
-    fig.subplots_adjust(left=0.14, right=0.975, top=0.97, bottom=0.36, wspace=0.28)
+    fig.subplots_adjust(left=0.14, right=0.975, top=0.88, bottom=0.36, wspace=0.28)
     return fig
 
 
