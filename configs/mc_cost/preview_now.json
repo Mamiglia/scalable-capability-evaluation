@@ -1,0 +1,35 @@
+{
+  "paths": {
+    "canonical_models": "docs/canonical-models.md",
+    "model_pool": "model-sampler/model_pool.json",
+    "model_overrides": "configs/mc_cost/model_overrides.json",
+    "irt_capabilities": "irt_results/easy_item_prediction/tables/fit_capabilities.csv",
+    "irt_items": "irt_results/easy_item_prediction/tables/fit_difficulties.csv",
+    "irt_posterior": "irt_results/easy_item_prediction/posterior/irt_posterior.npz",
+    "judge_logs": "logs/judging-variations/gpqa/a_baseline",
+    "candidate_log_roots": ["data/gpqa", "external_data/epoch-gpqa"],
+    "output": "analysis/mc_cost"
+  },
+  "fit": {"warmup": 50, "samples": 50, "chains": 1, "seed": 0},
+  "simulation": {
+    "trials": 3,
+    "attempted_items": 10,
+    "presentations": 1,
+    "reuse_responses": true,
+    "accuracy_target": "higher_theta",
+    "seed": 0
+  },
+  "dashboard": {
+    "grid_mode": "one_at_a_time",
+    "judge_counts": [3],
+    "anchor_counts": [8],
+    "comparator_counts": [4],
+    "attempted_item_counts": [10],
+    "presentation_counts": [1],
+    "judge_pool_column": "judge_pool",
+    "candidate_pool_column": "candidate_pool",
+    "manual_triples": [],
+    "manual_triple_limit": 0,
+    "max_judgment_calls": 100000
+  }
+}
