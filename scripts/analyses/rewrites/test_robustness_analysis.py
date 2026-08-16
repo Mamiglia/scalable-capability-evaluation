@@ -313,7 +313,7 @@ def test_figures_are_small_nature_style_and_show_judges_and_dashed_glm():
     by_judge = analysis.gap_by_judge(cells)
     gap = analysis.make_gap_figure(analysis.gap_summary(cells), by_judge)
 
-    assert tuple(accuracy.get_size_inches()) == pytest.approx((3.6, 1.9))
+    assert tuple(accuracy.get_size_inches()) == pytest.approx((2.9, 1.9))
     assert tuple(gap.get_size_inches()) == pytest.approx((2.9, 1.9))
     assert len(accuracy.axes) == len(gap.axes) == 2
     assert all(not ax.spines["top"].get_visible() for ax in [*accuracy.axes, *gap.axes])
@@ -321,9 +321,28 @@ def test_figures_are_small_nature_style_and_show_judges_and_dashed_glm():
                for ax in [*accuracy.axes, *gap.axes])
     assert any(line.get_linestyle() == "--" for line in gap.axes[0].lines)
     assert accuracy.axes[0].get_ylabel() == "Judge accuracy (%)"
-    assert accuracy.axes[1].get_ylabel() == "Rewrite − original (pp)"
+    assert accuracy.axes[1].get_ylabel() == "Accuracy change (pp)"
+    assert accuracy.axes[1].get_xticklabels()[0].get_text() == "Standardised\n− original"
     assert not {"a", "b"} & {text.get_text() for ax in accuracy.axes for text in ax.texts}
     assert max(line.get_markersize() for ax in accuracy.axes for line in ax.lines) >= 4
+    judge_colors = {
+        line.get_label(): line.get_color() for line in accuracy.axes[0].lines
+        if line.get_label() in analysis.JUDGE_LABELS.values()
+    }
+    assert judge_colors == {
+        "Qwen3 8B": "#2a78d6",
+        "Qwen3 32B": "#e87ba4",
+        "GPT-OSS 20B": "#eb6834",
+    }
+    accuracy.canvas.draw()
+    renderer = accuracy.canvas.get_renderer()
+    for ax in accuracy.axes:
+        label = ax.yaxis.label.get_window_extent(renderer)
+        assert accuracy.bbox.contains(*label.get_points()[0])
+        assert accuracy.bbox.contains(*label.get_points()[1])
+    assert not accuracy.axes[1].yaxis.label.get_window_extent(renderer).overlaps(
+        accuracy.axes[0].get_window_extent(renderer)
+    )
     assert accuracy.legends and gap.legends
     assert not accuracy.legends[0].get_frame_on() and not gap.legends[0].get_frame_on()
 
@@ -370,11 +389,17 @@ def test_style_delta_figures_are_compact_and_cover_all_six_regressors():
         (analysis.TARGETED_STYLE_CATEGORIES, analysis.OTHER_STYLE_CATEGORIES),
         strict=True,
     ):
-        assert tuple(figure.get_size_inches()) == pytest.approx((4.3, 1.9))
+        expected_width = 2.4 if features == analysis.TARGETED_STYLE_CATEGORIES else 4.3
+        assert tuple(figure.get_size_inches()) == pytest.approx((expected_width, 1.9))
         assert len(figure.axes) == 3
-        assert {ax.get_title(loc="left") for ax in figure.axes} == {
-            analysis.STYLE_LABELS[feature] for feature in features
+        titles = {
+            title for ax in figure.axes for loc in ("left", "right")
+            if (title := ax.get_title(loc=loc))
         }
+        expected_titles = ({"Pronouns", "Hedging", "Backtracking"}
+                           if features == analysis.TARGETED_STYLE_CATEGORIES else
+                           {analysis.STYLE_LABELS[feature] for feature in features})
+        assert titles == expected_titles
         assert all(ax.get_xticklabels()[0].get_text() == "Original" for ax in figure.axes)
         assert all(not ax.spines["top"].get_visible() for ax in figure.axes)
         assert figure.legends and not figure.legends[0].get_frame_on()
@@ -480,15 +505,16 @@ def test_axes_end_at_endpoint_ticks_and_panel_labels_are_above_data():
 
     titled = [
         (gap, analysis.CONDITION_LABELS),
-        (styles, tuple(analysis.STYLE_LABELS[name]
-                       for name in analysis.TARGETED_STYLE_CATEGORIES)),
+        (styles, ("Pronouns", "Hedging", "Backtracking")),
     ]
     for figure, expected in titled:
         figure.canvas.draw()
         renderer = figure.canvas.get_renderer()
         for ax, label in zip(figure.axes, expected, strict=True):
-            assert ax.get_title(loc="left") == label
-            title_box = ax._left_title.get_window_extent(renderer)
+            loc = "right" if label == "Backtracking" else "left"
+            assert ax.get_title(loc=loc) == label
+            title = ax._right_title if loc == "right" else ax._left_title
+            title_box = title.get_window_extent(renderer)
             axes_box = ax.get_window_extent(renderer)
             assert title_box.y0 >= axes_box.y1
             assert figure.bbox.contains(*title_box.get_points()[0])

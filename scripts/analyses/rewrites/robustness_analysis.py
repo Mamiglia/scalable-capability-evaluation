@@ -46,7 +46,7 @@ CONDITION_LABELS = ("Original", "Style-standardised")
 JUDGE_ORDER = ("qwen3-8b", "qwen3-32b", "gpt-oss-20b")
 JUDGE_LABELS = {"qwen3-8b": "Qwen3 8B", "qwen3-32b": "Qwen3 32B",
                 "gpt-oss-20b": "GPT-OSS 20B"}
-JUDGE_COLORS = {"qwen3-8b": "#1baf7a", "qwen3-32b": "#e87ba4",
+JUDGE_COLORS = {"qwen3-8b": "#2a78d6", "qwen3-32b": "#e87ba4",
                 "gpt-oss-20b": "#eb6834"}
 STYLE_CATEGORIES = (
     "personal_pronouns", "hedging", "backtracking", "uncertainty",
@@ -333,7 +333,7 @@ def make_accuracy_figure(cells: pd.DataFrame):
     present += sorted(present_set - set(present))
     x = np.arange(len(CONDITIONS))
     fig, axes = plt.subplots(
-        1, 2, figsize=(3.6, 1.9), gridspec_kw={"width_ratios": [1.3, 1.0]}
+        1, 2, figsize=(2.9, 1.9), gridspec_kw={"width_ratios": [1.3, 1.0]}
     )
 
     for judge in present:
@@ -358,7 +358,8 @@ def make_accuracy_figure(cells: pd.DataFrame):
     upper = 5 * math.ceil(max(accuracy_bounds) / 5)
     axes[0].set(
         xlim=(x[0], x[-1]), ylim=(lower, upper), xticks=x,
-        xticklabels=CONDITION_LABELS, yticks=np.arange(lower, upper + 0.1, 5),
+        xticklabels=("Original", "Standardised"),
+        yticks=np.arange(lower, upper + 0.1, 5),
         ylabel="Judge accuracy (%)",
     )
 
@@ -384,8 +385,8 @@ def make_accuracy_figure(cells: pd.DataFrame):
     limit = max(1, math.ceil(100 * max(delta_values, default=0.01)))
     axes[1].set(
         xlim=(-0.25, 0.25), ylim=(-limit, limit), xticks=[0],
-        xticklabels=["Style-standardised"], yticks=[-limit, 0, limit],
-        ylabel="Rewrite − original (pp)",
+        xticklabels=["Standardised\n− original"], yticks=[-limit, 0, limit],
+        ylabel="Accuracy change (pp)",
     )
     for ax in axes:
         _style_axes(ax)
@@ -400,7 +401,7 @@ def make_accuracy_figure(cells: pd.DataFrame):
         handles, labels, loc="lower center", ncol=2, frameon=False,
         bbox_to_anchor=(0.5, -0.01), handlelength=1.4, columnspacing=0.8,
     )
-    fig.subplots_adjust(left=0.14, right=0.98, top=0.97, bottom=0.39, wspace=0.55)
+    fig.subplots_adjust(left=0.18, right=0.99, top=0.93, bottom=0.39, wspace=0.75)
     return fig
 
 
@@ -596,7 +597,9 @@ def make_style_delta_pre_post_figure(
 
 def make_style_delta_figure(pairs: pd.DataFrame, features: tuple[str, ...]):
     """Pair-mean style-rate differences before and after rewriting."""
-    fig, axes = plt.subplots(1, len(features), figsize=(4.3, 1.9), squeeze=False)
+    targeted = features == TARGETED_STYLE_CATEGORIES
+    width = 2.4 if targeted else 4.3
+    fig, axes = plt.subplots(1, len(features), figsize=(width, 1.9), squeeze=False)
     axes = axes[0]
     x = np.arange(len(CONDITIONS))
     for ax, feature in zip(axes, features, strict=True):
@@ -615,11 +618,14 @@ def make_style_delta_figure(pairs: pd.DataFrame, features: tuple[str, ...]):
             xlim=(x[0], x[-1]), ylim=(-limit, limit), xticks=x,
             xticklabels=("Original", "Standardised"), yticks=(-limit, 0, limit),
         )
-        ax.set_title(STYLE_LABELS[feature], loc="left", color="#666666",
+        title = "Pronouns" if targeted and feature == "personal_pronouns" else STYLE_LABELS[feature]
+        title_loc = "right" if targeted and feature == "backtracking" else "left"
+        ax.set_title(title, loc=title_loc, color="#666666",
                      fontsize=7, pad=4)
         _style_axes(ax)
         plt.setp(ax.get_xticklabels(), rotation=90, ha="center", va="top")
-    axes[0].set_ylabel("Major − minor rate\n(per 1,000 words)")
+    axes[0].set_ylabel("Major − minor / 1k" if targeted else
+                       "Major − minor rate\n(per 1,000 words)")
     axes[0].yaxis.label.set_y(0.3)
     handles = [
         plt.Line2D([], [], color="#999999", marker="o", ms=2.8, lw=0.6,
@@ -629,7 +635,9 @@ def make_style_delta_figure(pairs: pd.DataFrame, features: tuple[str, ...]):
     ]
     fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False,
                bbox_to_anchor=(0.5, -0.01), handlelength=1.4, columnspacing=1.0)
-    fig.subplots_adjust(left=0.21, right=0.985, top=0.88, bottom=0.58, wspace=0.5)
+    fig.subplots_adjust(left=0.24 if targeted else 0.21,
+                        right=0.96 if targeted else 0.985,
+                        top=0.88, bottom=0.58, wspace=0.5)
     return fig
 
 
