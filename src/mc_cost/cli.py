@@ -75,6 +75,9 @@ _MODEL_FILES = tuple(
     for name in (*JUDGMENT_SPECS, "candidate_token", "judge_token")
     for suffix in ("npz", "json")
 )
+_DASHBOARD_SHARD_FILES = (
+    "automatic.json", "manual.json", "ranking_recovery.json", "warnings.json", "metadata.json",
+)
 
 
 class CliError(ValueError):
@@ -120,6 +123,9 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--out", type=Path)
             command.add_argument("--trials", type=_positive)
             command.add_argument("--provisional", action="store_true")
+            command.add_argument("--shard-index", type=int)
+            command.add_argument("--shard-count", type=_positive)
+            command.add_argument("--reduce-shards", action="store_true")
     return parser
 
 
@@ -1527,6 +1533,137 @@ def _dashboard_records(
     return rows, warning_rows
 
 
+def _dashboard_plan_hash(
+    dashboard: dict[str, Any], defaults: dict[str, Any], trials: int, seed: int,
+    provisional: bool, tasks: list[dict[str, Any]],
+) -> str:
+    return hashlib.sha256(json.dumps({
+        "dashboard": dashboard, "simulation": defaults, "trials": trials, "seed": seed,
+        "provisional": provisional, "tasks": tasks,
+    }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _dashboard_shard_metadata(
+    source_hashes: dict[str, str], plan_hash: str, status: str,
+    index: int, count: int, total: int,
+) -> tuple[str, dict[str, Any]]:
+    identity = {
+        "source_hashes": source_hashes, "plan_hash": plan_hash,
+        "validation_status": status, "shard_count": count, "task_total": total,
+    }
+    generation = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+    return generation, {
+        "schema_version": 1, **identity, "shard_index": index,
+        "task_ordinals": list(range(index, total, count)),
+    }
+
+
+def _dashboard_shard_names(generation: str, index: int, count: int) -> tuple[str, list[str]]:
+    relative = f"dashboard/shards/{generation}/{index:04d}-of-{count:04d}"
+    return relative, [f"{relative}/{name}" for name in _DASHBOARD_SHARD_FILES]
+
+
+def _completed_dashboard_shard(
+    output: Path, relative: str, files: list[str], expected: dict[str, Any],
+) -> bool:
+    manifest = f"{relative}/manifest.json"
+    if not (output / manifest).is_file():
+        return False
+    _verify_generation(output, manifest, files, "export-dashboard", "dashboard shard")
+    try:
+        actual = json.loads((output / relative / "metadata.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        raise CliError("invalid dashboard shard metadata") from None
+    if actual != expected:
+        raise CliError("stale dashboard shard metadata")
+    return True
+
+
+def _write_dashboard_shard(
+    output: Path, relative: str, files: list[str], metadata: dict[str, Any],
+    automatic: list[dict[str, Any]], manual: list[dict[str, Any]],
+    ranking_recovery: list[dict[str, Any]], warnings: list[dict[str, Any]],
+) -> None:
+    arrays = {
+        "automatic.json": automatic, "manual.json": manual,
+        "ranking_recovery.json": ranking_recovery, "warnings.json": warnings,
+    }
+    with _temporary_directory(output.parent) as directory:
+        stage = Path(directory) / relative
+        stage.mkdir(parents=True)
+        for name, rows in arrays.items():
+            _write_json(stage / name, rows)
+        _write_json(stage / "metadata.json", metadata)
+        _write_manifest(Path(directory), f"{relative}/manifest.json", files)
+        target = output / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            raise CliError("dashboard shard target already exists without a valid manifest")
+        stage.rename(target)
+
+
+def _read_dashboard_shard_rows(path: Path) -> list[dict[str, Any]]:
+    try:
+        rows = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        raise CliError("invalid dashboard shard data") from None
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise CliError("invalid dashboard shard data")
+    return rows
+
+
+def _load_dashboard_shards(
+    output: Path, source_hashes: dict[str, str], plan_hash: str,
+    status: str, count: int, total: int,
+) -> tuple[list[dict[str, Any]], ...]:
+    generation, _ = _dashboard_shard_metadata(
+        source_hashes, plan_hash, status, 0, count, total,
+    )
+    arrays = {name: [] for name in _DASHBOARD_SHARD_FILES[:-1]}
+    ordinals = []
+    ordinal_mismatch = False
+    for index in range(count):
+        relative, files = _dashboard_shard_names(generation, index, count)
+        manifest = output / relative / "manifest.json"
+        if not manifest.is_file():
+            raise CliError(f"missing dashboard shard {index} of {count}")
+        _verify_generation(
+            output, str(manifest.relative_to(output)), files,
+            "export-dashboard", "dashboard shard",
+        )
+        try:
+            metadata = json.loads((output / relative / "metadata.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            raise CliError("invalid dashboard shard metadata") from None
+        if not isinstance(metadata, dict):
+            raise CliError("invalid dashboard shard metadata")
+        _, expected = _dashboard_shard_metadata(
+            source_hashes, plan_hash, status, index, count, total,
+        )
+        actual_ordinals = metadata.get("task_ordinals")
+        if not isinstance(actual_ordinals, list) or any(
+            type(ordinal) is not int for ordinal in actual_ordinals
+        ):
+            raise CliError("invalid dashboard shard metadata")
+        actual = {key: value for key, value in metadata.items() if key != "task_ordinals"}
+        identity = {key: value for key, value in expected.items() if key != "task_ordinals"}
+        if actual != identity:
+            raise CliError("stale dashboard shard metadata")
+        ordinal_mismatch |= actual_ordinals != expected["task_ordinals"]
+        ordinals.extend(actual_ordinals)
+        for name in arrays:
+            arrays[name].extend(_read_dashboard_shard_rows(output / relative / name))
+    if len(ordinals) != len(set(ordinals)):
+        raise CliError("duplicate dashboard shard tasks")
+    if sorted(ordinals) != list(range(total)):
+        raise CliError("dashboard shards do not cover every task")
+    if ordinal_mismatch:
+        raise CliError("stale dashboard shard metadata")
+    return tuple(arrays[name] for name in arrays)
+
+
 def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
     inputs = _simulation_inputs(config, provisional=args.provisional)
     dashboard = config.get("dashboard")
@@ -1559,8 +1696,53 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
             f"dashboard.max_judgment_calls={cap}; reduce trials/grid/manual triples or raise the cap"
         )
 
-    automatic, manual, ranking_rows, warnings = [], [], [], []
-    for judges, anchors, comparators, items, presentations, require_stronger in scenarios:
+    shard_index = getattr(args, "shard_index", None)
+    shard_count = getattr(args, "shard_count", None)
+    reduce_shards = bool(getattr(args, "reduce_shards", False))
+    if reduce_shards:
+        if shard_count is None or shard_index is not None:
+            raise CliError("--reduce-shards requires --shard-count and no --shard-index")
+    elif (shard_index is None) != (shard_count is None):
+        raise CliError("--shard-index and --shard-count must be supplied together")
+    elif shard_index is not None and not 0 <= shard_index < shard_count:
+        raise CliError("--shard-index must satisfy 0 <= index < shard-count")
+
+    tasks = [
+        {"mode": "automatic", "scenario": list(scenario)} for scenario in scenarios
+    ] + [
+        {"mode": "manual", "identity": identity} for identity in manual_identities
+    ]
+    status = "provisional" if args.provisional else "validated"
+    plan_hash = _dashboard_plan_hash(
+        dashboard, defaults, trials, seed, bool(args.provisional), tasks,
+    )
+    total = len(tasks)
+    if reduce_shards:
+        automatic, manual, ranking_rows, warnings = _load_dashboard_shards(
+            inputs["output"], inputs["source_hashes"], plan_hash,
+            status, shard_count, total,
+        )
+        selected_scenarios, selected_manual = [], []
+    else:
+        selected_scenarios = [
+            scenario for ordinal, scenario in enumerate(scenarios)
+            if shard_index is None or ordinal % shard_count == shard_index
+        ]
+        selected_manual = [
+            identity for ordinal, identity in enumerate(manual_identities, start=len(scenarios))
+            if shard_index is None or ordinal % shard_count == shard_index
+        ]
+        automatic, manual, ranking_rows, warnings = [], [], [], []
+    if shard_index is not None:
+        generation, metadata = _dashboard_shard_metadata(
+            inputs["source_hashes"], plan_hash, status,
+            shard_index, shard_count, total,
+        )
+        relative, files = _dashboard_shard_names(generation, shard_index, shard_count)
+        if _completed_dashboard_shard(inputs["output"], relative, files, metadata):
+            return
+
+    for judges, anchors, comparators, items, presentations, require_stronger in selected_scenarios:
         resolved = {
             "mode": "automatic", "trials": trials, "items": items,
             "presentations": presentations, "reuse_responses": bool(defaults.get("reuse_responses", True)),
@@ -1595,9 +1777,9 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
         warnings.extend(warning_rows)
         warnings.extend(recovery_warnings)
 
-    if truncation_warning:
+    if truncation_warning and shard_index is None:
         warnings.append(truncation_warning)
-    for exported_identity in manual_identities:
+    for exported_identity in selected_manual:
         manual_source = exported_identity["manual_source"]
         identity = {key: exported_identity[key] for key in _MANUAL_COLUMNS}
         resolved = {
@@ -1626,12 +1808,19 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
         warnings.extend(warning_rows)
         warnings.extend(recovery_warnings)
 
+    if shard_index is not None:
+        _write_dashboard_shard(
+            inputs["output"], relative, files, metadata,
+            automatic, manual, ranking_rows, warnings,
+        )
+        return
+
     target = args.out or Path(dashboard.get("out", "interactive_viewer/data/mc_cost.json"))
     _write_json(target, dashboard_payload(
         generated_at=inputs["decision"].get("validation_timestamp"),
         source_hashes=inputs["source_hashes"], catalogue=_records(inputs["catalogue"]),
         validation={
-            "status": "provisional" if args.provisional else "validated",
+            "status": status,
             "selected_spec": inputs["decision"]["selected_judgment_spec"],
             "judge_covariates": inputs["decision"]["judge_covariate_gate"]["enabled"],
             "message": (

@@ -1259,6 +1259,204 @@ def test_validation_slurm_scripts_bound_parallelism_and_reduce_afterward():
     assert "--reduce-shards --shard-count 12" in reducer.read_text()
 
 
+def _dashboard_shard_artifacts(tmp_path, monkeypatch, dashboard, *, provisional=False):
+    config, output, hashes = pipeline_artifacts(tmp_path, dashboard=dashboard)
+    if provisional:
+        artifact = load_artifact(output / "model/core_release")
+        save_artifact(PosteriorArtifact(
+            artifact.posterior, {**artifact.metadata, "conditional_judges": True},
+            artifact.diagnostics,
+        ), output / "model/core_release")
+        write_generation(output, "model/manifest.json", MODEL_FILES)
+    else:
+        write_valid_decision(output, hashes)
+    calls = []
+
+    def fake_simulate(_comparisons, resolved, **_kwargs):
+        calls.append(resolved.configuration)
+        result = fake_result(resolved.configuration)
+        return SimulationResult(
+            result.trials.assign(mode=resolved.mode),
+            result.summary.assign(mode=resolved.mode), result.warnings,
+        )
+
+    monkeypatch.setattr(cli, "simulate", fake_simulate)
+    return config, output, calls
+
+
+def test_dashboard_shards_resume_and_reduce_to_the_unsharded_payload(tmp_path, monkeypatch):
+    protected = tmp_path / "existing-dashboard.json"
+    protected.write_text("validated dashboard stays put\n")
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "strength_filters": [True, False], "manual_triple_limit": 0,
+        "manual_triples": [{"judge": "j", "m1": "a", "m2": "b"}],
+        "out": str(protected),
+    }
+    config, output, calls = _dashboard_shard_artifacts(tmp_path, monkeypatch, dashboard)
+    expected = tmp_path / "expected.json"
+    assert main([
+        "export-dashboard", "--config", str(config), "--out", str(expected),
+        "--trials", "3", "--seed", "19",
+    ]) == 0
+    assert len(calls) == 3
+    calls.clear()
+
+    for index in range(2):
+        assert main([
+            "export-dashboard", "--config", str(config), "--trials", "3", "--seed", "19",
+            "--shard-index", str(index), "--shard-count", "2",
+        ]) == 0
+    before_resume = list(calls)
+    assert main([
+        "export-dashboard", "--config", str(config), "--trials", "3", "--seed", "19",
+        "--shard-index", "0", "--shard-count", "2",
+    ]) == 0
+
+    metadata = [
+        json.loads(path.read_text())
+        for path in sorted(output.glob("dashboard/shards/*/*/metadata.json"))
+    ]
+    assert sorted(ordinal for row in metadata for ordinal in row["task_ordinals"]) == [0, 1, 2]
+    assert calls == before_resume and len(calls) == 3
+    assert protected.read_text() == "validated dashboard stays put\n"
+
+    reduced = tmp_path / "reduced.json"
+    assert main([
+        "export-dashboard", "--config", str(config), "--trials", "3", "--seed", "19",
+        "--reduce-shards", "--shard-count", "2", "--out", str(reduced),
+    ]) == 0
+    assert reduced.read_bytes() == expected.read_bytes()
+    validate_dashboard_payload(json.loads(reduced.read_text()))
+
+
+def test_dashboard_shard_publish_is_atomic_before_manifest(tmp_path, monkeypatch):
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "manual_triple_limit": 0, "manual_triples": [],
+    }
+    config, output, _ = _dashboard_shard_artifacts(tmp_path, monkeypatch, dashboard)
+    monkeypatch.setattr(
+        cli, "_write_manifest",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("interrupted")),
+    )
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        main([
+            "export-dashboard", "--config", str(config),
+            "--shard-index", "0", "--shard-count", "2",
+        ])
+
+    assert not list(output.glob("dashboard/shards/*/*/metadata.json"))
+
+
+def test_dashboard_reducer_requires_every_shard(tmp_path, monkeypatch, capsys):
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "manual_triple_limit": 0, "manual_triples": [],
+    }
+    config, _, _ = _dashboard_shard_artifacts(tmp_path, monkeypatch, dashboard)
+    assert main([
+        "export-dashboard", "--config", str(config),
+        "--shard-index", "0", "--shard-count", "2",
+    ]) == 0
+
+    assert main([
+        "export-dashboard", "--config", str(config),
+        "--reduce-shards", "--shard-count", "2", "--out", str(tmp_path / "out.json"),
+    ]) == 2
+    assert "missing dashboard shard 1 of 2" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("duplicate", "duplicate dashboard shard tasks"),
+        ("stale", "stale dashboard shard metadata"),
+        ("malformed", "invalid dashboard shard metadata"),
+        ("hash", "hash mismatch"),
+    ],
+)
+def test_dashboard_reducer_rejects_invalid_shards(
+    tmp_path, monkeypatch, capsys, mutation, message,
+):
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "strength_filters": [True, False], "manual_triple_limit": 0,
+        "manual_triples": [],
+    }
+    config, output, _ = _dashboard_shard_artifacts(tmp_path, monkeypatch, dashboard)
+    for index in range(2):
+        assert main([
+            "export-dashboard", "--config", str(config),
+            "--shard-index", str(index), "--shard-count", "2",
+        ]) == 0
+    paths = sorted(output.glob("dashboard/shards/*/*/metadata.json"))
+    changed = json.loads(paths[1].read_text())
+    if mutation == "duplicate":
+        changed["task_ordinals"] = json.loads(paths[0].read_text())["task_ordinals"]
+        paths[1].write_text(json.dumps(changed, sort_keys=True))
+    elif mutation == "stale":
+        changed["plan_hash"] = "stale"
+        paths[1].write_text(json.dumps(changed, sort_keys=True))
+    elif mutation == "malformed":
+        paths[1].write_text("[]\n")
+    else:
+        automatic = paths[1].parent / "automatic.json"
+        automatic.write_text(automatic.read_text() + "\n")
+    if mutation != "hash":
+        relative = paths[1].parent.relative_to(output)
+        files = [f"{relative}/{name}" for name in cli._DASHBOARD_SHARD_FILES]
+        write_generation(output, f"{relative}/manifest.json", files)
+
+    assert main([
+        "export-dashboard", "--config", str(config),
+        "--reduce-shards", "--shard-count", "2", "--out", str(tmp_path / "out.json"),
+    ]) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_dashboard_shard_reduction_preserves_provisional_status(tmp_path, monkeypatch):
+    dashboard = {
+        "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],
+        "attempted_item_counts": [1], "presentation_counts": [1],
+        "manual_triple_limit": 0, "manual_triples": [],
+    }
+    config, _, _ = _dashboard_shard_artifacts(
+        tmp_path, monkeypatch, dashboard, provisional=True,
+    )
+    common = [
+        "export-dashboard", "--config", str(config), "--provisional",
+        "--trials", "1", "--shard-count", "1",
+    ]
+    assert main([*common, "--shard-index", "0"]) == 0
+    target = tmp_path / "provisional-reduced.json"
+    assert main([*common, "--reduce-shards", "--out", str(target)]) == 0
+
+    assert json.loads(target.read_text())["validation"]["status"] == "provisional"
+
+
+def test_dashboard_slurm_scripts_bound_parallelism_and_reduce_to_safe_output():
+    root = Path(__file__).resolve().parents[1]
+    worker = root / "scripts/mc_cost_dashboard_array_v1.sbatch"
+    reducer = root / "scripts/mc_cost_dashboard_reduce_v1.sbatch"
+    for path in (worker, reducer):
+        assert subprocess.run(["bash", "-n", path], capture_output=True).returncode == 0
+        assert "#SBATCH --requeue" in path.read_text()
+        assert "configs/mc_cost/preview.json" in path.read_text()
+        assert "--trials 3" in path.read_text()
+    assert "#SBATCH --mem=96G" in worker.read_text()
+    assert "#SBATCH --mem=64G" in reducer.read_text()
+    assert "#SBATCH --array=0-14%8" in worker.read_text()
+    assert '--shard-index "$SLURM_ARRAY_TASK_ID" --shard-count 15' in worker.read_text()
+    assert "--reduce-shards --shard-count 15" in reducer.read_text()
+    assert "--out analysis/mc_cost/dashboard/mc_cost.json" in reducer.read_text()
+
+
 def test_export_dashboard_runs_grid_and_manual_bank_then_replaces_json(tmp_path, monkeypatch):
     dashboard = {
         "judge_counts": [1], "anchor_counts": [1], "comparator_counts": [1],

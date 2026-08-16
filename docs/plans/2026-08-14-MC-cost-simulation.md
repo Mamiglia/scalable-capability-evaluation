@@ -67,6 +67,22 @@ array_job=$(sbatch --parsable scripts/mc_cost_validation_array_v1.sbatch)
 sbatch --dependency=afterok:"$array_job" scripts/mc_cost_validation_reduce_v1.sbatch
 ```
 
+The bounded three-trial preview dashboard can likewise run as a resumable
+15-worker array. Its workers request 96 GiB because that same three-trial
+default joint scenario measured above 60 GiB peak memory.
+Each worker publishes hash-bound raw arrays under
+`analysis/mc_cost/dashboard/shards`; the reducer requires every current shard,
+rebuilds and validates the canonical payload, and writes a separate cluster
+artifact rather than overwriting `interactive_viewer/data/mc_cost.json`:
+
+```bash
+dashboard_job=$(sbatch --parsable scripts/mc_cost_dashboard_array_v1.sbatch)
+sbatch --dependency=afterok:"$dashboard_job" scripts/mc_cost_dashboard_reduce_v1.sbatch
+```
+
+Inspect `analysis/mc_cost/dashboard/mc_cost.json` before deliberately copying it
+to the interactive viewer.
+
 The explicit `simulate` command above saves a separate 100-item run using the
 configured two presentations. Dashboard export independently simulates its
 bounded configured grid, whose default joint scenario is J=3, M=8, N=4 with
