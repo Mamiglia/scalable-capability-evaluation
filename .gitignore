@@ -43,3 +43,10 @@ data/
 /model-sampler/cache/
 
 /manuscript/
+
+# Local run and preservation artifacts
+/_preserved/
+/run_logs/
+/tmp/
+/scripts/analyses/direct-judge/judge_results/
+/scripts/pairwise-newjudges/run_logs/
