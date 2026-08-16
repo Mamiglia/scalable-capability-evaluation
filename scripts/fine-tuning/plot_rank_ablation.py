@@ -43,9 +43,11 @@ def main():
     args = ap.parse_args()
 
     plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
-                         "xtick.labelsize": 7, "ytick.labelsize": 7})
+                         "xtick.labelsize": 7, "ytick.labelsize": 7,
+                         "svg.fonttype": "none"})
     sizes = ["Qwen3-0.6B", "Llama-3.2-3B-Instruct", "Qwen3-8B"]
-    fig, axes = plt.subplots(1, 3, figsize=(6.8, 2.1), sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(4.2, 2.15), sharey=True,
+                             layout="constrained")
     for ax, size in zip(axes, sizes):
         df = load(args.results_dir, size)
         ax.axhline(0.5, color="#999", lw=0.8, ls="--")
@@ -62,16 +64,18 @@ def main():
         ax.set_xscale("log", base=2)
         ax.set_xticks(list(RANKS), [str(r) for r in RANKS])
         ax.minorticks_off()
-        ax.set_xlabel("adapter rank")
+        ax.set_xlabel("Adapter rank")
+        ax.set_ylim(0.4, 0.9)
+        ax.set_yticks([0.4, 0.6, 0.8, 0.9])
         ax.text(0.02, 0.95, NICE[size], transform=ax.transAxes, fontsize=7,
                 color="#777", va="top")  # panel tag
         for sp in ("top", "right"):
             ax.spines[sp].set_visible(False)
-    axes[0].set_ylabel("verdict accuracy")
+        for sp in ("left", "bottom"):
+            ax.spines[sp].set_position(("outward", 5))
+    axes[0].set_ylabel("Verdict accuracy")
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, ncol=4, frameon=False, loc="lower center",
-               bbox_to_anchor=(0.5, 0.98))
-    fig.tight_layout()
+    fig.legend(handles, labels, ncol=2, frameon=False, loc="outside upper center")
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     for ext in ("png", "svg"):
@@ -79,7 +83,8 @@ def main():
     print(f"wrote {out}/rank_ablation.png + .svg")
 
     # paired deltas vs rank 16, same cells: the actual test of "low rank matches"
-    fig, axes = plt.subplots(1, 3, figsize=(6.8, 2.1), sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(4.2, 2.15), sharey=True,
+                             layout="constrained")
     for ax, size in zip(axes, sizes):
         df = load(args.results_dir, size)
         wide = df.pivot_table(index=["label", "train", "test", "kind"],
@@ -102,17 +107,18 @@ def main():
         ax.set_xscale("log", base=2)
         ax.set_xticks([1, 2, 4], ["1", "2", "4"])
         ax.minorticks_off()
-        ax.set_xlabel("adapter rank")
-        ax.set_ylim(-0.08, 0.08)
+        ax.set_xlabel("Adapter rank")
+        ax.set_ylim(-0.1, 0.1)
+        ax.set_yticks([-0.1, 0, 0.1])
         ax.text(0.02, 0.95, NICE[size], transform=ax.transAxes, fontsize=7,
                 color="#777", va="top")  # panel tag
         for sp in ("top", "right"):
             ax.spines[sp].set_visible(False)
+        for sp in ("left", "bottom"):
+            ax.spines[sp].set_position(("outward", 5))
     axes[0].set_ylabel("Δ accuracy vs rank 16")
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, ncol=4, frameon=False, loc="lower center",
-               bbox_to_anchor=(0.5, 0.98))
-    fig.tight_layout()
+    fig.legend(handles, labels, ncol=2, frameon=False, loc="outside upper center")
     for ext in ("png", "svg"):
         fig.savefig(out / f"rank_ablation_delta.{ext}", dpi=300, bbox_inches="tight")
     print(f"wrote {out}/rank_ablation_delta.png + .svg")

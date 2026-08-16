@@ -104,26 +104,34 @@ def disagreement(root, pairs_dir, cfg):
 
 def figures(tab, size, out_dir):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analyses"))
-    from plots import MUTED, save, style
+    from plots import INK, MUTED, save
     import matplotlib.pyplot as plt
 
-    fig, axs = plt.subplots(1, len(tab.label.unique()), figsize=(11, 4.2))
+    labels = sorted(tab.label.unique())
+    fig, axs = plt.subplots(1, len(labels), figsize=(4.4, 2.15), sharey=True,
+                            layout="constrained")
     axs = np.atleast_1d(axs)
-    for ax, label in zip(axs, sorted(tab.label.unique())):
+    train_names = {"base": "Base", "gpqa": "GPQA", "aime": "AIME", "chess": "Chess",
+                   "loo_gpqa": "LOO GPQA", "loo_aime": "LOO AIME", "loo_chess": "LOO Chess"}
+    for ax, label in zip(axs, labels):
         g = grid(tab, label)
         im = ax.imshow(g.values, cmap="RdYlBu_r", vmin=0.3, vmax=1.0, aspect="auto")
-        ax.set_xticks(range(len(g.columns)), g.columns)
-        ax.set_yticks(range(len(g.index)), g.index)
+        ax.set_xticks(range(len(g.columns)), [x.upper() for x in g.columns])
+        ax.set_yticks(range(len(g.index)), [train_names.get(x, x) for x in g.index])
         for i in range(len(g.index)):
             for j in range(len(g.columns)):
                 v = g.values[i, j]
                 if not np.isnan(v):
-                    ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=8,
-                            color="#0b0b0b")
-        ax.set_title(f"{label}  ({size})", fontsize=10, color="#0b0b0b")
-        ax.set_xlabel("test domain"); ax.set_ylabel("train set")
-        fig.colorbar(im, ax=ax, fraction=0.046, label="P(pick more capable)")
-    fig.suptitle("Cross-domain transfer: train-set x test-domain accuracy", color="#0b0b0b")
+                    color = "white" if v < 0.43 or v > 0.90 else INK
+                    ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=7,
+                            color=color)
+        ax.text(0.02, 1.03, label.upper(), transform=ax.transAxes, color=MUTED,
+                fontsize=7, va="bottom")
+        ax.set_xlabel("Test set")
+    axs[0].set_ylabel("Train set")
+    cbar = fig.colorbar(im, ax=axs.tolist(), fraction=0.035, pad=0.02)
+    cbar.set_label("Accuracy")
+    cbar.set_ticks([0.3, 0.5, 0.7, 1.0])
     stub = str(out_dir / f"transfer_grid_{size}")
     save(fig, stub)
     return stub
@@ -147,26 +155,28 @@ def _verdicts_with_gap(root, pairs_dir, train, test, label):
 def gap_curves(root, pairs_dir, cfg, size, out_dir, tests=("gpqa", "aime", "chess")):
     """Accuracy vs capability gap, per label: one panel per test domain, one line
     per train set (base floor, in-domain single, cross-domain single, LOO mix).
-    Points = binned pair means ± SE; lines = sigmoid fits (house style)."""
+    Points = binned item means with 95% t-CIs; lines = sigmoid fits."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analyses"))
     from analysis import gap_fit
-    from plots import MUTED, PALETTE, chance, legend, save, style
+    from plots import MUTED, PALETTE, chance, save, style
     import matplotlib.pyplot as plt
+    from scipy import stats
 
     # fixed colour per TRAIN set (consistent across panels): gpqa=blue, aime=green,
     # chess=amber, any loo=pink, base=grey.
     dom_color = {"gpqa": PALETTE[0], "aime": PALETTE[2], "chess": PALETTE[3]}
     def color_of(tr):
         return MUTED if tr == "base" else PALETTE[4] if tr.startswith("loo_") else dom_color[tr]
-    def name_of(tr, test):
+    def name_of(tr):
         if tr == "base":
-            return "base"
+            return "Base"
         if tr.startswith("loo_"):
-            return "loo (other two)"
-        return f"{tr} (in-domain)" if tr == test else tr
+            return "LOO"
+        return tr.upper()
 
     for label in cfg["labels"]:
-        fig, axs = plt.subplots(1, len(tests), figsize=(5.2 * len(tests), 4.0), squeeze=False)
+        fig, axs = plt.subplots(1, len(tests), figsize=(4.4, 2.25), squeeze=False,
+                                sharey=True, layout="constrained")
         for ax, test in zip(axs[0], tests):
             others = [t for t in tests if t != test]
             trains = ["base", test] + others + [LOO[test]]        # floor, in-domain, cross, mix
@@ -175,25 +185,33 @@ def gap_curves(root, pairs_dir, cfg, size, out_dir, tests=("gpqa", "aime", "ches
                 v = _verdicts_with_gap(root, pairs_dir, tr, test, label)
                 if v is None or v.empty:
                     continue
-                pair = v.groupby("pair_uid").agg(gap=("gap", "first"), hit=("hit", "mean"))
+                pair = v.groupby("pair_uid").agg(item=("item", "first"), gap=("gap", "first"),
+                                                   hit=("hit", "mean"))
                 xmax = max(xmax, pair.gap.max())
-                b = pd.cut(pair.gap, 6)
-                g = pair.groupby(b, observed=True).agg(x=("gap", "mean"), p=("hit", "mean"),
-                                                       n=("hit", "size"))
-                se = np.sqrt(g.p * (1 - g.p) / g.n)
-                ax.errorbar(g.x, g.p, yerr=se, fmt="o", ms=4, lw=0, elinewidth=0.8,
+                n_bins = min(6, max(3, int(np.sqrt(len(pair)) / 3)))
+                pair["bin"] = pd.qcut(pair.gap, n_bins, duplicates="drop")
+                item_means = pair.groupby(["bin", "item"], observed=True).hit.mean()
+                g = item_means.groupby("bin", observed=True).agg(p="mean", se="sem", n="size")
+                g["x"] = pair.groupby("bin", observed=True).gap.mean()
+                ci = stats.t.ppf(0.975, g.n - 1) * g.se
+                ax.errorbar(g.x, g.p, yerr=ci, fmt="o", ms=3, lw=0, elinewidth=0.8,
                             color=color_of(tr), zorder=3)
                 a, d = gap_fit(v.gap, v.hit)
                 xs = np.linspace(0, pair.gap.max(), 100)
-                ax.plot(xs, 1 / (1 + np.exp(-(a + d * xs))), color=color_of(tr), lw=1.6,
-                        label=f"{name_of(tr, test)} (n={pair.shape[0]})", zorder=2)
+                ax.plot(xs, 1 / (1 + np.exp(-(a + d * xs))), color=color_of(tr), lw=1,
+                        label=name_of(tr), zorder=2)
             chance(ax)
-            ax.set_ylim(0, 1); ax.set_xlim(0, xmax * 1.03)
-            ax.set_xlabel(f"capability gap ({'ECI' if label=='eci' else 'acc-logit'})")
-            ax.set_ylabel("P(pick more capable)")
-            ax.set_title(f"test = {test}", fontsize=10, color="#0b0b0b")
-            style(ax); legend(ax, loc="lower right", fontsize=7)
-        fig.suptitle(f"Cross-domain gap curves — {label} label ({size})", color="#0b0b0b")
+            x_bound = max(1, int(np.ceil(xmax)))
+            ax.set_ylim(0, 1); ax.set_yticks([0, 0.5, 1])
+            ax.set_xlim(0, x_bound); ax.set_xticks([0, x_bound / 2, x_bound])
+            ax.set_xlabel("Pooled ECI gap" if label == "eci" else "Accuracy-logit gap")
+            ax.text(0.02, 0.98, test.upper(), transform=ax.transAxes, color=MUTED,
+                    fontsize=7, va="top")
+            style(ax)
+        axs[0, 0].set_ylabel("Judge accuracy")
+        handles, legend_labels = axs[0, 0].get_legend_handles_labels()
+        fig.legend(handles, legend_labels, frameon=False, ncol=3,
+                   loc="outside lower center")
         save(fig, str(out_dir / f"gap_curves_{label}_{size}"))
     print(f"wrote gap_curves_*_{size}.png")
 

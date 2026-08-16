@@ -42,3 +42,72 @@ def test_cell_accuracy_counterbalanced():
     d2 = pd.DataFrame({"pair_uid": ["p", "p"], "order": [0, 1], "label": [1, 2],
                        "logit_1": [2.0, 2.0], "logit_2": [-2.0, -2.0]})
     assert cell_accuracy(d2) == 0.5
+
+
+def test_house_style_offsets_visible_axes():
+    import matplotlib.pyplot as plt
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analyses"))
+    from plots import style
+
+    fig, ax = plt.subplots()
+    style(ax)
+    assert ax.spines["left"].get_position() == ("outward", 5)
+    assert ax.spines["bottom"].get_position() == ("outward", 5)
+    assert not ax.spines["top"].get_visible()
+    assert not ax.spines["right"].get_visible()
+    plt.close(fig)
+
+
+def _svg_width_points(path):
+    import xml.etree.ElementTree as ET
+    return float(ET.parse(path).getroot().attrib["width"].removesuffix("pt"))
+
+
+def test_transfer_grid_is_compact_and_has_no_canvas_title(tmp_path):
+    from cross_domain_analysis import figures
+
+    rows = []
+    for label in ("eci", "indomain"):
+        for train in ("base", "gpqa", "aime", "chess", "loo_gpqa", "loo_aime", "loo_chess"):
+            for test in ("gpqa", "aime", "chess"):
+                rows.append(dict(label=label, train=train, test=test, n=10, acc=0.65))
+    stub = figures(pd.DataFrame(rows), "Qwen3-8B", tmp_path)
+    svg = Path(stub + ".svg")
+    raw = svg.read_text()
+    assert _svg_width_points(svg) <= 330
+    assert "Cross-domain transfer: train-set x test-domain accuracy" not in raw
+
+
+def test_gap_curves_are_compact_and_use_panel_tags(tmp_path):
+    import json
+    from cross_domain_analysis import gap_curves
+
+    root, pairs_dir = tmp_path / "root", tmp_path / "pairs"
+    pairs_dir.mkdir()
+    for test in ("gpqa", "aime", "chess"):
+        pair_rows, verdict_rows = [], []
+        for i in range(12):
+            for order in (0, 1):
+                uid = f"{test}-{i}"
+                pair_rows.append(dict(pair_uid=uid, order=order,
+                                      cap_1=0.1 + i / 20, cap_2=0.1))
+                hit = i % 3 != 0
+                label = 1 if order == 0 else 2
+                picked = label if hit else 3 - label
+                verdict_rows.append(dict(pair_uid=uid, order=order, item=f"item-{i % 4}",
+                                         label=label, logit_1=float(picked == 1),
+                                         logit_2=float(picked == 2)))
+        pd.DataFrame(pair_rows).to_parquet(pairs_dir / f"pairs_{test}_indomain.parquet")
+        for path in (root / "base" / f"eval_{test}_indomain.jsonl",
+                     root / f"{test}_indomain" / f"eval_{test}.jsonl"):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("".join(json.dumps(row) + "\n" for row in verdict_rows))
+
+    gap_curves(root, pairs_dir, {"labels": ["indomain"]}, "Qwen3-8B", tmp_path)
+    svg = tmp_path / "gap_curves_indomain_Qwen3-8B.svg"
+    raw = svg.read_text()
+    assert _svg_width_points(svg) <= 330
+    assert "Cross-domain gap curves" not in raw
+    assert "GPQA" in raw
+    assert "Accuracy-logit gap" in raw

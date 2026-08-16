@@ -27,7 +27,7 @@ plt.rcParams.update({
     "font.size": 8, "axes.labelsize": 8, "legend.fontsize": 8,
     "xtick.labelsize": 8, "ytick.labelsize": 8,
     "figure.facecolor": SURFACE, "axes.facecolor": SURFACE,
-    "svg.fonttype": "none", "lines.linewidth": 1.6,
+    "svg.fonttype": "none", "lines.linewidth": 1.0,
     "figure.dpi": 400, "savefig.dpi": 400,
 })
 
@@ -39,6 +39,7 @@ def style(ax, grid_axis="y"):
         ax.spines[sp].set_visible(False)
     for sp in ("left", "bottom"):
         ax.spines[sp].set_color(MUTED)
+        ax.spines[sp].set_position(("outward", 5))
     ax.tick_params(colors=MUTED, labelcolor=INK2)
 
 
