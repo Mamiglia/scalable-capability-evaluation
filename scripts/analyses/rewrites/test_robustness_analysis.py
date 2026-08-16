@@ -272,35 +272,191 @@ def test_gap_summary_uses_judges_for_ci_and_suppresses_it_below_three():
     assert sparse[["obs_ci_lo", "obs_ci_hi", "pred_ci_lo", "pred_ci_hi"]].isna().all().all()
 
 
+def test_style_delta_tables_use_major_minus_minor_and_pair_means(tmp_path):
+    columns = ["model", "item", "n_chars", "reasoning_chars", *analysis.STYLE_CATEGORIES]
+    original = pd.DataFrame([
+        ["major", "i1", 10, 9, 5, 4, 3, 2, 1, 0],
+        ["minor", "i1", 10, 9, 1, 2, 3, 4, 5, 6],
+        ["major", "i2", 10, 9, 7, 6, 5, 4, 3, 2],
+        ["minor", "i2", 10, 9, 2, 3, 4, 5, 6, 7],
+    ], columns=columns)
+    rewritten = original.copy()
+    rewritten.loc[rewritten.model == "major", list(analysis.STYLE_CATEGORIES)] = 0
+    rewritten.loc[rewritten.model == "minor", list(analysis.STYLE_CATEGORIES)] = 1
+    paths = {}
+    for condition, frame in zip(analysis.CONDITIONS, (original, rewritten), strict=True):
+        paths[condition] = tmp_path / f"{condition}.csv"
+        frame.to_csv(paths[condition], index=False)
+
+    cells, pairs = analysis.style_delta_tables(
+        {"major-vs-minor": ["i1", "i2"]}, paths
+    )
+
+    assert len(cells) == 2 * 2 * len(analysis.STYLE_CATEGORIES)
+    assert len(pairs) == 2 * len(analysis.STYLE_CATEGORIES)
+    pronouns = cells[
+        (cells.condition == "a_baseline") &
+        (cells.feature == "personal_pronouns")
+    ]
+    assert pronouns.delta_major_minus_minor.tolist() == [4.0, 5.0]
+    pair = pairs[
+        (pairs.condition == "a_baseline") &
+        (pairs.feature == "personal_pronouns")
+    ].iloc[0]
+    assert pair.delta_major_minus_minor == pytest.approx(4.5)
+    assert pair.n_items == 2
+
+
 def test_figures_are_small_nature_style_and_show_judges_and_dashed_glm():
     cells = cell_frame()
     accuracy = analysis.make_accuracy_figure(cells)
     by_judge = analysis.gap_by_judge(cells)
     gap = analysis.make_gap_figure(analysis.gap_summary(cells), by_judge)
 
-    assert tuple(accuracy.get_size_inches()) == pytest.approx((3.8, 2.4))
-    assert tuple(gap.get_size_inches()) == pytest.approx((4.2, 2.4))
+    assert tuple(accuracy.get_size_inches()) == pytest.approx((3.6, 1.9))
+    assert tuple(gap.get_size_inches()) == pytest.approx((2.9, 1.9))
     assert len(accuracy.axes) == len(gap.axes) == 2
     assert all(not ax.spines["top"].get_visible() for ax in [*accuracy.axes, *gap.axes])
     assert all(ax.spines["left"].get_position() == ("outward", 5)
                for ax in [*accuracy.axes, *gap.axes])
     assert any(line.get_linestyle() == "--" for line in gap.axes[0].lines)
+    assert accuracy.axes[0].get_ylabel() == "Judge accuracy (%)"
+    assert accuracy.axes[1].get_ylabel() == "Rewrite − original (pp)"
+    assert not {"a", "b"} & {text.get_text() for ax in accuracy.axes for text in ax.texts}
+    assert max(line.get_markersize() for ax in accuracy.axes for line in ax.lines) >= 4
     assert accuracy.legends and gap.legends
     assert not accuracy.legends[0].get_frame_on() and not gap.legends[0].get_frame_on()
+
+
+def test_gap_shared_xlabel_does_not_overlap_ticks_or_legend():
+    cells = cell_frame()
+    gap = analysis.make_gap_figure(analysis.gap_summary(cells))
+    gap.canvas.draw()
+    renderer = gap.canvas.get_renderer()
+    xlabel = gap._supxlabel.get_window_extent(renderer)
+    tick_labels = [
+        tick.get_window_extent(renderer)
+        for ax in gap.axes for tick in ax.get_xticklabels()
+    ]
+    legend = gap.legends[0].get_window_extent(renderer)
+
+    assert not any(xlabel.overlaps(tick) for tick in tick_labels)
+    assert not xlabel.overlaps(legend)
+
+
+def test_style_delta_figures_are_compact_and_cover_all_six_regressors():
+    rows = []
+    for condition_index, condition in enumerate(analysis.CONDITIONS):
+        for pair_index in range(3):
+            for feature_index, feature in enumerate(analysis.STYLE_CATEGORIES):
+                rows.append({
+                    "condition": condition, "pair": f"pair-{pair_index}",
+                    "major": "major", "minor": "minor", "feature": feature,
+                    "delta_major_minus_minor": feature_index - condition_index,
+                    "n_items": 30,
+                })
+    pairs = pd.DataFrame(rows)
+    figures = [
+        analysis.make_style_delta_figure(pairs, features)
+        for features in (analysis.TARGETED_STYLE_CATEGORIES,
+                         analysis.OTHER_STYLE_CATEGORIES)
+    ]
+
+    assert set(analysis.TARGETED_STYLE_CATEGORIES + analysis.OTHER_STYLE_CATEGORIES) == set(
+        analysis.STYLE_CATEGORIES
+    )
+    for figure, features in zip(
+        figures,
+        (analysis.TARGETED_STYLE_CATEGORIES, analysis.OTHER_STYLE_CATEGORIES),
+        strict=True,
+    ):
+        assert tuple(figure.get_size_inches()) == pytest.approx((4.3, 1.9))
+        assert len(figure.axes) == 3
+        assert {text.get_text() for ax in figure.axes for text in ax.texts} >= {
+            analysis.STYLE_LABELS[feature] for feature in features
+        }
+        assert all(ax.get_xticklabels()[0].get_text() == "Original" for ax in figure.axes)
+        assert all(not ax.spines["top"].get_visible() for ax in figure.axes)
+        assert figure.legends and not figure.legends[0].get_frame_on()
+
+
+def test_style_delta_condition_labels_do_not_overlap_or_clip():
+    pairs = pd.DataFrame([{
+        "condition": condition, "pair": "pair", "major": "major",
+        "minor": "minor", "feature": feature,
+        "delta_major_minus_minor": 0.0, "n_items": 30,
+    } for condition in analysis.CONDITIONS for feature in analysis.TARGETED_STYLE_CATEGORIES])
+    figure = analysis.make_style_delta_figure(
+        pairs, analysis.TARGETED_STYLE_CATEGORIES
+    )
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    labels = [
+        label.get_window_extent(renderer)
+        for ax in figure.axes for label in ax.get_xticklabels()
+    ]
+    ylabel = figure.axes[0].yaxis.label.get_window_extent(renderer)
+    legend = figure.legends[0].get_window_extent(renderer)
+
+    assert not any(
+        left.overlaps(right)
+        for index, left in enumerate(labels) for right in labels[index + 1:]
+    )
+    assert all(figure.bbox.contains(*box.get_points()[0]) and
+               figure.bbox.contains(*box.get_points()[1]) for box in labels)
+    assert figure.bbox.contains(*ylabel.get_points()[0])
+    assert figure.bbox.contains(*ylabel.get_points()[1])
+    assert not any(label.overlaps(legend) for label in labels)
 
 
 def test_write_outputs_uses_shared_cells_and_keeps_svg_text_editable(tmp_path):
     cells = cell_frame()
     coverage = pd.DataFrame([{"judge": "j", "condition": "c", "observed_rows": 1}])
+    style_cells = pd.DataFrame([{
+        "condition": condition, "pair": "major-vs-minor", "major": "major",
+        "minor": "minor", "item": "item", "feature": feature,
+        "delta_major_minus_minor": 0.0,
+    } for condition in analysis.CONDITIONS for feature in analysis.STYLE_CATEGORIES])
+    style_pairs = style_cells.assign(n_items=1)
+    manuscript = tmp_path / "manuscript" / "04-ablations"
 
-    analysis.write_outputs(cells, coverage, tmp_path)
+    analysis.write_outputs(
+        cells, coverage, tmp_path, style_cells, style_pairs, manuscript,
+    )
 
     expected = {
         "accuracy_by_judge.csv", "accuracy_summary.csv", "coverage.csv",
         "cell_predictions.csv", "gap_by_judge.csv", "gap_estimates.csv",
         "overall_observed_vs_glm.csv", "accuracy_original_vs_rewrite.png",
         "accuracy_original_vs_rewrite.svg", "gap_curves.png", "gap_curves.svg",
+        "style_deltas_by_cell.csv", "style_deltas_by_pair.csv",
+        "style_deltas_targeted.png", "style_deltas_targeted.svg",
+        "style_deltas_other.png", "style_deltas_other.svg",
     }
     assert expected <= {path.name for path in tmp_path.iterdir()}
     assert "<text" in (tmp_path / "accuracy_original_vs_rewrite.svg").read_text()
     assert "<text" in (tmp_path / "gap_curves.svg").read_text()
+    assert "<text" in (tmp_path / "style_deltas_targeted.svg").read_text()
+    assert "<text" in (tmp_path / "style_deltas_other.svg").read_text()
+    manuscript_names = {
+        "style_standardisation_accuracy.png",
+        "style_standardisation_accuracy.svg",
+        "style_standardisation_gap_curves.png",
+        "style_standardisation_gap_curves.svg",
+        "style_standardisation_targeted_features.png",
+        "style_standardisation_targeted_features.svg",
+        "style_standardisation_other_features.png",
+        "style_standardisation_other_features.svg",
+    }
+    assert manuscript_names == {path.name for path in manuscript.iterdir()}
+    mapping = {
+        "accuracy_original_vs_rewrite": "style_standardisation_accuracy",
+        "gap_curves": "style_standardisation_gap_curves",
+        "style_deltas_targeted": "style_standardisation_targeted_features",
+        "style_deltas_other": "style_standardisation_other_features",
+    }
+    for source, destination in mapping.items():
+        for suffix in ("png", "svg"):
+            assert (tmp_path / f"{source}.{suffix}").read_bytes() == (
+                manuscript / f"{destination}.{suffix}"
+            ).read_bytes()

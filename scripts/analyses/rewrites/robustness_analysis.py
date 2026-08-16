@@ -26,6 +26,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+import shutil
 import sys
 
 import matplotlib
@@ -50,6 +51,16 @@ STYLE_CATEGORIES = (
     "personal_pronouns", "hedging", "backtracking", "uncertainty",
     "confidence", "questions",
 )
+TARGETED_STYLE_CATEGORIES = STYLE_CATEGORIES[:3]
+OTHER_STYLE_CATEGORIES = STYLE_CATEGORIES[3:]
+STYLE_LABELS = {
+    "personal_pronouns": "Personal pronouns",
+    "hedging": "Hedging",
+    "backtracking": "Backtracking",
+    "uncertainty": "Uncertainty",
+    "confidence": "Confidence",
+    "questions": "Questions",
+}
 STYLE_KEYS = ("model", "item", "n_chars", "reasoning_chars")
 TRANSCRIPT_FEATURES = (
     "total_length", "length_difference_stronger",
@@ -85,6 +96,13 @@ BASELINE_VERDICTS = ROOT / "judge_results/judging_variations/verdicts.csv"
 REWRITE_VERDICTS = (
     ROOT / "judge_results/robustness/style_standardised_gpt/verdicts_rewrite.csv"
 )
+MANUSCRIPT_OUT = ROOT / "manuscript/draft1/figures/04-ablations"
+MANUSCRIPT_STEMS = {
+    "accuracy_original_vs_rewrite": "style_standardisation_accuracy",
+    "gap_curves": "style_standardisation_gap_curves",
+    "style_deltas_targeted": "style_standardisation_targeted_features",
+    "style_deltas_other": "style_standardisation_other_features",
+}
 
 plt.rcParams.update({
     "font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
@@ -141,6 +159,36 @@ def load_verdicts(baseline_path: Path, rewrite_path: Path) -> pd.DataFrame:
             raise ValueError(f"{label} verdict input {path} has no {condition!r} rows")
         frames.append(frame[frame.condition == condition])
     return pd.concat(frames, ignore_index=True)
+
+
+def style_delta_tables(campaign_cells: dict, style_paths: dict[str, Path]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Raw style-rate differences, oriented major minus minor."""
+    rows = []
+    for condition in CONDITIONS:
+        rates = pd.read_csv(style_paths[condition])
+        validate_style_rates(rates, style_paths[condition])
+        rates = rates.set_index(["model", "item"])
+        for pair, items in campaign_cells.items():
+            major, minor = pair.split("-vs-", 1)
+            for item in items:
+                for feature in STYLE_CATEGORIES:
+                    rows.append({
+                        "condition": condition, "pair": pair,
+                        "major": major, "minor": minor, "item": item,
+                        "feature": feature,
+                        "delta_major_minus_minor": (
+                            rates.loc[(major, item), feature]
+                            - rates.loc[(minor, item), feature]
+                        ),
+                    })
+    cells = pd.DataFrame(rows)
+    pairs = (cells.groupby(
+        ["condition", "pair", "major", "minor", "feature"], as_index=False,
+    ).agg(
+        delta_major_minus_minor=("delta_major_minus_minor", "mean"),
+        n_items=("item", "size"),
+    ))
+    return cells, pairs
 
 
 def summarise(verdicts: pd.DataFrame, campaign_cells: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -260,13 +308,13 @@ def _style_axes(ax) -> None:
         ax.spines[name].set_position(("outward", 5))
 
 
-def _mean_errorbar(ax, x, row, value: str, lo: str, hi: str) -> None:
+def _mean_errorbar(ax, x, row, value: str, lo: str, hi: str, scale: float = 1) -> None:
     lower, upper = row[lo], row[hi]
     yerr = None
     if np.isfinite(lower) and np.isfinite(upper):
-        yerr = [[row[value] - lower], [upper - row[value]]]
+        yerr = [[scale * (row[value] - lower)], [scale * (upper - row[value])]]
     ax.errorbar(
-        [x], [row[value]], yerr=yerr, color="#111111", marker="D", ms=3.2,
+        [x], [scale * row[value]], yerr=yerr, color="#111111", marker="D", ms=4.5,
         lw=1, capsize=0, linestyle="none", zorder=5,
     )
 
@@ -279,35 +327,45 @@ def make_accuracy_figure(cells: pd.DataFrame):
     present += sorted(present_set - set(present))
     x = np.arange(len(CONDITIONS))
     fig, axes = plt.subplots(
-        1, 2, figsize=(3.8, 2.4), gridspec_kw={"width_ratios": [1.3, 1.0]}
+        1, 2, figsize=(3.6, 1.9), gridspec_kw={"width_ratios": [1.3, 1.0]}
     )
 
     for judge in present:
         rows = (by_judge[by_judge.judge == judge]
                 .set_index("condition").reindex(CONDITIONS))
         axes[0].plot(
-            x, rows.accuracy, color=JUDGE_COLORS.get(judge, "#777777"),
-            marker="o", ms=3, lw=0.9, label=JUDGE_LABELS.get(judge, judge), zorder=3,
+            x, 100 * rows.accuracy, color=JUDGE_COLORS.get(judge, "#777777"),
+            marker="o", ms=4.2, lw=1, label=JUDGE_LABELS.get(judge, judge), zorder=3,
         )
     for condition_index, condition in enumerate(CONDITIONS):
         row = summary[summary.condition == condition].iloc[0]
-        _mean_errorbar(axes[0], condition_index, row, "accuracy", "ci_lo", "ci_hi")
-    axes[0].axhline(0.5, color="#888888", lw=0.8, ls=(0, (2, 2)), zorder=1)
+        _mean_errorbar(
+            axes[0], condition_index, row, "accuracy", "ci_lo", "ci_hi", scale=100,
+        )
+    accuracy_bounds = [*list(100 * by_judge.accuracy)]
+    accuracy_bounds += [
+        100 * value for value in summary[["ci_lo", "ci_hi"]].to_numpy().ravel()
+        if np.isfinite(value)
+    ]
+    lower = 5 * math.floor(min(accuracy_bounds) / 5)
+    upper = 5 * math.ceil(max(accuracy_bounds) / 5)
     axes[0].set(
-        xlim=(-0.25, len(CONDITIONS) - 0.75), ylim=(0, 1), xticks=x,
-        xticklabels=CONDITION_LABELS, yticks=[0, 0.5, 1], ylabel="Judge accuracy",
+        xlim=(-0.25, len(CONDITIONS) - 0.75), ylim=(lower, upper), xticks=x,
+        xticklabels=CONDITION_LABELS, yticks=np.arange(lower, upper + 0.1, 5),
+        ylabel="Judge accuracy (%)",
     )
 
     rewrite = by_judge[by_judge.condition == "style_standardised_gpt"]
     offsets = np.linspace(-0.06, 0.06, len(rewrite)) if len(rewrite) > 1 else [0]
     for offset, (_, row) in zip(offsets, rewrite.iterrows(), strict=True):
         axes[1].plot(
-            offset, row.delta_vs_baseline, color=JUDGE_COLORS.get(row.judge, "#777777"),
-            marker="o", ms=3, linestyle="none", zorder=3,
+            offset, 100 * row.delta_vs_baseline,
+            color=JUDGE_COLORS.get(row.judge, "#777777"),
+            marker="o", ms=4.2, linestyle="none", zorder=3,
         )
     rewrite_summary = summary[summary.condition == "style_standardised_gpt"].iloc[0]
     _mean_errorbar(
-        axes[1], 0, rewrite_summary, "delta", "delta_ci_lo", "delta_ci_hi"
+        axes[1], 0, rewrite_summary, "delta", "delta_ci_lo", "delta_ci_hi", scale=100,
     )
     axes[1].axhline(0, color="#888888", lw=0.8, ls=(0, (2, 2)), zorder=1)
     delta_values = rewrite.delta_vs_baseline.abs().dropna().tolist()
@@ -316,26 +374,24 @@ def make_accuracy_figure(cells: pd.DataFrame):
             rewrite_summary.delta_ci_lo, rewrite_summary.delta_ci_hi,
         ) if np.isfinite(value)
     ]
-    limit = max(0.1, math.ceil(max(delta_values, default=0.1) * 10) / 10)
+    limit = max(1, math.ceil(100 * max(delta_values, default=0.01)))
     axes[1].set(
         xlim=(-0.25, 0.25), ylim=(-limit, limit), xticks=[0],
         xticklabels=["Style-standardised"], yticks=[-limit, 0, limit],
-        ylabel="Accuracy change",
+        ylabel="Rewrite − original (pp)",
     )
-    for ax, tag in zip(axes, ("a", "b"), strict=True):
+    for ax in axes:
         _style_axes(ax)
-        ax.text(-0.18, 1.03, tag, transform=ax.transAxes, color="#666666",
-                fontsize=8, va="bottom")
 
     handles, labels = axes[0].get_legend_handles_labels()
-    handles.append(plt.Line2D([], [], color="#111111", marker="D", ms=3.2,
+    handles.append(plt.Line2D([], [], color="#111111", marker="D", ms=4.5,
                               lw=0, label="Mean ± 95% CI"))
     labels.append("Mean ± 95% CI")
     fig.legend(
         handles, labels, loc="lower center", ncol=2, frameon=False,
-        bbox_to_anchor=(0.5, 0.0), handlelength=1.4, columnspacing=0.9,
+        bbox_to_anchor=(0.5, -0.01), handlelength=1.4, columnspacing=0.8,
     )
-    fig.subplots_adjust(left=0.15, right=0.98, top=0.94, bottom=0.34, wspace=0.52)
+    fig.subplots_adjust(left=0.14, right=0.98, top=0.97, bottom=0.39, wspace=0.55)
     return fig
 
 
@@ -452,9 +508,58 @@ def gap_summary(cells: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(result)
 
 
+def _symmetric_limit(values: pd.Series) -> float:
+    peak = float(values.abs().max())
+    if not np.isfinite(peak) or peak == 0:
+        return 1.0
+    magnitude = 10 ** math.floor(math.log10(peak))
+    step = magnitude if peak / magnitude > 5 else magnitude / 2
+    limit = math.ceil(peak / step) * step
+    return limit + step if math.isclose(limit, peak) else limit
+
+
+def make_style_delta_figure(pairs: pd.DataFrame, features: tuple[str, ...]):
+    """Pair-mean style-rate differences before and after rewriting."""
+    fig, axes = plt.subplots(1, len(features), figsize=(4.3, 1.9), squeeze=False)
+    axes = axes[0]
+    x = np.arange(len(CONDITIONS))
+    for ax, feature in zip(axes, features, strict=True):
+        rows = pairs[pairs.feature == feature]
+        wide = (rows.pivot(index="pair", columns="condition",
+                           values="delta_major_minus_minor")
+                    .reindex(columns=CONDITIONS).dropna())
+        for values in wide.to_numpy():
+            ax.plot(x, values, color="#999999", marker="o", ms=2.8,
+                    lw=0.6, alpha=0.24, zorder=2)
+        ax.plot(x, wide.mean(), color="#111111", marker="D", ms=4.5,
+                lw=1, zorder=4)
+        limit = _symmetric_limit(pd.Series(wide.to_numpy().ravel()))
+        ax.axhline(0, color="#888888", lw=0.8, ls=(0, (2, 2)), zorder=1)
+        ax.set(
+            xlim=(-0.25, 1.25), ylim=(-limit, limit), xticks=x,
+            xticklabels=("Original", "Standardised"), yticks=(-limit, 0, limit),
+        )
+        ax.text(0.03, 0.97, STYLE_LABELS[feature], transform=ax.transAxes,
+                color="#666666", fontsize=7, va="top")
+        _style_axes(ax)
+        plt.setp(ax.get_xticklabels(), rotation=90, ha="center", va="top")
+    axes[0].set_ylabel("Major − minor rate\n(per 1,000 words)")
+    axes[0].yaxis.label.set_y(0.3)
+    handles = [
+        plt.Line2D([], [], color="#999999", marker="o", ms=2.8, lw=0.6,
+                   alpha=0.5, label="Model pair"),
+        plt.Line2D([], [], color="#111111", marker="D", ms=4.5, lw=1,
+                   label="Mean"),
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False,
+               bbox_to_anchor=(0.5, -0.01), handlelength=1.4, columnspacing=1.0)
+    fig.subplots_adjust(left=0.21, right=0.985, top=0.97, bottom=0.58, wspace=0.5)
+    return fig
+
+
 def make_gap_figure(gaps: pd.DataFrame, by_judge: pd.DataFrame | None = None):
     """Observed and frozen-GLM gap curves, retaining judge-level traces."""
-    fig, axes = plt.subplots(1, 2, figsize=(4.2, 2.4), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(2.9, 1.9), sharex=True, sharey=True)
     max_gap = max(10.0, float(gaps.gap_mean.max()))
     x_max = (math.floor(max_gap / 10) + 1) * 10
     for ax, condition, label in zip(axes, CONDITIONS, CONDITION_LABELS, strict=True):
@@ -480,17 +585,17 @@ def make_gap_figure(gaps: pd.DataFrame, by_judge: pd.DataFrame | None = None):
             yerr = None if not finite_ci else [rows[value] - rows[lo], rows[hi] - rows[value]]
             ax.errorbar(
                 rows.gap_mean, rows[value], yerr=yerr,
-                color=color, marker="o", ms=3, lw=1, capsize=0,
+                color=color, marker="o", ms=4, lw=1, capsize=0,
                 linestyle=linestyle, zorder=3,
             )
         ax.axhline(0.5, color="#888888", lw=0.8, ls=":", zorder=1)
         ax.text(0.03, 0.96, label, transform=ax.transAxes, color="#666666",
                 fontsize=8, va="top")
-        ax.set(xlim=(0, x_max), ylim=(0, 1), xticks=[0, x_max / 2, x_max],
-               yticks=[0, 0.5, 1])
+        ax.set(xlim=(0, x_max), ylim=(0.5, 1), xticks=[0, x_max / 2, x_max],
+               yticks=[0.5, 0.75, 1])
         _style_axes(ax)
     axes[0].set_ylabel("Judge accuracy")
-    fig.supxlabel("Capability gap (ECI)", x=0.56, y=0.205, fontsize=8)
+    fig.supxlabel("Capability gap (ECI)", x=0.56, y=0.13, fontsize=8)
     handles = [
         plt.Line2D([], [], color="#111111", marker="o", ms=3, lw=1,
                    label="Observed mean"),
@@ -507,13 +612,15 @@ def make_gap_figure(gaps: pd.DataFrame, by_judge: pd.DataFrame | None = None):
         ]
     fig.legend(
         handles=handles, loc="lower center", ncol=3, frameon=False,
-        bbox_to_anchor=(0.5, 0.0), handlelength=1.8, columnspacing=0.9,
+        bbox_to_anchor=(0.5, -0.01), handlelength=1.8, columnspacing=0.8,
     )
-    fig.subplots_adjust(left=0.14, right=0.975, top=0.96, bottom=0.38, wspace=0.28)
+    fig.subplots_adjust(left=0.14, right=0.975, top=0.97, bottom=0.36, wspace=0.28)
     return fig
 
 
-def write_outputs(cells: pd.DataFrame, coverage: pd.DataFrame, out: Path) -> None:
+def write_outputs(cells: pd.DataFrame, coverage: pd.DataFrame, out: Path,
+                  style_cells: pd.DataFrame, style_pairs: pd.DataFrame,
+                  manuscript_out: Path | None = None) -> None:
     """Write both analyses from the same complete cell intersection."""
     out.mkdir(parents=True, exist_ok=True)
     accuracy_by_judge, accuracy_summary = accuracy_tables(cells)
@@ -533,14 +640,29 @@ def write_outputs(cells: pd.DataFrame, coverage: pd.DataFrame, out: Path) -> Non
     by_judge.to_csv(out / "gap_by_judge.csv", index=False)
     gaps.to_csv(out / "gap_estimates.csv", index=False)
     overall.to_csv(out / "overall_observed_vs_glm.csv", index=False)
+    style_cells.to_csv(out / "style_deltas_by_cell.csv", index=False)
+    style_pairs.to_csv(out / "style_deltas_by_pair.csv", index=False)
 
     figures = {
         "accuracy_original_vs_rewrite": make_accuracy_figure(cells),
-        "gap_curves": make_gap_figure(gaps, by_judge),
+        "gap_curves": make_gap_figure(gaps),
+        "style_deltas_targeted": make_style_delta_figure(
+            style_pairs, TARGETED_STYLE_CATEGORIES,
+        ),
+        "style_deltas_other": make_style_delta_figure(
+            style_pairs, OTHER_STYLE_CATEGORIES,
+        ),
     }
+    if manuscript_out is not None:
+        manuscript_out.mkdir(parents=True, exist_ok=True)
     for name, fig in figures.items():
-        fig.savefig(out / f"{name}.png", dpi=300)
-        fig.savefig(out / f"{name}.svg")
+        png, svg = out / f"{name}.png", out / f"{name}.svg"
+        fig.savefig(png, dpi=300)
+        fig.savefig(svg)
+        if manuscript_out is not None:
+            stem = MANUSCRIPT_STEMS[name]
+            shutil.copy2(png, manuscript_out / f"{stem}.png")
+            shutil.copy2(svg, manuscript_out / f"{stem}.svg")
         plt.close(fig)
 
 
@@ -548,7 +670,8 @@ def analyse(verdicts: pd.DataFrame, campaign_cells: dict, out: Path,
             style_paths: dict[str, Path] = STYLE_RATES,
             reference_path: Path = REFERENCE,
             summary_path: Path = GLM_SUMMARY,
-            coords_path: Path = GLM_COORDS) -> None:
+            coords_path: Path = GLM_COORDS,
+            manuscript_out: Path | None = MANUSCRIPT_OUT) -> None:
     """Build one shared complete-cell analysis from finished judging outputs."""
     validate_campaign(campaign_cells)
     _, coverage = summarise(verdicts, campaign_cells)
@@ -563,7 +686,10 @@ def analyse(verdicts: pd.DataFrame, campaign_cells: dict, out: Path,
     cells = paired_cells(designs, campaign_cells)
     if cells.empty:
         raise ValueError("No common complete cell intersection across judges and conditions")
-    write_outputs(cells, coverage, out)
+    style_cells, style_pairs = style_delta_tables(campaign_cells, style_paths)
+    write_outputs(
+        cells, coverage, out, style_cells, style_pairs, manuscript_out,
+    )
 
 
 def main() -> None:
