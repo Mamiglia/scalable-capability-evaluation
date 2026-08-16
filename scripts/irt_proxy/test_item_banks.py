@@ -74,6 +74,33 @@ def test_assign_splits_stratifies_joint_by_benchmark_year():
     assert set(got.loc[got["quartile"] == "Q1", "item"]) == {"0", "1"}
 
 
+def test_assign_splits_adds_stable_tertiles_and_quintiles():
+    from item_banks import assign_splits
+
+    difficulties = pd.DataFrame([
+        {
+            "irt_model": "fixed_3pl",
+            "fit": "gpqa",
+            "benchmark": "gpqa",
+            "item": str(i),
+            "difficulty": float(i),
+        }
+        for i in range(10)
+    ])
+
+    got = assign_splits(difficulties)
+
+    assert got.groupby("tertile").size().to_dict() == {"T1": 4, "T2": 3, "T3": 3}
+    assert got.groupby("quintile").size().to_dict() == {
+        "P1": 2,
+        "P2": 2,
+        "P3": 2,
+        "P4": 2,
+        "P5": 2,
+    }
+    assert got.loc[got["tertile"] == "T1", "item"].tolist() == ["0", "1", "2", "3"]
+
+
 def test_fit_difficulties_runs_declared_models_and_format_floors(monkeypatch):
     import item_banks
 

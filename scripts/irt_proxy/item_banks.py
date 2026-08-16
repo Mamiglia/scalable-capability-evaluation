@@ -120,7 +120,7 @@ def fit_difficulties(responses: pd.DataFrame, **kwargs) -> pd.DataFrame:
 
 
 def assign_splits(difficulties: pd.DataFrame) -> pd.DataFrame:
-    """Assign halves and quartiles independently within each benchmark-year.
+    """Assign equal-count difficulty bins within each benchmark-year.
 
     A pooled numerical cut would let GPQA's difficulty scale decide which AIME
     items count as easy. Stratifying makes the joint fit benchmark-balanced by
@@ -132,7 +132,8 @@ def assign_splits(difficulties: pd.DataFrame) -> pd.DataFrame:
         kind="stable",
     ).reset_index(drop=True)
     splits["half"] = ""
-    splits["quartile"] = ""
+    for column in ("tertile", "quartile", "quintile"):
+        splits[column] = ""
 
     for _, group in splits.groupby(group_columns, sort=False):
         indices = group.index.to_numpy()
@@ -142,8 +143,13 @@ def assign_splits(difficulties: pd.DataFrame) -> pd.DataFrame:
         splits.loc[indices[:midpoint], "half"] = "easy"
         splits.loc[indices[midpoint:], "half"] = "hard"
 
-        # array_split keeps quartile sizes within one item without inventing a
-        # floating percentile convention for small AIME strata.
-        for number, quartile_indices in enumerate(np.array_split(indices, 4), 1):
-            splits.loc[quartile_indices, "quartile"] = f"Q{number}"
+        # array_split keeps bins within one item of equal size. This matters for
+        # AIME, where a percentile interpolation rule would move whole items.
+        for column, prefix, n_bins in (
+            ("tertile", "T", 3),
+            ("quartile", "Q", 4),
+            ("quintile", "P", 5),
+        ):
+            for number, bin_indices in enumerate(np.array_split(indices, n_bins), 1):
+                splits.loc[bin_indices, column] = f"{prefix}{number}"
     return splits

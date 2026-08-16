@@ -72,7 +72,7 @@ def for_models(responses: pd.DataFrame, model_names, epoch=None) -> pd.DataFrame
 
 def pick_epoch(responses: pd.DataFrame, epoch: int = 1) -> pd.DataFrame:
     """
-    One row per (model, item): the given epoch, else the next available.
+    One row per (model, benchmark, item): the given epoch, else the next available.
 
     A blank answer counts as missing, so a broken epoch falls through to the next
     one that answered; a cell blank in every epoch drops out.
@@ -82,7 +82,7 @@ def pick_epoch(responses: pd.DataFrame, epoch: int = 1) -> pd.DataFrame:
     return (
         responses.assign(_o=order)
         .sort_values("_o")
-        .drop_duplicates(["model", "item"])
+        .drop_duplicates(["model", "benchmark", "item"])
         .drop(columns="_o")
     )
 
