@@ -214,6 +214,54 @@ def test_glm_frame_uses_exact_original_and_pair_dependent_truncated_lengths():
     assert len(frame) == 6
 
 
+def test_load_transcripts_replays_first_correct_epoch_and_length_limit(tmp_path):
+    def sample(item, epoch, text, correct=True):
+        return SimpleNamespace(
+            id=item, epoch=epoch, score=SimpleNamespace(value="C" if correct else "I"),
+            messages=None,
+            output=SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(role="assistant", content=text)
+            )]),
+        )
+
+    logs = {
+        "a.eval": SimpleNamespace(samples=[
+            sample("i", 2, "later-long"), sample("i", 1, "first-long"),
+        ]),
+        "b.eval": SimpleNamespace(samples=[sample("i", 1, "bravo-long")]),
+    }
+    config = {
+        "transcripts": {"a": "a.eval", "b": "b.eval"},
+        "comparisons": [["a", "b"]], "sample_ids": {"a-vs-b": ["i"]},
+        "max_length": 5,
+    }
+
+    transcripts = load_script().load_transcripts(
+        config, root=tmp_path, read_log=lambda path: logs[Path(path).name]
+    )
+
+    assert transcripts == {("a", "i"): "first", ("b", "i"): "bravo"}
+
+
+def test_collapse_predictions_averages_orders_onto_observed_cells():
+    cells = pd.DataFrame([{
+        "judge": "j", "condition": "first_90", "pair": "a-vs-b",
+        "item": "i", "observed": 0.5,
+    }])
+    frame = pd.DataFrame([
+        {"judge": "j", "condition": "first_90", "pair": "a-vs-b",
+         "item": "i", "order": 1, "predicted": 0.2, "capability_gap": 10.0},
+        {"judge": "j", "condition": "first_90", "pair": "a-vs-b",
+         "item": "i", "order": 2, "predicted": 0.6, "capability_gap": 10.0},
+    ])
+
+    merged = load_script().collapse_predictions(cells, frame)
+
+    assert merged[["observed", "predicted", "capability_gap"]].iloc[0].tolist() == [
+        0.5, 0.4, 10.0,
+    ]
+
+
 def figure_cells():
     rows = []
     for judge_index, judge in enumerate(("j1", "j2", "j3")):

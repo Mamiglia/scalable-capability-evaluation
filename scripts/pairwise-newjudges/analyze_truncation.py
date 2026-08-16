@@ -3,12 +3,32 @@
 import argparse
 import re
 from pathlib import Path
+import sys
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import yaml
 from inspect_ai.log import read_eval_log
 from scipy.stats import t
+
+from judge.dataset import truncate_pair
+from judge.util import extract_transcript, first_correct_by_id
+from mc_cost.gpqa import model_family
+
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/hibayes"))
+from style_features import feature_rates  # noqa: E402
+
+
+plt.rcParams.update({
+    "font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
+    "xtick.labelsize": 7, "ytick.labelsize": 7, "svg.fonttype": "none",
+})
 
 
 FRACTIONS = (0.1, 0.5, 0.9, 1.0)
@@ -25,6 +45,15 @@ SCALED_FEATURES = (
     "capability_gap", "total_length", "length_difference_stronger",
     *[f"{category}_difference_stronger" for category in STYLE_CATEGORIES],
 )
+PREDICTORS = (
+    "truth_side", "truth_side_x_total_length", "total_length_sd",
+    "capability_gap_sd", "length_difference_stronger_sd", "same_model_family",
+    *[f"{category}_difference_stronger_sd" for category in STYLE_CATEGORIES],
+)
+GAP_CONDITIONS = ("original", "first_90", "end_90")
+CONDITION_LABELS = {
+    "original": "Original", "first_90": "First 90%", "end_90": "End 90%",
+}
 
 
 def collect_logs(root: Path, read_log=read_eval_log) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -152,6 +181,203 @@ def overall_tables(cells: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
             if len(values) else 0,
         })
     return by_judge, pd.DataFrame(rows)
+
+
+def build_glm_frame(cells: pd.DataFrame, transcripts: dict,
+                    comparisons: dict[str, tuple[str, str]], capabilities: dict,
+                    reference: pd.DataFrame, lexicon: dict) -> pd.DataFrame:
+    """Recompute frozen-GLM predictors from the exact text shown per pair."""
+    rows = []
+    for cell in cells.drop_duplicates(["judge", "condition", "pair", "item"]).itertuples():
+        major, minor = comparisons[cell.pair]
+        major_text = transcripts[(major, cell.item)]
+        minor_text = transcripts[(minor, cell.item)]
+        if cell.condition == "original":
+            shown = major_text, minor_text
+        elif cell.condition == "first_90":
+            shown = truncate_pair(major_text, minor_text, 0.9, keep="first")
+        elif cell.condition == "end_90":
+            shown = truncate_pair(major_text, minor_text, 0.9, keep="last")
+        else:
+            raise ValueError(f"No GLM transcript treatment for {cell.condition}")
+        for order in (1, 2):
+            left_model, right_model = (major, minor) if order == 1 else (minor, major)
+            left, right = shown if order == 1 else shown[::-1]
+            truth_side = 1.0 if order == 1 else -1.0
+            left_rates, right_rates = feature_rates(left, lexicon), feature_rates(right, lexicon)
+            row = {
+                "judge": cell.judge, "condition": cell.condition, "pair": cell.pair,
+                "item": cell.item, "order": order, "truth_side": truth_side,
+                "left_chars": len(left), "right_chars": len(right),
+                "capability_gap": capabilities[major] - capabilities[minor],
+                "total_length": np.log1p(len(left) + len(right)),
+                "length_difference_stronger": (
+                    np.log1p(len(left)) - np.log1p(len(right))
+                ) * truth_side,
+                "same_model_family": int(
+                    left_model != right_model
+                    and model_family(left_model) == model_family(right_model)
+                ),
+            }
+            for category in STYLE_CATEGORIES:
+                row[f"{category}_difference_stronger"] = (
+                    left_rates[category] - right_rates[category]
+                ) * truth_side
+            rows.append(row)
+    frame = pd.DataFrame(rows)
+    for feature in SCALED_FEATURES:
+        frame[f"{feature}_sd"] = (
+            frame[feature] - reference[feature].mean()
+        ) / reference[feature].std(ddof=1)
+    frame["truth_side_x_total_length"] = frame.truth_side * frame.total_length_sd
+    if not np.isfinite(frame[list(PREDICTORS)].to_numpy()).all():
+        raise ValueError("Counterfactual GLM predictors are not finite")
+    return frame
+
+
+def load_transcripts(config: dict, root: Path = ROOT,
+                     read_log=read_eval_log) -> dict[tuple[str, str], str]:
+    """Replay the exact first-correct, final-text transcript selection."""
+    required: dict[str, set[str]] = {}
+    for major, minor in config["comparisons"]:
+        items = config["sample_ids"][f"{major}-vs-{minor}"]
+        required.setdefault(major, set()).update(map(str, items))
+        required.setdefault(minor, set()).update(map(str, items))
+    transcripts = {}
+    for model, items in sorted(required.items()):
+        grouped = first_correct_by_id(read_log(root / config["transcripts"][model]))
+        missing = items - set(map(str, grouped))
+        if missing:
+            raise ValueError(f"Missing {len(missing)} selected transcripts for {model}")
+        for item in items:
+            sample = grouped[item][0]
+            transcripts[(model, item)] = extract_transcript(
+                sample, include_reasoning=False
+            )[:config["max_length"]]
+    return transcripts
+
+
+def collapse_predictions(cells: pd.DataFrame, frame: pd.DataFrame) -> pd.DataFrame:
+    """Average the frozen GLM's two presentation-order predictions per cell."""
+    keys = ["judge", "condition", "pair", "item"]
+    predictions = (frame.groupby(keys, as_index=False)
+                         .agg(predicted=("predicted", "mean"),
+                              capability_gap=("capability_gap", "first")))
+    return cells.merge(predictions, on=keys, how="inner", validate="one_to_one")
+
+
+def _style_axes(ax) -> None:
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_position(("outward", 5))
+    ax.spines["bottom"].set_position(("outward", 5))
+
+
+def make_overall_figure(cells: pd.DataFrame):
+    """Overall first/end retention curves with judge-level uncertainty."""
+    by_judge, summary = overall_tables(cells)
+    fig, ax = plt.subplots(figsize=(2.2, 2.4))
+    colors = {"first": "#2a78d6", "end": "#eb6834"}
+    fractions = [10, 50, 90, 100]
+    for direction in ("first", "end"):
+        conditions = [f"{direction}_{fraction}" for fraction in fractions[:-1]] + ["original"]
+        for judge in sorted(by_judge.judge.unique()):
+            values = (by_judge[by_judge.judge == judge].set_index("condition")
+                      .reindex(conditions).accuracy)
+            ax.plot(fractions, values, color=colors[direction], lw=0.7, marker="o",
+                    ms=2.2, alpha=0.28, zorder=2)
+        means = summary.set_index("condition").reindex(conditions)
+        yerr = np.vstack([means.accuracy - means.ci_low,
+                          means.ci_high - means.accuracy])
+        yerr = yerr if np.isfinite(yerr).all() else None
+        ax.errorbar(
+            fractions, means.accuracy, yerr=yerr, color=colors[direction],
+            lw=1, marker="o", ms=3.2, capsize=0, label=f"{direction.title()} retained",
+            zorder=4,
+        )
+    ax.axhline(0.5, color="#888888", lw=0.8, ls=(0, (2, 2)), zorder=1)
+    ax.set(xlim=(10, 100), ylim=(0, 1), xticks=fractions, yticks=[0, 0.5, 1],
+           xlabel="Transcript retained (%)", ylabel="Judge accuracy")
+    _style_axes(ax)
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=1, frameon=False,
+               bbox_to_anchor=(0.5, 0.0), handlelength=1.8)
+    fig.subplots_adjust(left=0.24, right=0.96, top=0.97, bottom=0.30)
+    return fig
+
+
+def gap_tables(cells: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """ECI-gap tertiles with judges retained as the replication units."""
+    cells = cells[cells.condition.isin(GAP_CONDITIONS)].copy()
+    pair_gaps = cells.groupby("pair").capability_gap.first().sort_values()
+    bins = pd.qcut(pair_gaps.rank(method="first"), 3, labels=False)
+    cells["gap_bin"] = cells.pair.map(bins)
+    by_judge = (cells.groupby(["judge", "condition", "gap_bin"], as_index=False)
+                     .agg(gap_mean=("capability_gap", "mean"),
+                          observed=("observed", "mean"),
+                          predicted=("predicted", "mean")))
+    rows = []
+    for (condition, gap_bin), group in by_judge.groupby(["condition", "gap_bin"]):
+        row = {"condition": condition, "gap_bin": int(gap_bin),
+               "gap_mean": group.gap_mean.mean(), "n_judges": len(group)}
+        for value in ("observed", "predicted"):
+            mean = group[value].mean()
+            if len(group) < 3:
+                low = high = np.nan
+            else:
+                half = (t.ppf(0.975, len(group) - 1) * group[value].std(ddof=1)
+                        / np.sqrt(len(group)))
+                low, high = mean - half, mean + half
+            row |= {value: mean, f"{value}_ci_low": low, f"{value}_ci_high": high}
+        rows.append(row)
+    return by_judge, pd.DataFrame(rows)
+
+
+def make_gap_figure(cells: pd.DataFrame):
+    """Observed and frozen-GLM gap curves for original and 90% treatments."""
+    by_judge, summary = gap_tables(cells)
+    fig, axes = plt.subplots(1, 3, figsize=(5.4, 2.4), sharex=True, sharey=True)
+    palette = ("#2a78d6", "#1baf7a", "#eb6834", "#4a3aa7")
+    judges = sorted(by_judge.judge.unique())
+    judge_colors = dict(zip(judges, palette, strict=False))
+    maximum = max(10.0, float(summary.gap_mean.max()))
+    x_max = np.ceil(maximum / 10) * 10
+    for ax, condition in zip(axes, GAP_CONDITIONS, strict=True):
+        for judge in judges:
+            rows = by_judge[(by_judge.judge == judge) &
+                            (by_judge.condition == condition)].sort_values("gap_bin")
+            ax.plot(rows.gap_mean, rows.observed, color=judge_colors[judge], marker="o",
+                    ms=2.2, lw=0.7, alpha=0.35, zorder=2)
+            ax.plot(rows.gap_mean, rows.predicted, color=judge_colors[judge], marker="o",
+                    ms=2.2, lw=0.7, ls="--", alpha=0.35, zorder=2)
+        rows = summary[summary.condition == condition].sort_values("gap_bin")
+        for value, color, linestyle in (
+            ("observed", "#111111", "-"), ("predicted", "#666666", "--")
+        ):
+            low, high = f"{value}_ci_low", f"{value}_ci_high"
+            yerr = np.vstack([rows[value] - rows[low], rows[high] - rows[value]])
+            yerr = yerr if np.isfinite(yerr).all() else None
+            ax.errorbar(rows.gap_mean, rows[value], yerr=yerr, color=color, marker="o",
+                        ms=3, lw=1, capsize=0, linestyle=linestyle, zorder=4)
+        ax.axhline(0.5, color="#888888", lw=0.8, ls=":", zorder=1)
+        ax.text(0.03, 0.96, CONDITION_LABELS[condition], transform=ax.transAxes,
+                color="#666666", va="top", fontsize=8)
+        ax.set(xlim=(0, x_max), ylim=(0, 1), xticks=[0, x_max / 2, x_max],
+               yticks=[0, 0.5, 1], xlabel="Capability gap (ECI)")
+        _style_axes(ax)
+    axes[0].set_ylabel("Judge accuracy")
+    handles = [
+        plt.Line2D([], [], color="#111111", marker="o", ms=3, lw=1,
+                   label="Observed mean"),
+        plt.Line2D([], [], color="#666666", marker="o", ms=3, lw=1, ls="--",
+                   label="Frozen GLM"),
+        *[plt.Line2D([], [], color=judge_colors[judge], lw=1, label=judge)
+          for judge in judges],
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False,
+               bbox_to_anchor=(0.5, 0.0), handlelength=1.7, columnspacing=0.8)
+    fig.subplots_adjust(left=0.11, right=0.99, top=0.97, bottom=0.32, wspace=0.24)
+    return fig
 
 
 def _mean_ci(values: pd.Series) -> tuple[float, float, float]:
