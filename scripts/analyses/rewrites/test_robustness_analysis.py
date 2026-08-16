@@ -380,6 +380,85 @@ def test_style_delta_figures_are_compact_and_cover_all_six_regressors():
         assert figure.legends and not figure.legends[0].get_frame_on()
 
 
+def test_style_delta_pre_post_uses_green_pair_means_and_capless_intervals(tmp_path):
+    rows = []
+    for condition_index, condition in enumerate(analysis.CONDITIONS):
+        for pair_index in range(4):
+            for feature_index, feature in enumerate(analysis.STYLE_CATEGORIES):
+                rows.append({
+                    "condition": condition, "pair": f"pair-{pair_index}",
+                    "major": "major", "minor": "minor", "feature": feature,
+                    "delta_major_minus_minor": (
+                        feature_index - condition_index + 0.1 * pair_index
+                    ),
+                    "n_items": 30,
+                })
+    pairs = pd.DataFrame(rows)
+
+    summary = analysis.style_delta_summary(pairs)
+    figure = analysis.make_style_delta_pre_post_figure(pairs)
+    path = tmp_path / "pre-post.svg"
+    figure.savefig(path)
+    figure.canvas.draw()
+    ax = figure.axes[0]
+
+    assert len(summary) == 2 * len(analysis.STYLE_CATEGORIES)
+    assert set(summary.n_pairs) == {4}
+    assert summary[["ci_lo", "ci_hi"]].notna().all().all()
+    assert tuple(figure.get_size_inches()) == pytest.approx((1.8, 2.2))
+    assert len(figure.axes) == 1
+    assert not ax.get_title()
+    assert ax.get_xticklabels()[0].get_text() == "Original"
+    assert ax.get_xticklabels()[1].get_text() == "Standardised"
+    assert len(ax.containers) == len(analysis.STYLE_CATEGORIES)
+    assert all(container.has_yerr and not container.lines[1]
+               for container in ax.containers)
+    result_lines = [line for line in ax.lines if line.get_marker() == "None"
+                    and line.get_color() != "#888888"]
+    assert len(result_lines) == len(analysis.STYLE_CATEGORIES)
+    colors = [line.get_color() for line in result_lines]
+    assert colors == list(analysis.FEATURE_GREENS)
+    assert "#2a78d6" not in colors
+    assert figure.legends and not figure.legends[0].get_frame_on()
+    assert [text.get_text() for text in figure.legends[0].get_texts()] == [
+        analysis.STYLE_LABELS[feature] for feature in analysis.STYLE_CATEGORIES
+    ]
+    renderer = figure.canvas.get_renderer()
+    legend = figure.legends[0].get_window_extent(renderer)
+    assert 0 <= legend.x0 and legend.x1 <= figure.bbox.x1
+    assert not ax.xaxis.label.get_window_extent(renderer).overlaps(legend)
+    ylabel = ax.yaxis.label.get_window_extent(renderer)
+    assert figure.bbox.contains(*ylabel.get_points()[0])
+    assert figure.bbox.contains(*ylabel.get_points()[1])
+    assert "<text" in path.read_text()
+
+
+def test_targeted_style_delta_pre_post_combines_three_features_in_one_panel():
+    pairs = pd.DataFrame([{
+        "condition": condition, "pair": "pair", "major": "major",
+        "minor": "minor", "feature": feature,
+        "delta_major_minus_minor": 0.0, "n_items": 30,
+    } for condition in analysis.CONDITIONS
+      for feature in analysis.TARGETED_STYLE_CATEGORIES])
+
+    figure = analysis.make_style_delta_pre_post_figure(
+        pairs, analysis.TARGETED_STYLE_CATEGORIES,
+    )
+
+    assert tuple(figure.get_size_inches()) == pytest.approx((2.9, 1.9))
+    assert len(figure.axes) == 1
+    assert [text.get_text() for text in figure.legends[0].get_texts()] == [
+        analysis.STYLE_LABELS[feature]
+        for feature in analysis.TARGETED_STYLE_CATEGORIES
+    ]
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    boxes = [figure.axes[0].yaxis.label.get_window_extent(renderer),
+             figure.legends[0].get_window_extent(renderer)]
+    assert all(figure.bbox.contains(*box.get_points()[0]) and
+               figure.bbox.contains(*box.get_points()[1]) for box in boxes)
+
+
 def test_axes_end_at_endpoint_ticks_and_panel_labels_are_above_data():
     cells = cell_frame()
     accuracy = analysis.make_accuracy_figure(cells)
@@ -466,8 +545,11 @@ def test_write_outputs_uses_shared_cells_and_keeps_svg_text_editable(tmp_path):
         "overall_observed_vs_glm.csv", "accuracy_original_vs_rewrite.png",
         "accuracy_original_vs_rewrite.svg", "gap_curves.png", "gap_curves.svg",
         "style_deltas_by_cell.csv", "style_deltas_by_pair.csv",
+        "style_deltas_summary.csv",
         "style_deltas_targeted.png", "style_deltas_targeted.svg",
         "style_deltas_other.png", "style_deltas_other.svg",
+        "style_deltas_pre_post.png", "style_deltas_pre_post.svg",
+        "style_deltas_targeted_pre_post.png", "style_deltas_targeted_pre_post.svg",
     }
     assert expected <= {path.name for path in tmp_path.iterdir()}
     assert "<text" in (tmp_path / "accuracy_original_vs_rewrite.svg").read_text()
@@ -483,6 +565,10 @@ def test_write_outputs_uses_shared_cells_and_keeps_svg_text_editable(tmp_path):
         "style_standardisation_targeted_features.svg",
         "style_standardisation_other_features.png",
         "style_standardisation_other_features.svg",
+        "style_standardisation_features_pre_post.png",
+        "style_standardisation_features_pre_post.svg",
+        "style_standardisation_targeted_features_pre_post.png",
+        "style_standardisation_targeted_features_pre_post.svg",
     }
     assert manuscript_names == {path.name for path in manuscript.iterdir()}
     mapping = {
@@ -490,6 +576,8 @@ def test_write_outputs_uses_shared_cells_and_keeps_svg_text_editable(tmp_path):
         "gap_curves": "style_standardisation_gap_curves",
         "style_deltas_targeted": "style_standardisation_targeted_features",
         "style_deltas_other": "style_standardisation_other_features",
+        "style_deltas_pre_post": "style_standardisation_features_pre_post",
+        "style_deltas_targeted_pre_post": "style_standardisation_targeted_features_pre_post",
     }
     for source, destination in mapping.items():
         for suffix in ("png", "svg"):

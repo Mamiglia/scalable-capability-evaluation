@@ -33,6 +33,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.transforms import ScaledTranslation
 import numpy as np
 import pandas as pd
 import yaml
@@ -61,6 +62,9 @@ STYLE_LABELS = {
     "confidence": "Confidence",
     "questions": "Questions",
 }
+FEATURE_GREENS = (
+    "#244b3b", "#38644d", "#4f7b5c", "#689169", "#82a579", "#9db68a",
+)
 STYLE_KEYS = ("model", "item", "n_chars", "reasoning_chars")
 TRANSCRIPT_FEATURES = (
     "total_length", "length_difference_stronger",
@@ -102,6 +106,8 @@ MANUSCRIPT_STEMS = {
     "gap_curves": "style_standardisation_gap_curves",
     "style_deltas_targeted": "style_standardisation_targeted_features",
     "style_deltas_other": "style_standardisation_other_features",
+    "style_deltas_pre_post": "style_standardisation_features_pre_post",
+    "style_deltas_targeted_pre_post": "style_standardisation_targeted_features_pre_post",
 }
 
 plt.rcParams.update({
@@ -521,6 +527,73 @@ def _symmetric_limit(values: pd.Series) -> float:
     return limit + step if math.isclose(limit, peak) else limit
 
 
+def style_delta_summary(pairs: pd.DataFrame) -> pd.DataFrame:
+    """Feature means and 95% intervals across model pairs."""
+    rows = []
+    for condition in CONDITIONS:
+        for feature in STYLE_CATEGORIES:
+            values = pairs[(pairs.condition == condition) &
+                           (pairs.feature == feature)].delta_major_minus_minor
+            low, high = _t_interval(values)
+            rows.append({
+                "condition": condition, "feature": feature,
+                "mean": values.mean(), "ci_lo": low, "ci_hi": high,
+                "n_pairs": len(values),
+            })
+    return pd.DataFrame(rows)
+
+
+def make_style_delta_pre_post_figure(
+    pairs: pd.DataFrame, features: tuple[str, ...] = STYLE_CATEGORIES,
+):
+    """One-panel feature means before and after style standardisation."""
+    summary = style_delta_summary(pairs)
+    targeted = features == TARGETED_STYLE_CATEGORIES
+    fig, ax = plt.subplots(figsize=(2.9, 1.9) if targeted else (1.8, 2.2))
+    x = np.arange(len(CONDITIONS))
+    offsets = np.linspace(-2.5, 2.5, len(features))
+    handles = []
+    for offset, feature, color in zip(
+        offsets, features, FEATURE_GREENS[:len(features)], strict=True
+    ):
+        rows = summary[summary.feature == feature].set_index("condition").reindex(CONDITIONS)
+        transform = ax.transData + ScaledTranslation(
+            offset / 72, 0, fig.dpi_scale_trans
+        )
+        ax.plot(x, rows["mean"], color=color, lw=1, transform=transform,
+                clip_on=False, zorder=2)
+        yerr = np.vstack([rows["mean"] - rows.ci_lo,
+                          rows.ci_hi - rows["mean"]])
+        ax.errorbar(x, rows["mean"], yerr=yerr, fmt="o", color=color,
+                    ms=3, elinewidth=0.7, capsize=0, transform=transform,
+                    clip_on=False, zorder=3)
+        handles.append(plt.Line2D(
+            [], [], color=color, marker="o", ms=3, lw=1,
+            label=STYLE_LABELS[feature],
+        ))
+    bounds = summary[summary.feature.isin(features)][
+        ["mean", "ci_lo", "ci_hi"]
+    ].to_numpy().ravel()
+    limit = _symmetric_limit(pd.Series(bounds))
+    ax.axhline(0, color="#888888", lw=0.8, ls=(0, (2, 2)), zorder=1)
+    ax.set(xlim=(x[0], x[-1]), ylim=(-limit, limit), xticks=x,
+           xticklabels=("Original", "Standardised"), yticks=(-limit, 0, limit),
+           ylabel=("Major − minor / 1k" if targeted else
+                   "Major − minor rate\n(per 1,000 words)"))
+    _style_axes(ax)
+    ax.get_xticklabels()[0].set_horizontalalignment("left")
+    ax.get_xticklabels()[-1].set_horizontalalignment("right")
+    fig.legend(handles=handles, loc="lower center",
+               ncol=len(features) if targeted else 2, frameon=False,
+               bbox_to_anchor=(0.5, 0.0), handlelength=0.8,
+               handletextpad=0.2, columnspacing=0.2)
+    if targeted:
+        fig.subplots_adjust(left=0.22, right=0.98, top=0.97, bottom=0.36)
+    else:
+        fig.subplots_adjust(left=0.36, right=0.97, top=0.97, bottom=0.48)
+    return fig
+
+
 def make_style_delta_figure(pairs: pd.DataFrame, features: tuple[str, ...]):
     """Pair-mean style-rate differences before and after rewriting."""
     fig, axes = plt.subplots(1, len(features), figsize=(4.3, 1.9), squeeze=False)
@@ -644,6 +717,7 @@ def write_outputs(cells: pd.DataFrame, coverage: pd.DataFrame, out: Path,
     overall.to_csv(out / "overall_observed_vs_glm.csv", index=False)
     style_cells.to_csv(out / "style_deltas_by_cell.csv", index=False)
     style_pairs.to_csv(out / "style_deltas_by_pair.csv", index=False)
+    style_delta_summary(style_pairs).to_csv(out / "style_deltas_summary.csv", index=False)
 
     figures = {
         "accuracy_original_vs_rewrite": make_accuracy_figure(cells),
@@ -653,6 +727,10 @@ def write_outputs(cells: pd.DataFrame, coverage: pd.DataFrame, out: Path,
         ),
         "style_deltas_other": make_style_delta_figure(
             style_pairs, OTHER_STYLE_CATEGORIES,
+        ),
+        "style_deltas_pre_post": make_style_delta_pre_post_figure(style_pairs),
+        "style_deltas_targeted_pre_post": make_style_delta_pre_post_figure(
+            style_pairs, TARGETED_STYLE_CATEGORIES,
         ),
     }
     if manuscript_out is not None:
