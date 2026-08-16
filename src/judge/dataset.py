@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from pathlib import Path
+import re
 
 from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.log import read_eval_log
@@ -43,8 +44,8 @@ def format_options(sample: Sample, n: int) -> str:
 
 def strip_answer(text: str) -> str:
     """Drop the trailing ANSWER line."""
-    idx = text.rfind("ANSWER:")
-    return text[:idx].rstrip() if idx != -1 else text
+    matches = list(re.finditer(r"(?:final\s+)?answer\s*:", text, re.IGNORECASE))
+    return text[:matches[-1].start()].rstrip() if matches else text
 
 
 def has_reasoning(text: str, min_chars: int) -> bool:

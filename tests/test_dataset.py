@@ -7,7 +7,7 @@ from inspect_ai.model import ModelOutput
 from inspect_ai.scorer import Score
 from inspect_ai.dataset import MemoryDataset
 
-from dataset import responses_to_sample, build_dataset, truncate_pair, USER_PROMPT
+from dataset import responses_to_sample, build_dataset, strip_answer, truncate_pair, USER_PROMPT
 
 
 class TestResponsesToSample:
@@ -141,6 +141,9 @@ class TestTruncatePair:
     def test_truncate_pair_full_fraction_length_matches(self):
         a, b = truncate_pair("a" * 80, "b" * 40, 1.0, keep="last")
         assert len(a) == len(b) == 40 and a == "a" * 40
+
+    def test_strip_answer_recognises_final_answer_variant(self):
+        assert strip_answer("reasoning\nFinal Answer: C") == "reasoning"
 
 
 class TestBuildDataset:
