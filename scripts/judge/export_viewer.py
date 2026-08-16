@@ -29,6 +29,11 @@ DATA_ROOT = Path("interactive_viewer/data")
 MODEL_SET = "configs/comparisons/model_set.json"
 COMPARISONS = "configs/comparisons/comparisons.csv"
 BIGGAP_CFG = "configs/judge_biggap_gpqa.yaml"
+GPQA_ROOT_CONFIGS = {
+    "logs/data-expansion-bridge/gpqa": "configs/judge_bridge_gpqa.yaml",
+    "logs/data-expansion-models/gpqa": "configs/judge_expand_gpqa_models.yaml",
+    "logs/data-expansion-more-pairs/gpqa": "configs/judge_more_gpqa_pairs.yaml",
+}
 
 # collected members are whatever sits in the bench's collection dir
 
@@ -36,7 +41,9 @@ BIGGAP_CFG = "configs/judge_biggap_gpqa.yaml"
 #            include_reasoning in exported transcripts)
 BENCHES = {
     "gpqa": ("Data expansion GPQA", "63793eb6",
-             ["logs/data-expansion/gpqa", "logs/data-expansion-biggap/gpqa"],
+             ["logs/data-expansion/gpqa", "logs/data-expansion-biggap/gpqa",
+              "logs/data-expansion-bridge/gpqa", "logs/data-expansion-models/gpqa",
+              "logs/data-expansion-more-pairs/gpqa"],
              "gemini-3.1-flash-lite-rescored", False),  # stock scorer misses gemini's $C$ answers
     "aime2025": ("Data expansion AIME 2025", "44136fa3",
                  ["logs/data-expansion/aime2025"], "gemini-3.1-flash-lite", False),
@@ -65,6 +72,22 @@ EPOCH_ECI = {"gpt-5.5-low": 159.21, "gemini-3.5-flash": 154.56, "qwen3.6-plus": 
 JUDGE_COLORS = {"qwen3-8b": "#2a78d6", "qwen3-32b": "#eb6834",
                 "qwen3-vl-30b-a3b-instruct": "#1baf7a", "ling-2.6-flash": "#eda100",
                 "glm-4.6": "#e87ba4", "deepseek-v4-flash-0731": "#008300"}
+
+
+def configured_pair_names(config_path):
+    """Return the pair directories authorized by the current run config."""
+    config = yaml.safe_load(open(config_path))
+    return {"-vs-".join(pair) for pair in config.get("pairs", [])}
+
+
+def add_missing_transcripts(logs, config_paths):
+    """Add expanded candidates without replacing canonical response logs."""
+    logs = dict(logs)
+    for config_path in config_paths:
+        config = yaml.safe_load(open(config_path))
+        for model, path in config.get("transcripts", {}).items():
+            logs.setdefault(model, path)
+    return logs
 
 
 def wilson(c, n, z=1.96):
@@ -103,7 +126,10 @@ def export_bench(bench, label, hashdir, judge_roots, gemini_dir, incl_reasoning,
             grid_logs[m] = found[0]
     logs = dict(grid_logs)
     if bench == "gpqa":
-        logs |= yaml.safe_load(open(BIGGAP_CFG))["transcripts"]
+        logs = add_missing_transcripts(
+            logs,
+            [BIGGAP_CFG, *GPQA_ROOT_CONFIGS.values()],
+        )
 
     models, questions = {}, {}
     for m, path in logs.items():
@@ -129,9 +155,17 @@ def export_bench(bench, label, hashdir, judge_roots, gemini_dir, incl_reasoning,
     pairs = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {"orders": [None, None]})))
     bypair = defaultdict(list)
     for root in judge_roots:
+        allowed_pairs = (
+            configured_pair_names(GPQA_ROOT_CONFIGS[root])
+            if root in GPQA_ROOT_CONFIGS
+            else None
+        )
         for p in glob.glob(f"{root}/*/*/phase-*/*.eval"):
+            judge, pairname = Path(p).relative_to(root).parts[:2]
+            if allowed_pairs is not None and pairname not in allowed_pairs:
+                continue
             if read_eval_log(p, header_only=True).status == "success":
-                bypair[(p.split("/")[3], p.split("/")[4], root)].append(p)
+                bypair[(judge, pairname, root)].append(p)
 
     for (judge, pairname, root), paths in bypair.items():
         major, minor = pairname.split("-vs-")

@@ -1,0 +1,65 @@
+# Cross-component GPQA comparisons. These are deliberately full-bank runs: a
+# bridge that exists only in one item slice would leave the other Elo fits split.
+log_root: logs/data-expansion-bridge/gpqa
+phase1_items: 20
+include_reasoning: false
+max_tokens: 512
+max_connections: 8
+# There are 2,892 calls. The per-sample ceiling protects against an anomalous
+# runaway response; actual spend is tracked from the returned provider usage.
+cost_limit_per_sample: 0.01
+
+# Endpoint-specific dollars per million tokens, captured in the dated snapshot
+# beside the logs. Inspect needs these values to enforce cost_limit_per_sample.
+model_costs:
+  openrouter/inclusionai/ling-2.6-flash: {input: 0.01, output: 0.03, input_cache_write: 0.01, input_cache_read: 0.002}
+  openrouter/openai/gpt-oss-20b: {input: 0.03, output: 0.14, input_cache_write: 0.03, input_cache_read: 0.03}
+  openrouter/openai/gpt-oss-120b: {input: 0.037, output: 0.17, input_cache_write: 0.037, input_cache_read: 0.037}
+  openrouter/google/gemma-4-31b-it: {input: 0.13, output: 0.40, input_cache_write: 0.13, input_cache_read: 0.13}
+  openrouter/google/gemma-4-26b-a4b-it: {input: 0.12, output: 0.40, input_cache_write: 0.12, input_cache_read: 0.12}
+
+transcripts:
+  claude-sonnet-4.5: data/gpqa/63793eb6/claude-sonnet-4.5/0/2026-08-09T13-55-11-00-00_gpqa-diamond_XL8rie2TvZHs5imur6GNfv.eval
+  qwen3.6-plus: external_data/epoch-gpqa/qwen3.6-plus.eval
+  o4-mini: data/gpqa/63793eb6/o4-mini/0/2026-08-09T13-55-11-00-00_gpqa-diamond_h8MHpJ4R3fgUae45mMfda9.eval
+  gpt-5.5-low: external_data/epoch-gpqa/gpt-5.5_low.eval
+  qwen3-8b: data/gpqa/63793eb6/qwen3-8b/0/2026-08-08T01-25-38-00-00_gpqa-diamond_Q9XRPGahJtyTnMhVoe9rTz.eval
+  qwen3-32b: data/gpqa/2026-07-31T16-08-53-00-00_gpqa-diamond_QqbbE3NmKU5HphKAkeYnT8.eval
+  gemma-4-31b-it: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_Ftg8xiDvQq9dL5XLdGh3qR.eval
+  gemma-4-26b-a4b-it: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_RKu47hcJZnjPNBPKSwMMsw.eval
+  qwen-2.5-72b-instruct: external_data/epoch-gpqa/qwen2.5-72b-instruct.eval
+  gpt-4o: external_data/epoch-gpqa/gpt-4o-2024-08-06.eval
+  claude-3-5-sonnet-0620: external_data/epoch-gpqa/claude-3-5-sonnet-20240620.eval
+
+comparisons:
+  # Three locations on the capability range avoid anchoring two Elo scales on
+  # one idiosyncratic model matchup.
+  - [openrouter/inclusionai/ling-2.6-flash, claude-sonnet-4.5, qwen3.6-plus]
+  - [openrouter/inclusionai/ling-2.6-flash, o4-mini, gpt-5.5-low]
+  - [openrouter/inclusionai/ling-2.6-flash, qwen3-8b, claude-3-5-sonnet-0620]
+  - [openrouter/openai/gpt-oss-20b, claude-sonnet-4.5, qwen3.6-plus]
+  - [openrouter/openai/gpt-oss-20b, o4-mini, gpt-5.5-low]
+  - [openrouter/openai/gpt-oss-20b, qwen3-8b, claude-3-5-sonnet-0620]
+  - [openrouter/openai/gpt-oss-120b, claude-sonnet-4.5, qwen3.6-plus]
+  - [openrouter/openai/gpt-oss-120b, o4-mini, gpt-5.5-low]
+  - [openrouter/openai/gpt-oss-120b, qwen3-8b, claude-3-5-sonnet-0620]
+
+  # Join the three new-model groups to the existing qwen3-8b component.
+  - [openrouter/inclusionai/ling-2.6-flash, qwen3-32b, qwen3-8b]
+  - [openrouter/inclusionai/ling-2.6-flash, gemma-4-26b-a4b-it, qwen3-8b]
+  - [openrouter/inclusionai/ling-2.6-flash, gemma-4-31b-it, qwen3-8b]
+  - [openrouter/google/gemma-4-31b-it, qwen3-32b, qwen3-8b]
+  - [openrouter/google/gemma-4-31b-it, gemma-4-26b-a4b-it, qwen3-8b]
+  - [openrouter/google/gemma-4-26b-a4b-it, gemma-4-31b-it, qwen3-8b]
+
+judge_model_args:
+  openrouter/inclusionai/ling-2.6-flash:
+    provider: {only: [novita], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/openai/gpt-oss-20b:
+    provider: {only: [deepinfra/bf16], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/openai/gpt-oss-120b:
+    provider: {only: [deepinfra/bf16], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/google/gemma-4-31b-it:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/google/gemma-4-26b-a4b-it:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
