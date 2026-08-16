@@ -99,6 +99,8 @@ def _coverage_fields(group: pd.DataFrame) -> dict:
         "n_response_models", "n_graph_models", "n_component_models",
         "component_models", "n_rounds", "n_calls", "n_unique_items", "n_judges",
         "n_matched_models",
+        "predictor_accuracy_threshold", "n_graph_candidates_before_threshold",
+        "n_threshold_candidates", "threshold_target_models", "threshold_target_met",
     ]
     return {column: group[column].iloc[0] for column in candidates if column in group}
 

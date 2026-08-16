@@ -9,11 +9,36 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy.stats import kendalltau
 
 from mc_cost.ranking import _coverage_fields, _metric_keys, lomo_predictions
 
 BOOTSTRAP_RESAMPLES = 5000
+
+
+def kendall_tau_a(predictor, outcome, weights=None) -> float:
+    """Kendall tau-a, with every tied model pair contributing zero.
+
+    Unlike tau-b, the denominator remains the total number of model pairs.
+    A predictor tie therefore lowers the score instead of being corrected away.
+    """
+    predictor = np.asarray(predictor, dtype=float)
+    outcome = np.asarray(outcome, dtype=float)
+    if len(predictor) < 2:
+        return np.nan
+    left, right = np.triu_indices(len(predictor), k=1)
+    pair_scores = np.sign(predictor[left] - predictor[right]) * np.sign(
+        outcome[left] - outcome[right]
+    )
+    if weights is None:
+        return float(pair_scores.mean())
+    weights = np.asarray(weights, dtype=float)
+    pair_weights = weights[left] * weights[right]
+    denominator = pair_weights.sum()
+    return (
+        float(np.dot(pair_scores, pair_weights) / denominator)
+        if denominator
+        else np.nan
+    )
 
 
 def model_bootstrap_intervals(
@@ -52,13 +77,29 @@ def model_bootstrap_intervals(
         prediction = matched["prediction"].to_numpy(float)
         observed = matched["observed"].to_numpy(float)
 
-        tau_samples = np.array([
-            kendalltau(predictor[index], observed[index]).statistic
-            for index in indices
-        ])
+        # Bootstrap multiplicities weight pairs of distinct evaluated models.
+        # Two copies of the same model are not a new tied pair.
+        weights = np.zeros((n_resamples, n_models), dtype=np.int16)
+        np.add.at(
+            weights,
+            (np.repeat(np.arange(n_resamples), n_models), indices.ravel()),
+            1,
+        )
+        left, right = np.triu_indices(n_models, k=1)
+        pair_scores = np.sign(predictor[left] - predictor[right]) * np.sign(
+            observed[left] - observed[right]
+        )
+        pair_weights = weights[:, left] * weights[:, right]
+        denominators = pair_weights.sum(axis=1)
+        tau_samples = np.divide(
+            pair_weights @ pair_scores,
+            denominators,
+            out=np.full(n_resamples, np.nan),
+            where=denominators > 0,
+        )
         error = np.abs(prediction - observed)
         samples = {
-            "tau_b": tau_samples[np.isfinite(tau_samples)],
+            "tau_a": tau_samples[np.isfinite(tau_samples)],
             "mae": error[indices].mean(axis=1),
         }
         for metric, estimates in samples.items():
@@ -79,8 +120,90 @@ def model_bootstrap_intervals(
     return pd.DataFrame(rows)
 
 
+def paired_method_randomization(
+    predictions: pd.DataFrame,
+    *,
+    n_resamples: int = BOOTSTRAP_RESAMPLES,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Compare Elo and accuracy on the same evaluated models.
+
+    Under the null, either method label is equally plausible for each model.
+    Swapping those labels preserves the paired design and gives a two-sided
+    randomization test for both rank correlation and held-out error.
+    """
+    random = np.random.default_rng(seed)
+    keys = _metric_keys(predictions)
+    rows = []
+    selected = predictions[
+        predictions["method"].isin(("elo", "easy_accuracy"))
+    ]
+    for values, group in selected.groupby(keys, dropna=False, sort=True):
+        values = values if isinstance(values, tuple) else (values,)
+        identity = dict(zip(keys, values))
+        wide = group.pivot(
+            index="model",
+            columns="method",
+            values=["predictor", "prediction", "observed"],
+        ).dropna().sort_index()
+        n_models = len(wide)
+        if n_models < 3:
+            continue
+
+        observed = wide[("observed", "elo")].to_numpy(float)
+        elo_predictor = wide[("predictor", "elo")].to_numpy(float)
+        accuracy_predictor = wide[("predictor", "easy_accuracy")].to_numpy(float)
+        swaps = random.integers(0, 2, size=(n_resamples, n_models), dtype=bool)
+        tau_difference = (
+            kendall_tau_a(elo_predictor, observed)
+            - kendall_tau_a(accuracy_predictor, observed)
+        )
+        randomized_elo = np.where(swaps, accuracy_predictor, elo_predictor)
+        randomized_accuracy = np.where(swaps, elo_predictor, accuracy_predictor)
+        left, right = np.triu_indices(n_models, k=1)
+        outcome_pairs = np.sign(observed[left] - observed[right])
+        randomized_elo_tau = (
+            np.sign(randomized_elo[:, left] - randomized_elo[:, right])
+            * outcome_pairs
+        ).mean(axis=1)
+        randomized_accuracy_tau = (
+            np.sign(randomized_accuracy[:, left] - randomized_accuracy[:, right])
+            * outcome_pairs
+        ).mean(axis=1)
+        tau_null = randomized_elo_tau - randomized_accuracy_tau
+
+        elo_error = np.abs(
+            wide[("prediction", "elo")].to_numpy(float) - observed,
+        )
+        accuracy_error = np.abs(
+            wide[("prediction", "easy_accuracy")].to_numpy(float) - observed,
+        )
+        mae_difference = elo_error.mean() - accuracy_error.mean()
+        mae_null = (
+            np.where(swaps, accuracy_error, elo_error).mean(axis=1)
+            - np.where(swaps, elo_error, accuracy_error).mean(axis=1)
+        )
+
+        for metric, difference, null in (
+            ("tau_a", tau_difference, tau_null),
+            ("mae", mae_difference, mae_null),
+        ):
+            rows.append({
+                **identity,
+                "metric": metric,
+                "elo_minus_accuracy": difference,
+                "comparison_p_value": (
+                    (np.abs(null) >= abs(difference)).sum() + 1
+                ) / (n_resamples + 1),
+                "n_comparison_models": n_models,
+                "n_comparison_randomizations": n_resamples,
+                "comparison_test": "paired model-label randomization, two-sided",
+            })
+    return pd.DataFrame(rows)
+
+
 def rank_metrics(frame: pd.DataFrame) -> pd.DataFrame:
-    """Compute tau-b for Elo and easy accuracy on one shared model set."""
+    """Compute tie-penalized tau-a on one shared model set."""
     rows = []
     keys = _metric_keys(frame)
     # Each group is one Elo scale. In particular, `component` is part of the
@@ -99,10 +222,8 @@ def rank_metrics(frame: pd.DataFrame) -> pd.DataFrame:
             ("elo", "elo"),
             ("easy_accuracy", "easy_accuracy"),
         ):
-            # scipy's default variant is tau-b, which corrects for the accuracy
-            # ties common in the small AIME candidate set.
             tau = (
-                kendalltau(matched[predictor], matched["hard_accuracy"]).statistic
+                kendall_tau_a(matched[predictor], matched["hard_accuracy"])
                 if n_models >= 3
                 else np.nan
             )
@@ -110,7 +231,7 @@ def rank_metrics(frame: pd.DataFrame) -> pd.DataFrame:
                 **identity,
                 **coverage,
                 "method": method,
-                "tau_b": tau,
+                "tau_a": tau,
                 "n_models": n_models,
                 "reason": reason,
             })
@@ -151,8 +272,8 @@ def value_metrics(predictions: pd.DataFrame) -> pd.DataFrame:
 
 def _endpoint_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     """Combine the two requested endpoints in one plotting-friendly table."""
-    ranks = rank_metrics(frame).rename(columns={"tau_b": "value"})
-    ranks["metric"] = "tau_b"
+    ranks = rank_metrics(frame).rename(columns={"tau_a": "value"})
+    ranks["metric"] = "tau_a"
 
     errors = value_metrics(lomo_predictions(frame))
     errors = errors[errors["method"].isin(["elo", "easy_accuracy"])].rename(
@@ -174,13 +295,13 @@ def quartile_analysis(
     quartile_accuracies: pd.DataFrame,
     coverage: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Use the Q1 predictor bank against Q2, Q3, and Q4 accuracy separately."""
+    """Use Q1 to predict each later quartile and their pooled accuracy."""
     metrics, _ = partition_analysis(
         q1_elos,
         quartile_accuracies,
         coverage,
         predictor_bin="Q1",
-        target_bins=("Q2", "Q3", "Q4"),
+        target_bins=("Q2", "Q3", "Q4", "Q2–Q4"),
     )
     return metrics.rename(columns={"target_bin": "target_quartile"})
 
@@ -226,16 +347,23 @@ def partition_analysis(
     metrics = pd.concat(outputs, ignore_index=True)
     predictions = pd.concat(prediction_outputs, ignore_index=True)
 
-    # The plotted endpoint is the pooled consensus estimate. Bootstrap models
-    # inside each matched comparison component and save the intervals beside
-    # that estimate, so the figure is reproducible from the result table.
-    consensus = predictions[predictions["judge"] == "consensus"]
-    intervals = model_bootstrap_intervals(consensus)
+    # Models are the replication unit for every judge-specific correlation.
+    # Keeping these intervals in the table also makes the figures reproducible.
+    intervals = model_bootstrap_intervals(predictions)
     if not intervals.empty:
         interval_keys = _metric_keys(predictions) + ["method", "metric"]
         metrics = metrics.merge(
             intervals,
             on=interval_keys,
+            how="left",
+            validate="many_to_one",
+        )
+    comparisons = paired_method_randomization(predictions)
+    if not comparisons.empty:
+        comparison_keys = _metric_keys(predictions) + ["metric"]
+        metrics = metrics.merge(
+            comparisons,
+            on=comparison_keys,
             how="left",
             validate="many_to_one",
         )
