@@ -23,6 +23,12 @@ One of the two models is more capable than the other, and your task is to identi
 ANSWER: <1 or 2, indicating which response was produced by the more capable model.>
 """
 
+TRUNCATION_NOTE = """
+Both transcripts have been cut to the same number of characters and their final answers removed, so each one stops mid-reasoning. Judge the reasoning that is shown; do not penalise a transcript for being cut off or for not stating an answer."""
+
+TRUNCATION_NOTE_END = """
+Both transcripts have been cut to the same number of characters, keeping only the final portion, and their final answers removed — each one starts mid-reasoning. Judge the reasoning that is shown; do not penalise a transcript for starting abruptly or for not stating an answer."""
+
 USER_PROMPT = """Input question:
 ---
 {question}
