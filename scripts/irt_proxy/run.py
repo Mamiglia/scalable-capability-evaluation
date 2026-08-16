@@ -21,11 +21,19 @@ from metrics import (
     cross_benchmark_analysis,
     lomo_predictions,
     newer_stronger_analysis,
-    quartile_analysis,
+    partition_analysis,
     rank_metrics,
     value_metrics,
 )
-from scores import analysis_frame, fit_easy_elos, item_votes, model_accuracy
+from nulls import analytic_null_metrics
+from scores import (
+    PREDICTOR_ACCURACY_THRESHOLD,
+    analysis_frame,
+    filter_judges_above_chance,
+    fit_saturated_elos,
+    item_votes,
+    model_accuracy,
+)
 from simulation import monte_carlo_budgets
 
 HERE = Path(__file__).resolve().parent
@@ -36,21 +44,69 @@ EXPECTED_CSV = {
     "fit_difficulties.csv",
     "fit_capabilities.csv",
     "item_splits.csv",
+    "judge_diagnostics.csv",
     "coverage.csv",
     "elo_scores.csv",
     "rank_metrics.csv",
     "lomo_predictions.csv",
     "value_metrics.csv",
     "quartile_metrics.csv",
+    "partition_metrics.csv",
+    "partition_predictions.csv",
+    "null_metrics.csv",
     "cross_benchmark_metrics.csv",
     "newer_stronger_metrics.csv",
     "monte_carlo_raw.csv",
     "monte_carlo_summary.csv",
 }
 
+PARTITION_SPECS = (
+    ("tertile", "T", 3, "T2–T3"),
+    ("quartile", "Q", 4, "Q2–Q4"),
+    ("quintile", "P", 5, "P2–P5"),
+)
+
+
+def load_prefit_tables(
+    table_directory: Path,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load the saved IRT results needed for a downstream-only refresh."""
+    return tuple(
+        pd.read_csv(table_directory / filename)
+        for filename in (
+            "fit_difficulties.csv",
+            "fit_capabilities.csv",
+            "item_splits.csv",
+        )
+    )
+
+
+def partition_item_banks(splits: pd.DataFrame) -> pd.DataFrame:
+    """Return individual slices plus each pooled harder-than-first slice."""
+    individual = [
+        splits.assign(subset=splits[column])
+        for column, _, _, _ in PARTITION_SPECS
+    ]
+    pooled = [
+        splits[splits[column] != f"{prefix}1"].assign(subset=pooled_bin)
+        for column, prefix, _, pooled_bin in PARTITION_SPECS
+    ]
+    return pd.concat([*individual, *pooled], ignore_index=True)
+
+
+def output_directories(
+    output_directory: Path,
+    explicit_cutoff: float | None,
+) -> tuple[Path, Path]:
+    """Keep exploratory cutoffs beside, not on top of, the primary results."""
+    if explicit_cutoff is None:
+        return output_directory / "tables", output_directory / "figures"
+    tag = f"cut{round(explicit_cutoff * 100)}"
+    return output_directory / "tables" / tag, output_directory / "figures" / tag
+
 
 def write_outputs(tables: dict[str, pd.DataFrame], output_directory: Path) -> None:
-    """Atomically replace the thirteen declared analysis tables.
+    """Atomically replace the declared analysis tables.
 
     A full Bayesian run is expensive. Writing through a temporary sibling keeps
     an interrupted run from leaving a half-written CSV under a trusted name.
@@ -62,7 +118,12 @@ def write_outputs(tables: dict[str, pd.DataFrame], output_directory: Path) -> No
 
     output_directory.mkdir(parents=True, exist_ok=True)
     for name, table in tables.items():
-        if name not in {"fit_difficulties.csv", "fit_capabilities.csv", "item_splits.csv"}:
+        if name not in {
+            "fit_difficulties.csv",
+            "fit_capabilities.csv",
+            "item_splits.csv",
+            "judge_diagnostics.csv",
+        }:
             if "component" not in table:
                 raise ValueError(f"{name} must carry component")
         temporary = output_directory / f".{name}.tmp"
@@ -154,28 +215,39 @@ def build_tables(
     samples: int,
     resamples: int,
     seed: int,
+    predictor_cutoff: float = PREDICTOR_ACCURACY_THRESHOLD,
+    prefit: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | None = None,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, dict]]:
     """Run the analysis in dependency order and return tables plus posteriors."""
-    difficulties, capabilities, posteriors = fit_parameters(
-        responses,
-        floors=floors,
-        warmup=warmup,
-        samples=samples,
-        seed=seed,
+    if prefit is None:
+        difficulties, capabilities, posteriors = fit_parameters(
+            responses,
+            floors=floors,
+            warmup=warmup,
+            samples=samples,
+            seed=seed,
+        )
+        splits = assign_splits(difficulties)
+    else:
+        difficulties, capabilities, splits = prefit
+        posteriors = {}
+    rounds, judge_diagnostics = filter_judges_above_chance(
+        item_votes(votes), metadata,
     )
-    splits = assign_splits(difficulties)
-    rounds = item_votes(votes)
 
-    # The same response attempts feed all outcomes. Only the selected item bank
-    # and the benchmark/year macro-averaging change between these tables.
-    primary_items = splits.assign(subset=splits["half"])
-    quartile_items = splits.assign(subset=splits["quartile"])
-    full_items = splits.assign(subset="all")
-    primary_accuracy = model_accuracy(responses, primary_items)
-    quartile_accuracy = model_accuracy(responses, quartile_items)
-    full_accuracy = model_accuracy(responses, full_items)
-
+    # One canonical response feeds IRT and every measured-accuracy endpoint.
+    # Repeated eval epochs would turn the easy baseline into a much more precise
+    # benchmark than a model sees in an ordinary single run.
     response_cells = irt_cells(responses)
+    primary_items = splits.assign(subset=splits["half"])
+    full_items = splits.assign(subset="all")
+    primary_accuracy = model_accuracy(response_cells, primary_items)
+    partition_accuracy = model_accuracy(
+        response_cells,
+        partition_item_banks(splits),
+    )
+    full_accuracy = model_accuracy(response_cells, full_items)
+
     response_counts = {
         fit_name: response_cells.loc[
             response_cells["benchmark"].isin(benchmarks), "model"
@@ -183,25 +255,75 @@ def build_tables(
         for fit_name, benchmarks in FIT_BENCHMARKS.items()
     }
 
-    elos, coverage = fit_easy_elos(rounds, splits, bank="easy")
+    elos, coverage = fit_saturated_elos(
+        rounds,
+        splits,
+        primary_accuracy,
+        bank="easy",
+        threshold=predictor_cutoff,
+    )
     frame = analysis_frame(elos, primary_accuracy, coverage)
     coverage = _complete_coverage(coverage, frame, response_counts)
     # Rebuild once so every endpoint row inherits finalized coverage fields.
     frame = analysis_frame(elos, primary_accuracy, coverage)
     ranks = rank_metrics(frame)
-    predictions = lomo_predictions(frame)
-    values = value_metrics(predictions)
+    primary_predictions = lomo_predictions(frame)
+    values = value_metrics(primary_predictions)
 
-    q1_elos, q1_coverage = fit_easy_elos(rounds, splits, bank="Q1")
-    q1_frame = analysis_frame(
-        q1_elos,
-        quartile_accuracy,
-        q1_coverage,
-        predictor_subset="Q1",
-        target_subset="Q4",
+    partition_elos = []
+    partition_coverages = []
+    half_metrics, half_partition_predictions = partition_analysis(
+        elos,
+        primary_accuracy,
+        coverage,
+        predictor_bin="easy",
+        target_bins=("hard",),
     )
-    q1_coverage = _complete_coverage(q1_coverage, q1_frame, response_counts)
-    quartiles = quartile_analysis(q1_elos, quartile_accuracy, q1_coverage)
+    partition_metrics = [half_metrics]
+    partition_predictions = [half_partition_predictions]
+    for _, prefix, n_bins, pooled_bin in PARTITION_SPECS:
+        predictor_bin = f"{prefix}1"
+        target_bins = tuple(
+            f"{prefix}{number}" for number in range(2, n_bins + 1)
+        ) + (pooled_bin,)
+        bin_elos, bin_coverage = fit_saturated_elos(
+            rounds,
+            splits,
+            partition_accuracy,
+            bank=predictor_bin,
+            threshold=predictor_cutoff,
+        )
+        final_frame = analysis_frame(
+            bin_elos,
+            partition_accuracy,
+            bin_coverage,
+            predictor_subset=predictor_bin,
+            target_subset=target_bins[-1],
+        )
+        bin_coverage = _complete_coverage(bin_coverage, final_frame, response_counts)
+        metrics, bin_predictions = partition_analysis(
+            bin_elos,
+            partition_accuracy,
+            bin_coverage,
+            predictor_bin=predictor_bin,
+            target_bins=target_bins,
+        )
+        partition_elos.append(bin_elos)
+        partition_coverages.append(bin_coverage)
+        partition_metrics.append(metrics)
+        partition_predictions.append(bin_predictions)
+
+    partition_metrics = pd.concat(partition_metrics, ignore_index=True)
+    partition_predictions = pd.concat(partition_predictions, ignore_index=True)
+    all_elos = pd.concat([elos, *partition_elos], ignore_index=True)
+    null_scope = (
+        partition_predictions["irt_model"].eq("fixed_3pl")
+        & partition_predictions["fit"].eq("gpqa")
+    )
+    null_metrics = analytic_null_metrics(partition_predictions[null_scope])
+    quartiles = partition_metrics[
+        partition_metrics["partition"] == "quartile"
+    ].rename(columns={"target_bin": "target_quartile"})
     cross_benchmark = cross_benchmark_analysis(elos, primary_accuracy)
 
     # Consensus has no release date or benchmark accuracy of its own, so the
@@ -224,12 +346,16 @@ def build_tables(
         "fit_difficulties.csv": difficulties,
         "fit_capabilities.csv": capabilities,
         "item_splits.csv": splits,
-        "coverage.csv": pd.concat([coverage, q1_coverage], ignore_index=True),
-        "elo_scores.csv": pd.concat([elos, q1_elos], ignore_index=True),
+        "judge_diagnostics.csv": judge_diagnostics,
+        "coverage.csv": pd.concat([coverage, *partition_coverages], ignore_index=True),
+        "elo_scores.csv": all_elos,
         "rank_metrics.csv": ranks,
-        "lomo_predictions.csv": predictions,
+        "lomo_predictions.csv": primary_predictions,
         "value_metrics.csv": values,
         "quartile_metrics.csv": quartiles,
+        "partition_metrics.csv": partition_metrics,
+        "partition_predictions.csv": partition_predictions,
+        "null_metrics.csv": null_metrics,
         "cross_benchmark_metrics.csv": cross_benchmark,
         "newer_stronger_metrics.csv": newer_stronger,
         "monte_carlo_raw.csv": monte_carlo_raw,
@@ -245,7 +371,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--samples", type=int)
     parser.add_argument("--resamples", type=int)
     parser.add_argument("--seed", type=int)
+    parser.add_argument(
+        "--predictor-cutoff",
+        type=float,
+        help="strict easiest-slice accuracy cutoff; outputs go under cutXX",
+    )
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument(
+        "--allow-incomplete-graph",
+        action="store_true",
+        help="render provisional results before four-opponent collection finishes",
+    )
+    parser.add_argument(
+        "--reuse-irt",
+        action="store_true",
+        help="reuse saved IRT tables and refresh only downstream analyses",
+    )
     return parser.parse_args(argv)
 
 
@@ -259,11 +400,22 @@ def main(argv: list[str] | None = None) -> int:
     responses = load_responses(ROOT, config)
     votes = load_votes(viewer_root, datasets)
     metadata = load_metadata(viewer_root, datasets)
-    counts = validate_inputs(responses, votes, metadata)
+    counts = validate_inputs(
+        responses,
+        votes,
+        metadata,
+        require_four_opponents=not args.allow_incomplete_graph,
+    )
     print(counts.to_string(index=False))
     if args.validate_only:
         return 0
 
+    output_directory = ROOT / config["paths"]["output"]
+    prefit = (
+        load_prefit_tables(output_directory / "tables")
+        if args.reuse_irt
+        else None
+    )
     irt_config = config["irt"]
     tables, posteriors = build_tables(
         responses,
@@ -278,11 +430,27 @@ def main(argv: list[str] | None = None) -> int:
             else config["monte_carlo"]["resamples"]
         ),
         seed=args.seed if args.seed is not None else irt_config["seed"],
+        predictor_cutoff=(
+            args.predictor_cutoff
+            if args.predictor_cutoff is not None
+            else PREDICTOR_ACCURACY_THRESHOLD
+        ),
+        prefit=prefit,
     )
-    output_directory = ROOT / config["paths"]["output"]
-    write_outputs(tables, output_directory)
-    render_figures(tables, output_directory)
-    write_irt_posterior(output_directory / "irt_posterior.npz", posteriors)
+    table_directory, figure_directory = output_directories(
+        output_directory,
+        args.predictor_cutoff,
+    )
+    write_outputs(tables, table_directory)
+    render_figures(tables, figure_directory)
+    if posteriors:
+        write_irt_posterior(
+            output_directory / "posterior" / "irt_posterior.npz",
+            posteriors,
+        )
+
+    print("\nJudge inclusion (>50% pair-macro agreement):")
+    print(tables["judge_diagnostics.csv"].to_string(index=False))
 
     consensus = tables["coverage.csv"].query("judge == 'consensus'")
     print("\nPost-filter consensus components:")
@@ -296,7 +464,12 @@ def main(argv: list[str] | None = None) -> int:
         "n_component_models",
         "n_matched_models",
     ]].to_string(index=False))
-    print(f"\nWrote {len(EXPECTED_CSV)} tables and 6 figures to {output_directory}")
+    mode = (
+        "downstream tables and split figures"
+        if prefit
+        else "tables, posterior, and split figures"
+    )
+    print(f"\nWrote {mode} to {table_directory} and {figure_directory}")
     return 0
 
 
