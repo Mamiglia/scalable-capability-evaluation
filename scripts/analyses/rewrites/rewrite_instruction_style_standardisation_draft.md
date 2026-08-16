@@ -57,6 +57,32 @@ Constructions such as “Under the assumption that…” and “If X holds…”
 - “This may indicate X” can become “This observation is consistent with X but does not establish
   it”.
 - “Possibly X or Y” can become “The available information does not distinguish X from Y”.
+- “Products could result from route A or route B” can become “Products from route A or route B
+  are among the possible outcomes”.
+- “PFA may also capture transient interactions” can become “PFA has the capacity to capture
+  transient interactions; whether it does so here is unresolved”.
+- “The discrepancy may arise from X” can become “X is one possible source of the discrepancy”.
+- “G2 may be a transcription factor” can become “A transcription factor is one candidate
+  identity for G2; the identity is not established”.
+- “The component is likely methylcyclopentane” can become “Methylcyclopentane has the strongest
+  support among the candidate identities for the component”.
+- “The peaks would likely not persist” can become “Among the possible outcomes, non-persistence
+  of the peaks has the stronger support”. The word “would” alone does not preserve the original
+  probability judgment.
+- “A rough estimate might suggest X” can become “The rough estimate provides limited support for
+  X”. It must not become “The rough estimate indicates X”.
+- “The observation suggests that the reaction might not be straightforward” can become “The
+  observation provides evidence against a straightforward reaction without establishing that
+  conclusion”. It must not become “The observation suggests that the reaction is not
+  straightforward”: embedding a categorical claim under “suggests” does not preserve the
+  original modal force.
+
+For every targeted hedge, first determine whether it changes the proposition's epistemic force.
+If deleting it would turn a possibility, candidate, conditional result, or best-supported option
+into a fact, the uncertainty is substantive and must be restated explicitly in direct, impersonal
+language. Only remove a hedge without replacement when it is purely speaker-centred and its
+removal leaves the proposition unchanged. When the distinction is unclear, preserve the
+uncertainty.
 
 Retain equations, technical notation, numbered derivations, and step ordering where present. Do
 not convert a detailed derivation into summary prose.
@@ -85,6 +111,15 @@ underlying change in reasoning declaratively.
 Do not add confidence, rhetorical emphasis, rhetorical questions, or commentary about the
 rewriting task. Otherwise preserve the original structure and technical formatting as closely as
 possible.
+
+Before outputting, compare the original and rewrite proposition by proposition. For every modal
+or probability expression, verify that the rewritten proposition has the same epistemic strength.
+Never replace “may”, “might”, “could”, “could be”, or “likely” with an unqualified categorical
+verb such as “is”, “does”, “results”, “arises”, or “captures”. If the draft does so, revise it to
+state the original possibility, conditionality, or relative support directly and impersonally.
+Likewise, do not treat “would”, “suggests”, “indicates”, “can”, or “is expected to” as automatic
+substitutes for a probability judgment: the rewrite must still state whether the original claim
+was merely possible, weakly supported, or the best-supported alternative.
 
 ## Output
 

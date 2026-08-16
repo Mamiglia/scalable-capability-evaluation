@@ -3,7 +3,10 @@
 import json
 import re
 import sys
+import tempfile
 from pathlib import Path
+
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -33,9 +36,19 @@ EXCLUDED_OUT = REWRITE_DIR / f"excluded_{CONDITION}.json"
 FEATURES_OUT = REWRITE_DIR / f"style_features_{CONDITION}.jsonl"
 LEXICON = ROOT / "scripts/hibayes/style_lexicon.yaml"
 EVAL_DIR = ROOT / f"data/rewrites/{CONDITION}"
+CAMPAIGN_CONFIG = ROOT / f"scripts/pairwise-newjudges/configs/manipulations/{CONDITION}.yaml"
+EXPECTED_STORES = 42
+EXPECTED_PAIR_CELLS = 1500
 
 TARGETED_CATEGORIES = ("personal_pronouns", "hedging", "backtracking")
-ANSWER_LINE_RE = re.compile(r"\b(?:final\s+)?answer\s*:", re.IGNORECASE)
+# Preserve actual answer labels, not prose such as "why B is the correct answer:".
+# Uppercase ANSWER is also accepted inside the corpus's LaTeX wrappers.
+ANSWER_LINE_RE = re.compile(
+    r"\bANSWER\s*:"
+    r"|(?i:^\s*(?:\[assistant\]:\s*)?(?:#{1,6}\s*)?(?:✅\s*)?"
+    r"(?:\*\*)?(?:\d+\.\s*)?(?:\*\*)?"
+    r"(?:(?:final|correct)\s+)?answer\s*:\s*(?:\*\*)?)",
+)
 DELIMITER_RE = re.compile(r"<<<\s*(?:REWRITE|END|TRANSCRIPT)?\s*\d*\s*>>>|<<<|>>>")
 
 
@@ -188,21 +201,67 @@ def qc_rows(rows: list[dict], originals: dict[tuple[str, str], dict], lexicon: d
     return {"failures": failures, "features": features, "residual_targeted": residuals}
 
 
-def _build_evals(rows: list[dict], excluded: set[tuple[str, str]]) -> list[dict]:
+def _build_evals(rows: list[dict], out_dir: Path) -> list[dict]:
     from build_rewrite_evals import build_model_store
 
     rewrites = {_key(row): strip_role_prefix(row["rewritten"]) for row in rows}
     by_model = {}
-    for model, item_id in rewrites.keys() - excluded:
+    for model, item_id in rewrites:
         by_model.setdefault(model, []).append(item_id)
 
     bad = []
     for model, items in sorted(by_model.items()):
-        built, model_bad = build_model_store(model, items, rewrites, EVAL_DIR)
+        built, model_bad = build_model_store(model, items, rewrites, out_dir)
         bad.extend({"model": cell["model"], "item_id": cell["item"],
                     "reason": cell["reason"]} for cell in model_bad)
-        print(f"  {model}: {len(built)} items -> {EVAL_DIR / f'{model}.eval'}")
+        print(f"  {model}: {len(built)} items -> {out_dir / f'{model}.eval'}")
     return bad
+
+
+def _eval_store_keys(directory: Path) -> set[tuple[str, str]]:
+    from inspect_ai.log import read_eval_log
+
+    keys = set()
+    for path in sorted(directory.glob("*.eval")):
+        for sample in read_eval_log(str(path)).samples:
+            key = path.stem, str(sample.id)
+            if key in keys:
+                raise ValueError(f"duplicate built eval key: {key}")
+            keys.add(key)
+    return keys
+
+
+def _validate_campaign(directory: Path, manifest_keys: set[tuple[str, str]]) -> None:
+    cfg = yaml.safe_load(CAMPAIGN_CONFIG.read_text())
+    comparisons = cfg["comparisons"]
+    if len(comparisons) != 50:
+        raise ValueError(f"campaign has {len(comparisons)} comparisons, expected 50")
+
+    required = set()
+    pair_cells = 0
+    for major, minor in comparisons:
+        items = cfg["sample_ids"][f"{major}-vs-{minor}"]
+        if len(items) != 30 or len(set(items)) != 30:
+            raise ValueError(f"{major}-vs-{minor} does not have 30 unique items")
+        pair_cells += len(items)
+        required.update((major, item) for item in items)
+        required.update((minor, item) for item in items)
+    if pair_cells != EXPECTED_PAIR_CELLS:
+        raise ValueError(f"campaign has {pair_cells} pair-cells, expected {EXPECTED_PAIR_CELLS}")
+    if required != manifest_keys:
+        raise ValueError("campaign sides do not exactly match the manifest keys")
+
+    expected_models = set(cfg["transcripts"])
+    stores = {path.stem for path in directory.glob("*.eval")}
+    if len(expected_models) != EXPECTED_STORES or stores != expected_models:
+        raise ValueError(
+            f"built eval stores do not match the {EXPECTED_STORES} campaign models"
+        )
+    built_keys = _eval_store_keys(directory)
+    if built_keys != manifest_keys:
+        raise ValueError(
+            f"built eval keys do not match manifest: {len(built_keys)} vs {len(manifest_keys)}"
+        )
 
 
 def main() -> int:
@@ -210,7 +269,27 @@ def main() -> int:
     originals = _unique_map(_read_jsonl(ORIGINALS), "originals")
     report = qc_rows(rows, originals, load_lexicon(LEXICON))
     structural = report["failures"]
-    scorer = _build_evals(rows, {(_key(cell)) for cell in structural})
+    scorer = []
+    coverage_failure = None
+    if not structural:
+        EVAL_DIR.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=f".{CONDITION}-", dir=EVAL_DIR.parent) as stage:
+            stage_dir = Path(stage)
+            scorer = _build_evals(rows, stage_dir)
+            if not scorer:
+                try:
+                    _validate_campaign(stage_dir, {_key(row) for row in rows})
+                except ValueError as exc:
+                    coverage_failure = str(exc)
+                if not coverage_failure:
+                    staged = {path.name for path in stage_dir.glob("*.eval")}
+                    existing = {path.name for path in EVAL_DIR.glob("*.eval")}
+                    if existing - staged:
+                        coverage_failure = "production eval directory has unexpected stores"
+                    else:
+                        EVAL_DIR.mkdir(parents=True, exist_ok=True)
+                        for path in stage_dir.glob("*.eval"):
+                            path.replace(EVAL_DIR / path.name)
     excluded = structural + scorer
 
     _write_jsonl_atomic(FEATURES_OUT, report.pop("features"))
@@ -220,6 +299,7 @@ def main() -> int:
         "n_rows": len(rows),
         "n_structural_failures": len(structural),
         "n_scorer_failures": len(scorer),
+        "coverage_failure": coverage_failure,
         "structural_failures": structural,
         "scorer_failures": scorer,
         "residual_targeted": report["residual_targeted"],
@@ -230,12 +310,13 @@ def main() -> int:
         "why": "Only structural transcript failures and failures from the real Inspect scorer are excluded.",
         "n_excluded": len(excluded),
         "cells": excluded,
+        "coverage_failure": coverage_failure,
     })
     print(f"merged {len(rows)} rows -> {MERGED}")
     print(f"excluded {len(excluded)} rows -> {EXCLUDED_OUT}")
     print(f"canonical style features -> {FEATURES_OUT}")
     print(f"QC, including non-excluding residual target contexts -> {QC_OUT}")
-    return 0
+    return 1 if excluded or coverage_failure else 0
 
 
 if __name__ == "__main__":
