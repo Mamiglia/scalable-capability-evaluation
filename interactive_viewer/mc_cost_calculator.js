@@ -70,12 +70,16 @@
   }
 
   function takeSample(values, count, random) {
-    const copy = [...values];
-    for (let i = 0; i < count; i += 1) {
-      const selected = i + Math.floor(random() * (copy.length - i));
-      [copy[i], copy[selected]] = [copy[selected], copy[i]];
+    const result = [];
+    while (result.length < count && values.length) {
+      const copy = [...values];
+      for (let i = 0; i < copy.length; i += 1) {
+        const selected = i + Math.floor(random() * (copy.length - i));
+        [copy[i], copy[selected]] = [copy[selected], copy[i]];
+      }
+      result.push(...copy.slice(0, count - result.length));
     }
-    return copy.slice(0, count);
+    return result;
   }
 
   function sampleDesign(catalogue, config) {
@@ -98,17 +102,17 @@
       anchor.model_id !== judge.model_id &&
       (config.condition === "all" || (anchor.eci > judge.eci &&
         releaseOrdinal(anchor.release) > releaseOrdinal(judge.release))) &&
-      comparators(judge, anchor).length >= config.comparators
+      comparators(judge, anchor).length > 0
     );
-    const eligibleJudges = models.filter((judge) => anchors(judge).length >= config.anchors);
-    if (eligibleJudges.length < config.judges) {
-      throw new Error(`Only ${eligibleJudges.length} judges support J=${config.judges}, N=${config.anchors}, M=${config.comparators}`);
-    }
+    const eligibleJudges = models.filter((judge) => anchors(judge).length > 0);
+    if (!eligibleJudges.length) throw new Error("No catalogue model supports this condition");
     const random = randomGenerator(config.seed ?? 0);
-    return takeSample(eligibleJudges, config.judges, random).flatMap((judge) =>
-      takeSample(anchors(judge), config.anchors, random).flatMap((anchor) =>
-        takeSample(comparators(judge, anchor), config.comparators, random).map((comparator) => ({
+    return takeSample(eligibleJudges, config.judges, random).flatMap((judge, judgeInstance) =>
+      takeSample(anchors(judge), config.anchors, random).flatMap((anchor, anchorInstance) =>
+        takeSample(comparators(judge, anchor), config.comparators, random).map((comparator, comparatorInstance) => ({
           judge: judge.model_id, m1: anchor.model_id, m2: comparator.model_id,
+          judge_instance: judgeInstance, anchor_instance: anchorInstance,
+          comparator_instance: comparatorInstance,
           items: config.items, repeats: config.repeats,
         }))
       )
@@ -231,8 +235,8 @@
     ) ** 2;
     const pairVariance = Number(fit.pair_residual_sd || 0) ** 2;
     const accuracyHalf = Z95 * Math.sqrt(
-      (accuracy * (1 - accuracy) * se) ** 2 + judgeVariance + pairVariance +
-      accuracy * (1 - accuracy) / calls,
+      ((accuracy * (1 - accuracy) * se) ** 2 + judgeVariance + pairVariance +
+      accuracy * (1 - accuracy)) / calls,
     );
     const mutuallyCorrect = row.items * p1.mean * p2.mean;
     const mutualHalf = Z95 * Math.sqrt(row.items * p1.mean * p2.mean * (1 - p1.mean * p2.mean));
@@ -261,8 +265,6 @@
     if (!(judgeAccuracy >= 0.5 && judgeAccuracy < 1)) {
       throw new Error("judge accuracy must be between 50% and 100%");
     }
-    const judgeCount = new Set(rows.map((row) => row.judge)).size;
-    const pairCount = new Set(rows.map((row) => [row.m1, row.m2].sort().join("\u0000"))).size;
     const totalCalls = rows.reduce((sum, row) => sum + row.items * row.repeats, 0);
     const fit = data.accuracy_glm;
     const x = Array.from({length: 31}, (_, i) => i / 100);
@@ -270,10 +272,10 @@
       const mean = sigmoid(logit(judgeAccuracy) / 0.1 * gap);
       const judgeVariance = (
         mean * (1 - mean) * gap * Number(fit.judge_gap_sd || 0)
-      ) ** 2 / judgeCount;
-      const pairVariance = Number(fit.pair_residual_sd || 0) ** 2 / pairCount;
+      ) ** 2;
+      const pairVariance = Number(fit.pair_residual_sd || 0) ** 2;
       const half = Z95 * Math.sqrt(
-        judgeVariance + pairVariance + mean * (1 - mean) / totalCalls,
+        (judgeVariance + pairVariance + mean * (1 - mean)) / totalCalls,
       );
       return [mean, Math.max(0, mean - half), Math.min(1, mean + half)];
     });

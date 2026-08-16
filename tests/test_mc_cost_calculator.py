@@ -147,12 +147,18 @@ assert.ok(curve.p5[10] < curve.y[10] && curve.y[10] < curve.p95[10]);
 assert.ok(curve.p95[10] - curve.p5[10] > .1);
 const repeatedItems = sampled.map((row) => ({...row,items:100000,repeats:100}));
 const repeatedItemsCurve = calc.gapCurve(data, catalogue, repeatedItems, .6, "oversight");
-assert.ok(repeatedItemsCurve.p95[10] - repeatedItemsCurve.p5[10] > .1);
+assert.ok(repeatedItemsCurve.p95[10] - repeatedItemsCurve.p5[10] < (curve.p95[10] - curve.p5[10]) / 100);
+const repeatedEpochs = sampled.map((row) => ({...row,repeats:10}));
+const repeatedEpochsCurve = calc.gapCurve(data, catalogue, repeatedEpochs, .6, "oversight");
+assert.ok(repeatedEpochsCurve.p95[10] - repeatedEpochsCurve.p5[10] < curve.p95[10] - curve.p5[10]);
 const repeated = sampled.flatMap((row, i) => [row, {...row, judge:`copy${i}`, _judge:catalogue.get(row.judge)}]);
 const repeatedCatalogue = new Map(catalogue);
 for (const [i, row] of sampled.entries()) repeatedCatalogue.set(`copy${i}`, catalogue.get(row.judge));
 const tighter = calc.gapCurve(data, repeatedCatalogue, repeated, .6, "oversight");
 assert.ok(tighter.p95[10] - tighter.p5[10] < curve.p95[10] - curve.p5[10]);
+const future = calc.sampleDesign([...catalogue.values()], {condition:"oversight",judges:20,anchors:2,comparators:2,items:10,repeats:1,seed:3});
+assert.equal(future.length, 80);
+assert.equal(new Set(future.map((row) => row.judge_instance)).size, 20);
 '''
     result = subprocess.run(
         ["node", "-e", node, str(script)], capture_output=True, text=True,

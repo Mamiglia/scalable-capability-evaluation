@@ -519,7 +519,7 @@ function renderCalculator() {
   const fitted = state.calculatorData.accuracy_glm.accuracy_at_10pct_eci;
   byId("judge-accuracy-default").textContent = `(fitted default: ${number(100 * fitted.mean, 1)}% [${number(100 * fitted.low, 1)}, ${number(100 * fitted.high, 1)}])`;
   const overlap = McCostCalculator.expectedOverlap(state.calculatorData, calculatorConfig().items);
-  byId("calculator-items-estimate").textContent = `(est: ${number(overlap.mean, 0)} [${number(overlap.low, 0)}, ${number(overlap.high, 0)}])`;
+  byId("calculator-items-estimate").textContent = `(expected mutually-correct overlap: ${number(overlap.mean, 0)} [${number(overlap.low, 0)}, ${number(overlap.high, 0)}])`;
   const catalogue = new Map(state.calculatorData.catalogue.map((model) => [model.model_id, model]));
   try {
     if (!state.calculatorUploaded) {
