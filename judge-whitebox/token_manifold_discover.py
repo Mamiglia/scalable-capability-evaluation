@@ -62,22 +62,23 @@ def _oof_ridge(X, gap, prompt_idx, item, weights, alphas, cv_folds, fit_idx):
     prompt_splits = list(GroupKFold(n_splits=n_splits).split(prompt_rows, gap, item))
     y = gap[prompt_idx]
 
-    def predict(alpha):
-        pred = np.empty(len(y), dtype=np.float64)
+    def predict(alpha, all_tokens):
+        pred = np.full(len(y), np.nan, dtype=np.float64)
         for train_prompts, test_prompts in prompt_splits:
             train = fit_idx[np.isin(prompt_idx[fit_idx], train_prompts)]
-            test = np.flatnonzero(np.isin(prompt_idx, test_prompts))
-            pred[test] = Ridge(alpha=alpha).fit(
+            candidates = np.arange(len(y)) if all_tokens else fit_idx
+            test = candidates[np.isin(prompt_idx[candidates], test_prompts)]
+            pred[test] = Ridge(alpha=alpha, solver="lsqr", tol=1e-3).fit(
                 X[train], y[train], sample_weight=weights[train]).predict(X[test])
         return pred
 
     best_alpha, best_score = alphas[0], -np.inf
     for alpha in alphas:
-        pred = predict(alpha)
-        score = r2_score(y, pred, sample_weight=weights)
+        pred = predict(alpha, all_tokens=False)
+        score = r2_score(y[fit_idx], pred[fit_idx], sample_weight=weights[fit_idx])
         if score > best_score:
             best_alpha, best_score = alpha, score
-    return best_alpha, predict(best_alpha)
+    return best_alpha, predict(best_alpha, all_tokens=True)
 
 
 def ridge_timeline(data, alphas, cv_folds):
