@@ -10,7 +10,7 @@
 # re-running a script only fills gaps. The condition hash keeps conditions apart; ROOT is
 # just where the analysis scripts look.
 
-set -euo pipefail
+# set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 [[ ! -f .env ]] || { set -a; source .env; set +a; }

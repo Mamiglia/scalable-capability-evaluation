@@ -13,6 +13,8 @@ from pathlib import Path, PurePosixPath
 
 
 TASK_ARGS_HASH = "a288e1a9"  # sha256 of normalized task arguments: {"cot": true}
+TAGS = {"epoch_ai", "imported"}
+LEGACY_TAG = "imported_epoch_ai"
 
 
 def normalize_model(name: str) -> str:
@@ -50,9 +52,11 @@ def normalize_eval(header: dict, benchmark: str) -> None:
     header["eval"]["config"]["epochs"] = 1
     header["eval"]["model"] = normalize_model(header["eval"]["model"])
     tags = sorted(
-        set(header.get("tags") or [])
-        | set(header["eval"].get("tags") or [])
-        | {"imported_epoch_ai"}
+        (
+            set(header.get("tags") or []) | set(header["eval"].get("tags") or [])
+        )
+        - {LEGACY_TAG}
+        | TAGS
     )
     header["eval"]["tags"] = tags
     header["tags"] = tags

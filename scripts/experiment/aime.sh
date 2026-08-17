@@ -20,7 +20,7 @@ PAIRS=(
   kimi-k3-vs-deepseek-r1-0528
   qwen3.5-4b-vs-qwen3.5-9b
 )
-FLAGS=(--include_reasoning true)
+FLAGS=(--include_reasoning true --fail-on-error 0.3 --retry-attempts 2)
 
 sweep "$@"
 
