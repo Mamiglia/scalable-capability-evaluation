@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from inspect_ai import Epochs
-from inspect_ai.model import CachePolicy
 
 from configs.base import DraccusConfig
 
@@ -17,7 +16,10 @@ class TaskConfig(DraccusConfig):
 
     task: str = ''
     task_args: Dict[str, Any] = field(default_factory=dict)
-    cache: Any = field(default_factory=lambda: CachePolicy(expiry="1M"))
+    # No generate cache by default: repeats reuse the same prompts, so a cache turns the
+    # second repeat into a replay of the first (seen on aime/mbpp; gpqa escaped only because
+    # its options are reshuffled per run).
+    cache: Any = None
     limit: Optional[int] = None
     epochs: int = 1
     epochs_reducer: Any = None
