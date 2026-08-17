@@ -1,9 +1,0 @@
-name: pilot-gpt-oss-120b-gpqa-kimi-k3-vs-o3
-judge: !include ../../../models/openai/gpt-oss-120b.yml
-major: !include ../../../models/moonshotai/kimi-k3.yml
-minor: !include ../../../models/openai/o3.yml
-benchmark: !include ../../../bench/gpqa.yml
-mode: paired
-include_reasoning: false
-system_prompt: assets/system_prompt/mcq.txt
-log_dir: logs/pilot/

@@ -1,6 +1,7 @@
 """CLI interface for running judge experiments comparing model pairs across benchmarks."""
 
 import argparse
+from dataclasses import fields
 from pathlib import Path
 
 from inspect_ai import eval_set
@@ -9,6 +10,20 @@ from collect.runner import eval_runner
 from configs import ExperimentConfig, flag_parse
 from judge.task import build_judge_tasks
 from model import Model
+
+EXPERIMENT_FIELDS = {f.name for f in fields(ExperimentConfig)}
+
+
+def _split_extra(extra: list[str]) -> tuple[dict, dict]:
+    """Split trailing flags into ExperimentConfig overrides and ``eval_set`` kwargs.
+
+    Draccus errors on flags it does not know, so anything that is not a config field has to
+    be routed to ``eval_set`` instead.
+    """
+    parsed = flag_parse(extra) if extra else {}
+    overrides = {k: v for k, v in parsed.items() if k in EXPERIMENT_FIELDS}
+    eval_kwargs = {k: v for k, v in parsed.items() if k not in EXPERIMENT_FIELDS}
+    return overrides, eval_kwargs
 
 
 def _run_experiment_worker(exp: ExperimentConfig) -> int:
@@ -93,21 +108,32 @@ def main() -> int:
     )
 
     args, extra = parser.parse_known_args()
-    eval_extra_args = flag_parse(extra) if extra else {}
+    overrides, eval_extra_args = _split_extra(extra)
 
     ad_hoc = (args.bench, args.major, args.minor, args.judge)
-    if args.config_path and any(ad_hoc):
-        parser.error(
-            "Cannot specify both --config_path and any of (-b/--bench, --major, --minor, -j/--judge)."
-        )
     if not args.config_path and not all(ad_hoc):
         parser.error(
             "Specify either --config_path, or all of -b/--bench, --major, --minor and -j/--judge."
         )
 
     if args.config_path:
+        # With --config_path the model/bench flags are per-run overrides applied to every
+        # config, so a config only has to pin what actually varies between configs.
+        for field_name, values in (
+            ("benchmark", args.bench),
+            ("judge", args.judge),
+            ("major", args.major),
+            ("minor", args.minor),
+        ):
+            if not values:
+                continue
+            if len(values) > 1:
+                parser.error(f"--{field_name} takes a single value when used with --config_path")
+            overrides[field_name] = values[0]
+
+        draccus_args = [f"--{k}={v}" for k, v in overrides.items()]
         experiments = [
-            ExperimentConfig.from_cli(cfg_path, args=extra, **eval_extra_args)
+            ExperimentConfig.from_cli(cfg_path, args=draccus_args, **eval_extra_args)
             for cfg_path in args.config_path
         ]
     else:
@@ -128,6 +154,7 @@ def main() -> int:
                     "minor": m,
                     "judge": j,
                     "epochs": args.epochs,
+                    **overrides,
                 },
                 **eval_extra_args,
             )

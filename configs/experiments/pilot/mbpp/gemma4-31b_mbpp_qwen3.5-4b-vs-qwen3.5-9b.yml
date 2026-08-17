@@ -1,8 +1,0 @@
-name: pilot-gemma4-31b-mbpp-qwen3.5-4b-vs-qwen3.5-9b
-judge: !include ../../../models/google/gemma4-31b.yml
-major: !include ../../../models/qwen/qwen3.5-4b.yml
-minor: !include ../../../models/qwen/qwen3.5-9b.yml
-benchmark: !include ../../../bench/mbpp.yml
-mode: paired
-include_reasoning: false
-log_dir: logs/pilot/

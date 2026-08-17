@@ -104,7 +104,9 @@ class ExperimentConfig(DraccusConfig):
             self.minor = ModelConfig.from_cli(self.minor)
         if isinstance(self.benchmark, (str, Path)):
             self.benchmark = TaskConfig.from_cli(self.benchmark)
-        self.log_dir /= self.name
+        # <root>/<bench>/<judge>/<pair>: the root is the only axis a sweep has to set, and
+        # inspect can't tell two conditions apart on its own (same task name, same model).
+        self.log_dir = self.log_dir / self.benchmark.name / self.judge.shortname.lower() / self.name
 
     def eval_kwargs(self) -> Dict[str, Any]:
         """Return keyword arguments for inspect_ai.eval."""

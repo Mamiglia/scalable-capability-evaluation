@@ -1,8 +1,0 @@
-name: pilot-gemma4-31b-mbpp-kimi-k3-vs-deepseek-r1
-judge: !include ../../../models/google/gemma4-31b.yml
-major: !include ../../../models/moonshotai/kimi-k3.yml
-minor: !include ../../../models/deepseek/deepseek-r1-0528.yml
-benchmark: !include ../../../bench/mbpp.yml
-mode: paired
-include_reasoning: false
-log_dir: logs/pilot/

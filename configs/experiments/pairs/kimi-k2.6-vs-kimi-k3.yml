@@ -1,0 +1,3 @@
+name: kimi-k2.6-vs-kimi-k3
+major: !include ../../models/moonshotai/kimi-k2.6.yml
+minor: !include ../../models/moonshotai/kimi-k3.yml

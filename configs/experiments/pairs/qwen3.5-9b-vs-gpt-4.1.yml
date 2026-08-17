@@ -1,0 +1,3 @@
+name: qwen3.5-9b-vs-gpt-4.1
+major: !include ../../models/qwen/qwen3.5-9b.yml
+minor: !include ../../models/openai/gpt-4.1.yml

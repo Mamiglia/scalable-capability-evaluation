@@ -1,0 +1,3 @@
+name: deepseek-v3.2-vs-qwen3-32b
+major: !include ../../models/deepseek/deepseek-v3.2.yml
+minor: !include ../../models/qwen/qwen3-32b.yml

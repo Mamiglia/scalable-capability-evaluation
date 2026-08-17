@@ -1,8 +1,0 @@
-name: pilot-gpt-oss-120b-mbpp-qwen3.5-9b-vs-granite
-judge: !include ../../../models/openai/gpt-oss-120b.yml
-major: !include ../../../models/qwen/qwen3.5-9b.yml
-minor: !include ../../../models/ibm/granite-4.1-8b.yml
-benchmark: !include ../../../bench/mbpp.yml
-mode: paired
-include_reasoning: false
-log_dir: logs/pilot/

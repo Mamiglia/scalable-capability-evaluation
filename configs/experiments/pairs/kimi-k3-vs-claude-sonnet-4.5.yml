@@ -1,0 +1,3 @@
+name: kimi-k3-vs-claude-sonnet-4.5
+major: !include ../../models/moonshotai/kimi-k3.yml
+minor: !include ../../models/anthropic/claude-sonnet-4.5.yml

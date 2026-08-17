@@ -1,0 +1,3 @@
+name: glm-5.2-vs-claude-sonnet-4.5
+major: !include ../../models/zai/glm-5.2.yml
+minor: !include ../../models/anthropic/claude-sonnet-4.5.yml

@@ -1,0 +1,3 @@
+name: deepseek-v3.2-vs-glm-4.6
+major: !include ../../models/deepseek/deepseek-v3.2.yml
+minor: !include ../../models/zai/glm-4.6.yml
