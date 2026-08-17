@@ -182,14 +182,15 @@ def load_manifest(path, layer=None):
 
 
 def fit_cebra(X_train, gap_train, X_test, output_dim, seed, iterations, device="cpu",
-              conditional="time_delta", delta=None):
+              conditional="time_delta", delta=None, num_hidden_units=32):
     """Fit output-gap-conditioned CEBRA and return train/test latent codes."""
     import cebra
     torch.manual_seed(seed)
     np.random.seed(seed)
     kwargs = {"model_architecture": "offset1-model", "conditional": conditional,
               "output_dimension": output_dim, "max_iterations": iterations,
-              "batch_size": min(512, len(X_train)), "device": device}
+              "batch_size": min(512, len(X_train)), "device": device,
+              "num_hidden_units": num_hidden_units}
     if delta is not None:
         kwargs["delta"] = delta
     model = cebra.CEBRA(**kwargs)
@@ -331,7 +332,8 @@ def fit_method(name, X_train, gap_train, X_test, seed, quick=False, config=None)
         return fit_cebra(X_train, gap_train, X_test, config["output_dim"], seed,
                          config["iterations"], device="cuda_if_available",
                          conditional=config.get("conditional", "time_delta"),
-                         delta=config.get("delta"))
+                         delta=config.get("delta"),
+                         num_hidden_units=config.get("num_hidden_units", 32))
     if name == "bsf":
         return fit_bsf(X_train, X_test, config["group_size"], config["n_groups"],
                        config["l0"], seed, config["epochs"],
@@ -356,8 +358,10 @@ def _sample_prompt_groups(prompt_idx, group_id, seed):
 def trajectory_config(name, d_in, quick=False):
     """One prespecified calibration configuration per discovery family."""
     if name == "cebra":
-        return {"output_dim": 3, "iterations": 300 if quick else 10_000,
-                "conditional": "delta_normal", "delta": 0.25}
+        return {"output_dim": 3 if quick else 8,
+                "iterations": 300 if quick else 10_000,
+                "conditional": "delta_normal", "delta": 0.25,
+                "num_hidden_units": 32 if quick else 128}
     if name == "bsf":
         n_groups = math.ceil(d_in / 3)
         return {"group_size": 3, "n_groups": n_groups, "l0": min(16, n_groups),

@@ -218,9 +218,10 @@ def test_fit_cebra_standardises_continuous_labels_for_delta_sampling(monkeypatch
     X = np.arange(40, dtype=np.float32).reshape(10, 4)
 
     discover.fit_cebra(X[:8], np.arange(8, dtype=np.float32), X[8:], 3, 0, 10,
-                       conditional="delta_normal", delta=0.25)
+                       conditional="delta_normal", delta=0.25, num_hidden_units=128)
 
     assert seen["kwargs"]["conditional"] == "delta_normal"
+    assert seen["kwargs"]["num_hidden_units"] == 128
     assert seen["labels"].mean() == pytest.approx(0, abs=1e-6)
     assert seen["labels"].std() == pytest.approx(1, abs=1e-6)
 
@@ -288,9 +289,11 @@ def test_method_configs_expand_scientific_grid_but_not_quick_grid():
 
 def test_trajectory_configs_use_non_temporal_cebra_and_reference_bsf():
     cebra = discover.trajectory_config("cebra", d_in=3072, quick=True)
+    cebra_full = discover.trajectory_config("cebra", d_in=3072, quick=False)
     bsf = discover.trajectory_config("bsf", d_in=3072, quick=True)
 
     assert cebra["conditional"] == "delta_normal" and cebra["output_dim"] == 3
+    assert cebra_full["output_dim"] == 8 and cebra_full["num_hidden_units"] == 128
     assert bsf["group_size"] == 3 and bsf["l0"] == 16 and bsf["snr"] == 0.1
     small = discover.trajectory_config("bsf", d_in=8, quick=True)
     assert small["l0"] <= small["n_groups"]
