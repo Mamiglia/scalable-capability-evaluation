@@ -214,7 +214,7 @@ def code_gap_r2(result, gap_train, gap_test, alpha=1e-6):
 
 
 def grouped_code_predictions(code_train, gap_train, item_train, code_test,
-                             alphas=(0.1, 1, 10, 100), cv_folds=4):
+                             alphas=(0.01, 0.1, 1, 10, 100, 1000, 10_000), cv_folds=4):
     """Tune a scaled ridge decoder inside item groups, then predict held-out codes."""
     splits = GroupKFold(n_splits=min(cv_folds, len(np.unique(item_train)))).split(
         code_train, gap_train, item_train)

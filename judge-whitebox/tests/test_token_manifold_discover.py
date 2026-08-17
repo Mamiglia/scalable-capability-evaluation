@@ -254,6 +254,21 @@ def test_grouped_code_decoder_regularises_scale_stressed_p_greater_than_n_codes(
     assert discover.r2_score(y[test], pred) > 0.1
 
 
+def test_grouped_code_decoder_default_grid_reaches_strong_p_greater_than_n_penalties():
+    rng = np.random.default_rng(0)
+    n, width = 120, 2048
+    item = np.repeat(np.arange(n // 2), 2)
+    y = rng.normal(size=n)
+    code = rng.normal(size=(n, width))
+    code[:, 0] = y + rng.normal(scale=0.5, size=n)
+    train, test = next(discover.GroupKFold(2).split(code, y, item))
+
+    _, alpha = discover.grouped_code_predictions(
+        code[train], y[train], item[train], code[test], cv_folds=3)
+
+    assert alpha >= 1000
+
+
 def test_grouped_knn_decoder_recovers_curved_code_geometry():
     rng = np.random.default_rng(9)
     theta = rng.uniform(-2.5, 2.5, 160)
