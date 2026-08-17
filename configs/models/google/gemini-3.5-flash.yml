@@ -1,4 +1,6 @@
+# Google first-party only; no quantization label on OpenRouter, so no bf16 pin.
 name: google/gemini-3.5-flash
 slug: openrouter/google/gemini-3.5-flash
 release_date: '2026-05-19'
-
+model_args:
+  provider: {}
