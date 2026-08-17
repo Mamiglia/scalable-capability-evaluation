@@ -43,6 +43,14 @@ def select_fold(df, folds, name):
     return df[df["item"].map(folds) == name].copy()
 
 
+def limit_pairs(df, limit):
+    """Limit a selected fold by whole pair IDs without reordering rows."""
+    if limit is None:
+        return df
+    pair_ids = df["pair_uid"].drop_duplicates().iloc[:limit]
+    return df[df["pair_uid"].isin(pair_ids)].copy()
+
+
 def layer_indices(n_states, n_select=12):
     """Evenly spaced hidden-state indices including both endpoints."""
     assert n_states > 0 and n_select > 0
@@ -204,9 +212,10 @@ def main():
     parser.add_argument("--estimate-only", action="store_true")
     args = parser.parse_args()
 
-    df = wbpairs.load_pairs(c, args.split, args.limit)
+    df = wbpairs.load_pairs(c, args.split, None)
     folds = balanced_item_folds(df, args.fold_seed)
     df = select_fold(df, folds, args.fold)
+    df = limit_pairs(df, args.limit)
 
     if args.estimate_only:
         tokenizer, d_model, n_states = load_tokenizer_and_shape(args.model, c)

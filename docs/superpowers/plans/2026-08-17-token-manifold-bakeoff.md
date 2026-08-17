@@ -341,7 +341,8 @@ an existing file.
 
 - [ ] **Step 6: Implement CLI estimate and recording modes**
 
-`--estimate-only` loads `AutoConfig`, renders the selected fold, prints JSON, and writes nothing.
+`--estimate-only` loads `AutoConfig`, renders the selected fold, applies `--limit` by whole pair IDs
+*after* fold selection, prints JSON, and writes nothing.
 Recording asserts base-only (`--adapter` does not exist), resolves 12 layers when `--layers auto`, and
 records exact model/pairs/prompt hashes in the manifest.
 
@@ -760,8 +761,8 @@ finite. This smoke downloads no model.
 - [ ] **Step 8: Print—but do not execute—the real storage estimate commands**
 
 ```bash
-python token_manifold_record.py --model Qwen3-8B --fold A --estimate-only --out /unused
-python token_manifold_record.py --model Llama-3.2-3B-Instruct --fold B --estimate-only --out /unused
+python token_manifold_record.py --model Qwen3-8B --fold A --limit 100 --estimate-only --out /unused
+python token_manifold_record.py --model Llama-3.2-3B-Instruct --fold B --limit 100 --estimate-only --out /unused
 ```
 
 Record the expected command shape in the handoff; actual outputs require the locally cached tokenizer

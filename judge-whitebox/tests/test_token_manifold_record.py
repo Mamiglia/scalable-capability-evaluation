@@ -88,6 +88,16 @@ def test_select_fold_keeps_whole_items_and_original_order():
     assert set(out.item) == {"b"}
 
 
+def test_limit_pairs_applies_to_whole_pair_ids_after_fold_selection():
+    df = pd.DataFrame({"pair_uid": ["p0", "p0", "p1", "p1"],
+                       "item": ["a", "a", "b", "b"], "row": range(4)})
+
+    out = record.limit_pairs(df, 1)
+
+    assert out.row.tolist() == [0, 1]
+    assert set(out.pair_uid) == {"p0"}
+
+
 def test_layer_indices_include_ends_and_are_unique():
     assert record.layer_indices(33, 4) == (0, 11, 21, 32)
     assert record.layer_indices(3, 12) == (0, 1, 2)

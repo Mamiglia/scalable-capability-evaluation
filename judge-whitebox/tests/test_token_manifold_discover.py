@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -126,6 +127,7 @@ def test_main_timeline_writes_r2_and_shuffled_null(tmp_path, monkeypatch):
 
 
 def test_fit_cebra_returns_requested_dimension_and_seed_metadata():
+    pytest.importorskip("cebra")
     X, y = curved_gap_data(n=240, d=12, seed=0)
 
     a = discover.fit_cebra(X[:180], y[:180], X[180:], 4, 3, 200, device="cpu")
@@ -148,6 +150,7 @@ def test_code_gap_r2_uses_train_only_regression():
 
 @pytest.mark.parametrize("method", ["bsf", "sae"])
 def test_reconstructive_method_returns_codes_and_test_reconstruction(method):
+    pytest.importorskip("bsf" if method == "bsf" else "saes")
     X, _ = sparse_manifold_mix(n=256, d=12, seed=0)
 
     result = discover.fit_method(method, X[:192], None, X[192:], seed=2, quick=True)
@@ -159,6 +162,7 @@ def test_reconstructive_method_returns_codes_and_test_reconstruction(method):
 
 
 def test_ising_clusters_groups_planted_feature_pairs():
+    pytest.importorskip("unsupervised_clustering")
     codes = planted_binary_feature_groups(n=400, groups=((0, 1), (2, 3)), seed=0)
 
     labels = discover.ising_clusters(codes, alpha=0.01, method="spectral", n_clusters=2)
@@ -166,3 +170,70 @@ def test_ising_clusters_groups_planted_feature_pairs():
     assert labels[0] == labels[1]
     assert labels[2] == labels[3]
     assert labels[0] != labels[2]
+
+
+def write_fake_manifest(out):
+    rows = []
+    for prompt in range(8):
+        generator = torch.Generator().manual_seed(prompt)
+        rows.append({"row_idx": prompt, "pair_uid": f"p{prompt}",
+                     "item": f"it{prompt // 2}", "order": prompt % 2,
+                     "resid": torch.randn(4, 2, 6, generator=generator),
+                     "input_ids": [1, 2, 3, 4],
+                     "offsets": [(0, 1), (1, 2), (2, 3), (3, 4)],
+                     "group_id": np.array([0, 1, 1, 5], dtype=np.int8),
+                     "l1": float(prompt), "l2": 0.0, "gap": float(prompt)})
+    return record.write_shards(iter(rows), out, shard_prompts=4,
+                               manifest_meta={"model": "dev", "layers": [0, 1]})
+
+
+def fake_fit_method(name, X_train, gap_train, X_test, seed, quick):
+    width = 2 if name == "cebra" else 4
+    train = np.asarray(X_train)[:, :width]
+    test = np.asarray(X_test)[:, :width]
+    reconstruction = None if name == "cebra" else np.asarray(X_test)
+    return discover.MethodResult(name, train, test, reconstruction, {"seed": seed})
+
+
+def test_bakeoff_writes_one_row_per_method(tmp_path, monkeypatch):
+    manifest = write_fake_manifest(tmp_path / "recording")
+    monkeypatch.setattr(discover, "fit_method", fake_fit_method)
+    out = tmp_path / "bakeoff"
+
+    discover.run_bakeoff(manifest, layer=1, methods=("cebra", "bsf", "sae"),
+                         out_dir=out, seeds=(0,), quick=True)
+
+    table = pd.read_csv(out / "bakeoff.csv")
+    assert set(table.method) == {"cebra", "bsf", "sae"}
+    assert {"test_gap_r2", "test_recon_r2", "runtime_s"} <= set(table)
+    assert (out / "bakeoff.pt").exists()
+
+
+def test_main_bakeoff_dispatches_cli_arguments(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_run(manifest, layer, methods, out_dir, seeds, quick):
+        seen.update(manifest=manifest, layer=layer, methods=methods, out_dir=out_dir,
+                    seeds=seeds, quick=quick)
+
+    monkeypatch.setattr(discover, "run_bakeoff", fake_run)
+    monkeypatch.setattr(sys, "argv", ["token_manifold_discover.py", "bakeoff",
+                                       "--manifest", "recording/manifest.json", "--layer", "12",
+                                       "--methods", "cebra,bsf", "--seeds", "1,3",
+                                       "--out", str(tmp_path / "out"), "--quick"])
+
+    discover.main()
+
+    assert seen == {"manifest": "recording/manifest.json", "layer": 12,
+                    "methods": ("cebra", "bsf"), "out_dir": str(tmp_path / "out"),
+                    "seeds": (1, 3), "quick": True}
+
+
+def test_sbatch_has_explicit_stages_and_never_installs_packages():
+    text = (Path(__file__).parents[1] / "sbatch" / "token_manifold.sbatch").read_text()
+
+    assert "WB_STAGE" in text
+    for stage in ("record", "timeline", "bakeoff"):
+        assert stage in text
+    assert "WB_MANIFOLD_VENV" in text
+    assert "pip install" not in text

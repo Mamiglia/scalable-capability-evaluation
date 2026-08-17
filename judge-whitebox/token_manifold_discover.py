@@ -5,6 +5,7 @@ import dataclasses
 import json
 import os
 import pathlib
+import time
 
 import numpy as np
 import pandas as pd
@@ -221,6 +222,66 @@ def fit_method(name, X_train, gap_train, X_test, seed, quick=False):
     raise ValueError(f"unknown method: {name}")
 
 
+def _sample_prompt_groups(prompt_idx, group_id, seed):
+    rng = np.random.default_rng(seed)
+    selected = []
+    for prompt in np.unique(prompt_idx):
+        for group in np.unique(group_id[prompt_idx == prompt]):
+            candidates = np.flatnonzero((prompt_idx == prompt) & (group_id == group))
+            selected.append(int(rng.choice(candidates)))
+    return np.asarray(selected, dtype=int)
+
+
+def _reconstruction_r2(target, reconstruction):
+    if reconstruction is None:
+        return np.nan
+    residual = np.square(target - reconstruction).sum()
+    total = np.square(target - target.mean(axis=0, keepdims=True)).sum()
+    return float(1 - residual / max(total, 1e-12))
+
+
+def run_bakeoff(manifest, layer, methods, out_dir, seeds, quick=False):
+    """Run a bounded, equal-row method comparison on one recorded layer."""
+    out_dir = pathlib.Path(out_dir)
+    if out_dir.exists():
+        raise FileExistsError(out_dir)
+    data = load_manifest(manifest)
+    layers = list(data["manifest"]["layers"])
+    if layer not in layers:
+        raise ValueError(f"layer {layer} not in manifest layers {layers}")
+    layer_idx = layers.index(layer)
+    selected = _sample_prompt_groups(data["prompt_idx"], data["group_id"], seeds[0])
+    prompt = data["prompt_idx"][selected]
+    X = data["X"][selected, layer_idx]
+    y = data["gap"][prompt]
+    groups = data["item"][prompt]
+    train, test = next(GroupKFold(n_splits=2).split(X, y, groups))
+    mean = X[train].mean(axis=0, keepdims=True)
+    scale = np.sqrt(np.square(X[train] - mean).mean(axis=0, keepdims=True))
+    scale[scale < 1e-6] = 1
+    X_train, X_test = (X[train] - mean) / scale, (X[test] - mean) / scale
+    rows, artifacts = [], []
+    for method in methods:
+        for seed in seeds:
+            start = time.monotonic()
+            result = fit_method(method, X_train, y[train], X_test, seed, quick)
+            rows.append({"method": method, "seed": seed,
+                         "test_gap_r2": code_gap_r2(result, y[train], y[test]),
+                         "test_recon_r2": _reconstruction_r2(X_test, result.test_reconstruction),
+                         "active_code_count": float((result.test_code != 0).sum(axis=1).mean()),
+                         "runtime_s": time.monotonic() - start})
+            artifacts.append({"method": method, "seed": seed,
+                              "train_code": result.train_code, "test_code": result.test_code,
+                              "metadata": result.metadata})
+    out_dir.mkdir(parents=True)
+    token_manifold_record.atomic_torch_save(
+        {"manifest": str(manifest), "layer": layer, "artifacts": artifacts,
+         "train_rows": train, "test_rows": test, "mean": mean, "scale": scale},
+        out_dir / "bakeoff.pt")
+    _atomic_csv(pd.DataFrame(rows), out_dir / "bakeoff.csv")
+    return pd.DataFrame(rows)
+
+
 def _atomic_csv(df, path):
     path = pathlib.Path(path)
     tmp = path.with_name(path.name + ".partial")
@@ -240,6 +301,13 @@ def main():
     timeline.add_argument("--alphas", default="0.1,1,10,100")
     timeline.add_argument("--cv-folds", type=int, default=5)
     timeline.add_argument("--seed", type=int, default=0)
+    bakeoff = subparsers.add_parser("bakeoff")
+    bakeoff.add_argument("--manifest", required=True)
+    bakeoff.add_argument("--layer", required=True, type=int)
+    bakeoff.add_argument("--methods", default="cebra,bsf,sae")
+    bakeoff.add_argument("--seeds", default="0,1,2,3,4")
+    bakeoff.add_argument("--out", required=True)
+    bakeoff.add_argument("--quick", action="store_true")
     args = parser.parse_args()
 
     if args.command == "timeline":
@@ -256,6 +324,10 @@ def main():
         _atomic_csv(summary, out)
         _atomic_csv(oof, out.with_name(out.stem + "_oof.csv"))
         print(f"token timeline -> {out}")
+    elif args.command == "bakeoff":
+        run_bakeoff(args.manifest, args.layer, tuple(args.methods.split(",")), args.out,
+                    tuple(int(seed) for seed in args.seeds.split(",")), args.quick)
+        print(f"token manifold bakeoff -> {args.out}")
 
 
 if __name__ == "__main__":
