@@ -1,0 +1,6 @@
+name: intercode
+task: inspect_evals/gdm_intercode_ctf
+task_args:
+  max_attempts: 3
+  max_messages: 50
+
