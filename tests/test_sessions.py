@@ -6,14 +6,14 @@ from model import sessions
 
 
 def test_register_drop_and_unregister():
-    sessions.register("key", "pod1", "http://pod1/v1")
+    sessions.register("key", "pod1", "http://pod1/v1", "gpu")
     assert sessions.drop("key") == 0
     assert sessions.unregister("key", only_if_unused=True)
     assert not sessions.unregister("key")
 
 
 def test_unregister_keeps_pod_that_was_re_taken():
-    sessions.register("key", "pod1", "http://pod1/v1")
+    sessions.register("key", "pod1", "http://pod1/v1", "gpu")
     with sessions.locked_state() as state:
         entry, is_creating = sessions.claim_or_join(state, "key", ready_timeout=60)
     assert entry["pod_id"] == "pod1" and not is_creating
@@ -57,5 +57,5 @@ def test_corrupt_state_file_raises():
 
 
 def test_state_survives_round_trip():
-    sessions.register("key", "pod1", "http://pod1/v1")
+    sessions.register("key", "pod1", "http://pod1/v1", "gpu")
     assert json.loads(sessions.STATE_FILE.read_text())["key"]["pod_id"] == "pod1"

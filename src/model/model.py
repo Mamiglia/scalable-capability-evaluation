@@ -124,4 +124,7 @@ class Model:
         }
         if base_url:
             kwargs["model_base_url"] = base_url
+        if self._session and self._session.gpu:
+            # Which GPU actually served the run (may be a capacity fallback).
+            kwargs["metadata"] = {"runpod_gpu": self._session.gpu, "runpod_pod_id": self._session.pod_id}
         return kwargs

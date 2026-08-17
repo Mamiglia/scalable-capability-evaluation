@@ -186,8 +186,12 @@ def _create_pod_once(config: dict[str, Any], gpu_id: str) -> str:
     return pod_id
 
 
-def create(config: dict[str, Any]) -> str:
-    """Create a pod, falling back to another GPU type if the configured one has no capacity."""
+def create(config: dict[str, Any]) -> tuple[str, str]:
+    """Create a pod, falling back to another GPU type if the configured one has no capacity.
+
+    Returns ``(pod_id, gpu)``; the GPU is recorded in the eval metadata since a substitution
+    changes what was actually run.
+    """
     requested = config["gpu_id"]
     fallbacks = config.get("fallback_gpus", FALLBACK_GPUS)
     candidates = [requested] + [gpu for gpu in fallbacks if gpu != requested]
@@ -208,7 +212,7 @@ def create(config: dict[str, Any]) -> str:
                 "comparable to runs pinned to %s",
                 pod_id, config["model"], gpu, requested, requested,
             )
-        return pod_id
+        return pod_id, gpu
 
     raise RuntimeError(
         f"No capacity for {config['model']} on any of {candidates}"

@@ -93,13 +93,14 @@ def _creator_alive(entry: dict[str, Any], ready_timeout: float) -> bool:
     return time.time() - entry.get("created_at", 0) < ready_timeout + 60
 
 
-def register(key: str, pod_id: str, base_url: str) -> None:
+def register(key: str, pod_id: str, base_url: str, gpu: str) -> None:
     """Publish a ready pod, with this process as its first user."""
     with locked_state() as state:
         state[key] = {
             "status": "ready",
             "pod_id": pod_id,
             "base_url": base_url,
+            "gpu": gpu,
             "ref_count": 1,
         }
 

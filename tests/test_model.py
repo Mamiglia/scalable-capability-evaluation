@@ -34,7 +34,7 @@ def test_runpod_model_lifecycle(monkeypatch):
         runpod={"use": True, "model": "org/model", "gpu_id": "NVIDIA A40"},
     )
     events = []
-    monkeypatch.setattr(runpod, "create", lambda cfg: events.append("create") or "pod1")
+    monkeypatch.setattr(runpod, "create", lambda cfg: events.append("create") or ("pod1", "gpu"))
     monkeypatch.setattr(
         runpod,
         "wait",
@@ -50,6 +50,7 @@ def test_runpod_model_lifecycle(monkeypatch):
                 "model_args": {"api_key": "inspectai", "stream": True},
                 "model_base_url": "https://pod1-8000.proxy.runpod.net/v1",
                 "max_retries": 2,
+                "metadata": {"runpod_gpu": "gpu", "runpod_pod_id": "pod1"},
             }
             raise RuntimeError("eval failed")
 
@@ -76,7 +77,7 @@ def test_startup_failure_terminates_runpod(monkeypatch):
         runpod={"use": True, "model": "org/model", "gpu_id": "NVIDIA A40"},
     )
     terminated = []
-    monkeypatch.setattr(runpod, "create", lambda cfg: "pod1")
+    monkeypatch.setattr(runpod, "create", lambda cfg: ("pod1", "gpu"))
     monkeypatch.setattr(
         runpod, "wait", MagicMock(side_effect=TimeoutError("not ready"))
     )
@@ -100,7 +101,7 @@ def test_threads_share_one_runpod(monkeypatch):
     created = []
     terminated = []
     monkeypatch.setattr(
-        runpod, "create", lambda cfg: created.append(cfg) or "shared-pod"
+        runpod, "create", lambda cfg: created.append(cfg) or ("shared-pod", "gpu")
     )
     monkeypatch.setattr(runpod, "wait", lambda pod_id, port, timeout: "shared-url")
     monkeypatch.setattr(runpod, "terminate", terminated.append)
@@ -151,7 +152,7 @@ def test_runpod_command(monkeypatch):
         }
     )
 
-    assert runpod.create(config) == "pod1"
+    assert runpod.create(config) == ("pod1", "NVIDIA A40")
     assert captured[0][:3] == ["runpodctl", "pod", "create"]
     assert "--container-disk-in-gb=40" in captured[0]
     assert (
@@ -170,7 +171,7 @@ def _worker_eval(config_dict):
 
 
 def test_cross_process_runpod_sharing(monkeypatch):
-    monkeypatch.setattr(runpod, "create", lambda cfg: "shared-mp-pod")
+    monkeypatch.setattr(runpod, "create", lambda cfg: ("shared-mp-pod", "gpu"))
     monkeypatch.setattr(runpod, "wait", lambda pod_id, port, timeout: "http://shared-mp-url/v1")
     monkeypatch.setattr(runpod, "is_healthy", lambda base_url: True)
     monkeypatch.setattr(runpod, "terminate", lambda pod_id: None)
@@ -199,7 +200,7 @@ def test_keep_alive_timer(monkeypatch):
         },
     )
     terminated = []
-    monkeypatch.setattr(runpod, "create", lambda cfg: "timer-pod")
+    monkeypatch.setattr(runpod, "create", lambda cfg: ("timer-pod", "gpu"))
     monkeypatch.setattr(runpod, "wait", lambda pod_id, port, timeout: "http://timer-url/v1")
     monkeypatch.setattr(runpod, "is_healthy", lambda base_url: True)
     monkeypatch.setattr(runpod, "terminate", terminated.append)
@@ -243,7 +244,7 @@ def test_gpu_fallback_is_logged_loudly(monkeypatch, caplog):
     )
 
     with caplog.at_level("WARNING"):
-        assert runpod.create(config) == "pod1"
+        assert runpod.create(config) == ("pod1", "NVIDIA L40S")
 
     assert attempts == ["NVIDIA A40", "NVIDIA L40S"]
     assert "not the configured NVIDIA A40" in caplog.text

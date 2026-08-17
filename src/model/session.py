@@ -31,6 +31,7 @@ class RunpodSession(metaclass=Multiton):
         self.starting = False
         self.pod_id: str | None = None
         self.base_url: str | None = None
+        self.gpu: str | None = None
         self._timer: threading.Timer | None = None
 
     @property
@@ -48,6 +49,12 @@ class RunpodSession(metaclass=Multiton):
                 self.condition.wait()
             if self.base_url and runpod.is_healthy(self.base_url):
                 return self.base_url
+            if self.pod_id:
+                # Our pod died: give back its registry reference before replacing it.
+                LOGGER.warning("Runpod %s is unhealthy, replacing it", self.pod_id)
+                sessions.drop(self.key)
+                sessions.unregister(self.key, only_if_unused=True)
+                self.pod_id = self.base_url = None
             self.starting = True
 
         try:
@@ -99,6 +106,7 @@ class RunpodSession(metaclass=Multiton):
                 # process wanting a pod is blocked while we hold the lock.
                 if runpod.is_healthy(entry["base_url"]):
                     self.pod_id = entry["pod_id"]
+                    self.gpu = entry.get("gpu")
                     return entry["base_url"]
                 LOGGER.warning("Registered Runpod %s is unhealthy, discarding", entry["pod_id"])
                 sessions.drop(self.key)
@@ -124,7 +132,7 @@ class RunpodSession(metaclass=Multiton):
         """Create the pod this process claimed, and publish it for the others."""
         pod_id: str | None = None
         try:
-            pod_id = runpod.create(self.config)
+            pod_id, gpu = runpod.create(self.config)
             base_url = runpod.wait(pod_id, self.config["port"], self.ready_timeout)
         except BaseException:
             sessions.abort_creation(self.key)
@@ -132,8 +140,8 @@ class RunpodSession(metaclass=Multiton):
                 self._terminate(pod_id)
             raise
 
-        sessions.register(self.key, pod_id, base_url)
-        self.pod_id = pod_id
+        sessions.register(self.key, pod_id, base_url, gpu)
+        self.pod_id, self.gpu = pod_id, gpu
         return base_url
 
     def _terminate_if_unused(self, pod_id: str) -> None:
