@@ -98,6 +98,21 @@ def test_limit_pairs_applies_to_whole_pair_ids_after_fold_selection():
     assert set(out.pair_uid) == {"p0"}
 
 
+def test_limit_pairs_round_robins_items_deterministically():
+    df = pd.DataFrame([
+        {"pair_uid": f"{item}{pair}", "item": item, "order": order}
+        for item in ("a", "b", "c") for pair in range(4) for order in (0, 1)
+    ])
+
+    one = record.limit_pairs(df, 6)
+    two = record.limit_pairs(df.sample(frac=1, random_state=7), 6)
+
+    assert set(one.pair_uid) == set(two.pair_uid)
+    counts = one.drop_duplicates("pair_uid").groupby("item").size()
+    assert counts.to_dict() == {"a": 2, "b": 2, "c": 2}
+    assert record.LIMIT_SAMPLING == "item_round_robin_v1"
+
+
 def test_layer_indices_include_ends_and_are_unique():
     assert record.layer_indices(33, 4) == (0, 11, 21, 32)
     assert record.layer_indices(3, 12) == (0, 1, 2)

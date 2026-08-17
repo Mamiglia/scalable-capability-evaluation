@@ -19,6 +19,7 @@ import wbprompts
 
 STRUCTURAL_GROUPS = ("instr_format", "slot_labels", "question", "transcript_1",
                      "transcript_2", "answer_readout")
+LIMIT_SAMPLING = "item_round_robin_v1"
 
 
 def balanced_item_folds(df, seed):
@@ -46,9 +47,28 @@ def select_fold(df, folds, name):
 def limit_pairs(df, limit):
     """Limit a selected fold by whole pair IDs without reordering rows."""
     if limit is None:
-        return df
-    pair_ids = df["pair_uid"].drop_duplicates().iloc[:limit]
-    return df[df["pair_uid"].isin(pair_ids)].copy()
+        return df.copy()
+    pairs = df[["pair_uid", "item"]].drop_duplicates()
+    if pairs.groupby("pair_uid")["item"].nunique().max() != 1:
+        raise ValueError("pair_uid must map to exactly one item")
+    by_item = {
+        item: sorted(group["pair_uid"].tolist(), key=str)
+        for item, group in pairs.groupby("item", sort=True)
+    }
+    target = min(limit, len(pairs))
+    selected, round_idx = [], 0
+    while len(selected) < target:
+        added = False
+        for item in sorted(by_item, key=str):
+            if round_idx < len(by_item[item]):
+                selected.append(by_item[item][round_idx])
+                added = True
+                if len(selected) == target:
+                    break
+        if not added:
+            break
+        round_idx += 1
+    return df[df["pair_uid"].isin(selected)].copy()
 
 
 def layer_indices(n_states, n_select=12):
@@ -257,6 +277,7 @@ def main():
         record_rows(model, tokenizer, df, c, layers), args.out, args.shard_prompts,
         {"model": args.model, "layers": list(layers), "fold": args.fold,
          "fold_seed": args.fold_seed, "split": args.split, "limit": args.limit,
+         "limit_sampling": LIMIT_SAMPLING,
          "pairs_path": c["paths"]["pairs"], **identity})
     print(f"token recording -> {manifest}")
 
