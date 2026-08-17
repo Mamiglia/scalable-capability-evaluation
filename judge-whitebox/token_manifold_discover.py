@@ -14,6 +14,7 @@ import torch
 from sklearn.linear_model import Ridge
 from sklearn.metrics import r2_score
 from sklearn.model_selection import GroupKFold
+from sklearn.decomposition import PCA
 
 import token_manifold_record
 
@@ -325,8 +326,24 @@ def method_configs(name, d_in, quick=False):
 
 def fit_method(name, X_train, gap_train, X_test, seed, quick=False, config=None):
     """Small method dispatcher used by the bake-off."""
-    config = config or method_configs(name, X_train.shape[1], quick)[0]
+    config = method_configs(name, X_train.shape[1], quick)[0] if config is None else config
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    if name == "raw":
+        return MethodResult("raw", np.asarray(X_train), np.asarray(X_test),
+                            np.asarray(X_test), {"seed": seed})
+    if name == "pca":
+        model = PCA(n_components=config["output_dim"], svd_solver="randomized",
+                    random_state=seed).fit(X_train)
+        return MethodResult("pca", model.transform(X_train), model.transform(X_test),
+                            model.inverse_transform(model.transform(X_test)),
+                            {"seed": seed, "output_dim": config["output_dim"]})
+    if name == "random":
+        rng = np.random.default_rng(seed)
+        projection, _ = np.linalg.qr(rng.normal(size=(X_train.shape[1],
+                                                       config["output_dim"])))
+        train_code, test_code = X_train @ projection, X_test @ projection
+        return MethodResult("random", train_code, test_code, test_code @ projection.T,
+                            {"seed": seed, "output_dim": config["output_dim"]})
     if name == "cebra":
         assert gap_train is not None
         return fit_cebra(X_train, gap_train, X_test, config["output_dim"], seed,
@@ -370,6 +387,10 @@ def trajectory_config(name, d_in, quick=False):
     if name == "sae":
         return {"width": d_in, "k": min(32, d_in),
                 "epochs": 10 if quick else 60}
+    if name == "raw":
+        return {}
+    if name in {"pca", "random"}:
+        return {"output_dim": min(8, d_in)}
     raise ValueError(f"unknown method: {name}")
 
 
@@ -537,7 +558,9 @@ def main():
     trajectory = subparsers.add_parser("trajectory")
     trajectory.add_argument("--manifest", required=True)
     trajectory.add_argument("--layers", required=True)
-    trajectory.add_argument("--method", choices=("cebra", "bsf", "sae"), required=True)
+    trajectory.add_argument("--method",
+                            choices=("cebra", "bsf", "sae", "raw", "pca", "random"),
+                            required=True)
     trajectory.add_argument("--seeds", default="0,1,2")
     trajectory.add_argument("--positions-per-prompt", type=int, default=64)
     trajectory.add_argument("--cv-folds", type=int, default=3)

@@ -267,6 +267,19 @@ def test_reconstructive_method_returns_codes_and_test_reconstruction(method):
     assert np.isfinite(result.test_reconstruction).all()
 
 
+@pytest.mark.parametrize("method", ["raw", "pca", "random"])
+def test_control_method_returns_finite_train_and_test_codes(method):
+    X, _ = sparse_manifold_mix(n=80, d=12, seed=0)
+    config = discover.trajectory_config(method, d_in=12, quick=True)
+
+    result = discover.fit_method(method, X[:60], None, X[60:], seed=2,
+                                 quick=True, config=config)
+
+    assert result.train_code.shape[0] == 60 and result.test_code.shape[0] == 20
+    assert np.isfinite(result.train_code).all() and np.isfinite(result.test_code).all()
+    assert result.train_code.shape[1] <= 12
+
+
 def test_ising_clusters_groups_planted_feature_pairs():
     pytest.importorskip("unsupervised_clustering")
     codes = planted_binary_feature_groups(n=400, groups=((0, 1), (2, 3)), seed=0)
