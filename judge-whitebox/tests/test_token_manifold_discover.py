@@ -254,6 +254,21 @@ def test_grouped_code_decoder_regularises_scale_stressed_p_greater_than_n_codes(
     assert discover.r2_score(y[test], pred) > 0.1
 
 
+def test_grouped_knn_decoder_recovers_curved_code_geometry():
+    rng = np.random.default_rng(9)
+    theta = rng.uniform(-2.5, 2.5, 160)
+    code = np.column_stack([np.cos(theta), np.sin(theta)])
+    item = np.repeat(np.arange(80), 2)
+    train, test = next(discover.GroupKFold(2).split(code, theta, item))
+
+    pred, neighbors = discover.grouped_knn_predictions(
+        code[train], theta[train], item[train], code[test],
+        neighbors=(3, 5, 10, 20), cv_folds=4)
+
+    assert neighbors in (3, 5, 10, 20)
+    assert discover.r2_score(theta[test], pred) > 0.8
+
+
 @pytest.mark.parametrize("method", ["bsf", "sae"])
 def test_reconstructive_method_returns_codes_and_test_reconstruction(method):
     pytest.importorskip("bsf" if method == "bsf" else "saes")
@@ -361,6 +376,7 @@ def test_run_trajectory_writes_state_and_delta_surfaces(tmp_path, monkeypatch):
         positions_per_prompt=6, cv_folds=2, quick=True)
 
     assert set(table.kind) == {"state", "delta"}
+    assert set(table.decoder) == {"ridge", "knn"}
     assert set(table.layer) == {2}
     assert set(table.method) == {"cebra"}
     assert (out / "trajectory.csv").exists()

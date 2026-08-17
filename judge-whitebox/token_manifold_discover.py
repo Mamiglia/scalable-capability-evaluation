@@ -11,10 +11,11 @@ import time
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.decomposition import PCA
 from sklearn.linear_model import Ridge
 from sklearn.metrics import r2_score
 from sklearn.model_selection import GroupKFold
-from sklearn.decomposition import PCA
+from sklearn.neighbors import KNeighborsRegressor
 
 import token_manifold_record
 
@@ -239,6 +240,35 @@ def grouped_code_predictions(code_train, gap_train, item_train, code_test,
     return model.predict((code_test - mean) / scale), best_alpha
 
 
+def grouped_knn_predictions(code_train, gap_train, item_train, code_test,
+                            neighbors=(3, 5, 10, 20), cv_folds=4):
+    """Tune a scaled KNN decoder inside item groups for curved latent geometry."""
+    splits = list(GroupKFold(
+        n_splits=min(cv_folds, len(np.unique(item_train)))).split(
+            code_train, gap_train, item_train))
+    best_neighbors, best_score = neighbors[0], -np.inf
+    for n_neighbors in neighbors:
+        if any(n_neighbors > len(train) for train, _ in splits):
+            continue
+        pred = np.full(len(gap_train), np.nan)
+        for train, valid in splits:
+            mean = code_train[train].mean(axis=0)
+            scale = code_train[train].std(axis=0)
+            scale[scale < 1e-6] = 1
+            model = KNeighborsRegressor(n_neighbors=n_neighbors, weights="distance").fit(
+                (code_train[train] - mean) / scale, gap_train[train])
+            pred[valid] = model.predict((code_train[valid] - mean) / scale)
+        score = r2_score(gap_train, pred)
+        if score > best_score:
+            best_neighbors, best_score = n_neighbors, score
+    mean = code_train.mean(axis=0)
+    scale = code_train.std(axis=0)
+    scale[scale < 1e-6] = 1
+    model = KNeighborsRegressor(n_neighbors=best_neighbors, weights="distance").fit(
+        (code_train - mean) / scale, gap_train)
+    return model.predict((code_test - mean) / scale), best_neighbors
+
+
 def fit_bsf(X_train, X_test, group_size, n_groups, l0, seed, epochs,
             variant="grassmannian", device="cpu", snr=0, batch_size=64):
     """Train a pinned Goodfire block-sparse featurizer."""
@@ -442,35 +472,44 @@ def run_trajectory(manifest, layers, method, out_dir, seeds, positions_per_promp
             for fold, (train, test) in enumerate(splits):
                 X_train, X_test = _normalise_trajectory(X[train], X[test], method)
                 result = fit_method(method, X_train, gap[train], X_test, seed, quick, config)
-                pred, alpha = grouped_code_predictions(
-                    result.train_code, gap[train], item[train], result.test_code)
-                frames.append(pd.DataFrame({
-                    "method": method, "layer": layer, "seed": seed, "fold": fold,
-                    "kind": "state", "prompt_idx": prompt[test], "item": item[test],
-                    "position": position[test], "structural_group": group_id[test],
-                    "relative_decile": decile[test], "gap": gap[test], "pred_gap": pred,
-                    "alpha": alpha}))
                 train_delta, train_rows = code_deltas(
                     result.train_code, prompt[train], position[train])
                 test_delta, test_rows = code_deltas(
                     result.test_code, prompt[test], position[test])
-                delta_pred, delta_alpha = grouped_code_predictions(
-                    train_delta, gap[train][train_rows], item[train][train_rows], test_delta)
-                frames.append(pd.DataFrame({
-                    "method": method, "layer": layer, "seed": seed, "fold": fold,
-                    "kind": "delta", "prompt_idx": prompt[test][test_rows],
-                    "item": item[test][test_rows], "position": position[test][test_rows],
-                    "structural_group": group_id[test][test_rows],
-                    "relative_decile": decile[test][test_rows],
-                    "gap": gap[test][test_rows], "pred_gap": delta_pred,
-                    "alpha": delta_alpha}))
+                decoders = {"ridge": grouped_code_predictions}
+                if method == "cebra":
+                    decoders["knn"] = grouped_knn_predictions
+                for decoder, decode in decoders.items():
+                    pred, parameter = decode(
+                        result.train_code, gap[train], item[train], result.test_code)
+                    frames.append(pd.DataFrame({
+                        "method": method, "decoder": decoder, "layer": layer,
+                        "seed": seed, "fold": fold, "kind": "state",
+                        "prompt_idx": prompt[test], "item": item[test],
+                        "position": position[test], "structural_group": group_id[test],
+                        "relative_decile": decile[test], "gap": gap[test],
+                        "pred_gap": pred, "decoder_param": parameter}))
+                    delta_pred, delta_parameter = decode(
+                        train_delta, gap[train][train_rows], item[train][train_rows],
+                        test_delta)
+                    frames.append(pd.DataFrame({
+                        "method": method, "decoder": decoder, "layer": layer,
+                        "seed": seed, "fold": fold, "kind": "delta",
+                        "prompt_idx": prompt[test][test_rows],
+                        "item": item[test][test_rows],
+                        "position": position[test][test_rows],
+                        "structural_group": group_id[test][test_rows],
+                        "relative_decile": decile[test][test_rows],
+                        "gap": gap[test][test_rows], "pred_gap": delta_pred,
+                        "decoder_param": delta_parameter}))
     oof = pd.concat(frames, ignore_index=True)
     rows = []
-    keys = ["method", "layer", "seed", "kind", "structural_group", "relative_decile"]
+    keys = ["method", "decoder", "layer", "seed", "kind", "structural_group",
+            "relative_decile"]
     for values, sub in oof.groupby(keys, sort=True):
         score = r2_score(sub.gap, sub.pred_gap, sample_weight=prompt_weights(sub.prompt_idx))
         rows.append(dict(zip(keys, values), r2=score, n_rows=len(sub),
-                         alpha=float(np.median(sub.alpha))))
+                         decoder_param=float(np.median(sub.decoder_param))))
     table = pd.DataFrame(rows)
     _atomic_csv(table, out_dir / "trajectory.csv")
     _atomic_csv(oof, out_dir / "trajectory_oof.csv")
