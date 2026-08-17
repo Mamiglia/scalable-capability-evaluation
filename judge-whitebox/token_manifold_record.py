@@ -85,7 +85,7 @@ def estimate_storage(df, tokenizer, c, layers, d_model, dtype_bytes=2):
 def record_rows(model, tokenizer, df, c, layers):
     """Yield one float16 `[tokens, selected layers, hidden]` record per prompt."""
     device = next(model.parameters()).device
-    for row_idx, (_, row) in enumerate(df.iterrows()):
+    for row_idx, row in df.iterrows():
         meta = prompt_token_meta(row, tokenizer, c)
         enc = tokenizer(meta["prompt"], return_tensors="pt")
         enc = {name: value.to(device) for name, value in enc.items()}
@@ -110,6 +110,16 @@ def sha256(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def manifest_identity(df, tokenizer, pairs_path, model_revision):
+    """Hashes that pin a recording to its pairs file, prompts, and model revision."""
+    prompt_digest = hashlib.sha256()
+    for _, row in df.iterrows():
+        prompt_digest.update(wbprompts.render_verdict_prompt(row, tokenizer).encode())
+        prompt_digest.update(b"\0")
+    return {"pairs_sha256": sha256(pairs_path), "prompt_sha256": prompt_digest.hexdigest(),
+            "model_revision": model_revision}
 
 
 def atomic_torch_save(obj, path):
@@ -145,12 +155,16 @@ def _write_chunk(chunk, path):
 
 
 def write_shards(rows, out_dir, shard_prompts, manifest_meta):
-    """Write new immutable token shards and their checksum manifest."""
+    """Write immutable shards, resuming a verified completed prefix after interruption."""
     out_dir = pathlib.Path(out_dir)
-    if out_dir.exists():
+    if (out_dir / "manifest.json").exists():
         raise FileExistsError(out_dir)
     assert shard_prompts > 0
-    out_dir.mkdir(parents=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    existing = sorted(out_dir.glob("shard_*.pt"))
+    expected = [out_dir / f"shard_{idx:05d}.pt" for idx in range(len(existing))]
+    if existing != expected:
+        raise ValueError(f"existing shards are not a contiguous prefix: {out_dir}")
     entries, chunk, n_prompts, n_tokens = [], [], 0, 0
 
     def flush():
@@ -159,7 +173,15 @@ def write_shards(rows, out_dir, shard_prompts, manifest_meta):
             return
         name = f"shard_{len(entries):05d}.pt"
         path = out_dir / name
-        count = _write_chunk(chunk, path)
+        if path.exists():
+            blob = torch.load(path, map_location="cpu", weights_only=False)
+            expected_ids = [row["pair_uid"] for row in chunk]
+            actual_ids = [prompt["pair_uid"] for prompt in blob["prompts"]]
+            if actual_ids != expected_ids:
+                raise ValueError(f"existing shard does not match input rows: {path}")
+            count = len(blob["prompt_idx"])
+        else:
+            count = _write_chunk(chunk, path)
         n_tokens += count
         entries.append({"path": name, "sha256": sha256(path), "n_prompts": len(chunk),
                         "n_tokens": count, "nbytes": path.stat().st_size})
@@ -171,6 +193,8 @@ def write_shards(rows, out_dir, shard_prompts, manifest_meta):
         if len(chunk) == shard_prompts:
             flush()
     flush()
+    if len(entries) < len(existing):
+        raise ValueError(f"existing shard prefix is longer than input rows: {out_dir}")
 
     manifest = {**manifest_meta, "version": 1, "n_prompts": n_prompts,
                 "n_tokens": n_tokens, "shards": entries}
@@ -225,11 +249,13 @@ def main():
 
     model, tokenizer, _ = verdicts.load_model(args.model, None, c)
     layers = _parse_layers(args.layers, int(model.config.num_hidden_layers) + 1)
+    identity = manifest_identity(df, tokenizer, c["paths"]["pairs"],
+                                 getattr(model.config, "_name_or_path", args.model))
     manifest = write_shards(
         record_rows(model, tokenizer, df, c, layers), args.out, args.shard_prompts,
         {"model": args.model, "layers": list(layers), "fold": args.fold,
          "fold_seed": args.fold_seed, "split": args.split, "limit": args.limit,
-         "pairs_path": c["paths"]["pairs"]})
+         "pairs_path": c["paths"]["pairs"], **identity})
     print(f"token recording -> {manifest}")
 
 

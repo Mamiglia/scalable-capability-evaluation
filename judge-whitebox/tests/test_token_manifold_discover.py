@@ -172,6 +172,15 @@ def test_ising_clusters_groups_planted_feature_pairs():
     assert labels[0] != labels[2]
 
 
+def test_method_configs_expand_scientific_grid_but_not_quick_grid():
+    assert len(discover.method_configs("cebra", d_in=4096, quick=True)) == 1
+    assert [c["output_dim"] for c in discover.method_configs(
+        "cebra", d_in=4096, quick=False)] == [1, 2, 4, 8, 16]
+    assert [c["group_size"] for c in discover.method_configs(
+        "bsf", d_in=4096, quick=False)] == [1, 2, 4, 8]
+    assert discover.method_configs("sae", d_in=4096, quick=False)[0]["width"] == 4096
+
+
 def write_fake_manifest(out):
     rows = []
     for prompt in range(8):
@@ -187,7 +196,7 @@ def write_fake_manifest(out):
                                manifest_meta={"model": "dev", "layers": [0, 1]})
 
 
-def fake_fit_method(name, X_train, gap_train, X_test, seed, quick):
+def fake_fit_method(name, X_train, gap_train, X_test, seed, quick, config=None):
     width = 2 if name == "cebra" else 4
     train = np.asarray(X_train)[:, :width]
     test = np.asarray(X_test)[:, :width]
@@ -205,6 +214,7 @@ def test_bakeoff_writes_one_row_per_method(tmp_path, monkeypatch):
 
     table = pd.read_csv(out / "bakeoff.csv")
     assert set(table.method) == {"cebra", "bsf", "sae"}
+    assert "config" in table
     assert {"test_gap_r2", "test_recon_r2", "runtime_s"} <= set(table)
     assert (out / "bakeoff.pt").exists()
 

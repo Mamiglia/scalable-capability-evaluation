@@ -3,6 +3,7 @@
 import argparse
 import dataclasses
 import json
+import math
 import os
 import pathlib
 import time
@@ -207,18 +208,41 @@ def ising_clusters(train_code, alpha, method, n_clusters=None):
     return labels
 
 
-def fit_method(name, X_train, gap_train, X_test, seed, quick=False):
+def method_configs(name, d_in, quick=False):
+    """Bounded quick grid or the predeclared scientific dimensionality grid."""
+    if quick:
+        if name == "cebra":
+            return [{"output_dim": 4, "iterations": 200}]
+        if name == "bsf":
+            return [{"group_size": 2, "n_groups": 8, "l0": 2, "epochs": 5}]
+        if name == "sae":
+            return [{"width": 16, "k": 2, "epochs": 5}]
+    if name == "cebra":
+        return [{"output_dim": dim, "iterations": 10_000} for dim in (1, 2, 4, 8, 16)]
+    if name == "bsf":
+        return [{"group_size": size, "n_groups": max(2, math.ceil(d_in / size)),
+                 "l0": min(max(2, math.ceil(d_in / size)), max(1, math.ceil(32 / size))),
+                 "epochs": 40}
+                for size in (1, 2, 4, 8)]
+    if name == "sae":
+        return [{"width": d_in, "k": min(32, d_in), "epochs": 40}]
+    raise ValueError(f"unknown method: {name}")
+
+
+def fit_method(name, X_train, gap_train, X_test, seed, quick=False, config=None):
     """Small method dispatcher used by the bake-off."""
+    config = config or method_configs(name, X_train.shape[1], quick)[0]
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     if name == "cebra":
         assert gap_train is not None
-        return fit_cebra(X_train, gap_train, X_test, 4, seed, 200 if quick else 10_000)
-    n_groups, group_size, l0 = 8, 2, 2
+        return fit_cebra(X_train, gap_train, X_test, config["output_dim"], seed,
+                         config["iterations"], device="cuda_if_available")
     if name == "bsf":
-        return fit_bsf(X_train, X_test, group_size, n_groups, l0, seed,
-                       5 if quick else 40)
+        return fit_bsf(X_train, X_test, config["group_size"], config["n_groups"],
+                       config["l0"], seed, config["epochs"], device=device)
     if name == "sae":
-        return fit_sae(X_train, X_test, n_groups * group_size, l0, seed,
-                       5 if quick else 40)
+        return fit_sae(X_train, X_test, config["width"], config["k"], seed,
+                       config["epochs"], device=device)
     raise ValueError(f"unknown method: {name}")
 
 
@@ -262,17 +286,19 @@ def run_bakeoff(manifest, layer, methods, out_dir, seeds, quick=False):
     X_train, X_test = (X[train] - mean) / scale, (X[test] - mean) / scale
     rows, artifacts = [], []
     for method in methods:
-        for seed in seeds:
-            start = time.monotonic()
-            result = fit_method(method, X_train, y[train], X_test, seed, quick)
-            rows.append({"method": method, "seed": seed,
-                         "test_gap_r2": code_gap_r2(result, y[train], y[test]),
-                         "test_recon_r2": _reconstruction_r2(X_test, result.test_reconstruction),
-                         "active_code_count": float((result.test_code != 0).sum(axis=1).mean()),
-                         "runtime_s": time.monotonic() - start})
-            artifacts.append({"method": method, "seed": seed,
-                              "train_code": result.train_code, "test_code": result.test_code,
-                              "metadata": result.metadata})
+        for config in method_configs(method, X.shape[1], quick):
+            for seed in seeds:
+                start = time.monotonic()
+                result = fit_method(method, X_train, y[train], X_test, seed, quick, config)
+                rows.append({"method": method, "config": json.dumps(config, sort_keys=True),
+                             "seed": seed,
+                             "test_gap_r2": code_gap_r2(result, y[train], y[test]),
+                             "test_recon_r2": _reconstruction_r2(X_test, result.test_reconstruction),
+                             "active_code_count": float((result.test_code != 0).sum(axis=1).mean()),
+                             "runtime_s": time.monotonic() - start})
+                artifacts.append({"method": method, "config": config, "seed": seed,
+                                  "train_code": result.train_code, "test_code": result.test_code,
+                                  "metadata": result.metadata})
     out_dir.mkdir(parents=True)
     token_manifold_record.atomic_torch_save(
         {"manifest": str(manifest), "layer": layer, "artifacts": artifacts,

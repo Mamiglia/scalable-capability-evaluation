@@ -128,6 +128,20 @@ def test_estimate_storage_counts_rendered_tokens_and_residual_bytes(monkeypatch)
     assert out["residual_bytes"] == out["n_tokens"] * 2 * 4 * 2
 
 
+def test_manifest_identity_hashes_pairs_prompts_and_model(tmp_path, monkeypatch):
+    pairs = tmp_path / "pairs.parquet"
+    pairs.write_bytes(b"pairs")
+    df = pd.DataFrame([fake_row("p0"), fake_row("p1")])
+    monkeypatch.setattr(record.wbprompts, "render_verdict_prompt",
+                        lambda row, tok: row["pair_uid"])
+
+    identity = record.manifest_identity(df, OffsetTokenizer(), pairs, "model-revision")
+
+    assert identity["pairs_sha256"] == record.sha256(pairs)
+    assert len(identity["prompt_sha256"]) == 64
+    assert identity["model_revision"] == "model-revision"
+
+
 def test_record_rows_keeps_every_token_at_selected_layers(monkeypatch):
     model, tok, df = make_tiny_model(), OffsetTokenizer(), make_pairs_df(2)
     monkeypatch.setattr(record.wbprompts, "render_verdict_prompt", lambda row, tok: row["text_1"])
@@ -138,6 +152,16 @@ def test_record_rows_keeps_every_token_at_selected_layers(monkeypatch):
     assert rows[0]["resid"].shape == (len(df.iloc[0].text_1), 2, model.config.hidden_size)
     assert rows[0]["resid"].dtype == torch.float16
     assert rows[0]["gap"] == pytest.approx(rows[0]["l1"] - rows[0]["l2"])
+
+
+def test_record_rows_preserves_source_dataframe_index(monkeypatch):
+    model, tok, df = make_tiny_model(), OffsetTokenizer(), make_pairs_df(2)
+    df.index = [7, 11]
+    monkeypatch.setattr(record, "prompt_token_meta", fake_token_meta)
+
+    rows = list(record.record_rows(model, tok, df, fake_cfg(), layers=(0,)))
+
+    assert [row["row_idx"] for row in rows] == [7, 11]
 
 
 def test_write_shards_round_trips_and_hashes(tmp_path):
@@ -153,12 +177,25 @@ def test_write_shards_round_trips_and_hashes(tmp_path):
         assert record.sha256(path) == entry["sha256"]
 
 
-def test_write_shards_refuses_existing_output(tmp_path):
-    out = tmp_path / "existing"
-    out.mkdir()
+def test_write_shards_refuses_completed_output(tmp_path):
+    out = tmp_path / "completed"
+    record.write_shards(iter([fake_recorded_row("p0", 2)]), out, 1, {})
 
     with pytest.raises(FileExistsError):
         record.write_shards(iter([]), out, 1, {})
+
+
+def test_write_shards_resumes_verified_completed_prefix(tmp_path):
+    out = tmp_path / "resume"
+    out.mkdir()
+    rows = [fake_recorded_row("p0", 2), fake_recorded_row("p1", 3)]
+    record._write_chunk(rows[:1], out / "shard_00000.pt")
+
+    manifest = record.write_shards(iter(rows), out, 1, {"model": "dev"})
+
+    data = json.loads(manifest.read_text())
+    assert data["n_prompts"] == 2 and len(data["shards"]) == 2
+    assert [entry["path"] for entry in data["shards"]] == ["shard_00000.pt", "shard_00001.pt"]
 
 
 def test_main_estimate_only_prints_json_and_writes_nothing(tmp_path, monkeypatch, capsys):
