@@ -12,6 +12,7 @@ models:
   hf_ids:
     Qwen3-0.6B: Qwen/Qwen3-0.6B
     Qwen3-8B: Qwen/Qwen3-8B
+    Llama-3.2-3B-Instruct: meta-llama/Llama-3.2-3B-Instruct
   hpc_dir: /ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge/models
 
 verdicts:

@@ -1,0 +1,6 @@
+cebra @ git+https://github.com/AdaptiveMotorControlLab/CEBRA.git@493ed252e544b89aa0cff2c1e7af34d7f80261ba
+bsf @ git+https://github.com/goodfire-ai/block-sparse-featurizer.git@219f121ea82d2b19200d1dac918396e6058d7eb9
+sae-manifold-eval @ git+https://github.com/goodfire-ai/sae-manifold.git@f2632ddbb25f4c670254ceea999058b9ba4b0450
+pyarrow>=25.0.0
+pytest>=9.1.1
+PyYAML>=6.0
