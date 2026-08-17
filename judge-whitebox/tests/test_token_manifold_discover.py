@@ -567,7 +567,8 @@ def test_sbatch_has_explicit_stages_and_never_installs_packages():
     text = (Path(__file__).parents[1] / "sbatch" / "token_manifold.sbatch").read_text()
 
     assert "WB_STAGE" in text
-    for stage in ("record", "timeline", "bakeoff", "trajectory", "trace", "crossfit"):
+    for stage in ("estimate", "record", "timeline", "bakeoff", "trajectory", "trace",
+                  "crossfit"):
         assert stage in text
     assert "WB_MANIFOLD_VENV" in text
     assert "WB_RUN" in text
@@ -576,4 +577,5 @@ def test_sbatch_has_explicit_stages_and_never_installs_packages():
     assert "trajectory_${RUN}_${METHOD}" in text
     assert "trace_${RUN}_${METHOD}_L${LAYER}" in text
     assert "crossfit_${RUN}_cebra_L${LAYER}" in text
+    assert "--estimate-only" in text
     assert "pip install" not in text

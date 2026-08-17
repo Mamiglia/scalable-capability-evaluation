@@ -15,12 +15,20 @@
 # sbatch --export=ALL,WB_STAGE=bakeoff,WB_TAG=pilot,WB_RUN=qwen,WB_MANIFEST=/path/manifest.json,WB_LAYER=12,WB_MANIFOLD_VENV=/path/venv token_manifold.sbatch
 source wb_common.sh
 
-STAGE="${WB_STAGE:?set WB_STAGE=record|timeline|bakeoff|trajectory|trace|crossfit}"
+STAGE="${WB_STAGE:?set WB_STAGE=estimate|record|timeline|bakeoff|trajectory|trace|crossfit}"
 TAG="${WB_TAG:?set a new WB_TAG}"
 ROOT="$OUT/token_manifold/$TAG"
 mkdir -p "$ROOT"
 
 case "$STAGE" in
+  estimate)
+    MODEL="${WB_MODEL:?set WB_MODEL}"
+    FOLD="${WB_FOLD:?set WB_FOLD=A|B}"
+    ARGS=(--model "$MODEL" --fold "$FOLD" --layers "${WB_LAYERS:-auto}"
+          --out /unused --estimate-only)
+    [ -n "${WB_LIMIT:-}" ] && ARGS+=(--limit "$WB_LIMIT")
+    python token_manifold_record.py "${ARGS[@]}"
+    ;;
   record)
     MODEL="${WB_MODEL:?set WB_MODEL}"
     FOLD="${WB_FOLD:?set WB_FOLD=A|B}"
