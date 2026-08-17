@@ -84,6 +84,31 @@
       </details>
     </section>
 
+    <section id="calculator-summary" class="card" aria-labelledby="calculator-summary-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">Current forecast</p><h2 id="calculator-summary-heading">Live design totals</h2></div>
+      </div>
+      <div class="summary-grid" aria-live="polite">
+        <div class="summary-item"><span class="label">Model pairs</span><span id="calculator-pairs-summary" class="value">—</span><span class="interval">J × N × M</span></div>
+        <div class="summary-item"><span class="label">Judgment calls</span><span id="calculator-calls-summary" class="value">—</span><span class="interval">items × repeats</span></div>
+        <div class="summary-item"><span class="label">Usable judgments</span><span id="calculator-usable-summary" class="value">—</span><span class="interval">expected mutually-correct presentations</span></div>
+        <div class="summary-item"><span class="label">Total cost</span><span id="calculator-cost-summary" class="value">—</span><span id="calculator-cost-interval" class="interval"></span></div>
+        <div class="summary-item"><span class="label">Total tokens</span><span id="calculator-tokens-summary" class="value">—</span><span id="calculator-tokens-detail" class="interval"></span></div>
+      </div>
+    </section>
+
+    <section class="plots-grid" aria-label="live calculator totals">
+      <article class="card plot-card">
+        <div><p class="eyebrow">Cost</p><h2>Candidate and judge cost</h2><p class="caption">95% intervals from GPQA token-length variation.</p></div>
+        <div id="calculator-cost-plot" class="plot" role="img" aria-label="Candidate, judge, and total cost"></div>
+      </article>
+      <article class="card plot-card">
+        <div><p class="eyebrow">Tokens</p><h2>Candidate and judge tokens</h2><p class="caption">Total input and output tokens for the selected design.</p></div>
+        <div id="calculator-token-plot" class="plot" role="img" aria-label="Candidate and judge token totals"></div>
+      </article>
+    </section>
+
+    <div id="legacy-dashboard" hidden>
     <aside id="validation-banner" class="validation-banner" role="status"></aside>
     <section class="card controls-card" aria-labelledby="design-heading">
       <div class="section-heading">
@@ -173,6 +198,7 @@
       <div class="section-heading"><div><p class="eyebrow">Checks</p><h2 id="warnings-heading">Warnings and unavailable designs</h2></div></div>
       <ul id="warning-list" class="warning-list" aria-live="polite"></ul>
     </section>
+    </div>
   </main>
 
   <template id="manual-row-template">

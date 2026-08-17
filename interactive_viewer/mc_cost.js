@@ -516,6 +516,46 @@ function renderGapCurve(catalogue) {
   byId("calculator-gap-summary").textContent = `At 10% ΔECI: population ${number(100 * trace.y[10], 1)}%; sampled judges ${number(100 * Math.min(...atTen.map((row) => row.mean)), 1)}–${number(100 * Math.max(...atTen.map((row) => row.mean)), 1)}%; per-judge 95% bounds ${number(100 * Math.min(...atTen.map((row) => row.low)), 1)}–${number(100 * Math.max(...atTen.map((row) => row.high)), 1)}%.`;
 }
 
+function renderCalculatorTotals(summary) {
+  const money = (value) => value.toLocaleString(undefined, {
+    style: "currency", currency: "USD", maximumFractionDigits: 2,
+  });
+  const tokens = [summary.candidate_input_tokens, summary.candidate_output_tokens,
+    summary.judge_input_tokens, summary.judge_output_tokens];
+  const totalTokens = tokens.reduce((sum, value) => sum + value.mean, 0);
+  const tokenLow = Math.max(0, totalTokens - Math.hypot(...tokens.map((value) => value.mean - value.low)));
+  const tokenHigh = totalTokens + Math.hypot(...tokens.map((value) => value.high - value.mean));
+  byId("calculator-pairs-summary").textContent = number(summary.pairs, 0);
+  byId("calculator-calls-summary").textContent = number(summary.judgments, 0);
+  byId("calculator-usable-summary").textContent = number(summary.usable_judgments, 1);
+  byId("calculator-cost-summary").textContent = money(summary.total_cost.mean);
+  byId("calculator-cost-interval").textContent = `95%: ${money(summary.total_cost.low)}–${money(summary.total_cost.high)}`;
+  byId("calculator-tokens-summary").textContent = number(totalTokens, 0);
+  byId("calculator-tokens-detail").textContent = `95%: ${number(tokenLow, 0)}–${number(tokenHigh, 0)}`;
+  if (!summary.pairs) {
+    emptyPlot("calculator-cost-plot", "No calculated comparisons.");
+    emptyPlot("calculator-token-plot", "No calculated comparisons.");
+    return;
+  }
+  const bars = (id, labels, values, yTitle, hoverFormat) => {
+    const theme = plotTheme();
+    theme.yaxis.title = yTitle;
+    Plotly.react(id, [{
+      type: "bar", x: labels, y: values.map((value) => value.mean),
+      marker: {color: ["#256fbf", "#117958", "#9a5a00", "#aa3434"].slice(0, values.length)},
+      error_y: {type: "data", symmetric: false, visible: true,
+        array: values.map((value) => value.high - value.mean),
+        arrayminus: values.map((value) => value.mean - value.low)},
+      customdata: values.map((value) => [value.low, value.high]),
+      hovertemplate: `%{x}<br>%{y:${hoverFormat}}<br>95% %{customdata[0]:${hoverFormat}}–%{customdata[1]:${hoverFormat}}<extra></extra>`,
+    }], theme, plotConfig);
+  };
+  bars("calculator-cost-plot", ["Candidate", "Judge", "Total"],
+    [summary.candidate_cost, summary.judge_cost, summary.total_cost], "Cost (USD)", "$.4s");
+  bars("calculator-token-plot", ["Candidate input", "Candidate output", "Judge input", "Judge output"],
+    tokens, "Tokens", ",.3s");
+}
+
 function renderCalculator() {
   byId("judge-accuracy-value").textContent = `${number(100 * calculatorJudgeAccuracy(), 1)}% Acc at 10% ΔECI`;
   for (const name of ["judges", "anchors", "comparators", "items", "repeats"]) {
@@ -538,6 +578,7 @@ function renderCalculator() {
     state.calculatorResults = [];
     byId("calculator-status").textContent = error.message;
     emptyPlot("gap-curves", error.message);
+    renderCalculatorTotals(McCostCalculator.summarizeResults([]));
     return;
   }
   state.calculatorResults = state.calculatorRows.map((row) => {
@@ -566,15 +607,12 @@ function renderCalculator() {
     body.append(tr);
   }
   const failures = state.calculatorResults.filter((row) => row.error).length;
-  const valid = state.calculatorResults.filter((row) => !row.error);
-  const totalCost = valid.reduce((sum, row) => sum + row.total_cost, 0);
-  const costLow = Math.max(0, totalCost - Math.hypot(...valid.map((row) => row.total_cost - row.total_cost_low)));
-  const costHigh = totalCost + Math.hypot(...valid.map((row) => row.total_cost_high - row.total_cost));
+  const summary = McCostCalculator.summarizeResults(state.calculatorResults);
+  renderCalculatorTotals(summary);
   const format = (value) => value.toLocaleString(undefined, {style: "currency", currency: "USD", maximumFractionDigits: 2});
-  const calls = valid.reduce((sum, row) => sum + row.items * row.repeats, 0);
   byId("calculator-status").textContent = failures
-    ? `${valid.length} rows calculated; ${failures} need metadata overrides.`
-    : `${state.calculatorUploaded ? "Uploaded" : calculatorConfig().condition === "oversight" ? "Oversight" : "All"}: ${valid.length} pairs, ${calls.toLocaleString()} judgments; estimated total ${format(totalCost)} (${format(costLow)}–${format(costHigh)}).`;
+    ? `${summary.pairs} rows calculated; ${failures} need metadata overrides.`
+    : `${state.calculatorUploaded ? "Uploaded" : calculatorConfig().condition === "oversight" ? "Oversight" : "All"}: ${summary.pairs} pairs, ${summary.judgments.toLocaleString()} judgments; estimated total ${format(summary.total_cost.mean)} (${format(summary.total_cost.low)}–${format(summary.total_cost.high)}).`;
   byId("download-calculator").disabled = !state.calculatorResults.some((row) => !row.error);
 }
 

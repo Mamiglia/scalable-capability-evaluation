@@ -130,6 +130,15 @@ assert.ok(result.judging_accuracy_low < result.judging_accuracy && result.judgin
 assert.equal(result.m1_length.source, "observed_gpqa");
 assert.equal(result.m2_length.source, "reasoning_class_fallback");
 assert.ok(Math.abs(result.delta_eci - .2) < 1e-12);
+const summary = calc.summarizeResults([result, result]);
+assert.equal(summary.pairs, 2);
+assert.equal(summary.judgments, 40);
+assert.equal(summary.usable_judgments, 16);
+assert.equal(summary.candidate_input_tokens.mean, 1200);
+assert.equal(summary.candidate_output_tokens.mean, 12000);
+assert.equal(summary.judge_input_tokens.mean, 8000);
+assert.equal(summary.judge_output_tokens.mean, 800);
+assert.ok(summary.total_cost.low < summary.total_cost.mean && summary.total_cost.mean < summary.total_cost.high);
 
 const sampled = calc.sampleDesign([...catalogue.values()], {condition:"oversight",judges:1,anchors:2,comparators:2,items:10,repeats:1,seed:3});
 assert.equal(sampled.length, 4);
@@ -191,6 +200,10 @@ def test_dashboard_exposes_the_upload_calculator_as_the_primary_workflow():
     assert parser.elements["judge-accuracy"][1]["type"] == "range"
     assert parser.elements["judge-accuracy-default"][0] == "span"
     assert parser.elements["calculator-items-estimate"][0] == "span"
+    assert parser.elements["calculator-summary"][0] == "section"
+    assert parser.elements["calculator-cost-plot"][0] == "div"
+    assert parser.elements["calculator-token-plot"][0] == "div"
+    assert "hidden" in parser.elements["legacy-dashboard"][1]
     assert parser.elements["calculator-results"][0] == "table"
     assert parser.elements["gap-curves"][0] == "div"
     assert parser.order.index("gap-curves") < parser.order.index("calculator-results")

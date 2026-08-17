@@ -215,6 +215,10 @@
       tokenCostSd(m1, m1Length.input_sd, m1Length.output_sd),
       tokenCostSd(m2, m2Length.input_sd, m2Length.output_sd),
     );
+    const candidateInputTokens = calls * (m1Length.input_mean + m2Length.input_mean);
+    const candidateInputHalf = Z95 * Math.sqrt(calls) * Math.hypot(m1Length.input_sd, m2Length.input_sd);
+    const candidateOutputTokens = calls * (m1Length.output_mean + m2Length.output_mean);
+    const candidateOutputHalf = Z95 * Math.sqrt(calls) * Math.hypot(m1Length.output_sd, m2Length.output_sd);
     const candidateCostLow = Math.max(0, candidateCost - candidateCostHalf);
     const candidateCostHigh = candidateCost + candidateCostHalf;
     const judgeInput = judgeLength.input_overhead_mean + visible(m1Length, "mean") + visible(m2Length, "mean");
@@ -224,6 +228,12 @@
         judgeLength.input_overhead_sd, visible(m1Length, "sd"), visible(m2Length, "sd"),
       ), judgeLength.output_sd,
     );
+    const judgeInputTokens = calls * judgeInput;
+    const judgeInputHalf = Z95 * Math.sqrt(calls) * Math.hypot(
+      judgeLength.input_overhead_sd, visible(m1Length, "sd"), visible(m2Length, "sd"),
+    );
+    const judgeOutputTokens = calls * judgeLength.output_mean;
+    const judgeOutputHalf = Z95 * Math.sqrt(calls) * judgeLength.output_sd;
     const judgeCostLow = Math.max(0, judgeCost - judgeCostHalf);
     const judgeCostHigh = judgeCost + judgeCostHalf;
     const p1 = candidateAccuracy(m1, data), p2 = candidateAccuracy(m2, data);
@@ -264,9 +274,42 @@
       total_cost_low: Math.max(0, candidateCost + judgeCost - Math.hypot(candidateCostHalf, judgeCostHalf)),
       total_cost_high: candidateCost + judgeCost + Math.hypot(candidateCostHalf, judgeCostHalf),
       judge_input_tokens: judgeInput,
+      candidate_input_tokens: candidateInputTokens,
+      candidate_input_tokens_low: Math.max(0, candidateInputTokens - candidateInputHalf),
+      candidate_input_tokens_high: candidateInputTokens + candidateInputHalf,
+      candidate_output_tokens: candidateOutputTokens,
+      candidate_output_tokens_low: Math.max(0, candidateOutputTokens - candidateOutputHalf),
+      candidate_output_tokens_high: candidateOutputTokens + candidateOutputHalf,
+      judge_input_tokens_total: judgeInputTokens,
+      judge_input_tokens_total_low: Math.max(0, judgeInputTokens - judgeInputHalf),
+      judge_input_tokens_total_high: judgeInputTokens + judgeInputHalf,
+      judge_output_tokens: judgeOutputTokens,
+      judge_output_tokens_low: Math.max(0, judgeOutputTokens - judgeOutputHalf),
+      judge_output_tokens_high: judgeOutputTokens + judgeOutputHalf,
       m1_length: m1Length, m2_length: m2Length, judge_length: judgeLength,
       m1_accuracy: p1.mean, m1_accuracy_low: p1.low, m1_accuracy_high: p1.high,
       m2_accuracy: p2.mean, m2_accuracy_low: p2.low, m2_accuracy_high: p2.high,
+    };
+  }
+
+  function summarizeResults(rows) {
+    const valid = rows.filter((row) => !row.error);
+    const interval = (name) => {
+      const mean = valid.reduce((sum, row) => sum + row[name], 0);
+      const lowHalf = Math.hypot(...valid.map((row) => row[name] - row[`${name}_low`]));
+      const highHalf = Math.hypot(...valid.map((row) => row[`${name}_high`] - row[name]));
+      return {mean, low: Math.max(0, mean - lowHalf), high: mean + highHalf};
+    };
+    return {
+      pairs: valid.length,
+      judgments: valid.reduce((sum, row) => sum + row.items * row.repeats, 0),
+      usable_judgments: valid.reduce((sum, row) => sum + row.mutually_correct * row.repeats, 0),
+      candidate_cost: interval("candidate_cost"), judge_cost: interval("judge_cost"),
+      total_cost: interval("total_cost"),
+      candidate_input_tokens: interval("candidate_input_tokens"),
+      candidate_output_tokens: interval("candidate_output_tokens"),
+      judge_input_tokens: interval("judge_input_tokens_total"),
+      judge_output_tokens: interval("judge_output_tokens"),
     };
   }
 
@@ -327,7 +370,7 @@
     };
   }
 
-  const api = {estimateComparison, expectedOverlap, gapCurve, parseComparisons, sampleDesign};
+  const api = {estimateComparison, expectedOverlap, gapCurve, parseComparisons, sampleDesign, summarizeResults};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.McCostCalculator = api;
 })(typeof window === "undefined" ? globalThis : window);
