@@ -30,6 +30,9 @@ external_data/**/*.eval
 /judge_results/
 /irt_models_slide.pptx
 /interactive_viewer/data/
+/interactive_dashboards/transcript_viewer/data/
+/interactive_dashboards/jv/data/
+/interactive_dashboards/cost_estimator/data/
 
 /data/
 

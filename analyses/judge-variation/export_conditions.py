@@ -1,6 +1,7 @@
-"""Export judging-variation conditions as interactive_viewer datasets.
+"""Export judging-variation conditions as transcript-viewer datasets.
 
-One dataset per (bench, condition): interactive_viewer/data/jv-<bench>-<letter>/
+One dataset per (bench, condition):
+interactive_dashboards/jv/data/jv-<bench>-<letter>/
 index.json, pairs/ (per-item verdicts with the judge's explanation) and
 transcripts/ (member text exactly as that condition's judge saw it -
 include_reasoning and truncation from the condition config), in the same shape
@@ -26,7 +27,7 @@ from pool import load_members
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent.parent
-OUT = ROOT / "interactive_viewer" / "data"
+OUT = ROOT / "interactive_dashboards" / "jv" / "data"
 VERDICTS = ROOT / "judge_results" / "judging_variations" / "verdicts.csv"
 LOG_ROOT = ROOT / "logs" / "judging-variations"
 

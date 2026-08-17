@@ -33,8 +33,8 @@ if [ ! -f analysis/mc_cost/validation/manifest.json ]; then
   "$venv/bin/python" -m mc_cost.cli validate --config configs/mc_cost/preview.json
 fi
 
-if [ ! -f interactive_viewer/data/mc_cost.json ]; then
+if [ ! -f interactive_dashboards/cost_estimator/data/mc_cost.json ]; then
   "$venv/bin/python" -m mc_cost.cli export-dashboard \
     --config configs/mc_cost/preview.json --trials 100 \
-    --out interactive_viewer/data/mc_cost.json
+    --out interactive_dashboards/cost_estimator/data/mc_cost.json
 fi

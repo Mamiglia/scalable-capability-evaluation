@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument("--analysis", type=Path, default=Path("analysis/mc_cost"))
     parser.add_argument(
         "--out", type=Path,
-        default=Path("interactive_viewer/data/mc_cost_calculator.json"),
+        default=Path("interactive_dashboards/cost_estimator/data/mc_cost_calculator.json"),
     )
     parser.add_argument(
         "--model-pool", type=Path, default=Path("model-sampler/model_pool.json"),

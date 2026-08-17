@@ -23,7 +23,7 @@ import numpy as np
 from scipy.stats import pearsonr
 
 PILOT = Path("judge_results/gpqa-pilot-rd2")
-EXPANSION_IDX = Path("interactive_viewer/data/data-expansion-gpqa/index.json")
+EXPANSION_IDX = Path("interactive_dashboards/transcript_viewer/data/data-expansion-gpqa/index.json")
 
 # metadata missing from pilot models.csv / the viewer export:
 # judge-only pilot models (accuracy from Epoch's CSV) and release dates of

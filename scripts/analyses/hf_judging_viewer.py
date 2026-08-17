@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ROUND = ROOT / "data" / "hf-judging-2026-08-17"
 RAW = ROUND / "raw"
 BENCHMARK_SCORES = ROUND / "benchmark-scores"
-VIEWER_DATA = ROOT / "interactive_viewer" / "data"
+VIEWER_DATA = ROOT / "interactive_dashboards" / "transcript_viewer" / "data"
 DATASET_PREFIX = "hf-judging-2026-08-17"
 COLORS = {
     "deepseek-v4-flash": "#2a78d6",

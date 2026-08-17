@@ -21,8 +21,8 @@ export TRANSFORMERS_OFFLINE=1
 export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK"
 export PYTHONPATH="$site:$run/src"
 
-if [ ! -f interactive_viewer/data/mc_cost_provisional.json ]; then
+if [ ! -f interactive_dashboards/cost_estimator/data/mc_cost_provisional.json ]; then
   "$python" -m mc_cost.cli export-dashboard \
     --config configs/mc_cost/preview.json --trials 100 --provisional \
-    --out interactive_viewer/data/mc_cost_provisional.json
+    --out interactive_dashboards/cost_estimator/data/mc_cost_provisional.json
 fi

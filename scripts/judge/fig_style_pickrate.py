@@ -15,7 +15,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-DATA = Path("interactive_viewer/data/data-expansion-gpqa")
+DATA = Path("interactive_dashboards/transcript_viewer/data/data-expansion-gpqa")
 
 
 def main():

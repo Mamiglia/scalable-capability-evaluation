@@ -1,4 +1,4 @@
-"""Figure suite over interactive_viewer exports.
+"""Figure suite over transcript-viewer exports.
 
 Default: the data-expansion run with ECI gap axis (the run's design variable).
 --datasets extends to any viewer datasets (e.g. gpqa-pilot-rd2); pilot models
@@ -40,7 +40,7 @@ from sklearn.isotonic import IsotonicRegression
 from judge.dataset import is_effort_variant, strip_answer
 from mc_cost.gpqa import model_family
 
-DATA = Path("interactive_viewer/data")
+DATA = Path("interactive_dashboards/transcript_viewer/data")
 MODEL_SET_CSV = Path("configs/comparisons/model_set.csv")
 REASONING_CONFIG = Path("configs/reasoning_filter.yaml")
 REASONING_MODES = ("none", "per_transcript", "per_model")
@@ -1534,7 +1534,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--datasets", nargs="+", default=EXPANSION_DATASETS,
-                    help="viewer dataset dirs under interactive_viewer/data")
+                    help="viewer dataset dirs under interactive_dashboards/transcript_viewer/data")
     ap.add_argument("--gap", choices=["eci", "acc"], default="eci",
                     help="capability measure for the gap axis and pair orientation")
     ap.add_argument("--exclude-members", nargs="*", default=[],

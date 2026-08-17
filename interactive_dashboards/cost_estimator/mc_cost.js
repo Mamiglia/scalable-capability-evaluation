@@ -678,7 +678,7 @@ async function load() {
     render();
   } catch (error) {
     byId("data-status").textContent = `Dashboard data unavailable: ${error.message}`;
-    byId("warning-list").replaceChildren(Object.assign(document.createElement("li"), {textContent: "Serve interactive_viewer over HTTP after running mc-cost export-dashboard."}));
+    byId("warning-list").replaceChildren(Object.assign(document.createElement("li"), {textContent: "Serve interactive_dashboards/cost_estimator over HTTP after running mc-cost export-dashboard."}));
     for (const plot of ["accuracy-plot", "scaling-plot", "ranking-plot"]) emptyPlot(plot, "Export data before viewing this plot.");
   }
 }

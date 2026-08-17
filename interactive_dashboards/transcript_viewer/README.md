@@ -17,7 +17,7 @@ No build step, no server code, no CDN — just `index.html` + `app.js` +
 `fetch()` needs HTTP (not `file://`), so serve the folder:
 
 ```bash
-python3 -m http.server 8765 --directory interactive_viewer
+python3 -m http.server 8765 --directory interactive_dashboards/transcript_viewer
 # open http://localhost:8765/
 ```
 
@@ -43,24 +43,25 @@ not scraped from the transcript, whose format varies by model), and
 
 ## Share it
 
-The whole folder is ~100 MB (`data/` ~96 MB across both datasets), largest file
-4.3 MB — within every host's limits.
+This folder contains transcript data only; cost-estimator assets and its large
+Monte Carlo export live in `../cost_estimator/`.
 
-**Drag-and-drop (fastest, no git).** Drop `interactive_viewer/` onto
-<https://app.netlify.com/drop> (or Cloudflare Pages) for an instant public URL.
+**Drag-and-drop.** Upload `interactive_dashboards/transcript_viewer/` as a
+folder in Cloudflare Pages Direct Upload. If the dashboard rejects the number
+of assets, deploy the same folder with Wrangler instead.
 
 **GitHub Pages (versioned).**
 1. `data/` is git-ignored by the repo's bare `data/` rule — un-ignore it first:
-   change `data/` to `/data/` in `.gitignore`, or `git add -f interactive_viewer/data`.
-2. Commit and push `interactive_viewer/` (including `data/`).
+   un-ignore `interactive_dashboards/transcript_viewer/data/`, or force-add it.
+2. Commit and push `interactive_dashboards/transcript_viewer/` (including `data/`).
 3. Settings → Pages → Deploy from a branch → your branch, folder `/ (root)`.
-4. Served at `https://<user>.github.io/<repo>/interactive_viewer/`.
+4. Served at the path configured for `interactive_dashboards/transcript_viewer/`.
    Pages is free on public repos only; private repos need Pro/Team.
 
 ## Layout
 
 ```
-interactive_viewer/
+interactive_dashboards/transcript_viewer/
 ├── index.html      shell: controls, plot, transcript modal
 ├── app.js          plot, filters, legend-hover emphasis, modal, fetch/cache
 ├── style.css       house palette, light + dark

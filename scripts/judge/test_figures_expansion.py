@@ -24,7 +24,7 @@ STATS = ("score", "n_items", "slot_a", "noanswer_rate")
 
 @pytest.mark.parametrize("dataset", DATASETS)
 def test_refit_reproduces_the_exported_run_stats(dataset, monkeypatch):
-    d = ROOT / "interactive_viewer" / "data" / dataset
+    d = ROOT / "interactive_dashboards" / "transcript_viewer" / "data" / dataset
     if not (d / "index.json").exists():
         pytest.skip(f"{dataset} not exported here")
     monkeypatch.setattr(expansion, "MIN_REASONING_CHARS", 0)

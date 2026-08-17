@@ -6,7 +6,7 @@ paths:
     gpqa: data/gpqa/63793eb6
     aime2025: data/aime2025/44136fa3
     aime2026: data/aime2026/44136fa3
-  viewer_data: interactive_viewer/data
+  viewer_data: interactive_dashboards/transcript_viewer/data
   output: irt_results/easy_item_prediction
 
 viewer_datasets:

@@ -1,4 +1,4 @@
-"""Export the data-expansion judging into interactive_viewer/data/.
+"""Export the data-expansion judging into interactive_dashboards/transcript_viewer/data/.
 
 One dataset per bench (gpqa, aime2025, aime2026): index.json, transcripts/,
 pairs/ in the shapes the viewer reads. The gpqa dataset also carries the
@@ -25,7 +25,7 @@ from inspect_ai.log import read_eval_log
 from judge.util import extract_score
 from judge.dataset import extract_transcript
 
-DATA_ROOT = Path("interactive_viewer/data")
+DATA_ROOT = Path("interactive_dashboards/transcript_viewer/data")
 MODEL_SET = "configs/comparisons/model_set.json"
 COMPARISONS = "configs/comparisons/comparisons.csv"
 BIGGAP_CFG = "configs/judge_biggap_gpqa.yaml"

@@ -1815,7 +1815,7 @@ def _export_dashboard(args: argparse.Namespace, config: dict[str, Any]) -> None:
         )
         return
 
-    target = args.out or Path(dashboard.get("out", "interactive_viewer/data/mc_cost.json"))
+    target = args.out or Path(dashboard.get("out", "interactive_dashboards/cost_estimator/data/mc_cost.json"))
     _write_json(target, dashboard_payload(
         generated_at=inputs["decision"].get("validation_timestamp"),
         source_hashes=inputs["source_hashes"], catalogue=_records(inputs["catalogue"]),

@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import curve_fit
 
-DATA = Path("interactive_viewer/data/data-expansion-gpqa")
+DATA = Path("interactive_dashboards/transcript_viewer/data/data-expansion-gpqa")
 EDGES = [0, 175, 300, 425, 575, 750, 950, 1200, 1600, 2400, 99999]
 BINS = list(zip(EDGES[:-1], EDGES[1:]))
 CENTERS = [120, 232, 358, 494, 656, 845, 1068, 1385, 1959, 3200]

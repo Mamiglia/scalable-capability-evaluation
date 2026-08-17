@@ -99,7 +99,7 @@ def test_calculator_payload_uses_observed_gpqa_lengths_and_class_fallbacks():
 
 
 def test_browser_calculator_parses_uploads_and_computes_costs_and_curves():
-    script = ROOT / "interactive_viewer" / "mc_cost_calculator.js"
+    script = ROOT / "interactive_dashboards" / "cost_estimator" / "mc_cost_calculator.js"
     node = r'''
 const assert = require("node:assert/strict");
 const calc = require(process.argv[1]);
@@ -218,7 +218,7 @@ assert.ok(largeCost.total_cost.high - largeCost.total_cost.low > smallCost.total
 
 def test_dashboard_exposes_the_upload_calculator_as_the_primary_workflow():
     parser = _Elements()
-    parser.feed((ROOT / "interactive_viewer" / "mc_cost.html").read_text())
+    parser.feed((ROOT / "interactive_dashboards" / "cost_estimator" / "index.html").read_text())
 
     assert parser.elements["comparison-upload"][0] == "input"
     assert parser.elements["comparison-upload"][1]["type"] == "file"

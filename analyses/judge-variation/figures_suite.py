@@ -1,4 +1,4 @@
-"""Figure suite over interactive_viewer exports - judging-variations copy.
+"""Figure suite over transcript-viewer exports - judging-variations copy.
 
 Generalized from scripts/judge/figures_expansion.py: series colors assigned
 dynamically from the dataset list (any jv-* condition datasets work), judge
@@ -32,7 +32,7 @@ import numpy as np
 from scipy.optimize import curve_fit
 from scipy.stats import beta as beta_dist
 
-DATA = Path("interactive_viewer/data")
+DATA = Path("interactive_dashboards/jv/data")
 MODEL_SET_CSV = Path("configs/comparisons/model_set.csv")
 EXPANSION_DATASETS = ["data-expansion-gpqa", "data-expansion-aime2025", "data-expansion-aime2026"]
 SERIES_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#4a3aa7", "#008300", "#e34948"]
@@ -1051,7 +1051,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--datasets", nargs="+", default=EXPANSION_DATASETS,
-                    help="viewer dataset dirs under interactive_viewer/data")
+                    help="viewer dataset dirs under interactive_dashboards/jv/data")
     ap.add_argument("--gap", choices=["eci", "acc"], default="eci",
                     help="capability measure for the gap axis and pair orientation")
     ap.add_argument("--exclude-members", nargs="*", default=[],

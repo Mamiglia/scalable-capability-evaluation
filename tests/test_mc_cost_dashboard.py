@@ -336,7 +336,7 @@ def test_dashboard_ranking_recovery_requires_positive_presentations(presentation
 
 
 def test_dashboard_markup_has_accessible_native_controls_and_local_plotly():
-    html = (ROOT / "interactive_viewer/mc_cost.html").read_text()
+    html = (ROOT / "interactive_dashboards/cost_estimator/index.html").read_text()
     for control in (
         "mode", "automatic-controls", "manual-controls", "judge-pool", "anchor-pool",
         "comparator-pool", "judge-count", "anchor-count", "comparator-count",
@@ -354,26 +354,26 @@ def test_dashboard_markup_has_accessible_native_controls_and_local_plotly():
 
 
 def test_dashboard_assets_keep_existing_viewer_separate_and_support_dark_mode():
-    index = (ROOT / "interactive_viewer/index.html").read_text()
-    script = (ROOT / "interactive_viewer/mc_cost.js").read_text()
-    styles = (ROOT / "interactive_viewer/mc_cost.css").read_text()
+    index = (ROOT / "interactive_dashboards/transcript_viewer/index.html").read_text()
+    script = (ROOT / "interactive_dashboards/cost_estimator/mc_cost.js").read_text()
+    styles = (ROOT / "interactive_dashboards/cost_estimator/mc_cost.css").read_text()
 
-    assert '<a href="mc_cost.html">Monte Carlo cost simulator</a>' in index
+    assert "mc_cost" not in index
     assert 'fetch("data/mc_cost.json")' in script
     assert "Plotly.react" in script
     assert "mc-cost export-dashboard --config configs/mc_cost/default.json" in script
     assert "dashboard.joint_scenarios" in script
     assert "max_judgment_calls" in script
     assert "partial_reasons" in script
-    assert "<th>Candidate calls</th>" in (ROOT / "interactive_viewer/mc_cost.html").read_text()
-    assert "<th>Judge calls</th>" in (ROOT / "interactive_viewer/mc_cost.html").read_text()
+    assert "<th>Candidate calls</th>" in (ROOT / "interactive_dashboards/cost_estimator/index.html").read_text()
+    assert "<th>Judge calls</th>" in (ROOT / "interactive_dashboards/cost_estimator/index.html").read_text()
     assert "@media (prefers-color-scheme: dark)" in styles
     assert "@media (max-width:" in styles
 
 
 def test_dashboard_keeps_provisional_status_visible():
-    html = (ROOT / "interactive_viewer/mc_cost.html").read_text()
-    script = (ROOT / "interactive_viewer/mc_cost.js").read_text()
+    html = (ROOT / "interactive_dashboards/cost_estimator/index.html").read_text()
+    script = (ROOT / "interactive_dashboards/cost_estimator/mc_cost.js").read_text()
 
     assert 'id="validation-banner"' in html
     assert "state.data.validation.status" in script
@@ -381,7 +381,7 @@ def test_dashboard_keeps_provisional_status_visible():
 
 
 def test_dashboard_reuses_availability_details_across_views():
-    script = (ROOT / "interactive_viewer/mc_cost.js").read_text()
+    script = (ROOT / "interactive_dashboards/cost_estimator/mc_cost.js").read_text()
     availability_body = script.split("function availability(", 1)[1].split("\n}", 1)[0]
 
     assert script.count("function availability(") == 1
@@ -396,7 +396,7 @@ def test_dashboard_reuses_availability_details_across_views():
 
 
 def test_dashboard_badges_never_invent_support_for_a_missing_scenario():
-    script = (ROOT / "interactive_viewer/mc_cost.js").read_text()
+    script = (ROOT / "interactive_dashboards/cost_estimator/mc_cost.js").read_text()
 
     assert 'for (const status of statuses)' in script
     assert 'statuses.length ? statuses : ["predicted"]' not in script
@@ -408,7 +408,7 @@ def test_dashboard_headline_total_cost_requires_the_all_role():
         {"metric": "cost", "model": "__total__", "role": "judge", "p50": 2.0},
         {"metric": "cost", "model": "__total__", "role": "all", "p50": 3.0},
     ]
-    script = (ROOT / "interactive_viewer/mc_cost.js").read_text()
+    script = (ROOT / "interactive_dashboards/cost_estimator/mc_cost.js").read_text()
 
     expected = next(
         row for row in rows
