@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pilot: 25 pairs x {gpqa, mbpp}, judged with reasoning traces stripped.
-# Logs: logs/pilot/<bench>/<judge>/<pair>. Extra flags pass through, e.g. --limit 2 --jobs 4.
+# Logs: logs/pilot/<bench>/<judge>/<condition>. Extra flags pass through, e.g. --limit 2.
 source "$(dirname "$0")/_sweep.sh"
 
 ROOT=logs/pilot

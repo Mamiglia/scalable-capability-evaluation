@@ -195,7 +195,6 @@ judge:
     assert judge_main() == 0
     assert captured["tasks"] == ["dummy_task"]
     assert captured["model"] == "p/jdg"
-    assert captured["display"] == "plain"
 
 
 def test_judge_extra_args_parsing(monkeypatch, tmp_path):
@@ -231,4 +230,3 @@ def test_judge_extra_args_parsing(monkeypatch, tmp_path):
     assert captured["model"] == "custom/jdg"
     assert captured["limit"] == 10
     assert captured["max_connections"] == 4
-    assert captured["display"] == "plain"

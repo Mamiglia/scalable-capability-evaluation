@@ -1,7 +1,9 @@
 """Judge experiment configuration dataclass."""
 
+import hashlib
 import warnings
 from dataclasses import dataclass, field
+from itertools import combinations
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Tuple
 
@@ -9,6 +11,22 @@ from configs.task import TaskConfig
 from configs.model import ModelConfig
 from configs.base import DraccusConfig
 from configs.paths import get_eval_path, is_successful_eval
+
+
+def condition_hash(
+    system_prompt: str,
+    include_reasoning: bool,
+    truncate_frac: float,
+    max_length: int,
+    require_both_correct: bool,
+    include_reverse: bool,
+) -> str:
+    """8-char hash of everything that changes what the judge sees, besides the pair."""
+    condition = (
+        str(system_prompt), bool(include_reasoning), float(truncate_frac or 0.0), int(max_length),
+        bool(require_both_correct), bool(include_reverse),
+    )
+    return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
 
 
 @dataclass(kw_only=True)
@@ -79,6 +97,12 @@ class ExperimentConfig(DraccusConfig):
                 f"{self.benchmark.name} — collect them first."
             )
 
+        if self.major.name == self.minor.name:
+            # Self-pair control: with one epoch per log, two distinct repeats is the only
+            # way to get two transcripts of the same model for a question.
+            if len(major_evals) < 2:
+                raise ValueError(f"{self.task_name}: self-pair needs at least two repeats")
+            return list(combinations(major_evals, 2))
         if self.mode == "paired":
             n = min(len(major_evals), len(minor_evals))
             if n != len(major_evals) or n != len(minor_evals):
@@ -104,9 +128,19 @@ class ExperimentConfig(DraccusConfig):
             self.minor = ModelConfig.from_cli(self.minor)
         if isinstance(self.benchmark, (str, Path)):
             self.benchmark = TaskConfig.from_cli(self.benchmark)
-        # <root>/<bench>/<judge>/<pair>: the root is the only axis a sweep has to set, and
-        # inspect can't tell two conditions apart on its own (same task name, same model).
-        self.log_dir = self.log_dir / self.benchmark.name / self.judge.shortname.lower() / self.name
+        # <root>/<bench>/<judge>/<condition hash>: inspect can't tell two conditions apart
+        # on its own (same task names, same judge model), so the condition is in the path.
+        # All pairs of a condition share the directory; task names keep them apart.
+        self.log_dir = (
+            self.log_dir / self.benchmark.name / self.judge.shortname.lower() / self.condition_hash
+        )
+
+    @property
+    def condition_hash(self) -> str:
+        return condition_hash(
+            self.system_prompt, self.include_reasoning, self.truncate_frac, self.max_length,
+            self.require_both_correct, self.include_reverse,
+        )
 
     def eval_kwargs(self) -> Dict[str, Any]:
         """Return keyword arguments for inspect_ai.eval."""

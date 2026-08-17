@@ -6,10 +6,9 @@
 # and FLAGS (the condition), optionally PAIRS (bare config stems; default is all of them),
 # then call `sweep "$@"`.
 #
-# Logs land in $ROOT/<bench>/<judge>/<pair> and eval_set resumes off them, so re-running
-# a script only fills gaps. ROOT must differ per condition — inspect sees the same task
-# name and judge model whether or not reasoning is included, so a shared root would look
-# like one run to it.
+# Logs land in $ROOT/<bench>/<judge>/<condition hash> and eval_set resumes off them, so
+# re-running a script only fills gaps. The condition hash keeps conditions apart; ROOT is
+# just where the analysis scripts look.
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."

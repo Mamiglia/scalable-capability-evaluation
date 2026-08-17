@@ -31,6 +31,19 @@ def test_model_evals_orders_successful_repeats(tmp_path, monkeypatch):
     monkeypatch.setattr("configs.experiment.get_eval_path", lambda **kw: eval_dir)
 
     assert exp.model_evals(model) == [files["run1.eval"], files["run2.eval"]]
+    # Same model on both sides: the control compares distinct repeats, never a log to itself.
+    assert exp.resolve_pairs() == [(files["run1.eval"], files["run2.eval"])]
+
+
+def test_log_dir_separates_conditions():
+    from configs.experiment import ExperimentConfig
+
+    model = ModelConfig(name="model1", slug="model1")
+    kwargs = dict(name="pair", benchmark=TaskConfig(name="bench1"), major=model, minor=model, judge=model)
+    plain = ExperimentConfig(**kwargs)
+    stripped = ExperimentConfig(**kwargs, include_reasoning=False)
+    assert plain.log_dir.parent == stripped.log_dir.parent
+    assert plain.log_dir != stripped.log_dir
 
 
 def test_resolve_pairs_without_logs_raises(tmp_path, monkeypatch):

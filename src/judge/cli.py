@@ -2,6 +2,7 @@
 
 import argparse
 from dataclasses import fields
+from itertools import groupby
 from pathlib import Path
 
 from inspect_ai import eval_set
@@ -26,23 +27,29 @@ def _split_extra(extra: list[str]) -> tuple[dict, dict]:
     return overrides, eval_kwargs
 
 
-def _run_experiment_worker(exp: ExperimentConfig) -> int:
-    tasks = build_judge_tasks(exp)
-    kwargs = exp.eval_kwargs()
+def _run_experiments(experiments: list[ExperimentConfig], display: str | None = None) -> int:
+    """One ``eval_set`` per log dir (= bench x judge x condition), all its pairs as tasks.
 
+    A single eval_set shares one connection pool, retries, resumes and displays on its own;
+    the log dir may already hold other pairs of the same condition, hence allow_dirty.
+    """
+    tasks = [task for exp in experiments for task in build_judge_tasks(exp)]
+    exp = experiments[0]
+    # Judging is API-bound and every task is small: run them all at once, with a wide
+    # connection pool. Both are overridable from the CLI (--max-tasks / --max-connections).
+    concurrency = {"max_tasks": len(tasks), "max_connections": 64}
     with Model(exp.judge) as model:
         success, _ = eval_set(
             tasks=tasks,
             log_dir=str(exp.log_dir),
-            display="plain",
+            log_dir_allow_dirty=True,
+            display=display,
             embed_viewer=False,
-            **model.eval_kwargs(),
-            **kwargs,
+            **concurrency | model.eval_kwargs() | exp.eval_kwargs(),
         )
     if not success:
-        print(f"Judge experiment failed for configuration: {exp}")
-        return 1
-    return 0
+        print(f"Judge run failed in {exp.log_dir}")
+    return 0 if success else 1
 
 
 def main() -> int:
@@ -104,7 +111,7 @@ def main() -> int:
         "--jobs",
         type=int,
         default=8,
-        help="Maximum parallel experiment processes (default: 8).",
+        help="Maximum parallel processes, one per <bench, judge, condition> group (default: 8).",
     )
 
     args, extra = parser.parse_known_args()
@@ -161,8 +168,12 @@ def main() -> int:
             for b, M, m, j in zip(args.bench, args.major, args.minor, args.judge)
         ]
 
-    jobs = [(_run_experiment_worker, (exp,), exp.name) for exp in experiments]
-
+    experiments.sort(key=lambda exp: str(exp.log_dir))
+    groups = [list(group) for _, group in groupby(experiments, key=lambda exp: str(exp.log_dir))]
+    if len(groups) == 1:
+        # Inline, with inspect's own live display.
+        return _run_experiments(groups[0])
+    jobs = [(_run_experiments, (group, "plain"), str(group[0].log_dir)) for group in groups]
     return eval_runner(jobs, max_workers=args.jobs)
 
 
