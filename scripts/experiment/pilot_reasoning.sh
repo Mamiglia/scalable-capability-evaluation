@@ -19,17 +19,11 @@ JUDGES=(
   meta-llama/llama3.1-8b
 )
 PAIRS=(
-  claude-opus-4.7-vs-kimi-k3
   glm-5.2-vs-deepseek-r1-0528
   glm-5.2-vs-glm-4.6
-  glm-5.2-vs-gpt-5
-  gpt-5-vs-glm-4.6
-  gpt-5-vs-o3
-  gpt-5-vs-qwen3-32b
   kimi-k2.6-vs-glm-5.2
   kimi-k2.6-vs-kimi-k3
   kimi-k3-vs-deepseek-r1-0528
-  kimi-k3-vs-o3
   qwen3.5-4b-vs-qwen3.5-9b
 )
 FLAGS=(--include_reasoning true)
