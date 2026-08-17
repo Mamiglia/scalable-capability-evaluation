@@ -57,6 +57,19 @@ Corrected immutable recording jobs:
 Check these jobs roughly every 30 minutes, per user preference. Do not delete or overwrite old or
 new Ceph artefacts.
 
+The downstream campaign is frozen to
+`$C/staging/whitebox/code_snapshot_4a46b76` and queued with Slurm `afterok` dependencies:
+
+| Model | timeline | CEBRA all 12 | BSF all 12 | BatchTopK all 12 | raw / PCA / random controls |
+|---|---:|---:|---:|---:|---:|
+| Qwen | 3392182 | 3392183 | 3392184 | 3392185 | 3392186 / 3392187 / 3392188 |
+| Llama | 3392189 | 3392190 | 3392191 | 3392192 | 3392193 / 3392194 / 3392195 |
+
+CEBRA uses all eight latent dimensions, three seeds and three item folds. The reconstructive-method
+and matched-control screens use the same semantic-blind 32-relative-position sample and item folds.
+All paths are new under `item_balanced_core100_v2`; jobs cannot start unless the corresponding
+recording exits successfully.
+
 ## Research questions that bind the corrected analysis
 
 1. Which exact tokens change anonymous internal decision representations?
