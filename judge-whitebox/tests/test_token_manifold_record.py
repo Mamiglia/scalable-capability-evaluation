@@ -1,6 +1,11 @@
+import json
+import sys
+
 import numpy as np
 import pandas as pd
+import pytest
 import torch
+from transformers import AutoModelForCausalLM, Qwen3Config
 
 import token_manifold_record as record
 
@@ -23,8 +28,42 @@ class OffsetTokenizer:
             out["offset_mapping"] = [(i, i + 1) for i in range(len(text))]
         return out
 
+    def encode(self, text, add_special_tokens=False):
+        return {"1": [2], "2": [3]}[text]
+
 
 LengthTokenizer = OffsetTokenizer
+
+
+def make_tiny_model():
+    config = Qwen3Config(vocab_size=32, hidden_size=8, intermediate_size=16,
+                         num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1,
+                         head_dim=4, max_position_embeddings=32)
+    model = AutoModelForCausalLM.from_config(config)
+    model.eval()
+    return model
+
+
+def make_pairs_df(n):
+    return pd.DataFrame([fake_row(f"p{i}") | {"item": f"it{i}", "order": i % 2}
+                         for i in range(n)])
+
+
+def fake_token_meta(row, tokenizer, c):
+    n = len(row["text_1"])
+    return {"prompt": row["text_1"], "input_ids": list(range(1, n + 1)),
+            "offsets": [(i, i + 1) for i in range(n)],
+            "group_id": np.ones(n, dtype=np.int8),
+            "group_names": record.STRUCTURAL_GROUPS}
+
+
+def fake_recorded_row(uid, n_tokens):
+    return {"row_idx": int(uid[1:]), "pair_uid": uid, "item": "it0", "order": 0,
+            "resid": torch.zeros(n_tokens, 2, 4, dtype=torch.float16),
+            "input_ids": list(range(n_tokens)),
+            "offsets": [(i, i + 1) for i in range(n_tokens)],
+            "group_id": np.ones(n_tokens, dtype=np.int8),
+            "l1": 1.0, "l2": 0.0, "gap": 1.0}
 
 
 def test_balanced_item_folds_are_deterministic_disjoint_and_row_balanced():
@@ -77,3 +116,58 @@ def test_estimate_storage_counts_rendered_tokens_and_residual_bytes(monkeypatch)
     assert out["n_prompts"] == 2
     assert out["n_tokens"] == len(df.iloc[0].text_1) + len(df.iloc[1].text_1)
     assert out["residual_bytes"] == out["n_tokens"] * 2 * 4 * 2
+
+
+def test_record_rows_keeps_every_token_at_selected_layers(monkeypatch):
+    model, tok, df = make_tiny_model(), OffsetTokenizer(), make_pairs_df(2)
+    monkeypatch.setattr(record.wbprompts, "render_verdict_prompt", lambda row, tok: row["text_1"])
+    monkeypatch.setattr(record, "prompt_token_meta", fake_token_meta)
+
+    rows = list(record.record_rows(model, tok, df, fake_cfg(), layers=(0, 2)))
+
+    assert rows[0]["resid"].shape == (len(df.iloc[0].text_1), 2, model.config.hidden_size)
+    assert rows[0]["resid"].dtype == torch.float16
+    assert rows[0]["gap"] == pytest.approx(rows[0]["l1"] - rows[0]["l2"])
+
+
+def test_write_shards_round_trips_and_hashes(tmp_path):
+    rows = [fake_recorded_row("p0", 3), fake_recorded_row("p1", 2)]
+
+    manifest = record.write_shards(iter(rows), tmp_path / "new", 1, {"model": "dev"})
+
+    data = json.loads(manifest.read_text())
+    assert data["n_prompts"] == 2 and data["n_tokens"] == 5
+    assert len(data["shards"]) == 2
+    for entry in data["shards"]:
+        path = manifest.parent / entry["path"]
+        assert record.sha256(path) == entry["sha256"]
+
+
+def test_write_shards_refuses_existing_output(tmp_path):
+    out = tmp_path / "existing"
+    out.mkdir()
+
+    with pytest.raises(FileExistsError):
+        record.write_shards(iter([]), out, 1, {})
+
+
+def test_main_estimate_only_prints_json_and_writes_nothing(tmp_path, monkeypatch, capsys):
+    df = make_pairs_df(4)
+    monkeypatch.setattr(record.wbconfig, "cfg", lambda: {
+        "verdicts": {"eval_split": "eval_mm"}, "token_manifold": {"fold_seed": 7},
+        "paths": {"pairs": "/fake/pairs.parquet"},
+    })
+    monkeypatch.setattr(record.wbpairs, "load_pairs", lambda c, split, limit: df)
+    monkeypatch.setattr(record, "load_tokenizer_and_shape",
+                        lambda model, c: (OffsetTokenizer(), 4, 3))
+    monkeypatch.setattr(record.wbprompts, "render_verdict_prompt",
+                        lambda row, tok: row["text_1"])
+    out = tmp_path / "unused"
+    monkeypatch.setattr(sys, "argv", ["token_manifold_record.py", "--model", "dev",
+                                       "--fold", "A", "--estimate-only", "--out", str(out)])
+
+    record.main()
+
+    estimate = json.loads(capsys.readouterr().out)
+    assert estimate["n_prompts"] > 0 and estimate["n_layers"] == 3
+    assert not out.exists()
