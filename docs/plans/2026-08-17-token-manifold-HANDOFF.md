@@ -2,10 +2,78 @@
 
 ## One-line state
 
-The base-model per-token residual recordings and corrected item-grouped decoder timelines are
-complete. Qwen has a strong late readout-position signal; Llama has a weak late one; neither model
-yet has positive linear decoding at transcript tokens. Full five-seed method bake-offs are submitted
-on SWC at the frozen peak layers.
+**Critical correction, 2026-08-18:** the original 100-pair activation pilot is superseded for
+science because its order-preserving limit contained only four Qwen items and five Llama items.
+It remains an engineering/method-calibration artefact only. A tested deterministic item-round-robin
+sampler is committed; corrected item-balanced storage estimates and recordings use the new immutable
+tag `item_balanced_core100_v2`. No semantic feature or causal claim may use the old pilot.
+
+## Why the first pilot is invalid for inference
+
+`limit_pairs` previously took the first 100 pair IDs after fold selection. The pairs parquet is
+item-clustered, so the nominally item-grouped discovery cells actually contained:
+
+- Qwen fold A: 100 pairs / 200 prompts / **4 items**;
+- Llama fold B: 100 pairs / 200 prompts / **5 items**.
+
+This explains why nominal cross-validation halves contained only two items. All results below this
+correction—including late ridge/CEBRA/BSF/SAE values—are retained as pipeline calibration, not
+evidence. The fix is `item_round_robin_v1`: whole pair IDs are selected in deterministic rounds
+across every available item while original row order is preserved. New manifests record
+`limit_sampling=item_round_robin_v1`; estimates report `n_pairs` and `n_items` explicitly.
+
+The calibration nevertheless exposed and fixed real implementation defects:
+
+- fold-local residual and latent-code normalization;
+- nested item-grouped regularization over a sufficiently wide ridge grid;
+- CEBRA `delta_normal` conditioning and nonlinear KNN decoding;
+- semantic-blind prompt-balanced token sampling;
+- separate per-layer state and prompt-local change surfaces;
+- exact-token and strictly item-cross-fitted trace exporters;
+- genuine BatchTopK rather than the rejected inference-only per-sample TopK control;
+- post-hoc capability/length/position/error labels kept out of representation fitting;
+- held-out inherited-versus-new cross-layer decomposition.
+
+Runpod pod `s4163rowfu5yc6` was created briefly, received no data, and was terminated. No new Runpod
+volume exists and account spend returned to the pre-existing baseline. SWC remains the execution
+environment.
+
+## Corrected item-balanced core now recording
+
+Compute estimates completed cleanly with the new sampler:
+
+| Model/fold | estimate job | pairs | prompts | items | tokens | residual bytes |
+|---|---:|---:|---:|---:|---:|---:|
+| Qwen3-8B / A | 3392176 | 100 | 200 | 20 | 325,606 | 32,008,372,224 |
+| Llama-3.2-3B-Instruct / B | 3392177 | 100 | 200 | 20 | 334,728 | 24,678,825,984 |
+
+Corrected immutable recording jobs:
+
+| Model/fold | job | destination |
+|---|---:|---|
+| Qwen3-8B / A | 3392178 | `token_manifold/item_balanced_core100_v2/record_Qwen3-8B_A` |
+| Llama-3.2-3B-Instruct / B | 3392179 | `token_manifold/item_balanced_core100_v2/record_Llama-3.2-3B-Instruct_B` |
+
+Check these jobs roughly every 30 minutes, per user preference. Do not delete or overwrite old or
+new Ceph artefacts.
+
+## Research questions that bind the corrected analysis
+
+1. Which exact tokens change anonymous internal decision representations?
+2. Which post-hoc external transcript properties those objects encode, especially independent
+   capability/strength versus length, position/order and other biases?
+3. In errors where the judge selects the longer but weaker transcript, when does capability
+   information appear, when does the bias representation appear, and why does it take over?
+4. Can layer-X dimensions predict output-associated layer-Y geometry? Decompose layer Y into an
+   inherited/predictable component and a residual; define new information by incremental held-out
+   gap prediction beyond layer X, not residual predictivity alone.
+5. Which objects causally change the judge's own logit gap, and how do pairs interact non-additively?
+6. Which objects replicate across Qwen/Llama, conditional on each model exhibiting the corresponding
+   behaviour?
+
+Capability, length, position, style and correctness labels are prohibited during representation
+fitting. They enter only after anonymous objects are frozen. Semantic names require an independently
+measurable rule, confirmation-fold re-extraction/alignment and causal controls.
 
 ## Scientific question
 
@@ -19,9 +87,9 @@ Design: `docs/superpowers/specs/2026-08-17-output-conditioned-token-manifolds-de
 
 Plan: `docs/superpowers/plans/2026-08-17-token-manifold-bakeoff.md`
 
-## Corrected timeline results
+## Superseded pilot timeline results — engineering only
 
-Both jobs used 200 prompts (100 pair IDs, both orders), immutable float16 residual shards at 12
+Both jobs used 200 prompts (100 pair IDs, both orders), but only four/five items. They used immutable float16 residual shards at 12
 layers, item-grouped five-fold OOF ridge, equal prompt weights, fold-local mean/RMS scaling, and a
 prompt-level shuffled-gap null.
 
@@ -43,14 +111,14 @@ Compact local summaries:
 
 The corresponding OOF tables remain on Ceph because they are about 331 MB and 306 MB.
 
-## Scientific bake-offs now submitted
+## Superseded mixed-token bake-offs — engineering only
 
 | Model | job | layer | new Ceph output directory |
 |---|---:|---:|---|
 | Qwen3-8B base | 3391805 | 29 | `bakeoff_qwen_v2_scientific_L29` |
 | Llama-3.2-3B-Instruct base | 3391806 | 25 | `bakeoff_llama_v2_scientific_L25` |
 
-Each job runs the pre-declared full grid: five seeds; CEBRA dimensions 1/2/4/8/16 at 10,000
+Each job ran the pre-declared full grid: five seeds; CEBRA dimensions 1/2/4/8/16 at 10,000
 iterations; BSF block sizes 1/2/4/8; and matched BatchTopK SAE. Outputs are `bakeoff.csv` and
 `bakeoff.pt`. Do not interpret the earlier `*_quick` directories: they used smoke settings and layers
 selected from the superseded timeline.
