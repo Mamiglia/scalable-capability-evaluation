@@ -445,6 +445,22 @@ def test_run_trace_writes_exact_sparse_codes_offsets_and_model(tmp_path, monkeyp
     assert (out / "model.pt").exists()
 
 
+def test_run_cebra_crossfit_trace_predicts_every_token_out_of_item(tmp_path, monkeypatch):
+    manifest = write_trajectory_manifest(tmp_path / "recording")
+    monkeypatch.setattr(discover, "fit_method", fake_fit_method)
+    out = tmp_path / "crossfit"
+
+    discover.run_cebra_crossfit_trace(
+        manifest, layer=2, out_dir=out, seeds=(0,), positions_per_prompt=6,
+        cv_folds=2, quick=True)
+
+    trace = torch.load(out / "trace_oof.pt", map_location="cpu", weights_only=False)
+    assert trace["pred_gap"].shape == (1, 240)
+    assert trace["code"].shape[:2] == (1, 240)
+    assert torch.isfinite(trace["pred_gap"]).all()
+    assert set(trace["fold"].tolist()) == {0, 1}
+
+
 def test_bakeoff_writes_one_row_per_method(tmp_path, monkeypatch):
     manifest = write_fake_manifest(tmp_path / "recording")
     monkeypatch.setattr(discover, "fit_method", fake_fit_method)
@@ -526,11 +542,32 @@ def test_main_trace_dispatches_cli_arguments(tmp_path, monkeypatch):
                     "positions_per_prompt": 32, "quick": True}
 
 
+def test_main_crossfit_trace_dispatches_cli_arguments(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_run(manifest, layer, out_dir, seeds, positions_per_prompt, cv_folds, quick):
+        seen.update(manifest=manifest, layer=layer, out_dir=out_dir, seeds=seeds,
+                    positions_per_prompt=positions_per_prompt, cv_folds=cv_folds, quick=quick)
+
+    monkeypatch.setattr(discover, "run_cebra_crossfit_trace", fake_run)
+    monkeypatch.setattr(sys, "argv", ["token_manifold_discover.py", "crossfit-trace",
+                                       "--manifest", "recording/manifest.json",
+                                       "--layer", "25", "--seeds", "0,2",
+                                       "--positions-per-prompt", "32", "--cv-folds", "2",
+                                       "--out", str(tmp_path / "out"), "--quick"])
+
+    discover.main()
+
+    assert seen == {"manifest": "recording/manifest.json", "layer": 25,
+                    "out_dir": str(tmp_path / "out"), "seeds": (0, 2),
+                    "positions_per_prompt": 32, "cv_folds": 2, "quick": True}
+
+
 def test_sbatch_has_explicit_stages_and_never_installs_packages():
     text = (Path(__file__).parents[1] / "sbatch" / "token_manifold.sbatch").read_text()
 
     assert "WB_STAGE" in text
-    for stage in ("record", "timeline", "bakeoff", "trajectory", "trace"):
+    for stage in ("record", "timeline", "bakeoff", "trajectory", "trace", "crossfit"):
         assert stage in text
     assert "WB_MANIFOLD_VENV" in text
     assert "WB_RUN" in text
@@ -538,4 +575,5 @@ def test_sbatch_has_explicit_stages_and_never_installs_packages():
     assert "bakeoff_${RUN}_L${LAYER}" in text
     assert "trajectory_${RUN}_${METHOD}" in text
     assert "trace_${RUN}_${METHOD}_L${LAYER}" in text
+    assert "crossfit_${RUN}_cebra_L${LAYER}" in text
     assert "pip install" not in text

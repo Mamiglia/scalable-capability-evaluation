@@ -641,6 +641,72 @@ def run_trace(manifest, layer, method, out_dir, seed, positions_per_prompt=64,
     return out_dir / "codes.pt"
 
 
+def run_cebra_crossfit_trace(manifest, layer, out_dir, seeds, positions_per_prompt=64,
+                             cv_folds=2, quick=False):
+    """Encode and decode every token strictly out of item for CEBRA localization."""
+    out_dir = pathlib.Path(out_dir)
+    if out_dir.exists():
+        raise FileExistsError(out_dir)
+    out_dir.mkdir(parents=True)
+    data = load_manifest(manifest, layer=layer)
+    prompt_idx = data["prompt_idx"]
+    position = data["position"]
+    selected = relative_token_indices(prompt_idx, position, positions_per_prompt)
+    prompt_rows = np.arange(len(data["gap"]))
+    prompt_splits = list(GroupKFold(
+        n_splits=min(cv_folds, len(np.unique(data["item"])))).split(
+            prompt_rows, data["gap"], data["item"]))
+    predictions = np.full((len(seeds), len(prompt_idx)), np.nan, dtype=np.float32)
+    all_codes, token_fold = [], np.full(len(prompt_idx), -1, dtype=np.int8)
+    config = trajectory_config("cebra", data["X"].shape[2], quick)
+    for seed_idx, seed in enumerate(seeds):
+        seed_code = None
+        for fold, (train_prompts, test_prompts) in enumerate(prompt_splits):
+            train = selected[np.isin(prompt_idx[selected], train_prompts)]
+            test = np.flatnonzero(np.isin(prompt_idx, test_prompts))
+            mean, scale = _trajectory_stats(data["X"][train, 0], "cebra")
+            X_train = (data["X"][train, 0] - mean) / scale
+            X_test = (data["X"][test, 0] - mean) / scale
+            train_prompt = prompt_idx[train]
+            result = fit_method("cebra", X_train, data["gap"][train_prompt], X_test,
+                                seed, quick, config)
+            pred, _ = grouped_knn_predictions(
+                result.train_code, data["gap"][train_prompt], data["item"][train_prompt],
+                result.test_code)
+            predictions[seed_idx, test] = pred
+            if seed_code is None:
+                seed_code = np.full((len(prompt_idx), result.test_code.shape[1]), np.nan,
+                                    dtype=np.float32)
+            seed_code[test] = result.test_code
+            token_fold[test] = fold
+            if result.model is not None:
+                tmp = out_dir / f"model_s{seed}_f{fold}.cebra.partial"
+                result.model.save(str(tmp))
+                os.replace(tmp, out_dir / f"model_s{seed}_f{fold}.cebra")
+                token_manifold_record.atomic_torch_save(
+                    {"mean": mean, "scale": scale, "train_rows": train,
+                     "test_rows": test, "config": config},
+                    out_dir / f"fit_s{seed}_f{fold}.pt")
+        all_codes.append(seed_code)
+    if not np.isfinite(predictions).all() or token_fold.min() < 0:
+        raise ValueError("cross-fitted trace did not cover every token")
+    payload = {
+        "manifest": str(manifest), "method": "cebra", "layer": layer,
+        "seeds": tuple(seeds), "config": config,
+        "pred_gap": torch.as_tensor(predictions),
+        "code": torch.as_tensor(np.stack(all_codes), dtype=torch.float16),
+        "fold": torch.as_tensor(token_fold, dtype=torch.int8),
+        "prompt_idx": torch.as_tensor(prompt_idx, dtype=torch.int32),
+        "position": torch.as_tensor(position, dtype=torch.int32),
+        "input_ids": torch.as_tensor(data["input_ids"], dtype=torch.int32),
+        "offsets": torch.as_tensor(data["offsets"], dtype=torch.int32),
+        "group_id": torch.as_tensor(data["group_id"], dtype=torch.int8),
+        "prompts": data["prompts"],
+    }
+    token_manifold_record.atomic_torch_save(payload, out_dir / "trace_oof.pt")
+    return out_dir / "trace_oof.pt"
+
+
 def _reconstruction_r2(target, reconstruction):
     if reconstruction is None:
         return np.nan
@@ -740,6 +806,14 @@ def main():
     trace.add_argument("--positions-per-prompt", type=int, default=64)
     trace.add_argument("--out", required=True)
     trace.add_argument("--quick", action="store_true")
+    crossfit = subparsers.add_parser("crossfit-trace")
+    crossfit.add_argument("--manifest", required=True)
+    crossfit.add_argument("--layer", required=True, type=int)
+    crossfit.add_argument("--seeds", default="0,1,2")
+    crossfit.add_argument("--positions-per-prompt", type=int, default=64)
+    crossfit.add_argument("--cv-folds", type=int, default=2)
+    crossfit.add_argument("--out", required=True)
+    crossfit.add_argument("--quick", action="store_true")
     args = parser.parse_args()
 
     if args.command == "timeline":
@@ -770,6 +844,12 @@ def main():
         run_trace(args.manifest, args.layer, args.method, args.out, args.seed,
                   args.positions_per_prompt, args.quick)
         print(f"exact token trace -> {args.out}")
+    elif args.command == "crossfit-trace":
+        run_cebra_crossfit_trace(
+            args.manifest, args.layer, args.out,
+            tuple(int(seed) for seed in args.seeds.split(",")),
+            args.positions_per_prompt, args.cv_folds, args.quick)
+        print(f"cross-fitted exact token trace -> {args.out}")
 
 
 if __name__ == "__main__":
