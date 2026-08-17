@@ -66,7 +66,7 @@
       </div>
       <p class="caption">Oversight samples N models newer and stronger than each judge, then M older comparators per anchor. All models removes those restrictions. Uploads override the sampler and require <code>judge,m1,m2,items</code>; optional:
         <code>repeats</code>/<code>epochs</code> and per-role <code>theta</code>, <code>eci</code>, <code>reasoning_class</code>,
-        <code>release</code>, <code>price_in</code>, <code>price_out</code> overrides. Prices are USD per million tokens.</p>
+        <code>release</code>, <code>price_in</code>, <code>price_out</code> overrides. Default judges are generic Monte Carlo draws from the configured 36-model pool; uploaded judge names remain exact. Prices are USD per million tokens.</p>
       <div id="calculator-status" class="guidance neutral" role="status">Loading calculator data…</div>
       <div class="plot-heading calculator-plot-heading">
         <div><p class="eyebrow">Selected condition</p><h2>Relative ECI-gap curve</h2><p class="caption">Each line is one sampled judge. Its 95% band includes evaluated-model, nested-item, and repeat variance from the fitted hierarchy; the thick dashed line is the population mean set by the accuracy slider.</p></div>
@@ -99,11 +99,11 @@
 
     <section class="plots-grid" aria-label="live calculator totals">
       <article class="card plot-card">
-        <div><p class="eyebrow">Cost</p><h2>Candidate and judge cost</h2><p class="caption">95% intervals from GPQA token-length variation.</p></div>
+        <div><p class="eyebrow">Cost</p><h2>Candidate and judge cost</h2><p class="caption">95% Monte Carlo predictive intervals across judge/model profiles and GPQA token lengths.</p></div>
         <div id="calculator-cost-plot" class="plot" role="img" aria-label="Candidate, judge, and total cost"></div>
       </article>
       <article class="card plot-card">
-        <div><p class="eyebrow">Tokens</p><h2>Candidate and judge tokens</h2><p class="caption">Total input and output tokens for the selected design.</p></div>
+        <div><p class="eyebrow">Tokens</p><h2>Candidate and judge tokens</h2><p class="caption">Total input and output tokens with 95% Monte Carlo predictive intervals.</p></div>
         <div id="calculator-token-plot" class="plot" role="img" aria-label="Candidate and judge token totals"></div>
       </article>
     </section>

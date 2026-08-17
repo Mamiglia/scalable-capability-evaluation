@@ -11,6 +11,7 @@ const tokenMetrics = {
   judge_ordinary_output_tokens: "ordinary", judge_reasoning_tokens: "reasoning",
 };
 const state = {data: null, calculatorData: null, calculatorRows: [], calculatorResults: [], calculatorUploaded: false};
+let calculatorRenderTimer;
 
 function option(select, value, label = value) {
   const item = document.createElement("option");
@@ -460,6 +461,11 @@ function calculatorJudgeAccuracy() {
   return Number(byId("judge-accuracy").value) / 100;
 }
 
+function scheduleCalculator() {
+  clearTimeout(calculatorRenderTimer);
+  calculatorRenderTimer = setTimeout(renderCalculator, 100);
+}
+
 function calculatorConfig() {
   return {
     condition: byId("calculator-condition").value,
@@ -570,7 +576,9 @@ function renderCalculator() {
   const catalogue = new Map(state.calculatorData.catalogue.map((model) => [model.model_id, model]));
   try {
     if (!state.calculatorUploaded) {
-      state.calculatorRows = McCostCalculator.sampleDesign([...catalogue.values()], calculatorConfig());
+      state.calculatorRows = McCostCalculator.sampleDesign(
+        [...catalogue.values()], calculatorConfig(), state.calculatorData.judge_pool,
+      );
     }
     renderGapCurve(catalogue);
   } catch (error) {
@@ -607,7 +615,13 @@ function renderCalculator() {
     body.append(tr);
   }
   const failures = state.calculatorResults.filter((row) => row.error).length;
-  const summary = McCostCalculator.summarizeResults(state.calculatorResults);
+  const summary = McCostCalculator.simulateSummary(
+    state.calculatorRows, state.calculatorData, catalogue, calculatorJudgeAccuracy(),
+    calculatorConfig().correctFraction,
+    state.calculatorUploaded ? {} : {
+      config: calculatorConfig(), judgePool: state.calculatorData.judge_pool, trials: 200,
+    },
+  );
   renderCalculatorTotals(summary);
   const format = (value) => value.toLocaleString(undefined, {style: "currency", currency: "USD", maximumFractionDigits: 2});
   byId("calculator-status").textContent = failures
@@ -691,11 +705,11 @@ for (const id of ["calculator-condition", "calculator-judges", "calculator-ancho
   byId(id).addEventListener("input", () => {
     state.calculatorUploaded = false;
     byId("comparison-upload").value = "";
-    renderCalculator();
+    scheduleCalculator();
   });
 }
-byId("judge-accuracy").addEventListener("input", renderCalculator);
-byId("calculator-correct").addEventListener("input", renderCalculator);
+byId("judge-accuracy").addEventListener("input", scheduleCalculator);
+byId("calculator-correct").addEventListener("input", scheduleCalculator);
 byId("download-calculator").addEventListener("click", downloadCalculator);
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
 loadCalculator();

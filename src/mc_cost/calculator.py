@@ -7,6 +7,20 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 
 
+DEFAULT_JUDGE_POOL = (
+    "claude-sonnet-4.5", "deepseek-r1-0528", "deepseek-v3-0324",
+    "deepseek-v3.2", "deepseek-v4-flash-0731", "gemini-3.5-flash",
+    "gemma-7b", "gemma3-12b-it", "gemma4-26b-a4b-it", "gemma4-31b",
+    "gemma4-e2b-it", "granite-4.1-8b", "ling-2.6-flash", "llama-7b",
+    "llama2-13b", "llama3.1-8b", "phi3-medium-128k-instruct",
+    "mistral-medium-3", "kimi-k2-thinking", "kimi-k2.6", "kimi-k2",
+    "kimi-k3", "mpt-30b", "nemotron-3-super-120b-a12b",
+    "gpt-4o-mini-2024-07-18", "gpt-5", "gpt-oss-120b", "gpt-oss-20b",
+    "o3", "qwen-14b", "qwen3-14b", "qwen3-32b-thinking", "qwen3.5-4b",
+    "qwen3.5-9b", "glm-4.5", "glm-5.2",
+)
+
+
 def _summary(frame: pd.DataFrame, columns: tuple[str, ...], source: str) -> dict:
     result = {"n": int(len(frame)), "source": source}
     for column in columns:
@@ -154,9 +168,37 @@ def _candidate_accuracy_default(
     }
 
 
+def _judge_pool(catalogue: pd.DataFrame, model_ids: tuple[str, ...] | list[str]) -> list[dict]:
+    if not model_ids:
+        return []
+    indexed = catalogue.set_index("model_id")
+    if not indexed.index.is_unique:
+        raise ValueError("catalogue model_id must be unique")
+    missing = [model_id for model_id in model_ids if model_id not in indexed.index]
+    if missing:
+        raise ValueError(f"judge pool models missing from catalogue: {', '.join(missing)}")
+    pool = indexed.loc[list(model_ids)].reset_index()
+    for column in ("eci", "price_in", "price_out"):
+        values = pd.to_numeric(pool[column], errors="coerce")
+        if not values.notna().any():
+            raise ValueError(f"judge pool has no observed {column}")
+        pool[column] = values.fillna(values.mean())
+    release = pd.to_datetime(pool["release"], errors="coerce")
+    if not release.notna().any():
+        raise ValueError("judge pool has no observed release date")
+    pool["release"] = release.fillna(release.dropna().median()).dt.strftime("%Y-%m-%d")
+    columns = [
+        column for column in (
+            "model_id", "theta", "eci", "release", "reasoning_class", "price_in", "price_out",
+        ) if column in pool
+    ]
+    return pool[columns].astype(object).where(pd.notna(pool[columns]), None).to_dict("records")
+
+
 def build_calculator_payload(
     catalogue: pd.DataFrame, candidates: pd.DataFrame,
     judges: pd.DataFrame, judgments: pd.DataFrame,
+    *, judge_pool: tuple[str, ...] | list[str] = (),
 ) -> dict:
     candidate_frame = candidates.copy()
     candidate_frame["visible_tokens"] = (
@@ -189,6 +231,7 @@ def build_calculator_payload(
         "catalogue": catalogue[catalogue_columns].astype(object).where(
             pd.notna(catalogue[catalogue_columns]), None,
         ).to_dict("records"),
+        "judge_pool": _judge_pool(catalogue, judge_pool),
         "candidate_models": candidate_models,
         "candidate_defaults": _class_defaults(candidate_frame, candidate_columns),
         "judge_models": _group_summaries(

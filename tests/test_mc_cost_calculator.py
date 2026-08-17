@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from mc_cost.calculator import build_calculator_payload
+from mc_cost.calculator import DEFAULT_JUDGE_POOL, build_calculator_payload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,7 +63,9 @@ def test_calculator_payload_uses_observed_gpqa_lengths_and_class_fallbacks():
     judgments["left_model"] = judgments["left_theta"].map(by_theta)
     judgments["right_model"] = judgments["right_theta"].map(by_theta)
 
-    payload = build_calculator_payload(catalogue, candidates, judges, judgments)
+    payload = build_calculator_payload(
+        catalogue, candidates, judges, judgments, judge_pool=["j"],
+    )
 
     assert payload["candidate_models"]["a"] == {
         "accuracy": 0.5,
@@ -86,6 +88,13 @@ def test_calculator_payload_uses_observed_gpqa_lengths_and_class_fallbacks():
     assert payload["catalogue"][0]["eci"] == 120.0
     assert payload["candidate_accuracy_default"]["low"] <= payload["candidate_accuracy_default"]["mean"]
     assert payload["candidate_accuracy_default"]["mean"] <= payload["candidate_accuracy_default"]["high"]
+    assert payload["judge_pool"] == [{
+        "model_id": "j", "theta": 0.0, "eci": 95.0, "release": "2024-01-01",
+        "reasoning_class": "reasoning", "price_in": 1.0, "price_out": 2.0,
+    }]
+    assert len(DEFAULT_JUDGE_POOL) == 36
+    assert DEFAULT_JUDGE_POOL[0] == "claude-sonnet-4.5"
+    assert DEFAULT_JUDGE_POOL[-1] == "glm-5.2"
     json.dumps(payload, allow_nan=False)
 
 
@@ -178,6 +187,28 @@ const five = calc.sampleDesign([...catalogue.values()], {condition:"oversight",j
 const fiveCurve = calc.gapCurve(data, catalogue, five, .6, "oversight", .4);
 assert.ok(Math.min(...fiveCurve.judges.map((judge) => judge.y[10])) < .6);
 assert.ok(Math.max(...fiveCurve.judges.map((judge) => judge.y[10])) > .6);
+const generic = calc.sampleDesign(
+  [...catalogue.values()],
+  {condition:"oversight",judges:5,anchors:2,comparators:2,items:10,repeats:1,seed:3},
+  [catalogue.get("j"), catalogue.get("j2")],
+);
+assert.deepEqual([...new Set(generic.map((row) => row.judge))], ["Judge 1", "Judge 2", "Judge 3", "Judge 4", "Judge 5"]);
+assert.ok(generic.every((row) => row.generic_judge));
+assert.ok(generic.every((row) => ["j", "j2"].includes(row._judge.model_id)));
+assert.ok(calc.estimateComparison(generic[0], data, catalogue, .6, .4).judge_cost > 0);
+const genericCurve = calc.gapCurve(data, catalogue, generic, .6, "oversight", .4);
+assert.deepEqual(genericCurve.judges.map((judge) => judge.name), ["Judge 1", "Judge 2", "Judge 3", "Judge 4", "Judge 5"]);
+const smallCost = calc.simulateSummary(generic, data, catalogue, .6, .4, {
+  config:{condition:"oversight",judges:5,anchors:2,comparators:2,items:10,repeats:1,seed:3},
+  judgePool:[catalogue.get("j"), catalogue.get("j2")], trials:100,
+});
+const largeCost = calc.simulateSummary(
+  generic.map((row) => ({...row,items:100})), data, catalogue, .6, .4,
+  {config:{condition:"oversight",judges:5,anchors:2,comparators:2,items:100,repeats:1,seed:3},
+   judgePool:[catalogue.get("j"), catalogue.get("j2")], trials:100},
+);
+assert.ok(smallCost.total_cost.low < smallCost.total_cost.mean && smallCost.total_cost.mean < smallCost.total_cost.high);
+assert.ok(largeCost.total_cost.high - largeCost.total_cost.low > smallCost.total_cost.high - smallCost.total_cost.low);
 '''
     result = subprocess.run(
         ["node", "-e", node, str(script)], capture_output=True, text=True,

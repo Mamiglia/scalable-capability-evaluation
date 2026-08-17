@@ -87,7 +87,7 @@
     return result;
   }
 
-  function sampleDesign(catalogue, config) {
+  function sampleDesign(catalogue, config, judgePool = null) {
     const counts = [config.judges, config.anchors, config.comparators, config.items, config.repeats];
     if (!counts.every((value) => Number.isInteger(value) && value > 0)) {
       throw new Error("J, N, M, items, and repeats must be positive integers");
@@ -109,13 +109,20 @@
         releaseOrdinal(anchor.release) > releaseOrdinal(judge.release))) &&
       comparators(judge, anchor).length > 0
     );
-    const eligibleJudges = models.filter((judge) => anchors(judge).length > 0);
+    const generic = Array.isArray(judgePool);
+    const eligibleJudges = (generic ? judgePool : models).filter((judge) =>
+      Number.isFinite(judge.eci) && judge.eci > 0 && Number.isFinite(judge.price_in) &&
+      Number.isFinite(judge.price_out) && Number.isFinite(releaseOrdinal(judge.release)) &&
+      anchors(judge).length > 0
+    );
     if (!eligibleJudges.length) throw new Error("No catalogue model supports this condition");
     const random = randomGenerator(config.seed ?? 0);
     return takeSample(eligibleJudges, config.judges, random).flatMap((judge, judgeInstance) =>
       takeSample(anchors(judge), config.anchors, random).flatMap((anchor, anchorInstance) =>
         takeSample(comparators(judge, anchor), config.comparators, random).map((comparator, comparatorInstance) => ({
-          judge: judge.model_id, m1: anchor.model_id, m2: comparator.model_id,
+          judge: generic ? `Judge ${judgeInstance + 1}` : judge.model_id,
+          ...(generic ? {_judge: judge, generic_judge: true} : {}),
+          m1: anchor.model_id, m2: comparator.model_id,
           judge_instance: judgeInstance, anchor_instance: anchorInstance,
           comparator_instance: comparatorInstance,
           items: config.items, repeats: config.repeats,
@@ -125,10 +132,10 @@
   }
 
   function modelMetadata(role, row, catalogue) {
-    const model = catalogue.get(row[role]);
+    const model = row[`_${role}`] || catalogue.get(row[role]);
     const value = (name, fallback) => number(row[`${role}_${name}`], fallback);
     const metadata = {
-      model_id: row[role],
+      model_id: model?.model_id || row[role],
       theta: value("theta", model?.theta),
       eci: value("eci", model?.eci),
       release: row[`${role}_release`] || model?.release,
@@ -136,10 +143,14 @@
       price_in: value("price_in", model?.price_in),
       price_out: value("price_out", model?.price_out),
     };
-    if (![metadata.theta, metadata.eci, metadata.price_in, metadata.price_out].every(Number.isFinite) ||
-        metadata.eci <= 0 ||
-        !["reasoning", "non_reasoning"].includes(metadata.reasoning_class)) {
-      throw new Error(`${row[role]} is missing theta, ECI, reasoning_class, or input/output pricing`);
+    const valid = role === "judge"
+      ? [metadata.price_in, metadata.price_out].every(Number.isFinite)
+      : [metadata.theta, metadata.eci, metadata.price_in, metadata.price_out].every(Number.isFinite) &&
+        metadata.eci > 0 && ["reasoning", "non_reasoning"].includes(metadata.reasoning_class);
+    if (!valid) {
+      throw new Error(role === "judge"
+        ? `${row[role]} is missing input/output pricing`
+        : `${row[role]} is missing theta, ECI, reasoning_class, or input/output pricing`);
     }
     return metadata;
   }
@@ -313,6 +324,61 @@
     };
   }
 
+  function quantile(values, probability) {
+    const sorted = [...values].sort((left, right) => left - right);
+    const position = (sorted.length - 1) * probability;
+    const lower = Math.floor(position), upper = Math.ceil(position);
+    return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+  }
+
+  function simulateSummary(rows, data, catalogue, judgeAccuracy, correctFraction, options = {}) {
+    const trials = Number(options.trials ?? 200);
+    if (!Number.isInteger(trials) || trials < 2) throw new Error("Monte Carlo trials must be an integer of at least 2");
+    const random = randomGenerator(0x51A7E);
+    const metrics = ["candidate_cost", "judge_cost", "candidate_input_tokens",
+      "candidate_output_tokens", "judge_input_tokens_total", "judge_output_tokens"];
+    const samples = Object.fromEntries([...metrics, "total_cost"].map((name) => [name, []]));
+    const cache = new Map();
+    for (let trial = 0; trial < trials; trial += 1) {
+      const trialRows = options.config
+        ? sampleDesign([...catalogue.values()], {...options.config, seed: trial + 1}, options.judgePool)
+        : rows;
+      const totals = Object.fromEntries(metrics.map((name) => [name, 0]));
+      for (const row of trialRows) {
+        const key = options.config
+          ? [row._judge?.model_id || row.judge, row.m1, row.m2, row.items, row.repeats].join("\0")
+          : null;
+        let result = key && cache.get(key);
+        if (!result) {
+          result = estimateComparison(row, data, catalogue, judgeAccuracy, correctFraction);
+          if (key) cache.set(key, result);
+        }
+        for (const name of metrics) {
+          const sigma = Math.max(0, result[`${name}_high`] - result[name]) / Z95;
+          totals[name] += Math.max(0, result[name] + sigma * normalDraw(random));
+        }
+      }
+      for (const name of metrics) samples[name].push(totals[name]);
+      samples.total_cost.push(totals.candidate_cost + totals.judge_cost);
+    }
+    const interval = (name) => ({
+      mean: samples[name].reduce((sum, value) => sum + value, 0) / samples[name].length,
+      low: quantile(samples[name], 0.025), high: quantile(samples[name], 0.975),
+    });
+    const base = summarizeResults(rows.map((row) =>
+      estimateComparison(row, data, catalogue, judgeAccuracy, correctFraction)
+    ));
+    return {
+      ...base,
+      candidate_cost: interval("candidate_cost"), judge_cost: interval("judge_cost"),
+      total_cost: interval("total_cost"),
+      candidate_input_tokens: interval("candidate_input_tokens"),
+      candidate_output_tokens: interval("candidate_output_tokens"),
+      judge_input_tokens: interval("judge_input_tokens_total"),
+      judge_output_tokens: interval("judge_output_tokens"),
+    };
+  }
+
   function gapCurve(data, catalogue, rows, judgeAccuracy, condition, correctFraction = 1) {
     if (!rows.length) throw new Error("The selected design has no comparisons");
     if (!(judgeAccuracy >= 0.5 && judgeAccuracy < 1)) {
@@ -359,7 +425,7 @@
         return [probability, Math.max(0, probability - half), Math.min(1, probability + half)];
       });
       return {
-        name: `Judge ${index + 1}: ${judgeRows[0].judge}`,
+        name: judgeRows[0].generic_judge ? `Judge ${index + 1}` : `Judge ${index + 1}: ${judgeRows[0].judge}`,
         y: values.map((value) => value[0]), p5: values.map((value) => value[1]),
         p95: values.map((value) => value[2]),
       };
@@ -370,7 +436,7 @@
     };
   }
 
-  const api = {estimateComparison, expectedOverlap, gapCurve, parseComparisons, sampleDesign, summarizeResults};
+  const api = {estimateComparison, expectedOverlap, gapCurve, parseComparisons, sampleDesign, simulateSummary, summarizeResults};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.McCostCalculator = api;
 })(typeof window === "undefined" ? globalThis : window);

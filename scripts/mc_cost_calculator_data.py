@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from mc_cost.calculator import build_calculator_payload
+from mc_cost.calculator import DEFAULT_JUDGE_POOL, build_calculator_payload
 from mc_cost.catalogue import normalized_name
 
 
@@ -40,6 +40,7 @@ def main() -> None:
         pd.read_parquet(args.analysis / "token_candidate.parquet"),
         pd.read_parquet(args.analysis / "token_judge.parquet"),
         pd.read_parquet(args.analysis / "judgments.parquet"),
+        judge_pool=DEFAULT_JUDGE_POOL,
     )
     hierarchy = np.load(args.analysis / "model" / "core.npz")
     payload["accuracy_glm"]["variance_components"] = {
