@@ -13,7 +13,7 @@ from judge.cli import main as judge_main
 class SynchronousExecutor:
     """Runs each job inline and hands back an already-completed real Future."""
 
-    def __init__(self, max_workers=None):
+    def __init__(self, max_workers=None, mp_context=None):
         pass
 
     def __enter__(self):

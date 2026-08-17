@@ -5,11 +5,13 @@ display that forwards sample counts over a queue, and the parent renders them.
 """
 
 import contextlib
-import io
 import multiprocessing as mp
+import re
 import sys
+import tempfile
 import traceback
 from concurrent.futures import ProcessPoolExecutor, wait
+from pathlib import Path
 from queue import Empty
 from typing import Any, Callable, Iterator, Sequence
 
@@ -40,20 +42,14 @@ class _QueueTaskDisplay(PlainTaskDisplay):
 
 
 class _QueueDisplay(PlainDisplay):
-    """Silent display whose tasks forward their progress over ``queue``."""
+    """Display whose tasks forward their progress over ``queue``; errors go to the job log."""
 
     def __init__(self, queue, label: str):
         super().__init__()
         self.queue = queue
         self.label = label
 
-    def print(self, *args, **kwargs) -> None:
-        pass
-
     def update_task_count(self, *args, **kwargs) -> None:
-        pass
-
-    def display_error(self, *args, **kwargs) -> None:
         pass
 
     @contextlib.contextmanager
@@ -70,20 +66,21 @@ class _QueueDisplay(PlainDisplay):
             )
 
 
-def _worker(worker_fn: Callable[..., int], args: tuple[Any, ...], queue, label: str) -> tuple[int, str]:
-    """Run one job with its output captured, so only the parent writes to the terminal."""
+def _worker(worker_fn: Callable[..., int], args: tuple[Any, ...], queue, label: str, log_file: Path) -> int:
+    """Run one job with its output going to ``log_file``, so only the parent owns the terminal."""
     active_display._active_display = _QueueDisplay(queue, label)
 
-    buffer = io.StringIO()
     stdout, stderr = sys.stdout, sys.stderr
-    sys.stdout = sys.stderr = buffer
-    try:
-        code = worker_fn(*args)
-        return (code if isinstance(code, int) else 0), buffer.getvalue()
-    except Exception:
-        return 1, buffer.getvalue() + "\n" + traceback.format_exc()
-    finally:
-        sys.stdout, sys.stderr = stdout, stderr
+    with open(log_file, "w", buffering=1) as out:  # line-buffered: tail -f works while it runs
+        sys.stdout = sys.stderr = out
+        try:
+            code = worker_fn(*args)
+            return code if isinstance(code, int) else 0
+        except Exception:
+            traceback.print_exc()
+            return 1
+        finally:
+            sys.stdout, sys.stderr = stdout, stderr
 
 
 def _drain(queue, progress: Progress, bars: dict[str, Any]) -> None:
@@ -124,13 +121,19 @@ def eval_runner(jobs: Sequence[Job], max_workers: int = MAX_WORKERS) -> int:
     if not jobs:
         return 0
 
-    manager = mp.Manager()
-    queue = manager.Queue()
+    # spawn, not fork: inspect already has threads running in the parent by now.
+    context = mp.get_context("spawn")
+    queue = context.Manager().Queue()
     errors: list[tuple[str, str, str]] = []
 
-    with ProcessPoolExecutor(max_workers=max(1, max_workers)) as executor:
+    log_root = Path(tempfile.mkdtemp(prefix="small_judge_runner_"))
+    print(f"Per-job logs in {log_root} (tail -f them to watch a job)")
+    log_files = {label: log_root / (re.sub(r"[^\w.-]+", "_", label) + ".log") for _, _, label in jobs}
+
+    with ProcessPoolExecutor(max_workers=max(1, max_workers), mp_context=context) as executor:
         futures = {
-            executor.submit(_worker, fn, args, queue, label): label for fn, args, label in jobs
+            executor.submit(_worker, fn, args, queue, label, log_files[label]): label
+            for fn, args, label in jobs
         }
 
         with Progress(
@@ -154,9 +157,8 @@ def eval_runner(jobs: Sequence[Job], max_workers: int = MAX_WORKERS) -> int:
                 trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
                 errors.append((label, str(exc), trace))
                 continue
-            code, output = future.result()
-            if code != 0:
-                errors.append((label, f"Subtask evaluation failed with exit code {code}", output))
+            if future.result() != 0:
+                errors.append((label, "Subtask evaluation failed", log_files[label].read_text()))
 
     _report(errors, len(jobs))
     return 1 if errors else 0
