@@ -56,6 +56,32 @@ def training_token_indices(prompt_idx, group_id, position, max_per_group=10):
     return np.asarray(selected, dtype=int)
 
 
+def relative_token_indices(prompt_idx, position, n_per_prompt):
+    """Select the same number of semantic-blind relative positions per prompt."""
+    selected = []
+    for prompt in np.unique(prompt_idx):
+        idx = np.flatnonzero(prompt_idx == prompt)
+        idx = idx[np.argsort(position[idx])]
+        take = np.rint(np.linspace(0, len(idx) - 1,
+                                  min(n_per_prompt, len(idx)))).astype(int)
+        selected.extend(idx[take].tolist())
+    return np.asarray(selected, dtype=int)
+
+
+def code_deltas(code, prompt_idx, position):
+    """Return adjacent code changes without crossing prompt boundaries."""
+    deltas, rows = [], []
+    for prompt in np.unique(prompt_idx):
+        idx = np.flatnonzero(prompt_idx == prompt)
+        idx = idx[np.argsort(position[idx])]
+        if len(idx) > 1:
+            deltas.append(np.diff(code[idx], axis=0))
+            rows.extend(idx[1:].tolist())
+    width = code.shape[1:]
+    return (np.concatenate(deltas) if deltas else np.empty((0, *width), dtype=code.dtype),
+            np.asarray(rows, dtype=int))
+
+
 def _oof_ridge(X, gap, prompt_idx, item, weights, alphas, cv_folds, fit_idx):
     n_splits = min(cv_folds, len(np.unique(item)))
     prompt_rows = np.arange(len(gap))
@@ -119,10 +145,13 @@ def ridge_timeline(data, alphas, cv_folds):
     return pd.DataFrame(summary_rows), pd.concat(oof_frames, ignore_index=True)
 
 
-def load_manifest(path):
+def load_manifest(path, layer=None):
     """Verify and concatenate immutable activation shards."""
     path = pathlib.Path(path)
     manifest = json.loads(path.read_text())
+    if layer is not None and layer not in manifest["layers"]:
+        raise ValueError(f"layer {layer} not in manifest layers {manifest['layers']}")
+    layer_idx = None if layer is None else manifest["layers"].index(layer)
     root = path.parent
     resid, prompt_idx, position, group_id, prompts = [], [], [], [], []
     prompt_offset = 0
@@ -134,7 +163,10 @@ def load_manifest(path):
         n_tokens = len(blob["prompt_idx"])
         if n_tokens != entry["n_tokens"] or len(blob["resid"]) != n_tokens:
             raise ValueError(f"token-count mismatch: {shard_path}")
-        resid.append(blob["resid"].float().numpy())
+        values = blob["resid"]
+        if layer_idx is not None:
+            values = values[:, layer_idx:layer_idx + 1]
+        resid.append(values.float().numpy())
         prompt_idx.append(blob["prompt_idx"].numpy().astype(np.int64) + prompt_offset)
         position.append(blob["position"].numpy())
         group_id.append(blob["group_id"].numpy())
@@ -149,17 +181,25 @@ def load_manifest(path):
             "prompts": prompts, "manifest": manifest}
 
 
-def fit_cebra(X_train, gap_train, X_test, output_dim, seed, iterations, device="cpu"):
+def fit_cebra(X_train, gap_train, X_test, output_dim, seed, iterations, device="cpu",
+              conditional="time_delta", delta=None):
     """Fit output-gap-conditioned CEBRA and return train/test latent codes."""
     import cebra
     torch.manual_seed(seed)
     np.random.seed(seed)
-    model = cebra.CEBRA(model_architecture="offset1-model", conditional="time_delta",
-                        output_dimension=output_dim, max_iterations=iterations,
-                        batch_size=min(512, len(X_train)), device=device)
+    kwargs = {"model_architecture": "offset1-model", "conditional": conditional,
+              "output_dimension": output_dim, "max_iterations": iterations,
+              "batch_size": min(512, len(X_train)), "device": device}
+    if delta is not None:
+        kwargs["delta"] = delta
+    model = cebra.CEBRA(**kwargs)
     X_train = np.asarray(X_train, dtype=np.float32)
     X_test = np.asarray(X_test, dtype=np.float32)
-    model.fit(X_train, np.asarray(gap_train, dtype=np.float32)[:, None])
+    labels = np.asarray(gap_train, dtype=np.float32)
+    if conditional in {"delta", "delta_normal"}:
+        scale = labels.std()
+        labels = (labels - labels.mean()) / (scale if scale >= 1e-6 else 1)
+    model.fit(X_train, labels[:, None])
     return MethodResult("cebra", model.transform(X_train), model.transform(X_test), None,
                         {"output_dim": output_dim, "seed": seed})
 
@@ -170,8 +210,35 @@ def code_gap_r2(result, gap_train, gap_test, alpha=1e-6):
     return float(r2_score(gap_test, regressor.predict(result.test_code)))
 
 
+def grouped_code_predictions(code_train, gap_train, item_train, code_test,
+                             alphas=(0.1, 1, 10, 100), cv_folds=4):
+    """Tune a scaled ridge decoder inside item groups, then predict held-out codes."""
+    splits = GroupKFold(n_splits=min(cv_folds, len(np.unique(item_train)))).split(
+        code_train, gap_train, item_train)
+    splits = list(splits)
+    best_alpha, best_score = alphas[0], -np.inf
+    for alpha in alphas:
+        pred = np.full(len(gap_train), np.nan)
+        for train, valid in splits:
+            mean = code_train[train].mean(axis=0)
+            scale = code_train[train].std(axis=0)
+            scale[scale < 1e-6] = 1
+            model = Ridge(alpha=alpha, solver="lsqr").fit(
+                (code_train[train] - mean) / scale, gap_train[train])
+            pred[valid] = model.predict((code_train[valid] - mean) / scale)
+        score = r2_score(gap_train, pred)
+        if score > best_score:
+            best_alpha, best_score = alpha, score
+    mean = code_train.mean(axis=0)
+    scale = code_train.std(axis=0)
+    scale[scale < 1e-6] = 1
+    model = Ridge(alpha=best_alpha, solver="lsqr").fit(
+        (code_train - mean) / scale, gap_train)
+    return model.predict((code_test - mean) / scale), best_alpha
+
+
 def fit_bsf(X_train, X_test, group_size, n_groups, l0, seed, epochs,
-            variant="grassmannian", device="cpu"):
+            variant="grassmannian", device="cpu", snr=0, batch_size=64):
     """Train a pinned Goodfire block-sparse featurizer."""
     import bsf
     torch.manual_seed(seed)
@@ -179,7 +246,7 @@ def fit_bsf(X_train, X_test, group_size, n_groups, l0, seed, epochs,
     cls = bsf.GrassmannianBSF if variant == "grassmannian" else bsf.VanillaBSF
     model = cls(d=X_train.shape[1], n_groups=n_groups, group_size=group_size, l0=l0)
     model = bsf.train(model, np.asarray(X_train, dtype=np.float32), epochs=epochs,
-                      batch_size=min(64, len(X_train)), snr=0, device=device,
+                      batch_size=min(batch_size, len(X_train)), snr=snr, device=device,
                       log_every=max(1, epochs))
     model.eval()
     with torch.no_grad():
@@ -262,10 +329,14 @@ def fit_method(name, X_train, gap_train, X_test, seed, quick=False, config=None)
     if name == "cebra":
         assert gap_train is not None
         return fit_cebra(X_train, gap_train, X_test, config["output_dim"], seed,
-                         config["iterations"], device="cuda_if_available")
+                         config["iterations"], device="cuda_if_available",
+                         conditional=config.get("conditional", "time_delta"),
+                         delta=config.get("delta"))
     if name == "bsf":
         return fit_bsf(X_train, X_test, config["group_size"], config["n_groups"],
-                       config["l0"], seed, config["epochs"], device=device)
+                       config["l0"], seed, config["epochs"],
+                       variant=config.get("variant", "grassmannian"), device=device,
+                       snr=config.get("snr", 0), batch_size=config.get("batch_size", 64))
     if name == "sae":
         return fit_sae(X_train, X_test, config["width"], config["k"], seed,
                        config["epochs"], device=device)
@@ -280,6 +351,105 @@ def _sample_prompt_groups(prompt_idx, group_id, seed):
             candidates = np.flatnonzero((prompt_idx == prompt) & (group_id == group))
             selected.append(int(rng.choice(candidates)))
     return np.asarray(selected, dtype=int)
+
+
+def trajectory_config(name, d_in, quick=False):
+    """One prespecified calibration configuration per discovery family."""
+    if name == "cebra":
+        return {"output_dim": 3, "iterations": 300 if quick else 10_000,
+                "conditional": "delta_normal", "delta": 0.25}
+    if name == "bsf":
+        n_groups = math.ceil(d_in / 3)
+        return {"group_size": 3, "n_groups": n_groups, "l0": min(16, n_groups),
+                "epochs": 10 if quick else 60, "variant": "grassmannian",
+                "snr": 0.1, "batch_size": 512}
+    if name == "sae":
+        return {"width": d_in, "k": min(32, d_in),
+                "epochs": 10 if quick else 60}
+    raise ValueError(f"unknown method: {name}")
+
+
+def _prompt_deciles(prompt_idx, position):
+    decile = np.zeros(len(prompt_idx), dtype=np.int8)
+    for prompt in np.unique(prompt_idx):
+        idx = np.flatnonzero(prompt_idx == prompt)
+        idx = idx[np.argsort(position[idx])]
+        if len(idx) > 1:
+            decile[idx] = np.rint(np.linspace(0, 9, len(idx))).astype(np.int8)
+    return decile
+
+
+def _normalise_trajectory(X_train, X_test, method):
+    mean = X_train.mean(axis=0, keepdims=True)
+    centered = X_train - mean
+    if method == "bsf":
+        scale = np.sqrt(np.square(centered).mean())
+    else:
+        scale = np.sqrt(np.square(centered).mean(axis=0, keepdims=True))
+        scale[scale < 1e-6] = 1
+    if np.ndim(scale) == 0 and scale < 1e-6:
+        scale = 1.0
+    return (X_train - mean) / scale, (X_test - mean) / scale
+
+
+def run_trajectory(manifest, layers, method, out_dir, seeds, positions_per_prompt=64,
+                   cv_folds=3, quick=False):
+    """Fit one encoder per layer and score held-out state/change over token time."""
+    out_dir = pathlib.Path(out_dir)
+    if out_dir.exists():
+        raise FileExistsError(out_dir)
+    frames = []
+    for layer in layers:
+        data = load_manifest(manifest, layer=layer)
+        selected = relative_token_indices(data["prompt_idx"], data["position"],
+                                          positions_per_prompt)
+        X = data["X"][selected, 0]
+        prompt = data["prompt_idx"][selected]
+        position = data["position"][selected]
+        group_id = data["group_id"][selected]
+        gap = data["gap"][prompt]
+        item = data["item"][prompt]
+        decile = _prompt_deciles(prompt, position)
+        splits = list(GroupKFold(n_splits=min(cv_folds, len(np.unique(item)))).split(
+            X, gap, item))
+        config = trajectory_config(method, X.shape[1], quick)
+        for seed in seeds:
+            for fold, (train, test) in enumerate(splits):
+                X_train, X_test = _normalise_trajectory(X[train], X[test], method)
+                result = fit_method(method, X_train, gap[train], X_test, seed, quick, config)
+                pred, alpha = grouped_code_predictions(
+                    result.train_code, gap[train], item[train], result.test_code)
+                frames.append(pd.DataFrame({
+                    "method": method, "layer": layer, "seed": seed, "fold": fold,
+                    "kind": "state", "prompt_idx": prompt[test], "item": item[test],
+                    "position": position[test], "structural_group": group_id[test],
+                    "relative_decile": decile[test], "gap": gap[test], "pred_gap": pred,
+                    "alpha": alpha}))
+                train_delta, train_rows = code_deltas(
+                    result.train_code, prompt[train], position[train])
+                test_delta, test_rows = code_deltas(
+                    result.test_code, prompt[test], position[test])
+                delta_pred, delta_alpha = grouped_code_predictions(
+                    train_delta, gap[train][train_rows], item[train][train_rows], test_delta)
+                frames.append(pd.DataFrame({
+                    "method": method, "layer": layer, "seed": seed, "fold": fold,
+                    "kind": "delta", "prompt_idx": prompt[test][test_rows],
+                    "item": item[test][test_rows], "position": position[test][test_rows],
+                    "structural_group": group_id[test][test_rows],
+                    "relative_decile": decile[test][test_rows],
+                    "gap": gap[test][test_rows], "pred_gap": delta_pred,
+                    "alpha": delta_alpha}))
+    oof = pd.concat(frames, ignore_index=True)
+    rows = []
+    keys = ["method", "layer", "seed", "kind", "structural_group", "relative_decile"]
+    for values, sub in oof.groupby(keys, sort=True):
+        score = r2_score(sub.gap, sub.pred_gap, sample_weight=prompt_weights(sub.prompt_idx))
+        rows.append(dict(zip(keys, values), r2=score, n_rows=len(sub),
+                         alpha=float(np.median(sub.alpha))))
+    table = pd.DataFrame(rows)
+    _atomic_csv(table, out_dir / "trajectory.csv")
+    _atomic_csv(oof, out_dir / "trajectory_oof.csv")
+    return table
 
 
 def _reconstruction_r2(target, reconstruction):
@@ -360,6 +530,15 @@ def main():
     bakeoff.add_argument("--seeds", default="0,1,2,3,4")
     bakeoff.add_argument("--out", required=True)
     bakeoff.add_argument("--quick", action="store_true")
+    trajectory = subparsers.add_parser("trajectory")
+    trajectory.add_argument("--manifest", required=True)
+    trajectory.add_argument("--layers", required=True)
+    trajectory.add_argument("--method", choices=("cebra", "bsf", "sae"), required=True)
+    trajectory.add_argument("--seeds", default="0,1,2")
+    trajectory.add_argument("--positions-per-prompt", type=int, default=64)
+    trajectory.add_argument("--cv-folds", type=int, default=3)
+    trajectory.add_argument("--out", required=True)
+    trajectory.add_argument("--quick", action="store_true")
     args = parser.parse_args()
 
     if args.command == "timeline":
@@ -380,6 +559,12 @@ def main():
         run_bakeoff(args.manifest, args.layer, tuple(args.methods.split(",")), args.out,
                     tuple(int(seed) for seed in args.seeds.split(",")), args.quick)
         print(f"token manifold bakeoff -> {args.out}")
+    elif args.command == "trajectory":
+        run_trajectory(args.manifest, tuple(int(layer) for layer in args.layers.split(",")),
+                       args.method, args.out,
+                       tuple(int(seed) for seed in args.seeds.split(",")),
+                       args.positions_per_prompt, args.cv_folds, args.quick)
+        print(f"token trajectory -> {args.out}")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -83,6 +84,27 @@ def test_training_token_indices_caps_each_prompt_group():
             assert mask.sum() == 10
 
 
+def test_relative_token_indices_are_prompt_balanced_and_include_ends():
+    prompt_idx = np.repeat(np.arange(2), [5, 7])
+    position = np.concatenate([np.arange(5), np.arange(7)])
+
+    selected = discover.relative_token_indices(prompt_idx, position, n_per_prompt=3)
+
+    assert position[selected[prompt_idx[selected] == 0]].tolist() == [0, 2, 4]
+    assert position[selected[prompt_idx[selected] == 1]].tolist() == [0, 3, 6]
+
+
+def test_code_deltas_never_cross_prompt_boundaries():
+    code = np.array([[1.0], [4.0], [10.0], [12.0], [17.0]])
+    prompt_idx = np.array([0, 0, 1, 1, 1])
+    position = np.array([0, 1, 0, 1, 2])
+
+    delta, rows = discover.code_deltas(code, prompt_idx, position)
+
+    assert rows.tolist() == [1, 3, 4]
+    assert delta[:, 0].tolist() == [3.0, 2.0, 5.0]
+
+
 def test_ridge_timeline_finds_planted_layer_and_uses_item_groups():
     data = planted_token_data(n_items=20, prompts_per_item=2, tokens=6,
                               layers=4, d=10, signal_layer=2, seed=0)
@@ -119,6 +141,19 @@ def test_load_manifest_verifies_and_offsets_prompt_indices(tmp_path):
     assert data["X"].shape == (5, 2, 4)
     assert data["prompt_idx"].tolist() == [0, 0, 0, 1, 1]
     assert data["item"].tolist() == ["it0", "it1"]
+
+
+def test_load_manifest_can_select_one_physical_layer(tmp_path):
+    rows = [fake_recorded_row("p0", "it0", 3), fake_recorded_row("p1", "it1", 2)]
+    rows[0]["resid"][:, 1] = 7
+    rows[1]["resid"][:, 1] = 7
+    manifest = record.write_shards(iter(rows), tmp_path / "recording", 1,
+                                   {"model": "dev", "layers": [0, 2]})
+
+    data = discover.load_manifest(manifest, layer=2)
+
+    assert data["X"].shape == (5, 1, 4)
+    assert np.all(data["X"] == 7)
 
 
 def test_load_manifest_rejects_tampered_shard(tmp_path):
@@ -166,6 +201,30 @@ def test_fit_cebra_returns_requested_dimension_and_seed_metadata():
     assert a.metadata == {"output_dim": 4, "seed": 3}
 
 
+def test_fit_cebra_standardises_continuous_labels_for_delta_sampling(monkeypatch):
+    seen = {}
+
+    class FakeCEBRA:
+        def __init__(self, **kwargs):
+            seen["kwargs"] = kwargs
+
+        def fit(self, X, y):
+            seen["labels"] = y
+
+        def transform(self, X):
+            return np.zeros((len(X), 3), dtype=np.float32)
+
+    monkeypatch.setitem(sys.modules, "cebra", types.SimpleNamespace(CEBRA=FakeCEBRA))
+    X = np.arange(40, dtype=np.float32).reshape(10, 4)
+
+    discover.fit_cebra(X[:8], np.arange(8, dtype=np.float32), X[8:], 3, 0, 10,
+                       conditional="delta_normal", delta=0.25)
+
+    assert seen["kwargs"]["conditional"] == "delta_normal"
+    assert seen["labels"].mean() == pytest.approx(0, abs=1e-6)
+    assert seen["labels"].std() == pytest.approx(1, abs=1e-6)
+
+
 def test_code_gap_r2_uses_train_only_regression():
     y_train = np.arange(20, dtype=np.float32)
     y_test = np.arange(20, 30, dtype=np.float32)
@@ -174,6 +233,24 @@ def test_code_gap_r2_uses_train_only_regression():
     score = discover.code_gap_r2(result, y_train, y_test)
 
     assert score > 0.99
+
+
+def test_grouped_code_decoder_regularises_scale_stressed_p_greater_than_n_codes():
+    rng = np.random.default_rng(7)
+    n_items, prompts_per_item, width = 80, 2, 512
+    n = n_items * prompts_per_item
+    item = np.repeat(np.arange(n_items), prompts_per_item)
+    y = rng.normal(size=n)
+    code = rng.normal(scale=0.4, size=(n, width))
+    code[:, 0] = 1e-3 * (y + rng.normal(scale=0.25, size=n))
+    train, test = next(discover.GroupKFold(2).split(code, y, item))
+
+    pred, alpha = discover.grouped_code_predictions(
+        code[train], y[train], item[train], code[test],
+        alphas=(0.01, 0.1, 1, 10, 100, 1000), cv_folds=4)
+
+    assert alpha in (0.01, 0.1, 1, 10, 100, 1000)
+    assert discover.r2_score(y[test], pred) > 0.1
 
 
 @pytest.mark.parametrize("method", ["bsf", "sae"])
@@ -209,6 +286,16 @@ def test_method_configs_expand_scientific_grid_but_not_quick_grid():
     assert discover.method_configs("sae", d_in=4096, quick=False)[0]["width"] == 4096
 
 
+def test_trajectory_configs_use_non_temporal_cebra_and_reference_bsf():
+    cebra = discover.trajectory_config("cebra", d_in=3072, quick=True)
+    bsf = discover.trajectory_config("bsf", d_in=3072, quick=True)
+
+    assert cebra["conditional"] == "delta_normal" and cebra["output_dim"] == 3
+    assert bsf["group_size"] == 3 and bsf["l0"] == 16 and bsf["snr"] == 0.1
+    small = discover.trajectory_config("bsf", d_in=8, quick=True)
+    assert small["l0"] <= small["n_groups"]
+
+
 def write_fake_manifest(out):
     rows = []
     for prompt in range(8):
@@ -230,6 +317,38 @@ def fake_fit_method(name, X_train, gap_train, X_test, seed, quick, config=None):
     test = np.asarray(X_test)[:, :width]
     reconstruction = None if name == "cebra" else np.asarray(X_test)
     return discover.MethodResult(name, train, test, reconstruction, {"seed": seed})
+
+
+def write_trajectory_manifest(out):
+    rows = []
+    for prompt in range(40):
+        gap = float(prompt % 10)
+        resid = torch.randn(6, 2, 8, generator=torch.Generator().manual_seed(prompt))
+        resid[:, 1, 0] = gap
+        rows.append({"row_idx": prompt, "pair_uid": f"p{prompt}",
+                     "item": f"it{prompt // 2}", "order": prompt % 2,
+                     "resid": resid, "input_ids": list(range(6)),
+                     "offsets": [(i, i + 1) for i in range(6)],
+                     "group_id": np.array([0, 2, 3, 3, 4, 5], dtype=np.int8),
+                     "l1": gap, "l2": 0.0, "gap": gap})
+    return record.write_shards(iter(rows), out, shard_prompts=10,
+                               manifest_meta={"model": "dev", "layers": [0, 2]})
+
+
+def test_run_trajectory_writes_state_and_delta_surfaces(tmp_path, monkeypatch):
+    manifest = write_trajectory_manifest(tmp_path / "recording")
+    monkeypatch.setattr(discover, "fit_method", fake_fit_method)
+    out = tmp_path / "trajectory"
+
+    table = discover.run_trajectory(
+        manifest, layers=(2,), method="cebra", out_dir=out, seeds=(0,),
+        positions_per_prompt=6, cv_folds=2, quick=True)
+
+    assert set(table.kind) == {"state", "delta"}
+    assert set(table.layer) == {2}
+    assert set(table.method) == {"cebra"}
+    assert (out / "trajectory.csv").exists()
+    assert table.loc[table.kind == "state", "r2"].max() > 0.9
 
 
 def test_bakeoff_writes_one_row_per_method(tmp_path, monkeypatch):
@@ -267,14 +386,40 @@ def test_main_bakeoff_dispatches_cli_arguments(tmp_path, monkeypatch):
                     "seeds": (1, 3), "quick": True}
 
 
+def test_main_trajectory_dispatches_cli_arguments(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_run(manifest, layers, method, out_dir, seeds, positions_per_prompt,
+                 cv_folds, quick):
+        seen.update(manifest=manifest, layers=layers, method=method, out_dir=out_dir,
+                    seeds=seeds, positions_per_prompt=positions_per_prompt,
+                    cv_folds=cv_folds, quick=quick)
+
+    monkeypatch.setattr(discover, "run_trajectory", fake_run)
+    monkeypatch.setattr(sys, "argv", ["token_manifold_discover.py", "trajectory",
+                                       "--manifest", "recording/manifest.json",
+                                       "--layers", "3,15,25", "--method", "bsf",
+                                       "--seeds", "0,2", "--positions-per-prompt", "32",
+                                       "--cv-folds", "2", "--out", str(tmp_path / "out"),
+                                       "--quick"])
+
+    discover.main()
+
+    assert seen == {"manifest": "recording/manifest.json", "layers": (3, 15, 25),
+                    "method": "bsf", "out_dir": str(tmp_path / "out"),
+                    "seeds": (0, 2), "positions_per_prompt": 32,
+                    "cv_folds": 2, "quick": True}
+
+
 def test_sbatch_has_explicit_stages_and_never_installs_packages():
     text = (Path(__file__).parents[1] / "sbatch" / "token_manifold.sbatch").read_text()
 
     assert "WB_STAGE" in text
-    for stage in ("record", "timeline", "bakeoff"):
+    for stage in ("record", "timeline", "bakeoff", "trajectory"):
         assert stage in text
     assert "WB_MANIFOLD_VENV" in text
     assert "WB_RUN" in text
     assert "timeline_${RUN}.csv" in text
     assert "bakeoff_${RUN}_L${LAYER}" in text
+    assert "trajectory_${RUN}_${METHOD}" in text
     assert "pip install" not in text
