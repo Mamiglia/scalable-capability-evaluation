@@ -1,13 +1,14 @@
 """CLI interface for collecting benchmark transcripts."""
 
 import argparse
+import json
 from pathlib import Path
 
 from inspect_ai import eval_set
 
 from collect.runner import eval_runner
 from configs import ModelConfig, TaskConfig, flag_parse, kv_pair
-from configs.paths import get_eval_path, is_successful_eval
+from configs.paths import get_eval_path, is_successful_eval, task_args_with_defaults
 from model import Model
 
 
@@ -42,6 +43,13 @@ def _run_eval_worker(
     if any(is_successful_eval(path) for path in target_dir.glob("*.eval")):
         print(f"Skipping completed repeat {repeat + 1}: {target_dir}")
         return 0
+
+    # The hash dir is opaque; leave the args it was computed from next to it, so old data
+    # stays identifiable when a task's defaults change and move new runs to another hash.
+    manifest = target_dir.parent.parent / "task_args.json"
+    if not manifest.exists():
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(json.dumps(task_args_with_defaults(bench), indent=1, sort_keys=True, default=str))
 
     with Model(model_config, use_runpod=use_runpod) as model:
         kwargs = eval_extra_args.copy()

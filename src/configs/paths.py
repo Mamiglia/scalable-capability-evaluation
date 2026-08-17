@@ -103,9 +103,13 @@ def is_successful_eval(eval_path: Path) -> bool:
     """Whether an eval log completed successfully.
 
     False for the artifacts a crashed run leaves behind (0-byte stubs, logs without a
-    header, ``status: error``) so that re-running only fills the real gaps.
+    header, ``status: error``) so that re-running only fills the real gaps. Also false for
+    partial runs (``--limit`` / ``--sample-id``): they are not in the path hash, so a
+    validation run must not count as the collected data.
     """
     try:
-        return read_eval_log(str(eval_path), header_only=True).status == "success"
+        log = read_eval_log(str(eval_path), header_only=True)
     except Exception:
         return False
+    config = log.eval.config
+    return log.status == "success" and config.limit is None and not config.sample_id

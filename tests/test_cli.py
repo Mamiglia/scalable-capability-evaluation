@@ -34,6 +34,8 @@ class SynchronousExecutor:
 @pytest.fixture(autouse=True)
 def mock_process_pool(monkeypatch):
     monkeypatch.setattr("collect.runner.ProcessPoolExecutor", SynchronousExecutor)
+    # The bench configs here name tasks that do not exist; the manifest must not resolve them.
+    monkeypatch.setattr("collect.cli.task_args_with_defaults", lambda task: dict(task.task_args))
 
 
 
