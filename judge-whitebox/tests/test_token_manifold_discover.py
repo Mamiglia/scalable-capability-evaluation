@@ -69,6 +69,20 @@ def test_prompt_weights_sum_to_one_per_prompt():
     assert weights[prompt_idx == 1].sum() == pytest.approx(1.0)
 
 
+def test_training_token_indices_caps_each_prompt_group():
+    prompt_idx = np.repeat(np.arange(2), 100)
+    group_id = np.tile(np.repeat([1, 2], 50), 2)
+    position = np.tile(np.arange(100), 2)
+
+    selected = discover.training_token_indices(prompt_idx, group_id, position, max_per_group=10)
+
+    assert len(selected) == 2 * 2 * 10
+    for prompt in range(2):
+        for group in (1, 2):
+            mask = (prompt_idx[selected] == prompt) & (group_id[selected] == group)
+            assert mask.sum() == 10
+
+
 def test_ridge_timeline_finds_planted_layer_and_uses_item_groups():
     data = planted_token_data(n_items=20, prompts_per_item=2, tokens=6,
                               layers=4, d=10, signal_layer=2, seed=0)

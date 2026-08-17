@@ -44,23 +44,40 @@ def _relative_deciles(prompt_idx, group_id, position):
     return decile
 
 
-def _oof_ridge(X, y, groups, weights, alphas, cv_folds):
-    n_splits = min(cv_folds, len(np.unique(groups)))
-    splits = list(GroupKFold(n_splits=n_splits).split(X, y, groups))
-    best_alpha, best_score = alphas[0], -np.inf
-    for alpha in alphas:
+def training_token_indices(prompt_idx, group_id, position, max_per_group=10):
+    """Deterministic, bounded token sample for decoder fitting; prediction still uses all tokens."""
+    selected = []
+    for prompt in np.unique(prompt_idx):
+        for group in np.unique(group_id[prompt_idx == prompt]):
+            idx = np.flatnonzero((prompt_idx == prompt) & (group_id == group))
+            idx = idx[np.argsort(position[idx])]
+            take = np.rint(np.linspace(0, len(idx) - 1, min(max_per_group, len(idx)))).astype(int)
+            selected.extend(idx[take].tolist())
+    return np.asarray(selected, dtype=int)
+
+
+def _oof_ridge(X, gap, prompt_idx, item, weights, alphas, cv_folds, fit_idx):
+    n_splits = min(cv_folds, len(np.unique(item)))
+    prompt_rows = np.arange(len(gap))
+    prompt_splits = list(GroupKFold(n_splits=n_splits).split(prompt_rows, gap, item))
+    y = gap[prompt_idx]
+
+    def predict(alpha):
         pred = np.empty(len(y), dtype=np.float64)
-        for train, test in splits:
+        for train_prompts, test_prompts in prompt_splits:
+            train = fit_idx[np.isin(prompt_idx[fit_idx], train_prompts)]
+            test = np.flatnonzero(np.isin(prompt_idx, test_prompts))
             pred[test] = Ridge(alpha=alpha).fit(
                 X[train], y[train], sample_weight=weights[train]).predict(X[test])
+        return pred
+
+    best_alpha, best_score = alphas[0], -np.inf
+    for alpha in alphas:
+        pred = predict(alpha)
         score = r2_score(y, pred, sample_weight=weights)
         if score > best_score:
             best_alpha, best_score = alpha, score
-    pred = np.empty(len(y), dtype=np.float64)
-    for train, test in splits:
-        pred[test] = Ridge(alpha=best_alpha).fit(
-            X[train], y[train], sample_weight=weights[train]).predict(X[test])
-    return best_alpha, pred
+    return best_alpha, predict(best_alpha)
 
 
 def ridge_timeline(data, alphas, cv_folds):
@@ -75,10 +92,12 @@ def ridge_timeline(data, alphas, cv_folds):
     groups = item[prompt_idx]
     weights = prompt_weights(prompt_idx)
     decile = _relative_deciles(prompt_idx, group_id, position)
+    fit_idx = training_token_indices(prompt_idx, group_id, position)
     oof_frames, summary_rows = [], []
 
     for layer in range(X.shape[1]):
-        alpha, pred = _oof_ridge(X[:, layer], y, groups, weights, alphas, cv_folds)
+        alpha, pred = _oof_ridge(X[:, layer], gap, prompt_idx, item, weights,
+                                 alphas, cv_folds, fit_idx)
         frame = pd.DataFrame({"prompt_idx": prompt_idx, "item": groups, "position": position,
                               "group_id": group_id, "relative_decile": decile,
                               "layer": layer, "gap": y, "pred_gap": pred,
