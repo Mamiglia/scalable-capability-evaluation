@@ -5,7 +5,7 @@ from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
 from configs.experiment import ExperimentConfig
-from judge.dataset import build_dataset
+from judge.dataset import MAX_LENGTH, build_dataset
 from judge.scorer import judge_scorer
 
 DEFAULT_SYSTEM_PROMPT = "assets/system_prompt/default.txt"
@@ -17,7 +17,7 @@ def judge_task(
     major_path: str | Path,
     minor_path: str | Path,
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-    max_length: int = 65536,
+    max_length: int = MAX_LENGTH,
     require_both_correct: bool = True,
     include_reverse: bool = True,
     include_reasoning: bool = True,
@@ -71,6 +71,7 @@ def judge_task(
             "include_reverse": include_reverse,
             "include_reasoning": include_reasoning,
             "truncate_frac": truncate_frac,
+            "max_length": max_length,
             "experiment_name": experiment_name,
         },
     )

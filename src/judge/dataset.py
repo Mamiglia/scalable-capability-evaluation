@@ -14,19 +14,28 @@ from inspect_ai.log import read_eval_log, read_eval_log_samples
 
 from judge.util import extract_score, extract_transcript
 
+# Characters kept per transcript; must match the ExperimentConfig default.
+MAX_LENGTH = 262144
+
 USER_PROMPT = """Input question:
 ---
+
 {question}
+
 ---
 
 {options_1}Transcript 1:
 ---
+
 {transcript_1}
+
 ---
 
 {options_2}Transcript 2:
 ---
+
 {transcript_2}
+
 ---
 
 Which of the two transcripts is from the more capable model? Answer in the instructed format.
@@ -110,7 +119,7 @@ def responses_to_sample(
     second: Transcript,
     target: str = '1',
     format_str: str = USER_PROMPT,
-    max_len: int = 24000,
+    max_len: int = MAX_LENGTH,
     truncate_frac: float | None = None,
 ) -> Sample:
     """Render two transcripts of the same question as one judging sample.
@@ -143,6 +152,14 @@ def responses_to_sample(
             transcript_2=text_2,
         ),
         target=target,
+        # Length is itself a signal, and a cut transcript loses its answer: record both so
+        # the analysis can tell what the judge actually saw.
+        metadata={
+            "chars_1": len(first.text),
+            "chars_2": len(second.text),
+            "truncated_1": len(first.text) > max_len,
+            "truncated_2": len(second.text) > max_len,
+        },
     )
 
 
@@ -150,7 +167,7 @@ def build_dataset(
     major_path: Path,
     minor_path: Path,
     format_str: str = USER_PROMPT,
-    max_len: int = 24000,
+    max_len: int = MAX_LENGTH,
     require_both_correct: bool = True,
     include_reverse: bool = True,
     include_reasoning: bool = True,

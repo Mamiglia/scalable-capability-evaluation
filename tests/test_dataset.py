@@ -53,7 +53,8 @@ class TestResponsesToSample:
         res = responses_to_sample(
             transcript("A" * 100), transcript("Short answer"), target="1", max_len=10
         )
-        assert "Transcript 1:\n---\n" + ("A" * 10) + "\n---" in res.input
+        assert "Transcript 1:\n---\n\n" + ("A" * 10) + "\n\n---" in res.input
+        assert res.metadata["truncated_1"] and res.metadata["chars_1"] == 100
 
     def test_responses_to_sample_options_per_transcript(self):
         """Each transcript is shown the options in the order its own model saw them."""
