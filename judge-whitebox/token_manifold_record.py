@@ -96,7 +96,9 @@ def estimate_storage(df, tokenizer, c, layers, d_model, dtype_bytes=2):
     """Exact residual-byte estimate from rendered token counts; writes nothing."""
     n_tokens = sum(len(tokenizer(wbprompts.render_verdict_prompt(row, tokenizer))["input_ids"])
                    for _, row in df.iterrows())
-    return {"n_prompts": len(df), "n_tokens": n_tokens, "n_layers": len(layers),
+    return {"n_prompts": len(df), "n_pairs": int(df["pair_uid"].nunique()),
+            "n_items": int(df["item"].nunique()), "n_tokens": n_tokens,
+            "n_layers": len(layers),
             "d_model": d_model,
             "residual_bytes": n_tokens * len(layers) * d_model * dtype_bytes,
             "metadata_bytes_upper": n_tokens * 32}

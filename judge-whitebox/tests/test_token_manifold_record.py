@@ -139,6 +139,7 @@ def test_estimate_storage_counts_rendered_tokens_and_residual_bytes(monkeypatch)
     out = record.estimate_storage(df, LengthTokenizer(), fake_cfg(), layers=(0, 2), d_model=4)
 
     assert out["n_prompts"] == 2
+    assert out["n_pairs"] == 2 and out["n_items"] == 1
     assert out["n_tokens"] == len(df.iloc[0].text_1) + len(df.iloc[1].text_1)
     assert out["residual_bytes"] == out["n_tokens"] * 2 * 4 * 2
 
