@@ -505,13 +505,13 @@ tests import `judge-whitebox/` directly through pytest's working-directory path.
 - [ ] **Step 2: Write the failing adapter test**
 
 ```python
-def test_fit_cebra_returns_requested_dimension_and_is_seeded():
+def test_fit_cebra_returns_requested_dimension_and_seed_metadata():
     X, y = curved_gap_data(n=240, d=12, seed=0)
     a = discover.fit_cebra(X[:180], y[:180], X[180:], 4, 3, 200, device="cpu")
-    b = discover.fit_cebra(X[:180], y[:180], X[180:], 4, 3, 200, device="cpu")
     assert a.train_code.shape == (180, 4) and a.test_code.shape == (60, 4)
-    assert np.allclose(a.test_code, b.test_code)
+    assert np.isfinite(a.test_code).all()
     assert a.test_reconstruction is None
+    assert a.metadata == {"output_dim": 4, "seed": 3}
 ```
 
 - [ ] **Step 3: Run in the manifold venv and confirm RED**
@@ -524,10 +524,11 @@ Expected: missing `fit_cebra`.
 ```python
 def fit_cebra(X_train, gap_train, X_test, output_dim, seed, iterations, device="cpu"):
     import cebra
+    torch.manual_seed(seed)
+    np.random.seed(seed)
     model = cebra.CEBRA(model_architecture="offset1-model", conditional="time_delta",
                         output_dimension=output_dim, max_iterations=iterations,
-                        batch_size=min(512, len(X_train)), random_state=seed,
-                        device=device)
+                        batch_size=min(512, len(X_train)), device=device)
     model.fit(np.asarray(X_train, np.float32), np.asarray(gap_train, np.float32)[:, None])
     return MethodResult("cebra", model.transform(X_train), model.transform(X_test), None,
                         {"output_dim": output_dim, "seed": seed})
@@ -547,10 +548,11 @@ Add this comment next to the adapter registry:
 # the held-out/stability gate, otherwise a custom prompt-time sampler is dead code.
 ```
 
-- [ ] **Step 7: Run the CEBRA tests twice**
+- [ ] **Step 7: Run the CEBRA test and record upstream non-determinism**
 
 Run: `.venv-manifold/bin/python -m pytest judge-whitebox/tests/test_token_manifold_discover.py -q`
-Expected: PASS twice with identical seeded codes within tolerance.
+Expected: PASS. CEBRA v0.6.0 advertises `non_deterministic=True`; stability is therefore an empirical
+multi-run metric, not byte equality for one seed.
 
 - [ ] **Step 8: Commit**
 

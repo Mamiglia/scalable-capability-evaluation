@@ -1,6 +1,7 @@
 """Output-conditioned discovery on per-token residual recordings."""
 
 import argparse
+import dataclasses
 import json
 import os
 import pathlib
@@ -13,6 +14,15 @@ from sklearn.metrics import r2_score
 from sklearn.model_selection import GroupKFold
 
 import token_manifold_record
+
+
+@dataclasses.dataclass
+class MethodResult:
+    method: str
+    train_code: np.ndarray
+    test_code: np.ndarray
+    test_reconstruction: np.ndarray | None
+    metadata: dict
 
 
 def prompt_weights(prompt_idx):
@@ -109,6 +119,27 @@ def load_manifest(path):
             "gap": np.asarray([prompt["gap"] for prompt in prompts], dtype=np.float64),
             "item": np.asarray([prompt["item"] for prompt in prompts]),
             "prompts": prompts, "manifest": manifest}
+
+
+def fit_cebra(X_train, gap_train, X_test, output_dim, seed, iterations, device="cpu"):
+    """Fit output-gap-conditioned CEBRA and return train/test latent codes."""
+    import cebra
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    model = cebra.CEBRA(model_architecture="offset1-model", conditional="time_delta",
+                        output_dimension=output_dim, max_iterations=iterations,
+                        batch_size=min(512, len(X_train)), device=device)
+    X_train = np.asarray(X_train, dtype=np.float32)
+    X_test = np.asarray(X_test, dtype=np.float32)
+    model.fit(X_train, np.asarray(gap_train, dtype=np.float32)[:, None])
+    return MethodResult("cebra", model.transform(X_train), model.transform(X_test), None,
+                        {"output_dim": output_dim, "seed": seed})
+
+
+def code_gap_r2(result, gap_train, gap_test, alpha=1e-6):
+    """Held-out gap decoding from fixed latent codes."""
+    regressor = Ridge(alpha=alpha).fit(result.train_code, gap_train)
+    return float(r2_score(gap_test, regressor.predict(result.test_code)))
 
 
 def _atomic_csv(df, path):

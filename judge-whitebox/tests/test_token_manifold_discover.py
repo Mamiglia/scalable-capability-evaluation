@@ -33,6 +33,15 @@ def fake_recorded_row(uid, item, n_tokens):
             "l1": 1.0, "l2": 0.0, "gap": 1.0}
 
 
+def curved_gap_data(n, d, seed):
+    rng = np.random.default_rng(seed)
+    theta = rng.uniform(-np.pi, np.pi, n)
+    intrinsic = np.column_stack([np.cos(theta), np.sin(theta), np.cos(2 * theta)])
+    projection = rng.normal(size=(3, d))
+    X = intrinsic @ projection + 0.02 * rng.normal(size=(n, d))
+    return X.astype(np.float32), theta
+
+
 def test_prompt_weights_sum_to_one_per_prompt():
     prompt_idx = np.array([0, 0, 1, 1, 1, 1])
 
@@ -97,3 +106,24 @@ def test_main_timeline_writes_r2_and_shuffled_null(tmp_path, monkeypatch):
     table = pd.read_csv(out)
     assert {"r2", "null_r2"} <= set(table)
     assert table.loc[table.layer == 1, "r2"].mean() > 0.9
+
+
+def test_fit_cebra_returns_requested_dimension_and_seed_metadata():
+    X, y = curved_gap_data(n=240, d=12, seed=0)
+
+    a = discover.fit_cebra(X[:180], y[:180], X[180:], 4, 3, 200, device="cpu")
+
+    assert a.train_code.shape == (180, 4) and a.test_code.shape == (60, 4)
+    assert np.isfinite(a.test_code).all()
+    assert a.test_reconstruction is None
+    assert a.metadata == {"output_dim": 4, "seed": 3}
+
+
+def test_code_gap_r2_uses_train_only_regression():
+    y_train = np.arange(20, dtype=np.float32)
+    y_test = np.arange(20, 30, dtype=np.float32)
+    result = discover.MethodResult("exact", y_train[:, None], y_test[:, None], None, {})
+
+    score = discover.code_gap_r2(result, y_train, y_test)
+
+    assert score > 0.99
