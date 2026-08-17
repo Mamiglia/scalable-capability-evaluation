@@ -42,6 +42,23 @@ def curved_gap_data(n, d, seed):
     return X.astype(np.float32), theta
 
 
+def sparse_manifold_mix(n, d, seed):
+    rng = np.random.default_rng(seed)
+    theta = rng.uniform(-np.pi, np.pi, n)
+    active = rng.integers(0, 2, n)
+    z = np.column_stack([np.cos(theta), np.sin(theta), active, active * theta])
+    return (z @ rng.normal(size=(4, d))).astype(np.float32), z
+
+
+def planted_binary_feature_groups(n, groups, seed):
+    rng = np.random.default_rng(seed)
+    codes = np.zeros((n, 4), dtype=np.float32)
+    choice = rng.integers(0, len(groups), n)
+    for row, selected in enumerate(choice):
+        codes[row, list(groups[selected])] = 1
+    return codes
+
+
 def test_prompt_weights_sum_to_one_per_prompt():
     prompt_idx = np.array([0, 0, 1, 1, 1, 1])
 
@@ -127,3 +144,25 @@ def test_code_gap_r2_uses_train_only_regression():
     score = discover.code_gap_r2(result, y_train, y_test)
 
     assert score > 0.99
+
+
+@pytest.mark.parametrize("method", ["bsf", "sae"])
+def test_reconstructive_method_returns_codes_and_test_reconstruction(method):
+    X, _ = sparse_manifold_mix(n=256, d=12, seed=0)
+
+    result = discover.fit_method(method, X[:192], None, X[192:], seed=2, quick=True)
+
+    assert result.train_code.shape[0] == 192
+    assert result.test_code.shape[0] == 64
+    assert result.test_reconstruction.shape == X[192:].shape
+    assert np.isfinite(result.test_reconstruction).all()
+
+
+def test_ising_clusters_groups_planted_feature_pairs():
+    codes = planted_binary_feature_groups(n=400, groups=((0, 1), (2, 3)), seed=0)
+
+    labels = discover.ising_clusters(codes, alpha=0.01, method="spectral", n_clusters=2)
+
+    assert labels[0] == labels[1]
+    assert labels[2] == labels[3]
+    assert labels[0] != labels[2]

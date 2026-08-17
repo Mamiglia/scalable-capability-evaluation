@@ -142,6 +142,85 @@ def code_gap_r2(result, gap_train, gap_test, alpha=1e-6):
     return float(r2_score(gap_test, regressor.predict(result.test_code)))
 
 
+def fit_bsf(X_train, X_test, group_size, n_groups, l0, seed, epochs,
+            variant="grassmannian", device="cpu"):
+    """Train a pinned Goodfire block-sparse featurizer."""
+    import bsf
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    cls = bsf.GrassmannianBSF if variant == "grassmannian" else bsf.VanillaBSF
+    model = cls(d=X_train.shape[1], n_groups=n_groups, group_size=group_size, l0=l0)
+    model = bsf.train(model, np.asarray(X_train, dtype=np.float32), epochs=epochs,
+                      batch_size=min(64, len(X_train)), snr=0, device=device,
+                      log_every=max(1, epochs))
+    model.eval()
+    with torch.no_grad():
+        train_recon, train_code = model(torch.as_tensor(X_train, dtype=torch.float32, device=device))
+        test_recon, test_code = model(torch.as_tensor(X_test, dtype=torch.float32, device=device))
+    return MethodResult("bsf", train_code.flatten(1).cpu().numpy(),
+                        test_code.flatten(1).cpu().numpy(), test_recon.cpu().numpy(),
+                        {"seed": seed, "group_size": group_size, "n_groups": n_groups,
+                         "l0": l0, "block_train_code": train_code.cpu().numpy()})
+
+
+def fit_sae(X_train, X_test, width, k, seed, epochs, device="cpu"):
+    """Train the minimal BatchTopK SAE supplied by Goodfire's evaluation package."""
+    from saes import BatchTopKSAE
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    model = BatchTopKSAE(X_train.shape[1], width, k, device=device)
+    X = torch.as_tensor(X_train, dtype=torch.float32)
+    optimizer = torch.optim.Adam(model.parameters(), lr=4e-4)
+    for _ in range(epochs):
+        for idx in torch.randperm(len(X)).split(64):
+            batch = X[idx].to(device)
+            reconstruction, _ = model(batch)
+            loss = torch.nn.functional.mse_loss(reconstruction, batch)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            with torch.no_grad():
+                model.decoder.weight.data = torch.nn.functional.normalize(
+                    model.decoder.weight.data, dim=0)
+    model.eval()
+    with torch.no_grad():
+        train_recon, train_code = model(torch.as_tensor(X_train, dtype=torch.float32, device=device))
+        test_recon, test_code = model(torch.as_tensor(X_test, dtype=torch.float32, device=device))
+    return MethodResult("sae", train_code.cpu().numpy(), test_code.cpu().numpy(),
+                        test_recon.cpu().numpy(), {"seed": seed, "width": width, "k": k})
+
+
+def ising_clusters(train_code, alpha, method, n_clusters=None):
+    """Group SAE features from inverse-Ising conditional dependencies."""
+    from unsupervised_clustering import compute_ising, cluster_leiden, cluster_spectral
+    matrix, _, _ = compute_ising(np.asarray(train_code) > 0, alpha=alpha, n_jobs=1)
+    if method == "spectral":
+        clusters, _ = cluster_spectral(matrix, n_clusters=n_clusters)
+    elif method == "leiden":
+        clusters, _ = cluster_leiden(matrix)
+    else:
+        raise ValueError(f"unknown clustering method: {method}")
+    labels = np.full(train_code.shape[1], -1, dtype=int)
+    for label, members in clusters.items():
+        labels[members] = label
+    return labels
+
+
+def fit_method(name, X_train, gap_train, X_test, seed, quick=False):
+    """Small method dispatcher used by the bake-off."""
+    if name == "cebra":
+        assert gap_train is not None
+        return fit_cebra(X_train, gap_train, X_test, 4, seed, 200 if quick else 10_000)
+    n_groups, group_size, l0 = 8, 2, 2
+    if name == "bsf":
+        return fit_bsf(X_train, X_test, group_size, n_groups, l0, seed,
+                       5 if quick else 40)
+    if name == "sae":
+        return fit_sae(X_train, X_test, n_groups * group_size, l0, seed,
+                       5 if quick else 40)
+    raise ValueError(f"unknown method: {name}")
+
+
 def _atomic_csv(df, path):
     path = pathlib.Path(path)
     tmp = path.with_name(path.name + ".partial")
