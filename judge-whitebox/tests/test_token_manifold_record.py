@@ -198,6 +198,18 @@ def test_write_shards_resumes_verified_completed_prefix(tmp_path):
     assert [entry["path"] for entry in data["shards"]] == ["shard_00000.pt", "shard_00001.pt"]
 
 
+def test_write_shards_rejects_resume_with_same_pair_but_different_order(tmp_path):
+    out = tmp_path / "resume"
+    out.mkdir()
+    original = fake_recorded_row("p0", 2)
+    record._write_chunk([original], out / "shard_00000.pt")
+    changed = fake_recorded_row("p0", 2)
+    changed["order"] = 1
+
+    with pytest.raises(ValueError, match="does not match"):
+        record.write_shards(iter([changed]), out, 1, {})
+
+
 def test_main_estimate_only_prints_json_and_writes_nothing(tmp_path, monkeypatch, capsys):
     df = make_pairs_df(4)
     monkeypatch.setattr(record.wbconfig, "cfg", lambda: {

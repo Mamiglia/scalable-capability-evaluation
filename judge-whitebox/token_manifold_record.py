@@ -175,8 +175,10 @@ def write_shards(rows, out_dir, shard_prompts, manifest_meta):
         path = out_dir / name
         if path.exists():
             blob = torch.load(path, map_location="cpu", weights_only=False)
-            expected_ids = [row["pair_uid"] for row in chunk]
-            actual_ids = [prompt["pair_uid"] for prompt in blob["prompts"]]
+            identity_keys = ("row_idx", "pair_uid", "item", "order")
+            expected_ids = [tuple(row[key] for key in identity_keys) for row in chunk]
+            actual_ids = [tuple(prompt[key] for key in identity_keys)
+                          for prompt in blob["prompts"]]
             if actual_ids != expected_ids:
                 raise ValueError(f"existing shard does not match input rows: {path}")
             count = len(blob["prompt_idx"])
