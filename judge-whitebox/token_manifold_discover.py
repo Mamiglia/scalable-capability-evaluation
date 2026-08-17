@@ -68,8 +68,14 @@ def _oof_ridge(X, gap, prompt_idx, item, weights, alphas, cv_folds, fit_idx):
             train = fit_idx[np.isin(prompt_idx[fit_idx], train_prompts)]
             candidates = np.arange(len(y)) if all_tokens else fit_idx
             test = candidates[np.isin(prompt_idx[candidates], test_prompts)]
-            pred[test] = Ridge(alpha=alpha, solver="lsqr", tol=1e-3).fit(
-                X[train], y[train], sample_weight=weights[train]).predict(X[test])
+            mean = X[train].mean(axis=0)
+            scale = X[train].std(axis=0)
+            scale[scale < 1e-6] = 1
+            model = Ridge(alpha=alpha, solver="lsqr", tol=1e-3).fit(
+                (X[train] - mean) / scale, y[train], sample_weight=weights[train])
+            coef = np.ravel(model.coef_) / scale
+            intercept = float(model.intercept_) - mean @ coef
+            pred[test] = X[test] @ coef + intercept
         return pred
 
     best_alpha, best_score = alphas[0], -np.inf

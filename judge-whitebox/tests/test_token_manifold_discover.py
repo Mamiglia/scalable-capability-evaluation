@@ -95,6 +95,20 @@ def test_ridge_timeline_finds_planted_layer_and_uses_item_groups():
     assert set(oof["item"]) == set(data["item"])
 
 
+def test_ridge_timeline_is_invariant_to_feature_scales():
+    data = planted_token_data(n_items=20, prompts_per_item=2, tokens=6,
+                              layers=4, d=10, signal_layer=2, seed=1)
+    rng = np.random.default_rng(2)
+    y = data["gap"][data["prompt_idx"]]
+    data["X"][:, 2] = rng.normal(size=data["X"][:, 2].shape)
+    data["X"][:, 2, 0] = (4 * y + rng.normal(size=len(y))) * 1e-4
+    data["X"][:, 2, 1:] *= 1e4
+
+    summary, _ = discover.ridge_timeline(data, alphas=(0.1, 1.0, 10.0, 100.0), cv_folds=5)
+
+    assert summary.loc[summary.layer == 2, "r2"].mean() > 0.7
+
+
 def test_load_manifest_verifies_and_offsets_prompt_indices(tmp_path):
     rows = [fake_recorded_row("p0", "it0", 3), fake_recorded_row("p1", "it1", 2)]
     manifest = record.write_shards(iter(rows), tmp_path / "recording", 1,
