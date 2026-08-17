@@ -266,7 +266,7 @@ def test_grouped_code_decoder_default_grid_reaches_strong_p_greater_than_n_penal
     _, alpha = discover.grouped_code_predictions(
         code[train], y[train], item[train], code[test], cv_folds=3)
 
-    assert alpha >= 1000
+    assert alpha == 1_000_000
 
 
 def test_grouped_knn_decoder_recovers_curved_code_geometry():
