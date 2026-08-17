@@ -96,6 +96,32 @@ class TestParseJudgeOutput:
         text2 = "EXPLANATION: Good reasoning\nCONFIDENCE: 4"
         assert parse_judge_output(text2) == (None, 4, "Good reasoning")
 
+    def test_quoted_transcript_answers_are_ignored(self):
+        """A digit run like 'ANSWER: 128' is not a verdict, and the last verdict wins."""
+        assert parse_judge_output("Model 1 wrote ANSWER: 128.\nANSWER: 2")[0] == "2"
+        assert parse_judge_output("ANSWER: 128")[0] is None
+
+    def test_verdict_without_format(self):
+        """A judge that names its pick without the ANSWER line still counts as answered."""
+        assert parse_judge_output("Transcript 1 is verbose. Transcript 2 is stronger.")[0] == "2"
+        assert parse_judge_output("Both are fine.")[0] is None
+
+
+def test_consistency_metric():
+    from inspect_ai.scorer import CORRECT, INCORRECT, NOANSWER, SampleScore, Score
+    from judge.scorer import consistency
+
+    def sample(sid, value):
+        return SampleScore(sample_id=sid, score=Score(value=value))
+
+    scores = [
+        sample("q1_1", CORRECT), sample("q1_2", CORRECT),      # same model both orders
+        sample("q2_1", CORRECT), sample("q2_2", INCORRECT),    # position 1 both times
+        sample("q3_1", NOANSWER), sample("q3_2", NOANSWER),    # no verdict
+    ]
+    assert consistency()(scores) == 1 / 3
+
+
 class TestJudgeScorer:
     """Unit tests for judge_scorer in scorer.py."""
 
@@ -120,7 +146,7 @@ class TestJudgeScorer:
         assert score.value == CORRECT
         assert score.answer == "1"
         assert score.explanation == "Model 1 is better."
-        assert score.metadata == {"confidence": 5}
+        assert score.metadata == {"format": True, "confidence": 5}
 
     @pytest.mark.asyncio
     async def test_scorer_incorrect_answer(self):
@@ -143,7 +169,7 @@ class TestJudgeScorer:
         assert score.value == INCORRECT
         assert score.answer == "2"
         assert score.explanation == "Model 2 is better."
-        assert score.metadata == {"confidence": 4}
+        assert score.metadata == {"format": True, "confidence": 4}
 
     @pytest.mark.asyncio
     async def test_scorer_no_answer(self):
@@ -166,7 +192,7 @@ class TestJudgeScorer:
         assert score.value == NOANSWER
         assert score.answer is None
         assert score.explanation is None
-        assert score.metadata is None
+        assert score.metadata == {"format": False}
 
     @pytest.mark.asyncio
     async def test_scorer_target_as_list(self):
