@@ -72,7 +72,12 @@ def main() -> int:
         if len(usable) < args.min_repeats:
             problems.append(f"{model_dir}: {len(usable)} usable repeat(s), need {args.min_repeats}")
 
-        texts = {r: completions(p, args.samples) for r, p in usable.items()}
+        texts = {}
+        for repeat, path in usable.items():
+            try:
+                texts[repeat] = completions(path, args.samples)
+            except Exception as exc:  # e.g. sandbox plugin missing for cyber benches
+                problems.append(f"{path}: cannot read samples ({str(exc).splitlines()[0][:80]})")
         for a, b in itertools.combinations(sorted(texts), 2):
             common = texts[a].keys() & texts[b].keys()
             share = sum(texts[a][k] == texts[b][k] for k in common) / len(common) if common else 0
