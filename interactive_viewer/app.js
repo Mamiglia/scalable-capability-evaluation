@@ -34,6 +34,7 @@ function gapOf(r) {
   return r.d_acc;
 }
 const X_TITLES = { eci: "capability gap (ECI)", gpqa: "capability gap (GPQA accuracy difference)",
+                   mbpp: "capability gap (MBPP accuracy difference)",
                    aime2025: "capability gap (AIME 2025 accuracy difference)",
                    aime2026: "capability gap (AIME 2026 accuracy difference)" };
 const overlay = $("modal");
@@ -185,14 +186,14 @@ function hoverData(r) {
           r.n_items, r.slot_a];
 }
 const MAIN_HOVER =
-  "<b>%{customdata[0]}</b> — judge · GPQA %{customdata[1]:.2f} · %{customdata[2]}<br>" +
-  "<b>major:</b> %{customdata[3]} (GPQA %{customdata[4]:.2f} · %{customdata[5]})<br>" +
-  "<b>minor:</b> %{customdata[6]} (GPQA %{customdata[7]:.2f} · %{customdata[8]})<br>" +
+  "<b>%{customdata[0]}</b> — judge · accuracy %{customdata[1]:.2f} · %{customdata[2]}<br>" +
+  "<b>major:</b> %{customdata[3]} (accuracy %{customdata[4]:.2f} · %{customdata[5]})<br>" +
+  "<b>minor:</b> %{customdata[6]} (accuracy %{customdata[7]:.2f} · %{customdata[8]})<br>" +
   "<b>gap:</b> %{customdata[9]:.3f} · <b>judge acc:</b> %{customdata[10]:.2f} " +
   "[%{customdata[11]:.2f}, %{customdata[12]:.2f}]<br>" +
   "<b>n:</b> %{customdata[13]} · <b>slot-1 rate:</b> %{customdata[14]:.2f}<extra></extra>";
 const SELF_HOVER =
-  "<b>%{customdata[0]}</b> — judge · GPQA %{customdata[1]:.2f} · %{customdata[2]}<br>" +
+  "<b>%{customdata[0]}</b> — judge · accuracy %{customdata[1]:.2f} · %{customdata[2]}<br>" +
   "<b>self-pair control:</b> %{customdata[3]} vs itself (should sit at chance)<br>" +
   "<b>judge acc:</b> %{customdata[10]:.2f} [%{customdata[11]:.2f}, %{customdata[12]:.2f}]<br>" +
   "<b>n:</b> %{customdata[13]} · <b>slot-1 rate:</b> %{customdata[14]:.2f}<extra></extra>";
@@ -383,7 +384,7 @@ function attachLegendHover() {
 
 /* --- fetch + cache ------------------------------------------------------- */
 async function fetchJSON(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(url + " → HTTP " + res.status);
   return res.json();
 }
@@ -796,6 +797,13 @@ async function loadDataset(id) {
     loadFailed("data/" + id + "/index.json", e);
     return;
   }
+  const available = INDEX.available_xmetrics;
+  Array.from(ctlXmetric.options).forEach(option => {
+    const supported = !available || available.includes(option.value);
+    option.disabled = !supported;
+    option.hidden = !supported;
+  });
+  if (INDEX.default_xmetric) ctlXmetric.value = INDEX.default_xmetric;
   rescaleX();
   renderPlot();
 }
