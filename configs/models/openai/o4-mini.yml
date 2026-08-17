@@ -1,0 +1,6 @@
+name: openai/o4-mini
+slug: openrouter/openai/o4-mini
+release_date: '2025-04-16'
+
+model_args:
+  provider: {}

@@ -12,3 +12,5 @@ runpod:
   image: vllm/vllm-openai:v0.18.0
   vllm_args:
     - --trust-remote-code
+    - --max-model-len
+    - '131072'
