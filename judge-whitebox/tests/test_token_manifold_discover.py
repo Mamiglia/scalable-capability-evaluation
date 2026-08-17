@@ -141,6 +141,8 @@ def test_load_manifest_verifies_and_offsets_prompt_indices(tmp_path):
     assert data["X"].shape == (5, 2, 4)
     assert data["prompt_idx"].tolist() == [0, 0, 0, 1, 1]
     assert data["item"].tolist() == ["it0", "it1"]
+    assert data["input_ids"].tolist() == [0, 1, 2, 0, 1]
+    assert data["offsets"].shape == (5, 2)
 
 
 def test_load_manifest_can_select_one_physical_layer(tmp_path):
@@ -198,6 +200,7 @@ def test_fit_cebra_returns_requested_dimension_and_seed_metadata():
     assert a.train_code.shape == (180, 4) and a.test_code.shape == (60, 4)
     assert np.isfinite(a.test_code).all()
     assert a.test_reconstruction is None
+    assert a.model is not None
     assert a.metadata == {"output_dim": 4, "seed": 3}
 
 
@@ -295,6 +298,7 @@ def test_reconstructive_method_returns_codes_and_test_reconstruction(method):
     assert result.test_code.shape[0] == 64
     assert result.test_reconstruction.shape == X[192:].shape
     assert np.isfinite(result.test_reconstruction).all()
+    assert result.model is not None
 
 
 @pytest.mark.parametrize("method", ["raw", "pca", "random"])
@@ -398,6 +402,33 @@ def test_run_trajectory_writes_state_and_delta_surfaces(tmp_path, monkeypatch):
     assert table.loc[table.kind == "state", "r2"].max() > 0.9
 
 
+def test_run_trace_writes_exact_sparse_codes_offsets_and_model(tmp_path, monkeypatch):
+    manifest = write_trajectory_manifest(tmp_path / "recording")
+
+    def fake_config(name, d_in, quick):
+        return {"width": 4, "k": 2, "epochs": 1}
+
+    def fake_fit(name, X_train, gap_train, X_test, seed, quick, config):
+        train = np.zeros((len(X_train), 4), dtype=np.float32)
+        test = np.zeros((len(X_test), 4), dtype=np.float32)
+        train[:, :2] = np.abs(X_train[:, :2]) + 1
+        test[:, :2] = np.abs(X_test[:, :2]) + 1
+        return discover.MethodResult(name, train, test, np.asarray(X_test), {"seed": seed},
+                                     model=torch.nn.Linear(4, 4))
+
+    monkeypatch.setattr(discover, "trajectory_config", fake_config)
+    monkeypatch.setattr(discover, "fit_method", fake_fit)
+    out = tmp_path / "trace"
+
+    discover.run_trace(manifest, layer=2, method="sae", out_dir=out, seed=0,
+                       positions_per_prompt=6, quick=True)
+
+    codes = torch.load(out / "codes.pt", map_location="cpu", weights_only=False)
+    assert codes["code_indices"].shape == (240, 2)
+    assert codes["offsets"].shape == (240, 2)
+    assert (out / "model.pt").exists()
+
+
 def test_bakeoff_writes_one_row_per_method(tmp_path, monkeypatch):
     manifest = write_fake_manifest(tmp_path / "recording")
     monkeypatch.setattr(discover, "fit_method", fake_fit_method)
@@ -458,15 +489,37 @@ def test_main_trajectory_dispatches_cli_arguments(tmp_path, monkeypatch):
                     "cv_folds": 2, "quick": True}
 
 
+def test_main_trace_dispatches_cli_arguments(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_run(manifest, layer, method, out_dir, seed, positions_per_prompt, quick):
+        seen.update(manifest=manifest, layer=layer, method=method, out_dir=out_dir,
+                    seed=seed, positions_per_prompt=positions_per_prompt, quick=quick)
+
+    monkeypatch.setattr(discover, "run_trace", fake_run)
+    monkeypatch.setattr(sys, "argv", ["token_manifold_discover.py", "trace",
+                                       "--manifest", "recording/manifest.json",
+                                       "--layer", "25", "--method", "sae", "--seed", "2",
+                                       "--positions-per-prompt", "32",
+                                       "--out", str(tmp_path / "out"), "--quick"])
+
+    discover.main()
+
+    assert seen == {"manifest": "recording/manifest.json", "layer": 25,
+                    "method": "sae", "out_dir": str(tmp_path / "out"), "seed": 2,
+                    "positions_per_prompt": 32, "quick": True}
+
+
 def test_sbatch_has_explicit_stages_and_never_installs_packages():
     text = (Path(__file__).parents[1] / "sbatch" / "token_manifold.sbatch").read_text()
 
     assert "WB_STAGE" in text
-    for stage in ("record", "timeline", "bakeoff", "trajectory"):
+    for stage in ("record", "timeline", "bakeoff", "trajectory", "trace"):
         assert stage in text
     assert "WB_MANIFOLD_VENV" in text
     assert "WB_RUN" in text
     assert "timeline_${RUN}.csv" in text
     assert "bakeoff_${RUN}_L${LAYER}" in text
     assert "trajectory_${RUN}_${METHOD}" in text
+    assert "trace_${RUN}_${METHOD}_L${LAYER}" in text
     assert "pip install" not in text

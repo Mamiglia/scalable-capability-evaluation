@@ -27,6 +27,7 @@ class MethodResult:
     test_code: np.ndarray
     test_reconstruction: np.ndarray | None
     metadata: dict
+    model: object | None = None
 
 
 def prompt_weights(prompt_idx):
@@ -155,7 +156,7 @@ def load_manifest(path, layer=None):
         raise ValueError(f"layer {layer} not in manifest layers {manifest['layers']}")
     layer_idx = None if layer is None else manifest["layers"].index(layer)
     root = path.parent
-    resid, prompt_idx, position, group_id, prompts = [], [], [], [], []
+    resid, prompt_idx, position, input_ids, offsets, group_id, prompts = [], [], [], [], [], [], []
     prompt_offset = 0
     for entry in manifest["shards"]:
         shard_path = root / entry["path"]
@@ -171,13 +172,16 @@ def load_manifest(path, layer=None):
         resid.append(values.float().numpy())
         prompt_idx.append(blob["prompt_idx"].numpy().astype(np.int64) + prompt_offset)
         position.append(blob["position"].numpy())
+        input_ids.append(blob["input_ids"].numpy())
+        offsets.append(blob["offsets"].numpy())
         group_id.append(blob["group_id"].numpy())
         prompts.extend(blob["prompts"])
         prompt_offset += len(blob["prompts"])
     if prompt_offset != manifest["n_prompts"] or sum(map(len, prompt_idx)) != manifest["n_tokens"]:
         raise ValueError("manifest totals disagree with shards")
     return {"X": np.concatenate(resid), "prompt_idx": np.concatenate(prompt_idx),
-            "position": np.concatenate(position), "group_id": np.concatenate(group_id),
+            "position": np.concatenate(position), "input_ids": np.concatenate(input_ids),
+            "offsets": np.concatenate(offsets), "group_id": np.concatenate(group_id),
             "gap": np.asarray([prompt["gap"] for prompt in prompts], dtype=np.float64),
             "item": np.asarray([prompt["item"] for prompt in prompts]),
             "prompts": prompts, "manifest": manifest}
@@ -204,7 +208,7 @@ def fit_cebra(X_train, gap_train, X_test, output_dim, seed, iterations, device="
         labels = (labels - labels.mean()) / (scale if scale >= 1e-6 else 1)
     model.fit(X_train, labels[:, None])
     return MethodResult("cebra", model.transform(X_train), model.transform(X_test), None,
-                        {"output_dim": output_dim, "seed": seed})
+                        {"output_dim": output_dim, "seed": seed}, model=model)
 
 
 def code_gap_r2(result, gap_train, gap_test, alpha=1e-6):
@@ -288,7 +292,7 @@ def fit_bsf(X_train, X_test, group_size, n_groups, l0, seed, epochs,
     return MethodResult("bsf", train_code.flatten(1).cpu().numpy(),
                         test_code.flatten(1).cpu().numpy(), test_recon.cpu().numpy(),
                         {"seed": seed, "group_size": group_size, "n_groups": n_groups,
-                         "l0": l0, "block_train_code": train_code.cpu().numpy()})
+                         "l0": l0, "block_train_code": train_code.cpu().numpy()}, model=model)
 
 
 def fit_sae(X_train, X_test, width, k, seed, epochs, device="cpu"):
@@ -315,7 +319,8 @@ def fit_sae(X_train, X_test, width, k, seed, epochs, device="cpu"):
         train_recon, train_code = model(torch.as_tensor(X_train, dtype=torch.float32, device=device))
         test_recon, test_code = model(torch.as_tensor(X_test, dtype=torch.float32, device=device))
     return MethodResult("sae", train_code.cpu().numpy(), test_code.cpu().numpy(),
-                        test_recon.cpu().numpy(), {"seed": seed, "width": width, "k": k})
+                        test_recon.cpu().numpy(), {"seed": seed, "width": width, "k": k},
+                        model=model)
 
 
 def ising_clusters(train_code, alpha, method, n_clusters=None):
@@ -436,6 +441,11 @@ def _prompt_deciles(prompt_idx, position):
 
 
 def _normalise_trajectory(X_train, X_test, method):
+    mean, scale = _trajectory_stats(X_train, method)
+    return (X_train - mean) / scale, (X_test - mean) / scale
+
+
+def _trajectory_stats(X_train, method):
     mean = X_train.mean(axis=0, keepdims=True)
     centered = X_train - mean
     if method == "bsf":
@@ -445,7 +455,7 @@ def _normalise_trajectory(X_train, X_test, method):
         scale[scale < 1e-6] = 1
     if np.ndim(scale) == 0 and scale < 1e-6:
         scale = 1.0
-    return (X_train - mean) / scale, (X_test - mean) / scale
+    return mean, scale
 
 
 def run_trajectory(manifest, layers, method, out_dir, seeds, positions_per_prompt=64,
@@ -515,6 +525,64 @@ def run_trajectory(manifest, layers, method, out_dir, seeds, positions_per_promp
     _atomic_csv(table, out_dir / "trajectory.csv")
     _atomic_csv(oof, out_dir / "trajectory_oof.csv")
     return table
+
+
+def run_trace(manifest, layer, method, out_dir, seed, positions_per_prompt=64,
+              quick=False):
+    """Fit a frozen layer model and export exact-token latent codes for localization."""
+    out_dir = pathlib.Path(out_dir)
+    if out_dir.exists():
+        raise FileExistsError(out_dir)
+    if method not in {"cebra", "bsf", "sae"}:
+        raise ValueError(f"trace requires a learned method, got {method}")
+    data = load_manifest(manifest, layer=layer)
+    selected = relative_token_indices(data["prompt_idx"], data["position"],
+                                      positions_per_prompt)
+    X = data["X"][:, 0]
+    mean, scale = _trajectory_stats(X[selected], method)
+    X_train = (X[selected] - mean) / scale
+    X_all = (X - mean) / scale
+    config = trajectory_config(method, X.shape[1], quick)
+    prompt = data["prompt_idx"][selected]
+    result = fit_method(method, X_train, data["gap"][prompt], X_all, seed, quick, config)
+    payload = {
+        "manifest": str(manifest), "method": method, "layer": layer, "seed": seed,
+        "config": config, "prompt_idx": torch.as_tensor(data["prompt_idx"], dtype=torch.int32),
+        "position": torch.as_tensor(data["position"], dtype=torch.int32),
+        "input_ids": torch.as_tensor(data["input_ids"], dtype=torch.int32),
+        "offsets": torch.as_tensor(data["offsets"], dtype=torch.int32),
+        "group_id": torch.as_tensor(data["group_id"], dtype=torch.int8),
+        "prompts": data["prompts"],
+    }
+    code = np.asarray(result.test_code)
+    if method == "cebra":
+        payload["code"] = torch.as_tensor(code, dtype=torch.float16)
+    elif method == "sae":
+        k = config["k"]
+        indices = np.argpartition(code, -k, axis=1)[:, -k:]
+        values = np.take_along_axis(code, indices, axis=1)
+        payload["code_indices"] = torch.as_tensor(indices, dtype=torch.int32)
+        payload["code_values"] = torch.as_tensor(values, dtype=torch.float16)
+    else:
+        blocks = code.reshape(len(code), config["n_groups"], config["group_size"])
+        norms = np.square(blocks).sum(axis=2)
+        indices = np.argpartition(norms, -config["l0"], axis=1)[:, -config["l0"]:]
+        values = np.take_along_axis(blocks, indices[:, :, None], axis=1)
+        payload["block_indices"] = torch.as_tensor(indices, dtype=torch.int32)
+        payload["block_values"] = torch.as_tensor(values, dtype=torch.float16)
+    out_dir.mkdir(parents=True)
+    token_manifold_record.atomic_torch_save(payload, out_dir / "codes.pt")
+    if method == "cebra":
+        tmp = out_dir / "model.cebra.partial"
+        result.model.save(str(tmp))
+        os.replace(tmp, out_dir / "model.cebra")
+        token_manifold_record.atomic_torch_save(
+            {"mean": mean, "scale": scale, "config": config}, out_dir / "normalizer.pt")
+    else:
+        token_manifold_record.atomic_torch_save(
+            {"state_dict": result.model.state_dict(), "mean": mean, "scale": scale,
+             "config": config}, out_dir / "model.pt")
+    return out_dir / "codes.pt"
 
 
 def _reconstruction_r2(target, reconstruction):
@@ -606,6 +674,14 @@ def main():
     trajectory.add_argument("--cv-folds", type=int, default=3)
     trajectory.add_argument("--out", required=True)
     trajectory.add_argument("--quick", action="store_true")
+    trace = subparsers.add_parser("trace")
+    trace.add_argument("--manifest", required=True)
+    trace.add_argument("--layer", required=True, type=int)
+    trace.add_argument("--method", choices=("cebra", "bsf", "sae"), required=True)
+    trace.add_argument("--seed", type=int, default=0)
+    trace.add_argument("--positions-per-prompt", type=int, default=64)
+    trace.add_argument("--out", required=True)
+    trace.add_argument("--quick", action="store_true")
     args = parser.parse_args()
 
     if args.command == "timeline":
@@ -632,6 +708,10 @@ def main():
                        tuple(int(seed) for seed in args.seeds.split(",")),
                        args.positions_per_prompt, args.cv_folds, args.quick)
         print(f"token trajectory -> {args.out}")
+    elif args.command == "trace":
+        run_trace(args.manifest, args.layer, args.method, args.out, args.seed,
+                  args.positions_per_prompt, args.quick)
+        print(f"exact token trace -> {args.out}")
 
 
 if __name__ == "__main__":
