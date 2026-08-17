@@ -246,4 +246,7 @@ def test_sbatch_has_explicit_stages_and_never_installs_packages():
     for stage in ("record", "timeline", "bakeoff"):
         assert stage in text
     assert "WB_MANIFOLD_VENV" in text
+    assert "WB_RUN" in text
+    assert "timeline_${RUN}.csv" in text
+    assert "bakeoff_${RUN}_L${LAYER}" in text
     assert "pip install" not in text

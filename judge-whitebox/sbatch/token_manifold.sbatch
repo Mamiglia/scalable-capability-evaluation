@@ -11,8 +11,8 @@
 
 # User-gated stages; submit from staging/whitebox/code after reviewing the storage estimate.
 # sbatch --export=ALL,WB_STAGE=record,WB_TAG=pilot,WB_MODEL=Qwen3-8B,WB_FOLD=A token_manifold.sbatch
-# sbatch --export=ALL,WB_STAGE=timeline,WB_TAG=pilot,WB_MANIFEST=/path/manifest.json,WB_MANIFOLD_VENV=/path/venv token_manifold.sbatch
-# sbatch --export=ALL,WB_STAGE=bakeoff,WB_TAG=pilot,WB_MANIFEST=/path/manifest.json,WB_LAYER=12,WB_MANIFOLD_VENV=/path/venv token_manifold.sbatch
+# sbatch --export=ALL,WB_STAGE=timeline,WB_TAG=pilot,WB_RUN=qwen,WB_MANIFEST=/path/manifest.json,WB_MANIFOLD_VENV=/path/venv token_manifold.sbatch
+# sbatch --export=ALL,WB_STAGE=bakeoff,WB_TAG=pilot,WB_RUN=qwen,WB_MANIFEST=/path/manifest.json,WB_LAYER=12,WB_MANIFOLD_VENV=/path/venv token_manifold.sbatch
 source wb_common.sh
 
 STAGE="${WB_STAGE:?set WB_STAGE=record|timeline|bakeoff}"
@@ -33,16 +33,18 @@ case "$STAGE" in
     ;;
   timeline)
     source "${WB_MANIFOLD_VENV:?set WB_MANIFOLD_VENV}/bin/activate"
+    RUN="${WB_RUN:?set a model-specific WB_RUN}"
     MANIFEST="${WB_MANIFEST:?set WB_MANIFEST}"
-    DEST="$ROOT/timeline.csv"
+    DEST="$ROOT/timeline_${RUN}.csv"
     [ ! -e "$DEST" ] || { echo "destination exists: $DEST"; exit 1; }
     python token_manifold_discover.py timeline --manifest "$MANIFEST" --out "$DEST"
     ;;
   bakeoff)
     source "${WB_MANIFOLD_VENV:?set WB_MANIFOLD_VENV}/bin/activate"
+    RUN="${WB_RUN:?set a model-specific WB_RUN}"
     MANIFEST="${WB_MANIFEST:?set WB_MANIFEST}"
     LAYER="${WB_LAYER:?set WB_LAYER}"
-    DEST="$ROOT/bakeoff_L${LAYER}"
+    DEST="$ROOT/bakeoff_${RUN}_L${LAYER}"
     [ ! -e "$DEST" ] || { echo "destination exists: $DEST"; exit 1; }
     python token_manifold_discover.py bakeoff --manifest "$MANIFEST" --layer "$LAYER" \
       --methods "${WB_METHODS:-cebra,bsf,sae}" --seeds "${WB_SEEDS:-0,1,2,3,4}" --out "$DEST"
