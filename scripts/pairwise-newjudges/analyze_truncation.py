@@ -2,6 +2,7 @@
 
 import argparse
 import re
+import shutil
 from pathlib import Path
 import sys
 
@@ -9,6 +10,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.transforms import ScaledTranslation
 import numpy as np
 import pandas as pd
 import yaml
@@ -54,6 +56,9 @@ GAP_CONDITIONS = ("original", "first_90", "end_90")
 CONDITION_LABELS = {
     "original": "Original", "first_90": "First 90%", "end_90": "End 90%",
 }
+JUDGE_COLORS = {
+    "qwen3-8b": "#2a78d6", "qwen3-32b": "#e87ba4", "gpt-oss-20b": "#eb6834",
+}
 CAPABILITY_CONFIG = ROOT / "scripts/analyses/judge-elo/configs/gpqa.yaml"
 REFERENCE = ROOT / "analysis/hibayes/gpqa_correctness.csv"
 GLM_DIR = (ROOT / "analysis/hibayes/run_correctness_full/models/"
@@ -61,6 +66,7 @@ GLM_DIR = (ROOT / "analysis/hibayes/run_correctness_full/models/"
 GLM_SUMMARY = GLM_DIR / "diagnostics/inference_data_summary.csv"
 GLM_COORDS = ROOT / "analysis/hibayes/run_correctness_full/coords.json"
 STYLE_LEXICON = ROOT / "scripts/hibayes/style_lexicon.yaml"
+MANUSCRIPT_OUT = ROOT / "manuscript/figures"
 
 
 def collect_logs(root: Path, read_log=read_eval_log) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -170,8 +176,16 @@ def experiment_cells(rows: pd.DataFrame) -> pd.DataFrame:
 
 def overall_tables(cells: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Per-judge accuracy and mean intervals with judges as replication units."""
-    by_judge = (cells.groupby(["judge", "condition"], as_index=False)
-                     .agg(accuracy=("observed", "mean"), n_cells=("item", "size")))
+    units = []
+    for (judge, condition), group in cells.groupby(["judge", "condition"]):
+        pair_scores = group.groupby("pair")["observed"].mean()
+        mean, low, high = _mean_ci(pair_scores)
+        units.append({
+            "judge": judge, "condition": condition, "accuracy": mean,
+            "ci_low": low, "ci_high": high, "n_cells": len(group),
+            "n_pairs": len(pair_scores),
+        })
+    by_judge = pd.DataFrame(units)
     rows = []
     for condition in CONDITION_ORDER:
         values = by_judge[by_judge.condition == condition].accuracy
@@ -281,35 +295,55 @@ def _style_axes(ax) -> None:
 
 
 def make_overall_figure(cells: pd.DataFrame):
-    """Overall first/end retention curves with judge-level uncertainty."""
-    by_judge, summary = overall_tables(cells)
-    fig, ax = plt.subplots(figsize=(2.2, 2.4))
-    colors = {"first": "#2a78d6", "end": "#eb6834"}
+    """Overall first/end retention curves for each judge."""
+    by_judge, _ = overall_tables(cells)
+    fig, ax = plt.subplots(figsize=(1.8, 1.9))
+    palette = ("#2a78d6", "#1baf7a", "#eb6834", "#4a3aa7")
     fractions = [10, 50, 90, 100]
-    for direction in ("first", "end"):
-        conditions = [f"{direction}_{fraction}" for fraction in fractions[:-1]] + ["original"]
-        for judge in sorted(by_judge.judge.unique()):
-            values = (by_judge[by_judge.judge == judge].set_index("condition")
-                      .reindex(conditions).accuracy)
-            ax.plot(fractions, values, color=colors[direction], lw=0.7, marker="o",
-                    ms=2.2, alpha=0.28, zorder=2)
-        means = summary.set_index("condition").reindex(conditions)
-        yerr = np.vstack([means.accuracy - means.ci_low,
-                          means.ci_high - means.accuracy])
-        yerr = yerr if np.isfinite(yerr).all() else None
-        ax.errorbar(
-            fractions, means.accuracy, yerr=yerr, color=colors[direction],
-            lw=1, marker="o", ms=3.2, capsize=0, label=f"{direction.title()} retained",
-            zorder=4,
-        )
+    judges = sorted(by_judge.judge.unique())
+    colors = {judge: JUDGE_COLORS.get(judge, palette[index % len(palette)])
+              for index, judge in enumerate(judges)}
+    offsets = np.linspace(-1.5, 1.5, len(judges) * 2)
+    series_index = 0
+    for judge in judges:
+        judge_rows = by_judge[by_judge.judge == judge].set_index("condition")
+        for direction, linestyle in (("first", "-"), ("end", "--")):
+            conditions = [f"{direction}_{fraction}" for fraction in fractions[:-1]] + ["original"]
+            rows = judge_rows.reindex(conditions)
+            ax.plot(fractions, rows.accuracy, color=colors[judge], ls=linestyle,
+                    lw=1, clip_on=False, zorder=2)
+            yerr = np.vstack([rows.accuracy - rows.ci_low,
+                              rows.ci_high - rows.accuracy])
+            yerr = yerr if np.isfinite(yerr).all() else None
+            transform = ax.transData + ScaledTranslation(
+                offsets[series_index] / 72, 0, fig.dpi_scale_trans
+            )
+            ax.errorbar(fractions, rows.accuracy, yerr=yerr, fmt="o",
+                        color=colors[judge], ms=3.2, elinewidth=0.7, capsize=0,
+                        markerfacecolor=("none" if direction == "end"
+                                         else colors[judge]),
+                        markeredgecolor=colors[judge], markeredgewidth=0.8,
+                        transform=transform, clip_on=False, zorder=3)
+            series_index += 1
     ax.axhline(0.5, color="#888888", lw=0.8, ls=(0, (2, 2)), zorder=1)
-    ax.set(xlim=(10, 100), ylim=(0, 1), xticks=fractions, yticks=[0, 0.5, 1],
+    ax.set(xlim=(10, 100), ylim=(0.5, 1), xticks=fractions,
+           yticks=[0.5, 0.75, 1],
            xlabel="Transcript retained (%)", ylabel="Judge accuracy")
     _style_axes(ax)
-    handles, labels = ax.get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=1, frameon=False,
-               bbox_to_anchor=(0.5, 0.0), handlelength=1.8)
-    fig.subplots_adjust(left=0.24, right=0.96, top=0.97, bottom=0.30)
+    ax.get_xticklabels()[-2].set_horizontalalignment("right")
+    ax.get_xticklabels()[-1].set_horizontalalignment("left")
+    handles = [
+        *[plt.Line2D([], [], color=colors[judge], lw=1, label=judge)
+          for judge in judges],
+        plt.Line2D([], [], color="#555555", marker="o", ms=3, lw=1,
+                   markerfacecolor="#555555", label="First retained"),
+        plt.Line2D([], [], color="#555555", marker="o", ms=3, lw=1, ls="--",
+                   markerfacecolor="none", markeredgecolor="#555555",
+                   label="End retained"),
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False,
+               bbox_to_anchor=(0.5, 0.0), handlelength=1.2, columnspacing=0.7)
+    fig.subplots_adjust(left=0.24, right=0.87, top=0.97, bottom=0.54)
     return fig
 
 
@@ -319,10 +353,24 @@ def gap_tables(cells: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     pair_gaps = cells.groupby("pair").capability_gap.first().sort_values()
     bins = pd.qcut(pair_gaps.rank(method="first"), 3, labels=False)
     cells["gap_bin"] = cells.pair.map(bins)
-    by_judge = (cells.groupby(["judge", "condition", "gap_bin"], as_index=False)
-                     .agg(gap_mean=("capability_gap", "mean"),
-                          observed=("observed", "mean"),
-                          predicted=("predicted", "mean")))
+    units = []
+    for (judge, condition, gap_bin), group in cells.groupby(
+        ["judge", "condition", "gap_bin"]
+    ):
+        pairs = group.groupby("pair", as_index=False).agg(
+            gap_mean=("capability_gap", "first"),
+            observed=("observed", "mean"), predicted=("predicted", "mean"),
+        )
+        row = {
+            "judge": judge, "condition": condition, "gap_bin": int(gap_bin),
+            "gap_mean": pairs.gap_mean.mean(), "n_cells": len(group),
+            "n_pairs": len(pairs),
+        }
+        for value in ("observed", "predicted"):
+            mean, low, high = _mean_ci(pairs[value])
+            row |= {value: mean, f"{value}_ci_low": low, f"{value}_ci_high": high}
+        units.append(row)
+    by_judge = pd.DataFrame(units)
     rows = []
     for (condition, gap_bin), group in by_judge.groupby(["condition", "gap_bin"]):
         row = {"condition": condition, "gap_bin": int(gap_bin),
@@ -340,69 +388,166 @@ def gap_tables(cells: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return by_judge, pd.DataFrame(rows)
 
 
+def average_gap_table(cells: pd.DataFrame) -> pd.DataFrame:
+    """Pair-weighted gap curves after averaging each judge within pair."""
+    cells = cells[cells.condition.isin(GAP_CONDITIONS)].copy()
+    pair_gaps = cells.groupby("pair").capability_gap.first().sort_values()
+    bins = pd.qcut(pair_gaps.rank(method="first"), 3, labels=False)
+    cells["gap_bin"] = cells.pair.map(bins)
+    judge_pairs = cells.groupby(
+        ["condition", "gap_bin", "judge", "pair"], as_index=False
+    ).agg(gap_mean=("capability_gap", "first"),
+          observed=("observed", "mean"), predicted=("predicted", "mean"))
+    rows = []
+    for (condition, gap_bin), group in judge_pairs.groupby(["condition", "gap_bin"]):
+        pairs = group.groupby("pair", as_index=False).agg(
+            gap_mean=("gap_mean", "first"),
+            observed=("observed", "mean"), predicted=("predicted", "mean"),
+        )
+        row = {
+            "condition": condition, "gap_bin": int(gap_bin),
+            "gap_mean": pairs.gap_mean.mean(),
+            "n_judges": group.judge.nunique(), "n_pairs": len(pairs),
+        }
+        for value in ("observed", "predicted"):
+            mean, low, high = _mean_ci(pairs[value])
+            row |= {value: mean, f"{value}_ci_low": low, f"{value}_ci_high": high}
+        rows.append(row)
+    return pd.DataFrame(rows).sort_values(["condition", "gap_bin"], ignore_index=True)
+
+
 def make_gap_figure(cells: pd.DataFrame):
     """Observed and frozen-GLM gap curves for original and 90% treatments."""
-    by_judge, summary = gap_tables(cells)
-    fig, axes = plt.subplots(1, 3, figsize=(5.4, 2.4), sharex=True, sharey=True)
+    by_judge, _ = gap_tables(cells)
+    fig, axes = plt.subplots(1, 3, figsize=(4.3, 1.9), sharex=True, sharey=True)
     palette = ("#2a78d6", "#1baf7a", "#eb6834", "#4a3aa7")
     judges = sorted(by_judge.judge.unique())
-    judge_colors = dict(zip(judges, palette, strict=False))
-    maximum = max(10.0, float(summary.gap_mean.max()))
+    colors = {judge: JUDGE_COLORS.get(judge, palette[index % len(palette)])
+              for index, judge in enumerate(judges)}
+    offsets = np.linspace(-1.5, 1.5, len(judges) * 2)
+    maximum = max(10.0, float(by_judge.gap_mean.max()))
     x_max = np.ceil(maximum / 10) * 10
     for ax, condition in zip(axes, GAP_CONDITIONS, strict=True):
+        series_index = 0
         for judge in judges:
             rows = by_judge[(by_judge.judge == judge) &
                             (by_judge.condition == condition)].sort_values("gap_bin")
-            ax.plot(rows.gap_mean, rows.observed, color=judge_colors[judge], marker="o",
-                    ms=2.2, lw=0.7, alpha=0.35, zorder=2)
-            ax.plot(rows.gap_mean, rows.predicted, color=judge_colors[judge], marker="o",
-                    ms=2.2, lw=0.7, ls="--", alpha=0.35, zorder=2)
-        rows = summary[summary.condition == condition].sort_values("gap_bin")
-        for value, color, linestyle in (
-            ("observed", "#111111", "-"), ("predicted", "#666666", "--")
-        ):
-            low, high = f"{value}_ci_low", f"{value}_ci_high"
-            yerr = np.vstack([rows[value] - rows[low], rows[high] - rows[value]])
-            yerr = yerr if np.isfinite(yerr).all() else None
-            ax.errorbar(rows.gap_mean, rows[value], yerr=yerr, color=color, marker="o",
-                        ms=3, lw=1, capsize=0, linestyle=linestyle, zorder=4)
+            for value, linestyle in (("observed", "-"), ("predicted", "--")):
+                ax.plot(rows.gap_mean, rows[value], color=colors[judge],
+                        lw=1, ls=linestyle, zorder=2)
+                low, high = f"{value}_ci_low", f"{value}_ci_high"
+                yerr = np.vstack([rows[value] - rows[low], rows[high] - rows[value]])
+                yerr = yerr if np.isfinite(yerr).all() else None
+                transform = ax.transData + ScaledTranslation(
+                    offsets[series_index] / 72, 0, fig.dpi_scale_trans
+                )
+                ax.errorbar(rows.gap_mean, rows[value], yerr=yerr, fmt="o",
+                            color=colors[judge], ms=3, elinewidth=0.7, capsize=0,
+                            markerfacecolor=("none" if condition == "end_90"
+                                             else colors[judge]),
+                            transform=transform, zorder=3)
+                series_index += 1
         ax.axhline(0.5, color="#888888", lw=0.8, ls=":", zorder=1)
         ax.text(0.03, 0.96, CONDITION_LABELS[condition], transform=ax.transAxes,
                 color="#666666", va="top", fontsize=8)
-        ax.set(xlim=(0, x_max), ylim=(0, 1), xticks=[0, x_max / 2, x_max],
-               yticks=[0, 0.5, 1], xlabel="Capability gap (ECI)")
+        ax.set(xlim=(0, x_max), ylim=(0.5, 1), xticks=[0, x_max / 2, x_max],
+               yticks=[0.5, 0.75, 1], xlabel="Capability gap (ECI)")
         _style_axes(ax)
     axes[0].set_ylabel("Judge accuracy")
     handles = [
-        plt.Line2D([], [], color="#111111", marker="o", ms=3, lw=1,
-                   label="Observed mean"),
+        *[plt.Line2D([], [], color=colors[judge], marker="o", ms=3, lw=1,
+                    label=judge) for judge in judges],
+        plt.Line2D([], [], color="#555555", marker="o", ms=3, lw=1,
+                   label="Empirical accuracy"),
         plt.Line2D([], [], color="#666666", marker="o", ms=3, lw=1, ls="--",
-                   label="Frozen GLM"),
-        *[plt.Line2D([], [], color=judge_colors[judge], lw=1, label=judge)
-          for judge in judges],
+                   label="Frozen GLM prediction"),
     ]
-    fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False,
+    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False,
                bbox_to_anchor=(0.5, 0.0), handlelength=1.7, columnspacing=0.8)
-    fig.subplots_adjust(left=0.11, right=0.99, top=0.97, bottom=0.32, wspace=0.24)
+    fig.subplots_adjust(left=0.15, right=0.99, top=0.97, bottom=0.52, wspace=0.24)
     return fig
 
 
-def write_plot_outputs(cells: pd.DataFrame, out: Path) -> None:
+def make_average_gap_figure(cells: pd.DataFrame):
+    """Empirical and frozen-GLM gap curves averaged over judges."""
+    averages = average_gap_table(cells)
+    fig, ax = plt.subplots(figsize=(1.8, 1.9))
+    styles = (
+        ("original", "Original", "#111111", False, -4),
+        ("first_90", "First 90%", "#1baf7a", False, 0),
+        ("end_90", "End 90%", "#eda100", True, 4),
+    )
+    maximum = max(10.0, float(averages.gap_mean.max()))
+    x_max = np.ceil(maximum / 10) * 10
+    handles = []
+    for condition, label, color, hollow, offset in styles:
+        rows = averages[averages.condition == condition].sort_values("gap_bin")
+        transform = ax.transData + ScaledTranslation(
+            offset / 72, 0, fig.dpi_scale_trans
+        )
+        ax.plot(rows.gap_mean, rows.observed, color=color, lw=1,
+                transform=transform, clip_on=False, zorder=2)
+        yerr = np.vstack([
+            rows.observed - rows.observed_ci_low,
+            rows.observed_ci_high - rows.observed,
+        ])
+        ax.errorbar(rows.gap_mean, rows.observed, yerr=yerr, fmt="o",
+                    color=color, ms=3, elinewidth=0.7, capsize=0,
+                    markerfacecolor="none" if hollow else color,
+                    markeredgecolor=color, markeredgewidth=0.8,
+                    transform=transform, clip_on=False, zorder=3)
+        if condition != "original":
+            ax.plot(rows.gap_mean, rows.predicted, color=color, lw=1, ls=":",
+                    transform=transform, clip_on=False, zorder=2)
+        handles.append(plt.Line2D(
+            [], [], color=color, marker="o", ms=3, lw=1,
+            markerfacecolor="none" if hollow else color,
+            markeredgecolor=color, label=label,
+        ))
+    handles += [
+        plt.Line2D([], [], color="#555555", marker="o", ms=3, lw=1,
+                   label="Empirical"),
+        plt.Line2D([], [], color="#555555", lw=1, ls=":",
+                   label="GLM prediction"),
+    ]
+    ax.axhline(0.5, color="#888888", lw=0.8, ls=(0, (2, 2)), zorder=1)
+    ax.set(xlim=(0, x_max), ylim=(0.5, 1),
+           xticks=[0, x_max / 2, x_max], yticks=[0.5, 0.75, 1],
+           xlabel="Capability gap (ECI)", ylabel="Judge accuracy")
+    _style_axes(ax)
+    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False,
+               bbox_to_anchor=(0.5, 0.0), handlelength=1.1,
+               handletextpad=0.3, columnspacing=0.5)
+    fig.subplots_adjust(left=0.32, right=0.97, top=0.97, bottom=0.54)
+    return fig
+
+
+def write_plot_outputs(cells: pd.DataFrame, out: Path,
+                       manuscript_out: Path | None = None) -> None:
     """Write plot source tables and compact PNG/SVG figures."""
     out.mkdir(parents=True, exist_ok=True)
     overall_by_judge, overall = overall_tables(cells)
     gap_by_judge, gaps = gap_tables(cells)
+    gap_average = average_gap_table(cells)
     overall_by_judge.to_csv(out / "overall_by_judge.csv", index=False)
     overall.to_csv(out / "overall_summary.csv", index=False)
     gap_by_judge.to_csv(out / "gap_by_judge.csv", index=False)
     gaps.to_csv(out / "gap_estimates.csv", index=False)
+    gap_average.to_csv(out / "gap_average.csv", index=False)
     figures = {
         "overall_accuracy": make_overall_figure(cells),
         "gap_curves_90": make_gap_figure(cells),
+        "gap_curves_90_average": make_average_gap_figure(cells),
     }
+    if manuscript_out is not None:
+        manuscript_out.mkdir(parents=True, exist_ok=True)
     for name, fig in figures.items():
-        fig.savefig(out / f"{name}.png", dpi=300)
-        fig.savefig(out / f"{name}.svg")
+        png, svg = out / f"{name}.png", out / f"{name}.svg"
+        fig.savefig(png, dpi=300)
+        fig.savefig(svg)
+        if manuscript_out is not None:
+            shutil.copy2(png, manuscript_out / png.name)
+            shutil.copy2(svg, manuscript_out / svg.name)
         plt.close(fig)
 
 
@@ -587,7 +732,7 @@ def main() -> None:
     coverage.to_csv(args.out / "coverage.csv", index=False)
     estimates.to_csv(args.out / "estimates.csv", index=False)
     contrasts.to_csv(args.out / "direction_contrasts.csv", index=False)
-    write_plot_outputs(plotted, args.out)
+    write_plot_outputs(plotted, args.out, MANUSCRIPT_OUT)
     print(coverage.to_string(index=False))
     print("\nMatched complete curves:")
     shown = estimates.copy()

@@ -333,7 +333,7 @@ def make_accuracy_figure(cells: pd.DataFrame):
     present += sorted(present_set - set(present))
     x = np.arange(len(CONDITIONS))
     fig, axes = plt.subplots(
-        1, 2, figsize=(2.9, 1.9), gridspec_kw={"width_ratios": [1.3, 1.0]}
+        1, 2, figsize=(1.8, 1.9), gridspec_kw={"width_ratios": [1.2, 0.8]}
     )
 
     for judge in present:
@@ -358,9 +358,9 @@ def make_accuracy_figure(cells: pd.DataFrame):
     upper = 5 * math.ceil(max(accuracy_bounds) / 5)
     axes[0].set(
         xlim=(x[0], x[-1]), ylim=(lower, upper), xticks=x,
-        xticklabels=("Original", "Standardised"),
+        xticklabels=("Original", "Rewrite"),
         yticks=np.arange(lower, upper + 0.1, 5),
-        ylabel="Judge accuracy (%)",
+        ylabel="Accuracy (%)",
     )
 
     rewrite = by_judge[by_judge.condition == "style_standardised_gpt"]
@@ -385,13 +385,14 @@ def make_accuracy_figure(cells: pd.DataFrame):
     limit = max(1, math.ceil(100 * max(delta_values, default=0.01)))
     axes[1].set(
         xlim=(-0.25, 0.25), ylim=(-limit, limit), xticks=[0],
-        xticklabels=["Standardised\n− original"], yticks=[-limit, 0, limit],
-        ylabel="Accuracy change (pp)",
+        xticklabels=["Rewrite"], yticks=[-limit, 0, limit],
+        ylabel="Δ accuracy (pp)",
     )
-    for ax in axes:
-        _style_axes(ax)
+    for axis in axes:
+        _style_axes(axis)
     axes[1].spines["bottom"].set_visible(False)
     axes[1].tick_params(axis="x", length=0)
+    axes[1].yaxis.set_label_position("right")
 
     handles, labels = axes[0].get_legend_handles_labels()
     handles.append(plt.Line2D([], [], color="#111111", marker="D", ms=4.5,
@@ -401,7 +402,7 @@ def make_accuracy_figure(cells: pd.DataFrame):
         handles, labels, loc="lower center", ncol=2, frameon=False,
         bbox_to_anchor=(0.5, -0.01), handlelength=1.4, columnspacing=0.8,
     )
-    fig.subplots_adjust(left=0.18, right=0.99, top=0.93, bottom=0.39, wspace=0.75)
+    fig.subplots_adjust(left=0.25, right=0.82, top=0.97, bottom=0.43, wspace=0.8)
     return fig
 
 
@@ -598,8 +599,9 @@ def make_style_delta_pre_post_figure(
 def make_style_delta_figure(pairs: pd.DataFrame, features: tuple[str, ...]):
     """Pair-mean style-rate differences before and after rewriting."""
     targeted = features == TARGETED_STYLE_CATEGORIES
-    width = 2.4 if targeted else 4.3
-    fig, axes = plt.subplots(1, len(features), figsize=(width, 1.9), squeeze=False)
+    width = 1.7 if targeted else 4.3
+    height = 2.5 if targeted else 1.9
+    fig, axes = plt.subplots(1, len(features), figsize=(width, height), squeeze=False)
     axes = axes[0]
     x = np.arange(len(CONDITIONS))
     for ax, feature in zip(axes, features, strict=True):
@@ -616,12 +618,15 @@ def make_style_delta_figure(pairs: pd.DataFrame, features: tuple[str, ...]):
         ax.axhline(0, color="#888888", lw=0.8, ls=(0, (2, 2)), zorder=1)
         ax.set(
             xlim=(x[0], x[-1]), ylim=(-limit, limit), xticks=x,
-            xticklabels=("Original", "Standardised"), yticks=(-limit, 0, limit),
+            xticklabels=("Original", "Rewrite" if targeted else "Standardised"),
+            yticks=(-limit, 0, limit),
         )
-        title = "Pronouns" if targeted and feature == "personal_pronouns" else STYLE_LABELS[feature]
+        title = ({"personal_pronouns": "Pronouns", "backtracking": "Back-\ntrack"}.get(
+            feature, STYLE_LABELS[feature]
+        ) if targeted else STYLE_LABELS[feature])
         title_loc = "right" if targeted and feature == "backtracking" else "left"
         ax.set_title(title, loc=title_loc, color="#666666",
-                     fontsize=7, pad=4)
+                     fontsize=6 if targeted else 7, pad=4)
         _style_axes(ax)
         plt.setp(ax.get_xticklabels(), rotation=90, ha="center", va="top")
     axes[0].set_ylabel("Major − minor / 1k" if targeted else
@@ -635,69 +640,47 @@ def make_style_delta_figure(pairs: pd.DataFrame, features: tuple[str, ...]):
     ]
     fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False,
                bbox_to_anchor=(0.5, -0.01), handlelength=1.4, columnspacing=1.0)
-    fig.subplots_adjust(left=0.24 if targeted else 0.21,
+    fig.subplots_adjust(left=0.30 if targeted else 0.21,
                         right=0.96 if targeted else 0.985,
-                        top=0.88, bottom=0.58, wspace=0.5)
+                        top=0.91, bottom=0.45 if targeted else 0.58, wspace=0.5)
     return fig
 
 
-def make_gap_figure(gaps: pd.DataFrame, by_judge: pd.DataFrame | None = None):
-    """Observed and frozen-GLM gap curves, retaining judge-level traces."""
-    fig, axes = plt.subplots(1, 2, figsize=(2.9, 1.9), sharex=True, sharey=True)
+def make_gap_figure(gaps: pd.DataFrame):
+    """Original, rewritten, and frozen-GLM rewrite gap curves."""
+    fig, ax = plt.subplots(figsize=(1.8, 1.9))
     max_gap = max(10.0, float(gaps.gap_mean.max()))
-    x_max = (math.floor(max_gap / 10) + 1) * 10
-    for ax, condition, label in zip(axes, CONDITIONS, CONDITION_LABELS, strict=True):
-        rows = gaps[gaps.condition == condition].sort_values("gap_bin")
-        if by_judge is not None:
-            present = [judge for judge in JUDGE_ORDER if judge in set(by_judge.judge)]
-            present += sorted(set(by_judge.judge) - set(present))
-            for judge in present:
-                unit = by_judge[(by_judge.condition == condition) &
-                                (by_judge.judge == judge)].sort_values("gap_bin")
-                if unit.empty:
-                    continue
-                color = JUDGE_COLORS.get(judge, "#777777")
-                ax.plot(unit.gap_mean, unit.observed, color=color, marker="o",
-                        ms=2.2, lw=0.7, alpha=0.42, zorder=2)
-                ax.plot(unit.gap_mean, unit.predicted, color=color, marker="o",
-                        ms=2.2, lw=0.7, ls="--", alpha=0.42, zorder=2)
-        for value, lo, hi, color, linestyle in (
-            ("observed", "obs_ci_lo", "obs_ci_hi", "#111111", "-"),
-            ("predicted", "pred_ci_lo", "pred_ci_hi", "#666666", "--"),
-        ):
-            finite_ci = rows[[lo, hi]].notna().all().all()
-            yerr = None if not finite_ci else [rows[value] - rows[lo], rows[hi] - rows[value]]
-            ax.errorbar(
-                rows.gap_mean, rows[value], yerr=yerr,
-                color=color, marker="o", ms=4, lw=1, capsize=0,
-                linestyle=linestyle, zorder=3,
-            )
-        ax.axhline(0.5, color="#888888", lw=0.8, ls=":", zorder=1)
-        ax.set_title(label, loc="left", color="#666666", fontsize=8, pad=4)
-        ax.set(xlim=(0, x_max), ylim=(0.5, 1), xticks=[0, x_max / 2, x_max],
-               yticks=[0.5, 0.75, 1])
-        _style_axes(ax)
-    axes[0].set_ylabel("Judge accuracy")
-    fig.supxlabel("Capability gap (ECI)", x=0.56, y=0.13, fontsize=8)
-    handles = [
-        plt.Line2D([], [], color="#111111", marker="o", ms=3, lw=1,
-                   label="Observed mean"),
-        plt.Line2D([], [], color="#666666", marker="o", ms=3, lw=1, ls="--",
-                   label="Frozen GLM"),
-    ]
-    if by_judge is not None:
-        present = [judge for judge in JUDGE_ORDER if judge in set(by_judge.judge)]
-        present += sorted(set(by_judge.judge) - set(present))
-        handles += [
-            plt.Line2D([], [], color=JUDGE_COLORS.get(judge, "#777777"), lw=1,
-                       label=JUDGE_LABELS.get(judge, judge))
-            for judge in present
-        ]
-    fig.legend(
-        handles=handles, loc="lower center", ncol=3, frameon=False,
-        bbox_to_anchor=(0.5, -0.01), handlelength=1.8, columnspacing=0.8,
+    x_max = math.ceil(max_gap / 10) * 10
+    series = (
+        ("a_baseline", "observed", "obs_ci_lo", "obs_ci_hi",
+         "#111111", "-", "Original", False),
+        ("style_standardised_gpt", "observed", "obs_ci_lo", "obs_ci_hi",
+         "#1baf7a", "-", "Rewrite", False),
+        ("style_standardised_gpt", "predicted", "pred_ci_lo", "pred_ci_hi",
+         "#1baf7a", "--", "Rewrite (GLM)", True),
     )
-    fig.subplots_adjust(left=0.14, right=0.975, top=0.88, bottom=0.36, wspace=0.28)
+    handles = []
+    for condition, value, lo, hi, color, linestyle, label, hollow in series:
+        rows = gaps[gaps.condition == condition].sort_values("gap_bin")
+        finite_ci = rows[[lo, hi]].notna().all().all()
+        yerr = None if not finite_ci else [rows[value] - rows[lo], rows[hi] - rows[value]]
+        ax.errorbar(rows.gap_mean, rows[value], yerr=yerr, color=color,
+                    marker="o", ms=3, lw=1, capsize=0, linestyle=linestyle,
+                    markerfacecolor="none" if hollow else color,
+                    clip_on=False, zorder=3)
+        handles.append(plt.Line2D(
+            [], [], color=color, marker="o", ms=3, lw=1, ls=linestyle,
+            markerfacecolor="none" if hollow else color, label=label,
+        ))
+    ax.axhline(0.5, color="#888888", lw=0.8, ls=(0, (2, 2)), zorder=1)
+    ax.set(xlim=(0, x_max), ylim=(0.5, 1),
+           xticks=[0, x_max / 2, x_max], yticks=[0.5, 0.75, 1],
+           xlabel="Capability gap (ECI)", ylabel="Judge accuracy")
+    _style_axes(ax)
+    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False,
+               bbox_to_anchor=(0.5, 0.0), handlelength=1.1,
+               handletextpad=0.3, columnspacing=0.5)
+    fig.subplots_adjust(left=0.32, right=0.97, top=0.97, bottom=0.54)
     return fig
 
 

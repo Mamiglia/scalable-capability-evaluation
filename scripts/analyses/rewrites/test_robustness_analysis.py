@@ -310,19 +310,28 @@ def test_style_delta_tables_use_major_minus_minor_and_pair_means(tmp_path):
 def test_figures_are_small_nature_style_and_show_judges_and_dashed_glm():
     cells = cell_frame()
     accuracy = analysis.make_accuracy_figure(cells)
-    by_judge = analysis.gap_by_judge(cells)
-    gap = analysis.make_gap_figure(analysis.gap_summary(cells), by_judge)
+    gap = analysis.make_gap_figure(analysis.gap_summary(cells))
 
-    assert tuple(accuracy.get_size_inches()) == pytest.approx((2.9, 1.9))
-    assert tuple(gap.get_size_inches()) == pytest.approx((2.9, 1.9))
-    assert len(accuracy.axes) == len(gap.axes) == 2
+    assert tuple(accuracy.get_size_inches()) == pytest.approx((1.8, 1.9))
+    assert tuple(gap.get_size_inches()) == pytest.approx((1.8, 1.9))
+    assert len(accuracy.axes) == 2
+    assert len(gap.axes) == 1
     assert all(not ax.spines["top"].get_visible() for ax in [*accuracy.axes, *gap.axes])
     assert all(ax.spines["left"].get_position() == ("outward", 5)
                for ax in [*accuracy.axes, *gap.axes])
-    assert any(line.get_linestyle() == "--" for line in gap.axes[0].lines)
-    assert accuracy.axes[0].get_ylabel() == "Judge accuracy (%)"
-    assert accuracy.axes[1].get_ylabel() == "Accuracy change (pp)"
-    assert accuracy.axes[1].get_xticklabels()[0].get_text() == "Standardised\n− original"
+    assert [(container.lines[0].get_color(), container.lines[0].get_linestyle())
+            for container in gap.axes[0].containers] == [
+        ("#111111", "-"), ("#1baf7a", "-"), ("#1baf7a", "--"),
+    ]
+    assert [text.get_text() for text in gap.legends[0].get_texts()] == [
+        "Original", "Rewrite", "Rewrite (GLM)",
+    ]
+    assert accuracy.axes[0].get_ylabel() == "Accuracy (%)"
+    assert [label.get_text() for label in accuracy.axes[0].get_xticklabels()] == [
+        "Original", "Rewrite",
+    ]
+    assert accuracy.axes[1].get_ylabel() == "Δ accuracy (pp)"
+    assert accuracy.axes[1].get_xticklabels()[0].get_text() == "Rewrite"
     assert not {"a", "b"} & {text.get_text() for ax in accuracy.axes for text in ax.texts}
     assert max(line.get_markersize() for ax in accuracy.axes for line in ax.lines) >= 4
     judge_colors = {
@@ -340,19 +349,16 @@ def test_figures_are_small_nature_style_and_show_judges_and_dashed_glm():
         label = ax.yaxis.label.get_window_extent(renderer)
         assert accuracy.bbox.contains(*label.get_points()[0])
         assert accuracy.bbox.contains(*label.get_points()[1])
-    assert not accuracy.axes[1].yaxis.label.get_window_extent(renderer).overlaps(
-        accuracy.axes[0].get_window_extent(renderer)
-    )
     assert accuracy.legends and gap.legends
     assert not accuracy.legends[0].get_frame_on() and not gap.legends[0].get_frame_on()
 
 
-def test_gap_shared_xlabel_does_not_overlap_ticks_or_legend():
+def test_gap_xlabel_does_not_overlap_ticks_or_legend():
     cells = cell_frame()
     gap = analysis.make_gap_figure(analysis.gap_summary(cells))
     gap.canvas.draw()
     renderer = gap.canvas.get_renderer()
-    xlabel = gap._supxlabel.get_window_extent(renderer)
+    xlabel = gap.axes[0].xaxis.label.get_window_extent(renderer)
     tick_labels = [
         tick.get_window_extent(renderer)
         for ax in gap.axes for tick in ax.get_xticklabels()
@@ -389,18 +395,23 @@ def test_style_delta_figures_are_compact_and_cover_all_six_regressors():
         (analysis.TARGETED_STYLE_CATEGORIES, analysis.OTHER_STYLE_CATEGORIES),
         strict=True,
     ):
-        expected_width = 2.4 if features == analysis.TARGETED_STYLE_CATEGORIES else 4.3
-        assert tuple(figure.get_size_inches()) == pytest.approx((expected_width, 1.9))
+        expected_width = 1.7 if features == analysis.TARGETED_STYLE_CATEGORIES else 4.3
+        expected_height = 2.5 if features == analysis.TARGETED_STYLE_CATEGORIES else 1.9
+        assert tuple(figure.get_size_inches()) == pytest.approx((expected_width, expected_height))
         assert len(figure.axes) == 3
         titles = {
             title for ax in figure.axes for loc in ("left", "right")
             if (title := ax.get_title(loc=loc))
         }
-        expected_titles = ({"Pronouns", "Hedging", "Backtracking"}
+        expected_titles = ({"Pronouns", "Hedging", "Back-\ntrack"}
                            if features == analysis.TARGETED_STYLE_CATEGORIES else
                            {analysis.STYLE_LABELS[feature] for feature in features})
         assert titles == expected_titles
         assert all(ax.get_xticklabels()[0].get_text() == "Original" for ax in figure.axes)
+        expected_rewrite = ("Rewrite" if features == analysis.TARGETED_STYLE_CATEGORIES
+                            else "Standardised")
+        assert all(ax.get_xticklabels()[1].get_text() == expected_rewrite
+                   for ax in figure.axes)
         assert all(not ax.spines["top"].get_visible() for ax in figure.axes)
         assert figure.legends and not figure.legends[0].get_frame_on()
 
@@ -502,16 +513,14 @@ def test_axes_end_at_endpoint_ticks_and_panel_labels_are_above_data():
         assert ax.get_xlim() == pytest.approx((ax.get_xticks()[0], ax.get_xticks()[-1]))
         assert ax.get_ylim() == pytest.approx((ax.get_yticks()[0], ax.get_yticks()[-1]))
     assert not accuracy.axes[1].spines["bottom"].get_visible()
-
     titled = [
-        (gap, analysis.CONDITION_LABELS),
-        (styles, ("Pronouns", "Hedging", "Backtracking")),
+        (styles, ("Pronouns", "Hedging", "Back-\ntrack")),
     ]
     for figure, expected in titled:
         figure.canvas.draw()
         renderer = figure.canvas.get_renderer()
         for ax, label in zip(figure.axes, expected, strict=True):
-            loc = "right" if label == "Backtracking" else "left"
+            loc = "right" if label == "Back-\ntrack" else "left"
             assert ax.get_title(loc=loc) == label
             title = ax._right_title if loc == "right" else ax._left_title
             title_box = title.get_window_extent(renderer)

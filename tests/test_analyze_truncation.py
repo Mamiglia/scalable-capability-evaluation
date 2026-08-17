@@ -186,6 +186,70 @@ def test_overall_summary_suppresses_ci_below_three_judges():
     assert summary[["ci_low", "ci_high"]].isna().all().all()
 
 
+def test_plot_tables_use_pair_clustered_intervals():
+    rows = []
+    gaps = (3.0, 5.0, 12.0, 15.0, 25.0, 30.0)
+    for condition in (
+        "original", "first_10", "first_50", "first_90",
+        "end_10", "end_50", "end_90",
+    ):
+        for pair_index, gap in enumerate(gaps):
+            observed, predicted = ((0.0, 0.2) if pair_index % 2 == 0 else (1.0, 0.8))
+            for item_index in range(3 if pair_index % 2 == 0 else 1):
+                rows.append({
+                    "judge": "j1", "condition": condition,
+                    "pair": f"pair-{pair_index}", "item": f"item-{item_index}",
+                    "observed": observed, "predicted": predicted,
+                    "capability_gap": gap,
+                })
+    cells = pd.DataFrame(rows)
+
+    overall, _ = load_script().overall_tables(cells)
+    gaps, _ = load_script().gap_tables(cells)
+
+    original = overall[overall.condition == "original"].iloc[0]
+    assert original.accuracy == pytest.approx(0.5)
+    assert original.n_pairs == 6
+    assert np.isfinite([original.ci_low, original.ci_high]).all()
+    assert gaps.observed.tolist() == pytest.approx([0.5] * len(gaps))
+    assert gaps.predicted.tolist() == pytest.approx([0.5] * len(gaps))
+    assert gaps.n_pairs.tolist() == [2] * len(gaps)
+    assert np.isfinite(gaps[["observed_ci_low", "observed_ci_high",
+                             "predicted_ci_low", "predicted_ci_high"]]).all().all()
+
+
+def test_average_gap_table_averages_judges_before_weighting_pairs():
+    rows = []
+    for condition in ("original", "first_90", "end_90"):
+        for pair_index, gap in enumerate((3.0, 5.0, 12.0, 15.0, 25.0, 30.0)):
+            scores = {"j1": 1.0, "j2": 0.0} if pair_index % 2 == 0 else {
+                "j1": 0.0, "j2": 1.0,
+            }
+            for judge, score in scores.items():
+                repetitions = 3 if pair_index == 0 and judge == "j1" else 1
+                for item_index in range(repetitions):
+                    rows.append({
+                        "judge": judge, "condition": condition,
+                        "pair": f"pair-{pair_index}", "item": f"item-{item_index}",
+                        "observed": score, "predicted": 0.2 + 0.6 * score,
+                        "capability_gap": gap,
+                    })
+
+    averages = load_script().average_gap_table(pd.DataFrame(rows))
+
+    first_bin = averages[(averages.condition == "original") &
+                         (averages.gap_bin == 0)].iloc[0]
+    assert len(averages) == 9
+    assert first_bin.observed == pytest.approx(0.5)
+    assert first_bin.observed_ci_low == pytest.approx(0.5)
+    assert first_bin.observed_ci_high == pytest.approx(0.5)
+    assert first_bin.predicted == pytest.approx(0.5)
+    assert first_bin.predicted_ci_low == pytest.approx(0.5)
+    assert first_bin.predicted_ci_high == pytest.approx(0.5)
+    assert first_bin.n_judges == 2
+    assert first_bin.n_pairs == 2
+
+
 def test_glm_frame_uses_exact_original_and_pair_dependent_truncated_lengths():
     module = load_script()
     cells = pd.DataFrame([
@@ -269,12 +333,12 @@ def figure_cells():
             "original", "first_10", "first_50", "first_90",
             "end_10", "end_50", "end_90",
         ):
-            for pair_index, gap in enumerate((5.0, 15.0, 30.0)):
+            for pair_index, gap in enumerate((3.0, 5.0, 12.0, 15.0, 25.0, 30.0)):
                 rows.append({
                     "judge": judge, "condition": condition,
                     "pair": f"pair-{pair_index}", "item": f"item-{pair_index}",
-                    "observed": 0.55 + 0.05 * judge_index,
-                    "predicted": 0.57 + 0.04 * judge_index,
+                    "observed": 0.55 + 0.05 * judge_index + 0.02 * (pair_index % 2),
+                    "predicted": 0.57 + 0.04 * judge_index + 0.01 * (pair_index % 2),
                     "capability_gap": gap,
                 })
     return pd.DataFrame(rows)
@@ -282,35 +346,188 @@ def figure_cells():
 
 def test_overall_figure_is_compact_nature_style():
     fig = load_script().make_overall_figure(figure_cells())
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    ax = fig.axes[0]
+    xlabel = fig.axes[0].xaxis.label.get_window_extent(renderer)
+    legend = fig.legends[0].get_window_extent(renderer)
 
-    assert tuple(fig.get_size_inches()) == pytest.approx((2.2, 2.4))
+    assert tuple(fig.get_size_inches()) == pytest.approx((1.8, 1.9))
     assert len(fig.axes) == 1
-    assert not fig.axes[0].spines["top"].get_visible()
-    assert fig.axes[0].spines["left"].get_position() == ("outward", 5)
+    assert not ax.spines["top"].get_visible()
+    assert ax.spines["left"].get_position() == ("outward", 5)
+    assert ax.get_ylim() == pytest.approx((0.5, 1.0))
+    assert ax.get_yticks().tolist() == pytest.approx([0.5, 0.75, 1.0])
+    result_lines = [line for line in ax.lines
+                    if line.get_color() != "#888888" and line.get_marker() == "None"]
+    assert len(result_lines) == 6
+    assert {line.get_linestyle() for line in result_lines} == {"-", "--"}
+    assert all({line.get_linestyle() for line in result_lines
+                if line.get_color() == color} == {"-", "--"}
+               for color in {line.get_color() for line in result_lines})
+    assert len(ax.containers) == 6
+    assert all(container.has_yerr and not container.lines[1]
+               for container in ax.containers)
+    marker_x = []
+    for container in ax.containers:
+        line = container.lines[0]
+        marker_x.append(line.get_transform().transform(
+            [[line.get_xdata()[0], line.get_ydata()[0]]]
+        )[0, 0])
+    assert len(set(np.round(marker_x, 3))) == 6
+    assert all(not container.lines[0].get_clip_on() for container in ax.containers)
     assert fig.legends and not fig.legends[0].get_frame_on()
+    legend_items = dict(zip(
+        (text.get_text() for text in fig.legends[0].get_texts()),
+        fig.legends[0].legend_handles,
+    ))
+    assert set(legend_items) == {
+        "j1", "j2", "j3", "First retained", "End retained",
+    }
+    markers = [container.lines[0] for container in ax.containers]
+    assert all(line.get_markerfacecolor() != "none" for line in markers[::2])
+    assert all(line.get_markerfacecolor() == "none" for line in markers[1::2])
+    assert legend_items["First retained"].get_markerfacecolor() != "none"
+    assert legend_items["End retained"].get_markerfacecolor() == "none"
+    assert not xlabel.overlaps(legend)
+    tick_boxes = [label.get_window_extent(renderer) for label in ax.get_xticklabels()]
+    assert all(not left.overlaps(right)
+               for left, right in zip(tick_boxes, tick_boxes[1:]))
 
 
-def test_gap_figure_has_three_conditions_frozen_glm_and_editable_svg(tmp_path):
+def test_gap_figure_colours_models_and_styles_empirical_vs_glm(tmp_path):
     fig = load_script().make_gap_figure(figure_cells())
     path = tmp_path / "gap.svg"
     fig.savefig(path)
 
-    assert tuple(fig.get_size_inches()) == pytest.approx((5.4, 2.4))
+    assert tuple(fig.get_size_inches()) == pytest.approx((4.3, 1.9))
     assert len(fig.axes) == 3
     assert all(not ax.get_title() for ax in fig.axes)
     assert all(not ax.spines["right"].get_visible() for ax in fig.axes)
-    assert any(line.get_linestyle() == "--" for line in fig.axes[0].lines)
+    assert all(ax.get_ylim() == pytest.approx((0.5, 1.0)) for ax in fig.axes)
+    assert all(ax.get_yticks().tolist() == pytest.approx([0.5, 0.75, 1.0])
+               for ax in fig.axes)
+    for ax in fig.axes:
+        result_lines = [line for line in ax.lines if line.get_marker() == "None"
+                        and line.get_color() != "#888888"]
+        assert len(result_lines) == 6
+        assert len({line.get_color() for line in result_lines}) == 3
+        assert all({line.get_linestyle() for line in result_lines
+                    if line.get_color() == color} == {"-", "--"}
+                   for color in {line.get_color() for line in result_lines})
+        assert len(ax.containers) == 6
+        assert all(container.has_yerr and not container.lines[1]
+                   for container in ax.containers)
+        marker_x = []
+        for container in ax.containers:
+            line = container.lines[0]
+            marker_x.append(line.get_transform().transform(
+                [[line.get_xdata()[0], line.get_ydata()[0]]]
+            )[0, 0])
+        assert len(set(np.round(marker_x, 3))) == 6
+    assert all(container.lines[0].get_markerfacecolor() != "none"
+               for ax in fig.axes[:2] for container in ax.containers)
+    assert all(container.lines[0].get_markerfacecolor() == "none"
+               for container in fig.axes[2].containers)
     assert fig.legends and not fig.legends[0].get_frame_on()
+    assert {text.get_text() for text in fig.legends[0].get_texts()} == {
+        "j1", "j2", "j3", "Empirical accuracy", "Frozen GLM prediction",
+    }
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    legend = fig.legends[0].get_window_extent(renderer)
+    assert all(not ax.xaxis.label.get_window_extent(renderer).overlaps(legend)
+               for ax in fig.axes)
+    assert fig.axes[0].yaxis.label.get_window_extent(renderer).x0 >= 0
+    assert "<text" in path.read_text()
+
+
+def test_figures_use_standard_qwen_and_gpt_oss_colours():
+    cells = figure_cells()
+    cells = cells[cells.judge.isin(("j1", "j2"))].copy()
+    cells["judge"] = cells.judge.map({"j1": "qwen3-8b", "j2": "gpt-oss-20b"})
+    expected = {"qwen3-8b": "#2a78d6", "gpt-oss-20b": "#eb6834"}
+
+    for make_figure in (load_script().make_overall_figure, load_script().make_gap_figure):
+        fig = make_figure(cells)
+        handles = dict(zip(
+            (text.get_text() for text in fig.legends[0].get_texts()),
+            fig.legends[0].legend_handles,
+        ))
+        assert {judge: handles[judge].get_color() for judge in expected} == expected
+
+
+def test_average_gap_figure_is_small_and_shows_empirical_and_glm_means(tmp_path):
+    fig = load_script().make_average_gap_figure(figure_cells())
+    path = tmp_path / "gap-average.svg"
+    fig.savefig(path)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    ax = fig.axes[0]
+
+    assert tuple(fig.get_size_inches()) == pytest.approx((1.8, 1.9))
+    assert len(fig.axes) == 1
+    assert not ax.get_title()
+    assert not ax.spines["top"].get_visible()
+    assert ax.get_ylim() == pytest.approx((0.5, 1.0))
+    assert ax.get_yticks().tolist() == pytest.approx([0.5, 0.75, 1.0])
+    result_lines = [line for line in ax.lines
+                    if line.get_color() != "#888888" and line.get_marker() == "None"]
+    assert [(line.get_color(), line.get_linestyle()) for line in result_lines] == [
+        ("#111111", "-"),
+        ("#1baf7a", "-"), ("#1baf7a", ":"),
+        ("#eda100", "-"), ("#eda100", ":"),
+    ]
+    assert "#2a78d6" not in {line.get_color() for line in result_lines}
+    assert len(ax.containers) == 3
+    assert all(container.has_yerr and not container.lines[1]
+               for container in ax.containers)
+    markers = [container.lines[0] for container in ax.containers]
+    assert [marker.get_markerfacecolor() == "none" for marker in markers] == [
+        False, False, True,
+    ]
+    marker_x = [marker.get_transform().transform(
+        [[marker.get_xdata()[0], marker.get_ydata()[0]]]
+    )[0, 0] for marker in markers]
+    assert len(set(np.round(marker_x, 3))) == 3
+    assert max(marker_x) - min(marker_x) > 5
+    assert all(not marker.get_clip_on() for marker in markers)
+    legend = fig.legends[0]
+    assert not legend.get_frame_on()
+    assert [text.get_text() for text in legend.get_texts()] == [
+        "Original", "First 90%", "End 90%",
+        "Empirical", "GLM prediction",
+    ]
+    assert legend.legend_handles[-1].get_linestyle() == ":"
+    legend_box = legend.get_window_extent(renderer)
+    assert 0 <= legend_box.x0 and legend_box.x1 <= fig.bbox.x1
+    assert not ax.xaxis.label.get_window_extent(renderer).overlaps(
+        legend_box
+    )
+    assert ax.yaxis.label.get_window_extent(renderer).x0 >= 0
     assert "<text" in path.read_text()
 
 
 def test_write_plot_outputs_writes_figures_and_source_tables(tmp_path):
-    load_script().write_plot_outputs(figure_cells(), tmp_path)
+    results = tmp_path / "results"
+    manuscript = tmp_path / "manuscript" / "04-ablations"
+    load_script().write_plot_outputs(figure_cells(), results, manuscript)
 
     assert {
         "overall_by_judge.csv", "overall_summary.csv", "gap_by_judge.csv",
-        "gap_estimates.csv", "overall_accuracy.png", "overall_accuracy.svg",
+        "gap_estimates.csv", "gap_average.csv",
+        "overall_accuracy.png", "overall_accuracy.svg",
         "gap_curves_90.png", "gap_curves_90.svg",
-    } == {path.name for path in tmp_path.iterdir()}
-    assert "<text" in (tmp_path / "overall_accuracy.svg").read_text()
-    assert "<text" in (tmp_path / "gap_curves_90.svg").read_text()
+        "gap_curves_90_average.png", "gap_curves_90_average.svg",
+    } == {path.name for path in results.iterdir()}
+    assert {"overall_accuracy.png", "overall_accuracy.svg",
+            "gap_curves_90.png", "gap_curves_90.svg",
+            "gap_curves_90_average.png", "gap_curves_90_average.svg"} == {
+                path.name for path in manuscript.iterdir()
+            }
+    for name in ("overall_accuracy.png", "overall_accuracy.svg",
+                 "gap_curves_90.png", "gap_curves_90.svg",
+                 "gap_curves_90_average.png", "gap_curves_90_average.svg"):
+        assert (results / name).read_bytes() == (manuscript / name).read_bytes()
+    assert "<text" in (results / "overall_accuracy.svg").read_text()
+    assert "<text" in (manuscript / "gap_curves_90.svg").read_text()
