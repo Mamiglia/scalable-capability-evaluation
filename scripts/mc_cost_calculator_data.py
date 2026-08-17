@@ -8,6 +8,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from mc_cost.calculator import build_calculator_payload
@@ -40,6 +41,13 @@ def main() -> None:
         pd.read_parquet(args.analysis / "token_judge.parquet"),
         pd.read_parquet(args.analysis / "judgments.parquet"),
     )
+    hierarchy = np.load(args.analysis / "model" / "core.npz")
+    payload["accuracy_glm"]["variance_components"] = {
+        "source": "core_hierarchical_posterior",
+        "judge_slope_sd": payload["accuracy_glm"]["judge_gap_sd"],
+        "candidate_sd": float(hierarchy["candidate_scale"].mean()),
+        "item_sd": float(hierarchy["item_scale"].mean()),
+    }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:

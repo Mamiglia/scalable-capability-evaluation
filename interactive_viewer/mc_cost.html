@@ -48,6 +48,10 @@
           <span id="calculator-items-estimate" class="caption"></span>
         </div>
         <div class="field">
+          <label for="calculator-correct">Mutually-correct samples (%)</label>
+          <input id="calculator-correct" type="number" min="0.1" max="100" step="0.1" value="40" />
+        </div>
+        <div class="field">
           <label for="calculator-repeats">Repeats / epochs: <output id="calculator-repeats-value">1</output></label>
           <input id="calculator-repeats" type="range" min="1" max="20" step="1" value="1" />
         </div>
@@ -65,9 +69,10 @@
         <code>release</code>, <code>price_in</code>, <code>price_out</code> overrides. Prices are USD per million tokens.</p>
       <div id="calculator-status" class="guidance neutral" role="status">Loading calculator data…</div>
       <div class="plot-heading calculator-plot-heading">
-        <div><p class="eyebrow">Selected condition</p><h2>Relative ECI-gap curve</h2><p class="caption">One length-adjusted curve for the selected model pool. The 95% band includes observed judge and model-pair heterogeneity plus coin-toss sampling for the selected design. Token and cost totals use observed GPQA lengths where available and reasoning-class GPQA estimates otherwise.</p></div>
+        <div><p class="eyebrow">Selected condition</p><h2>Relative ECI-gap curve</h2><p class="caption">Each line is one sampled judge. Its 95% band includes evaluated-model, nested-item, and repeat variance from the fitted hierarchy; the thick dashed line is the population mean set by the accuracy slider.</p></div>
       </div>
       <div id="gap-curves" class="plot" role="img" aria-label="Judging accuracy by capability gap and oversight condition"></div>
+      <div id="calculator-gap-summary" class="caption"></div>
       <details id="calculator-comparison-details" class="calculator-comparison-details">
         <summary>Show sampled comparisons</summary>
         <div id="calculator-table-scroll" class="table-scroll calculator-table-scroll">

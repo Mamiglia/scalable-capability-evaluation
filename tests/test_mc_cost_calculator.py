@@ -113,11 +113,12 @@ const data = {
   judge_models:{j:{input_overhead_mean:50,input_overhead_sd:5,output_mean:20,output_sd:2,source:"observed_gpqa_judging"}},
   judge_defaults:{reasoning:{input_overhead_mean:60,input_overhead_sd:6,output_mean:30,output_sd:3,source:"reasoning_class_fallback"}},
   correctness_fit:{intercept:0,theta:0,covariance:[[.04,0],[0,.01]]},
-  accuracy_glm:{coefficients:{capability_gap:1,length_difference:.2},covariance:[[.04,0],[0,.01]],judge_gap_sd:1.5,pair_residual_sd:.2},
+  accuracy_glm:{coefficients:{capability_gap:1,length_difference:.2},covariance:[[.04,0],[0,.01]],judge_gap_sd:1.5,pair_residual_sd:.2,
+    variance_components:{judge_intercept_sd:.4,judge_slope_sd:1.5,candidate_sd:.6,item_sd:.3}},
   candidate_accuracy_default:{mean:.8,low:.6,high:.95},
 };
 assert.deepEqual(calc.expectedOverlap(data, 10), {mean:6.4,low:3.6,high:9.025});
-const result = calc.estimateComparison(csv[0], data, catalogue, .6);
+const result = calc.estimateComparison(csv[0], data, catalogue, .6, .4);
 assert.equal(result.mutually_correct, 4);
 assert.ok(result.mutually_correct_low < result.mutually_correct && result.mutually_correct < result.mutually_correct_high);
 assert.ok(Math.abs(result.candidate_cost - .0126) < 1e-12);
@@ -138,27 +139,36 @@ for (const row of sampled) {
   assert.ok(Date.parse(comparator.release) < Date.parse(anchor.release));
   assert.notEqual(row.judge, "bad"); assert.notEqual(row.m1, "bad"); assert.notEqual(row.m2, "bad");
 }
-const curve = calc.gapCurve(data, catalogue, sampled, .6, "oversight");
+const curve = calc.gapCurve(data, catalogue, sampled, .6, "oversight", .4);
 assert.equal(curve.name, "Oversight");
 assert.equal(curve.y[0], .5);
+assert.equal(curve.judges[0].y[0], .5);
 assert.equal(curve.x[10], .1);
 assert.ok(Math.abs(curve.y[10] - .6) < 1e-12);
-assert.ok(curve.p5[10] < curve.y[10] && curve.y[10] < curve.p95[10]);
-assert.ok(curve.p95[10] - curve.p5[10] > .1);
+assert.equal(curve.judges.length, 1);
+assert.ok(curve.judges[0].p5[10] < curve.judges[0].y[10] && curve.judges[0].y[10] < curve.judges[0].p95[10]);
+assert.ok(curve.judges[0].p95[10] - curve.judges[0].p5[10] > .1);
 const repeatedItems = sampled.map((row) => ({...row,items:100000,repeats:100}));
-const repeatedItemsCurve = calc.gapCurve(data, catalogue, repeatedItems, .6, "oversight");
-assert.ok(repeatedItemsCurve.p95[10] - repeatedItemsCurve.p5[10] < (curve.p95[10] - curve.p5[10]) / 100);
+const repeatedItemsCurve = calc.gapCurve(data, catalogue, repeatedItems, .6, "oversight", .4);
+assert.ok(repeatedItemsCurve.judges[0].p95[10] - repeatedItemsCurve.judges[0].p5[10] < curve.judges[0].p95[10] - curve.judges[0].p5[10]);
 const repeatedEpochs = sampled.map((row) => ({...row,repeats:10}));
-const repeatedEpochsCurve = calc.gapCurve(data, catalogue, repeatedEpochs, .6, "oversight");
-assert.ok(repeatedEpochsCurve.p95[10] - repeatedEpochsCurve.p5[10] < curve.p95[10] - curve.p5[10]);
+const repeatedEpochsCurve = calc.gapCurve(data, catalogue, repeatedEpochs, .6, "oversight", .4);
+assert.ok(repeatedEpochsCurve.judges[0].p95[10] - repeatedEpochsCurve.judges[0].p5[10] < curve.judges[0].p95[10] - curve.judges[0].p5[10]);
+const scarceCorrect = calc.gapCurve(data, catalogue, sampled, .6, "oversight", .1);
+assert.ok(scarceCorrect.judges[0].p95[10] - scarceCorrect.judges[0].p5[10] > curve.judges[0].p95[10] - curve.judges[0].p5[10]);
 const repeated = sampled.flatMap((row, i) => [row, {...row, judge:`copy${i}`, _judge:catalogue.get(row.judge)}]);
 const repeatedCatalogue = new Map(catalogue);
 for (const [i, row] of sampled.entries()) repeatedCatalogue.set(`copy${i}`, catalogue.get(row.judge));
-const tighter = calc.gapCurve(data, repeatedCatalogue, repeated, .6, "oversight");
-assert.ok(tighter.p95[10] - tighter.p5[10] < curve.p95[10] - curve.p5[10]);
 const future = calc.sampleDesign([...catalogue.values()], {condition:"oversight",judges:20,anchors:2,comparators:2,items:10,repeats:1,seed:3});
 assert.equal(future.length, 80);
 assert.equal(new Set(future.map((row) => row.judge_instance)).size, 20);
+const futureCurve = calc.gapCurve(data, catalogue, future, .6, "oversight", .4);
+assert.equal(futureCurve.judges.length, 20);
+assert.ok(new Set(futureCurve.judges.map((judge) => judge.y[10].toFixed(6))).size > 1);
+const five = calc.sampleDesign([...catalogue.values()], {condition:"oversight",judges:5,anchors:2,comparators:2,items:10,repeats:1,seed:3});
+const fiveCurve = calc.gapCurve(data, catalogue, five, .6, "oversight", .4);
+assert.ok(Math.min(...fiveCurve.judges.map((judge) => judge.y[10])) < .6);
+assert.ok(Math.max(...fiveCurve.judges.map((judge) => judge.y[10])) > .6);
 '''
     result = subprocess.run(
         ["node", "-e", node, str(script)], capture_output=True, text=True,
@@ -177,6 +187,7 @@ def test_dashboard_exposes_the_upload_calculator_as_the_primary_workflow():
         assert parser.elements[element][1]["type"] == "range"
         assert parser.elements[element][1]["value"] == "5"
     assert parser.elements["calculator-repeats"][1]["type"] == "range"
+    assert parser.elements["calculator-correct"][1]["type"] == "number"
     assert parser.elements["judge-accuracy"][1]["type"] == "range"
     assert parser.elements["judge-accuracy-default"][0] == "span"
     assert parser.elements["calculator-items-estimate"][0] == "span"

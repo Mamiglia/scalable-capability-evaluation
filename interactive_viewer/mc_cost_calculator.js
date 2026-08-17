@@ -69,6 +69,11 @@
     };
   }
 
+  function normalDraw(random) {
+    return Math.sqrt(-2 * Math.log(Math.max(random(), Number.EPSILON))) *
+      Math.cos(2 * Math.PI * random());
+  }
+
   function takeSample(values, count, random) {
     const result = [];
     while (result.length < count && values.length) {
@@ -187,9 +192,12 @@
     return {mean: overlap(value.mean), low: overlap(value.low), high: overlap(value.high)};
   }
 
-  function estimateComparison(row, data, catalogue, judgeAccuracy) {
+  function estimateComparison(row, data, catalogue, judgeAccuracy, correctFraction = 1) {
     if (!(judgeAccuracy >= 0.5 && judgeAccuracy < 1)) {
       throw new Error("judge accuracy must be between 50% and 100%");
+    }
+    if (!(correctFraction > 0 && correctFraction <= 1)) {
+      throw new Error("mutually-correct samples must be between 0% and 100%");
     }
     const judge = modelMetadata("judge", row, catalogue);
     const m1 = modelMetadata("m1", row, catalogue);
@@ -225,29 +233,31 @@
       Math.log1p(4 * visible(m1Length, "mean")) - Math.log1p(4 * visible(m2Length, "mean"))
     );
     const fit = data.accuracy_glm;
+    const variance = fit.variance_components || {};
     const x = [0, lengthDifference];
     const eta = logit(judgeAccuracy) / 0.1 * deltaEci +
       fit.coefficients.length_difference * lengthDifference;
     const se = Math.sqrt(quadraticVariance(x, fit.covariance));
     const accuracy = sigmoid(eta);
-    const judgeVariance = (
-      accuracy * (1 - accuracy) * deltaEci * Number(fit.judge_gap_sd || 0)
-    ) ** 2;
-    const pairVariance = Number(fit.pair_residual_sd || 0) ** 2;
+    const usableItems = Math.max(Number.EPSILON, row.items * correctFraction);
+    const usableCalls = usableItems * row.repeats;
+    const logitVariance = (deltaEci * Number(variance.judge_slope_sd || 0)) ** 2 +
+      2 * Number(variance.candidate_sd || 0) ** 2 +
+      Number(variance.item_sd || 0) ** 2 / usableItems;
     const accuracyHalf = Z95 * Math.sqrt(
-      ((accuracy * (1 - accuracy) * se) ** 2 + judgeVariance + pairVariance +
-      accuracy * (1 - accuracy)) / calls,
+      (accuracy * (1 - accuracy)) ** 2 * (se ** 2 + logitVariance) +
+      accuracy * (1 - accuracy) / usableCalls,
     );
-    const mutuallyCorrect = row.items * p1.mean * p2.mean;
-    const mutualHalf = Z95 * Math.sqrt(row.items * p1.mean * p2.mean * (1 - p1.mean * p2.mean));
+    const mutuallyCorrect = row.items * correctFraction;
+    const mutualHalf = Z95 * Math.sqrt(row.items * correctFraction * (1 - correctFraction));
     return {
       ...row, delta_eci: deltaEci,
       judging_accuracy: accuracy,
       judging_accuracy_low: Math.max(0, accuracy - accuracyHalf),
       judging_accuracy_high: Math.min(1, accuracy + accuracyHalf),
       mutually_correct: mutuallyCorrect,
-      mutually_correct_low: Math.max(0, row.items * p1.low * p2.low - mutualHalf),
-      mutually_correct_high: Math.min(row.items, row.items * p1.high * p2.high + mutualHalf),
+      mutually_correct_low: Math.max(0, mutuallyCorrect - mutualHalf),
+      mutually_correct_high: Math.min(row.items, mutuallyCorrect + mutualHalf),
       candidate_cost: candidateCost, candidate_cost_low: candidateCostLow, candidate_cost_high: candidateCostHigh,
       judge_cost: judgeCost, judge_cost_low: judgeCostLow, judge_cost_high: judgeCostHigh,
       total_cost: candidateCost + judgeCost,
@@ -260,29 +270,60 @@
     };
   }
 
-  function gapCurve(data, catalogue, rows, judgeAccuracy, condition) {
+  function gapCurve(data, catalogue, rows, judgeAccuracy, condition, correctFraction = 1) {
     if (!rows.length) throw new Error("The selected design has no comparisons");
     if (!(judgeAccuracy >= 0.5 && judgeAccuracy < 1)) {
       throw new Error("judge accuracy must be between 50% and 100%");
     }
-    const totalCalls = rows.reduce((sum, row) => sum + row.items * row.repeats, 0);
+    if (!(correctFraction > 0 && correctFraction <= 1)) {
+      throw new Error("mutually-correct samples must be between 0% and 100%");
+    }
     const fit = data.accuracy_glm;
+    const variance = fit.variance_components || {};
     const x = Array.from({length: 31}, (_, i) => i / 100);
-    const values = x.map((gap) => {
-      const mean = sigmoid(logit(judgeAccuracy) / 0.1 * gap);
-      const judgeVariance = (
-        mean * (1 - mean) * gap * Number(fit.judge_gap_sd || 0)
-      ) ** 2;
-      const pairVariance = Number(fit.pair_residual_sd || 0) ** 2;
-      const half = Z95 * Math.sqrt(
-        (judgeVariance + pairVariance + mean * (1 - mean)) / totalCalls,
-      );
-      return [mean, Math.max(0, mean - half), Math.min(1, mean + half)];
+    const grouped = new Map();
+    for (const row of rows) {
+      const key = row.judge_instance ?? row.judge;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(row);
+    }
+    const random = randomGenerator(0xC0FFEE);
+    const judgeGroups = [...grouped.values()];
+    const rawSlopes = judgeGroups.map(() => normalDraw(random));
+    const rawMean = rawSlopes.reduce((sum, value) => sum + value, 0) / rawSlopes.length;
+    const rawSd = rawSlopes.length > 1 ? Math.sqrt(rawSlopes.reduce(
+      (sum, value) => sum + (value - rawMean) ** 2, 0,
+    ) / (rawSlopes.length - 1)) : 1;
+    const judges = judgeGroups.map((judgeRows, index) => {
+      const slope = (rawSlopes.length > 1 ? (rawSlopes[index] - rawMean) / rawSd : rawSlopes[index]) *
+        Number(variance.judge_slope_sd || 0);
+      const anchorCount = new Set(judgeRows.map((row) => row.anchor_instance ?? row.m1)).size;
+      const pairCount = judgeRows.length;
+      const usableItems = Math.max(Number.EPSILON, judgeRows.reduce(
+        (sum, row) => sum + row.items * correctFraction, 0,
+      ));
+      const usableCalls = Math.max(Number.EPSILON, judgeRows.reduce(
+        (sum, row) => sum + row.items * row.repeats * correctFraction, 0,
+      ));
+      const nestedLogitVariance = Number(variance.candidate_sd || 0) ** 2 *
+        (1 / anchorCount + 1 / pairCount) + Number(variance.item_sd || 0) ** 2 / usableItems;
+      const values = x.map((gap) => {
+        const probability = sigmoid(logit(judgeAccuracy) / 0.1 * gap + slope * gap);
+        const half = Z95 * Math.sqrt(
+          (probability * (1 - probability)) ** 2 * nestedLogitVariance +
+          probability * (1 - probability) / usableCalls,
+        );
+        return [probability, Math.max(0, probability - half), Math.min(1, probability + half)];
+      });
+      return {
+        name: `Judge ${index + 1}: ${judgeRows[0].judge}`,
+        y: values.map((value) => value[0]), p5: values.map((value) => value[1]),
+        p95: values.map((value) => value[2]),
+      };
     });
     return {
       name: condition === "oversight" ? "Oversight" : "All", x,
-      y: values.map((value) => value[0]), p5: values.map((value) => value[1]),
-      p95: values.map((value) => value[2]),
+      y: x.map((gap) => sigmoid(logit(judgeAccuracy) / 0.1 * gap)), judges,
     };
   }
 

@@ -468,6 +468,7 @@ function calculatorConfig() {
     comparators: Number(byId("calculator-comparators").value),
     items: Number(byId("calculator-items").value),
     repeats: Number(byId("calculator-repeats").value),
+    correctFraction: Number(byId("calculator-correct").value) / 100,
     seed: 0,
   };
 }
@@ -487,27 +488,32 @@ function renderGapCurve(catalogue) {
   if (!state.calculatorData || !state.calculatorRows.length) return emptyPlot("gap-curves", "No sampled comparisons.");
   const trace = McCostCalculator.gapCurve(
     state.calculatorData, catalogue, state.calculatorRows, calculatorJudgeAccuracy(),
-    calculatorConfig().condition,
+    calculatorConfig().condition, calculatorConfig().correctFraction,
   );
-  const color = calculatorConfig().condition === "oversight"
-    ? {line: "#2563eb", fill: "rgba(37,99,235,.32)"}
-    : {line: "#ea580c", fill: "rgba(234,88,12,.32)"};
-  const traces = [
-    {x: trace.x, y: trace.p5, mode: "lines", line: {width: 0}, hoverinfo: "skip", showlegend: false},
-    {x: trace.x, y: trace.p95, mode: "lines", line: {width: 0}, fill: "tonexty", fillcolor: color.fill, hoverinfo: "skip", showlegend: false},
-    {x: trace.x, y: trace.y, name: trace.name, mode: "lines", line: {width: 2, color: color.line},
-      customdata: trace.p5.map((low, i) => [low, trace.p95[i]]),
-      hovertemplate: "Relative ΔECI %{x:.1%}<br>Accuracy %{y:.1%}<br>95% interval %{customdata[0]:.1%}–%{customdata[1]:.1%}<extra>%{fullData.name}</extra>"},
-  ];
+  const traces = trace.judges.flatMap((judge, index) => {
+    const hue = (index * 137.508 + (calculatorConfig().condition === "oversight" ? 215 : 25)) % 360;
+    const line = `hsl(${hue},70%,42%)`, fill = `hsla(${hue},70%,50%,.10)`;
+    return [
+      {x: trace.x, y: judge.p5, mode: "lines", line: {width: 1, color: line, dash: "dot"}, hoverinfo: "skip", showlegend: false},
+      {x: trace.x, y: judge.p95, mode: "lines", line: {width: 1, color: line, dash: "dot"}, fill: "tonexty", fillcolor: fill, hoverinfo: "skip", showlegend: false},
+      {x: trace.x, y: judge.y, name: judge.name, mode: "lines", line: {width: 1.7, color: line},
+        customdata: judge.p5.map((low, i) => [low, judge.p95[i]]),
+        hovertemplate: "Relative ΔECI %{x:.1%}<br>Accuracy %{y:.1%}<br>95% interval %{customdata[0]:.1%}–%{customdata[1]:.1%}<extra>%{fullData.name}</extra>"},
+    ];
+  });
+  traces.push({x: trace.x, y: trace.y, name: "Population mean", mode: "lines", line: {width: 3, color: "#111827", dash: "dash"}});
   const theme = plotTheme();
   theme.showlegend = true;
   theme.xaxis.title = "Relative ΔECI: |ECI₁ − ECI₂| / min(ECI₁, ECI₂)";
   theme.xaxis.tickformat = ".0%";
   theme.yaxis.title = "Judging accuracy";
-  const minimum = Math.min(...trace.p5), maximum = Math.max(...trace.p95);
+  const minimum = Math.min(...trace.judges.flatMap((judge) => judge.p5));
+  const maximum = Math.max(...trace.judges.flatMap((judge) => judge.p95));
   const padding = Math.max(.03, (maximum - minimum) * .12);
   theme.yaxis.range = [Math.max(0, minimum - padding), Math.min(1, maximum + padding)];
   Plotly.react("gap-curves", traces, theme, plotConfig);
+  const atTen = trace.judges.map((judge) => ({mean: judge.y[10], low: judge.p5[10], high: judge.p95[10]}));
+  byId("calculator-gap-summary").textContent = `At 10% ΔECI: population ${number(100 * trace.y[10], 1)}%; sampled judges ${number(100 * Math.min(...atTen.map((row) => row.mean)), 1)}–${number(100 * Math.max(...atTen.map((row) => row.mean)), 1)}%; per-judge 95% bounds ${number(100 * Math.min(...atTen.map((row) => row.low)), 1)}–${number(100 * Math.max(...atTen.map((row) => row.high)), 1)}%.`;
 }
 
 function renderCalculator() {
@@ -519,7 +525,8 @@ function renderCalculator() {
   const fitted = state.calculatorData.accuracy_glm.accuracy_at_10pct_eci;
   byId("judge-accuracy-default").textContent = `(fitted default: ${number(100 * fitted.mean, 1)}% [${number(100 * fitted.low, 1)}, ${number(100 * fitted.high, 1)}])`;
   const overlap = McCostCalculator.expectedOverlap(state.calculatorData, calculatorConfig().items);
-  byId("calculator-items-estimate").textContent = `(expected mutually-correct overlap: ${number(overlap.mean, 0)} [${number(overlap.low, 0)}, ${number(overlap.high, 0)}])`;
+  const expected = calculatorConfig().items * calculatorConfig().correctFraction;
+  byId("calculator-items-estimate").textContent = `(usable mutually-correct items: ${number(expected, 1)}; GPQA default ${number(overlap.mean, 0)} [${number(overlap.low, 0)}, ${number(overlap.high, 0)}])`;
   const catalogue = new Map(state.calculatorData.catalogue.map((model) => [model.model_id, model]));
   try {
     if (!state.calculatorUploaded) {
@@ -534,7 +541,7 @@ function renderCalculator() {
     return;
   }
   state.calculatorResults = state.calculatorRows.map((row) => {
-    try { return McCostCalculator.estimateComparison(row, state.calculatorData, catalogue, calculatorJudgeAccuracy()); }
+    try { return McCostCalculator.estimateComparison(row, state.calculatorData, catalogue, calculatorJudgeAccuracy(), calculatorConfig().correctFraction); }
     catch (error) { return {...row, error: error.message}; }
   });
   const body = byId("calculator-results").tBodies[0];
@@ -597,6 +604,7 @@ async function loadCalculator() {
     state.calculatorData = await response.json();
     const fitted = state.calculatorData.accuracy_glm.accuracy_at_10pct_eci.mean;
     byId("judge-accuracy").value = Math.min(99.9, Math.max(50, 100 * fitted));
+    byId("calculator-correct").value = 100 * state.calculatorData.candidate_accuracy_default.mean ** 2;
     byId("calculator-status").textContent = "Ready. Upload CSV or JSON comparisons.";
     renderCalculator();
   } catch (error) {
@@ -649,6 +657,7 @@ for (const id of ["calculator-condition", "calculator-judges", "calculator-ancho
   });
 }
 byId("judge-accuracy").addEventListener("input", renderCalculator);
+byId("calculator-correct").addEventListener("input", renderCalculator);
 byId("download-calculator").addEventListener("click", downloadCalculator);
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
 loadCalculator();
