@@ -323,6 +323,49 @@ def fit_sae(X_train, X_test, width, k, seed, epochs, device="cpu"):
                         model=model)
 
 
+def fit_batchtopk(X_train, X_test, width, k, seed, steps, batch_size=256,
+                  device="cpu"):
+    """Train the pinned-reference BatchTopK objective on recorded activations."""
+    from batch_topk import BatchTopKSAE
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    model = BatchTopKSAE(X_train.shape[1], width, k).to(device)
+    X = torch.as_tensor(X_train, dtype=torch.float32)
+    optimizer = torch.optim.Adam(model.parameters(), lr=3e-4, betas=(0.9, 0.99))
+    generator = torch.Generator().manual_seed(seed)
+    order, cursor = torch.randperm(len(X), generator=generator), 0
+    for _ in range(steps):
+        if cursor + min(batch_size, len(X)) > len(X):
+            order, cursor = torch.randperm(len(X), generator=generator), 0
+        idx = order[cursor:cursor + min(batch_size, len(X))]
+        cursor += len(idx)
+        loss, _ = model.training_loss(X[idx].to(device))
+        optimizer.zero_grad()
+        loss.backward()
+        model.project_decoder_grad_and_normalize()
+        optimizer.step()
+    batches = [X[start:start + batch_size].to(device)
+               for start in range(0, len(X), batch_size)]
+    model.calibrate_threshold(batches)
+
+    def encode(values):
+        tensor = torch.as_tensor(values, dtype=torch.float32)
+        codes, reconstructions = [], []
+        with torch.no_grad():
+            for start in range(0, len(tensor), batch_size):
+                batch = tensor[start:start + batch_size].to(device)
+                code = model.encode(batch)
+                codes.append(code.cpu())
+                reconstructions.append(model.decode(code).cpu())
+        return torch.cat(codes).numpy(), torch.cat(reconstructions).numpy()
+
+    train_code, _ = encode(X_train)
+    test_code, test_recon = encode(X_test)
+    return MethodResult("batchtopk", train_code, test_code, test_recon,
+                        {"seed": seed, "width": width, "k": k,
+                         "threshold": float(model.threshold)}, model=model)
+
+
 def ising_clusters(train_code, alpha, method, n_clusters=None):
     """Group SAE features from inverse-Ising conditional dependencies."""
     from unsupervised_clustering import compute_ising, cluster_leiden, cluster_spectral
@@ -395,6 +438,9 @@ def fit_method(name, X_train, gap_train, X_test, seed, quick=False, config=None)
     if name == "sae":
         return fit_sae(X_train, X_test, config["width"], config["k"], seed,
                        config["epochs"], device=device)
+    if name == "batchtopk":
+        return fit_batchtopk(X_train, X_test, config["width"], config["k"], seed,
+                             config["steps"], config.get("batch_size", 256), device=device)
     raise ValueError(f"unknown method: {name}")
 
 
@@ -423,6 +469,9 @@ def trajectory_config(name, d_in, quick=False):
     if name == "sae":
         return {"width": d_in, "k": min(32, d_in),
                 "epochs": 10 if quick else 60}
+    if name == "batchtopk":
+        return {"width": 2 * d_in, "k": min(32, 2 * d_in),
+                "steps": 200 if quick else 1000, "batch_size": 256}
     if name == "raw":
         return {}
     if name in {"pca", "random"}:
@@ -533,7 +582,7 @@ def run_trace(manifest, layer, method, out_dir, seed, positions_per_prompt=64,
     out_dir = pathlib.Path(out_dir)
     if out_dir.exists():
         raise FileExistsError(out_dir)
-    if method not in {"cebra", "bsf", "sae"}:
+    if method not in {"cebra", "bsf", "sae", "batchtopk"}:
         raise ValueError(f"trace requires a learned method, got {method}")
     data = load_manifest(manifest, layer=layer)
     selected = relative_token_indices(data["prompt_idx"], data["position"],
@@ -563,6 +612,13 @@ def run_trace(manifest, layer, method, out_dir, seed, positions_per_prompt=64,
         values = np.take_along_axis(code, indices, axis=1)
         payload["code_indices"] = torch.as_tensor(indices, dtype=torch.int32)
         payload["code_values"] = torch.as_tensor(values, dtype=torch.float16)
+    elif method == "batchtopk":
+        row, column = np.nonzero(code)
+        counts = np.bincount(row, minlength=len(code))
+        payload["code_row_ptr"] = torch.as_tensor(
+            np.concatenate([[0], np.cumsum(counts)]), dtype=torch.int64)
+        payload["code_indices"] = torch.as_tensor(column, dtype=torch.int32)
+        payload["code_values"] = torch.as_tensor(code[row, column], dtype=torch.float16)
     else:
         blocks = code.reshape(len(code), config["n_groups"], config["group_size"])
         norms = np.square(blocks).sum(axis=2)
@@ -667,7 +723,8 @@ def main():
     trajectory.add_argument("--manifest", required=True)
     trajectory.add_argument("--layers", required=True)
     trajectory.add_argument("--method",
-                            choices=("cebra", "bsf", "sae", "raw", "pca", "random"),
+                            choices=("cebra", "bsf", "sae", "batchtopk", "raw",
+                                     "pca", "random"),
                             required=True)
     trajectory.add_argument("--seeds", default="0,1,2")
     trajectory.add_argument("--positions-per-prompt", type=int, default=64)
@@ -677,7 +734,8 @@ def main():
     trace = subparsers.add_parser("trace")
     trace.add_argument("--manifest", required=True)
     trace.add_argument("--layer", required=True, type=int)
-    trace.add_argument("--method", choices=("cebra", "bsf", "sae"), required=True)
+    trace.add_argument("--method", choices=("cebra", "bsf", "sae", "batchtopk"),
+                       required=True)
     trace.add_argument("--seed", type=int, default=0)
     trace.add_argument("--positions-per-prompt", type=int, default=64)
     trace.add_argument("--out", required=True)

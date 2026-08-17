@@ -301,6 +301,20 @@ def test_reconstructive_method_returns_codes_and_test_reconstruction(method):
     assert result.model is not None
 
 
+def test_batchtopk_method_calibrates_batch_independent_inference():
+    X, _ = sparse_manifold_mix(n=128, d=12, seed=0)
+    config = {"width": 24, "k": 2, "steps": 20, "batch_size": 32}
+
+    result = discover.fit_method("batchtopk", X[:96], None, X[96:], seed=2,
+                                 quick=True, config=config)
+
+    assert result.test_code.shape == (32, 24)
+    assert np.isfinite(result.test_code).all()
+    assert np.isfinite(result.test_reconstruction).all()
+    assert result.model is not None
+    assert np.isfinite(result.metadata["threshold"])
+
+
 @pytest.mark.parametrize("method", ["raw", "pca", "random"])
 def test_control_method_returns_finite_train_and_test_codes(method):
     X, _ = sparse_manifold_mix(n=80, d=12, seed=0)
@@ -344,6 +358,8 @@ def test_trajectory_configs_use_non_temporal_cebra_and_reference_bsf():
     assert bsf["group_size"] == 3 and bsf["l0"] == 16 and bsf["snr"] == 0.1
     small = discover.trajectory_config("bsf", d_in=8, quick=True)
     assert small["l0"] <= small["n_groups"]
+    batchtopk = discover.trajectory_config("batchtopk", d_in=3072, quick=True)
+    assert batchtopk["width"] == 6144 and batchtopk["k"] == 32
 
 
 def write_fake_manifest(out):
