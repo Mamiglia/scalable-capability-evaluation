@@ -308,3 +308,32 @@ def test_gauss_needs_far_fewer_samples_than_midpoint_on_a_smooth_integrand():
     midpoint_8 = abs(integrate(8, "midpoint") - exact)
 
     assert gauss_8 < midpoint_8 / 100
+
+
+def test_occlusion_scores_one_per_span_and_zero_when_nothing_is_removed():
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    ids = torch.tensor([[3, 4, 5, 6, 7, 8]])
+    mask = torch.ones_like(ids)
+
+    out = token_attribution.occlusion_scores(model, tokenizer, ids, mask, span_size=2)
+
+    assert out["spans"] == [(0, 2), (2, 4), (4, 6)]
+    assert out["scores"].shape == (3,)
+    assert np.isfinite(out["scores"]).all()
+
+
+def test_occlusion_matches_a_directly_edited_prompt():
+    """The score must be the real change in the gap, not an approximation of it."""
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    ids = torch.tensor([[3, 4, 5, 6]])
+    mask = torch.ones_like(ids)
+    id1, id2 = token_attribution.answer_token_ids(tokenizer)
+
+    out = token_attribution.occlusion_scores(model, tokenizer, ids, mask, span_size=1)
+
+    table = model.get_input_embeddings()
+    edited = table(ids).detach().clone()
+    edited[0, 2] = table.weight.detach().mean(0)
+    with torch.no_grad():
+        direct = out["gap"] - float(token_attribution._gap_logits(model, edited, mask, id1, id2)[0])
+    assert out["scores"][2] == pytest.approx(direct, abs=1e-4)

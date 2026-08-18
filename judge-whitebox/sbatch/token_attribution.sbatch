@@ -38,11 +38,13 @@ ARGS=(--model "$MODEL" --fold "$FOLD" --split "${WB_SPLIT:?set WB_SPLIT}"
 if [ -n "${WB_SWEEP_STEPS:-}" ]; then
   DEST="$OUT/token_attribution/$TAG/completeness_sweep_${MODEL}_${FOLD}${SHARD_SUFFIX}.parquet"
   ARGS+=(--sweep-steps "$WB_SWEEP_STEPS")
+  [ -n "${WB_DTYPE:-}" ] && ARGS+=(--dtype "$WB_DTYPE")
   [ -n "${WB_SWEEP_PROMPTS:-}" ] && ARGS+=(--sweep-prompts "$WB_SWEEP_PROMPTS")
   [ -n "${WB_SWEEP_SEED:-}" ] && ARGS+=(--sweep-seed "$WB_SWEEP_SEED")
 else
   DEST="$OUT/token_attribution/$TAG/attributions_${MODEL}_${FOLD}${SHARD_SUFFIX}.parquet"
   ARGS+=(--steps "${WB_STEPS:?set WB_STEPS from the sweep}")
+  [ -n "${WB_DTYPE:-}" ] && ARGS+=(--dtype "$WB_DTYPE")
 fi
 [ ! -e "$DEST" ] || { echo "destination exists: $DEST"; exit 1; }
 mkdir -p "$(dirname "$DEST")"
