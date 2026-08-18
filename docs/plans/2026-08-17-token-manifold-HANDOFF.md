@@ -148,44 +148,61 @@ Two further traps found while resubmitting, both worth remembering:
   what the directory names claimed. The resubmission passes all twelve layers, verified by a
   stubbed-`sbatch` dry run before anything was submitted.
 
-### First corrected result: the pilot's Qwen readout peak does not survive item balancing
+### First corrected result: no linear verdict information inside Qwen transcripts; a weak one in Llama
 
 Both timelines finished (3392423 in 10m25s, 3392424 in 8m48s) and are pulled to
-`judge-whitebox/out/token_manifold/item_balanced_core100_v2/timeline_{qwen,llama}.csv`. The readout
-structural group has exactly one relative-decile cell per layer, so these are pooled held-out R2
-values, directly comparable to the pilot numbers quoted earlier in this document.
+`judge-whitebox/out/token_manifold/item_balanced_core100_v2/timeline_{qwen,llama}.csv`.
 
-Qwen3-8B, readout group, R2 by physical layer:
+Read the readout group first and then set it aside. `answer_readout` is the last span before the
+model emits its answer, so a ridge decoding the signed gap there is reading the output, not
+localising a decision. Its layer profile is not a finding, and the fact that it now peaks at the last
+recorded layer is what a readout should do. The only thing the readout numbers are good for is
+sizing how badly four items inflated the pilot: Qwen physical layer 29 falls from R2 0.416 to 0.067,
+and the sharp 26/29/33 plateau flattens away. Llama's readout is stable, 0.038 to 0.066 at layer 25.
+That is a warning about the pilot's variance, not a localisation result, and no layer should be
+frozen on the strength of it.
 
-| | 0 | 3 | 7 | 10 | 13 | 16 | 20 | 23 | 26 | 29 | 33 | 36 |
-|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| pilot, 4 items | -0.142 | -0.152 | -0.156 | -0.159 | -0.147 | -0.154 | -0.158 | -0.118 | **+0.403** | **+0.416** | **+0.411** | +0.036 |
-| corrected, 20 items | -0.051 | -0.062 | -0.060 | -0.070 | -0.069 | -0.065 | -0.068 | -0.012 | +0.045 | +0.067 | +0.043 | **+0.145** |
+The Stage 1 question the design actually poses is where in **token time** verdict information first
+becomes decodable, and whether a decision is present before, during or after each transcript. That
+lives in the `transcript_1` and `transcript_2` groups across ten relative-position deciles and twelve
+layers, scored against the prompt-level shuffled-gap null. Counting cells that beat their own null:
 
-Llama-3.2-3B-Instruct, readout group:
+| model | span | pilot, 4-5 items | corrected, 20 items | median margin over null | raw R2 > 0 |
+|---|---|---:|---:|---:|---:|
+| Qwen | transcript_1 | 0/120 | 0/120 | -0.050 | 0/120 |
+| Qwen | transcript_2 | 0/120 | 0/120 | -0.048 | 0/120 |
+| Llama | transcript_1 | 0/120 | **109/120** | +0.012 | 7/120 |
+| Llama | transcript_2 | 0/120 | **118/120** | +0.017 | 0/120 |
 
-| | 0 | 3 | 5 | 8 | 10 | 13 | 15 | 18 | 20 | 23 | 25 | 28 |
-|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| pilot, 5 items | -0.097 | -0.084 | -0.092 | -0.092 | -0.094 | -0.094 | -0.070 | -0.005 | -0.012 | +0.005 | **+0.038** | -0.014 |
-| corrected, 20 items | -0.015 | -0.020 | -0.014 | -0.023 | -0.020 | -0.015 | -0.012 | +0.024 | +0.033 | +0.052 | **+0.066** | +0.039 |
+- **Qwen carries no linear verdict information in either transcript, at any layer or token position.**
+  Every one of its 240 transcript cells sits below its own shuffled null, before and after the
+  correction. Whatever drives a Qwen verdict is not linearly readable from the transcript tokens.
+- **Item balancing created the only transcript-level signal in the study, and it is Llama's.** The
+  pilot showed 0/240 cells above null; the corrected run shows 227/240. This is the change that
+  matters — not the readout deflation — because it is the first evidence of decision-relevant
+  structure while the judge is still reading.
+- **It does not yet clear the design's claim-1 bar.** Held-out R2 stays at or below zero in almost
+  every transcript cell (7/120 and 0/120 positive). Llama beats a shuffled-gap control while still
+  predicting worse than the mean, so this is a consistent edge over the control, not decodability.
+  Calling it decodability would skip a rung on the claim ladder.
 
-Read this carefully, because it changes the picture the pilot painted:
+The Llama margin has real token-time shape rather than being a flat offset:
 
-- **The Qwen "strong late readout locator" was largely an item-clustering artefact.** At physical
-  layer 29 the pilot reported R2 0.416; with twenty items the same cell gives 0.067. The sharp
-  26/29/33 plateau flattens out entirely.
-- What survives in Qwen is a smaller signal that peaks at the **last recorded layer, 36** (+0.145),
-  which is precisely where the pilot showed almost nothing (+0.036). The layer profile is close to
-  reversed, so any layer choice inherited from the pilot is unsafe.
-- **Llama is qualitatively stable and slightly stronger**: same peak layer, 25, rising 0.038 to
-  0.066, with the late layers now consistently positive rather than straddling zero. Llama's pilot
-  had five items and a weak signal, so there was less to inflate.
-- Shuffled-gap nulls stay where they should (-0.014 Qwen, -0.037 Llama), so the surviving positives
-  are real relative to the control, just much smaller than advertised.
+- In `transcript_1` it is largest at the opening and early-middle deciles (0, 3-5, up to +0.040 at
+  physical layer 20) and decays toward the end of the span, going slightly negative at decile 9 in the
+  late layers (-0.009 at layers 23-28).
+- In `transcript_2` it concentrates in the middle deciles (4-7) and *strengthens with depth*, reaching
+  +0.042 at layer 28.
 
-Because Qwen now peaks at the edge of the recorded range, the twelve-layer sweep should be checked
-for whether the signal is still climbing at 36. If it is, the layer set itself needs extending
-before any layer is frozen for phrase localisation.
+So in Llama the weak signal is present while the judge reads, is strongest mid-span in each
+transcript, and fades at the tail of the first transcript rather than accumulating there. That is the
+"present before, during or after each transcript" trajectory the spec asks Stage 1 to produce.
+
+This is precisely the situation the nonlinear/sparse gate exists for: a linear locator finds nothing
+usable inside Qwen's transcripts and only a sub-threshold edge inside Llama's. The twelve running
+CEBRA/BSF/BatchTopK trajectory jobs test whether nonlinear or sparse structure recovers what ridge
+cannot, against raw/PCA/random matched controls. The layer set needs no extension: the spec fixes
+twelve evenly spaced layers with early, middle and late controls and forbids removing them.
 
 ### Original resubmission commands, for reference
 
