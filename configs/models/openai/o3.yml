@@ -1,6 +1,13 @@
+# Routed via OpenRouter's Responses endpoint through inspect's native `openai/` provider:
+# o-series rejects a function tool named `python` (intercode) on Chat Completions, and only
+# the Responses path aliases it (python -> python_exec). Needs OPENAI_API_KEY=$OPENROUTER_API_KEY.
 name: openai/o3
-slug: openrouter/openai/o3
+slug: openai/openai/o3
 release_date: '2025-04-16'
 
 model_args:
-  provider: {}
+  base_url: https://openrouter.ai/api/v1
+  responses_api: true
+
+generate_args:
+  reasoning_effort: medium   # OpenRouter defaults effort to 'none', which o3 rejects
