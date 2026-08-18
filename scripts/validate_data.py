@@ -53,8 +53,20 @@ def complete_log(repeat_dir: Path, delete: bool = False) -> tuple[Path | None, b
 
 
 def completions(path: Path, limit: int) -> dict:
+    """Per sample: every assistant text and reasoning plus the output token count. The bare
+    completion is often just "ANSWER: 204" or a flag, identical across genuine repeats."""
     samples = read_eval_log_samples(str(path), all_samples_required=False)
-    return {(s.id, s.epoch): s.output.completion for s in itertools.islice(samples, limit)}
+    out = {}
+    for s in itertools.islice(samples, limit):
+        parts = []
+        for m in s.messages:
+            if m.role != "assistant":
+                continue
+            content = m.content if isinstance(m.content, list) else [m.content]
+            parts += [c if isinstance(c, str) else getattr(c, "text", None) or getattr(c, "reasoning", "") for c in content]
+        usage = s.output.usage
+        out[(s.id, s.epoch)] = ("\n".join(parts), usage.output_tokens if usage else None)
+    return out
 
 
 def main() -> int:
