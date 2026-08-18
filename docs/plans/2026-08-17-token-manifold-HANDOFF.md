@@ -2,10 +2,11 @@
 
 ## One-line state
 
-**Status 2026-08-18 morning:** both corrected recordings are COMPLETE and verified on Ceph; all
-fourteen downstream analysis jobs failed on a launcher bug and produced no output. The launcher is
-fixed and staged, and the resubmission commands are below under "All 14 downstream jobs failed".
-Nothing is currently queued — the campaign is waiting on the user to submit.
+**Status 2026-08-18 morning:** both corrected recordings are COMPLETE and verified on Ceph. The
+first fourteen downstream analysis jobs failed on a launcher bug and produced no output; the
+launcher is fixed, and the campaign was **resubmitted as jobs 3392423-3392436** after an
+environment smoke passed. See "All 14 downstream jobs failed" below for the post-mortem and the
+current job table.
 
 **Critical correction, 2026-08-18:** the original 100-pair activation pilot is superseded for
 science because its order-preserving limit contained only four Qwen items and five Llama items.
@@ -114,11 +115,43 @@ judge_ft venv underneath.
 manifold stages resolve dependencies. It matches what the successful runs actually did, but it is an
 environment decision rather than a bug fix, so it is worth a look before the campaign is trusted.
 
-### Resubmission
+### Resubmission — DONE 2026-08-18, jobs 3392423-3392436
 
-Nothing is queued. The commands below reproduce the intended campaign; no `afterok` dependencies are
-needed now that both recordings are complete. Run the smoke first — it costs about a minute and
-confirms the overlay/venv stack imports before committing fourteen jobs.
+The campaign was resubmitted after the launcher fix. The environment smoke (job 3392421) passed
+first, on a CPU node, confirming the stack the analysis stages actually need:
+
+```
+/…/code/judge_ft/venv/bin/python
+OK torch 2.11.0+cu130 numpy 2.3.5 sklearn 1.7.2 cebra 0.6.0 scipy 1.16.3
+OK discover module imports
+```
+
+| Model | timeline | CEBRA all 12 | BSF all 12 | BatchTopK all 12 | raw / PCA / random controls |
+|---|---:|---:|---:|---:|---:|
+| Qwen | 3392423 | 3392425 | 3392426 | 3392427 | 3392428 / 3392429 / 3392430 |
+| Llama | 3392424 | 3392431 | 3392432 | 3392433 | 3392434 / 3392435 / 3392436 |
+
+Their logs are clean of the launcher error that killed the previous fourteen. The submitting script
+is staged at `code_snapshot_4a46b76/submit_campaign.sh`.
+
+Two further traps found while resubmitting, both worth remembering:
+
+- **`sbatch --wrap` runs under `/bin/sh` (dash), which has no `source`.** The first smoke attempt
+  (3392418) died on `source: not found`. Anything needing bash must be a real script file.
+- **`--export` splits its own argument on commas**, so `--export=ALL,WB_LAYERS=0,3,7,…` sets
+  `WB_LAYERS=0` and treats `3`, `7`, … as separate variable names. Comma-valued variables
+  (`WB_LAYERS`, `WB_SEEDS`) must be exported in the submitting shell and picked up by a plain
+  `--export=ALL`, which is what `submit_campaign.sh` does. **The original campaign passed
+  `WB_LAYERS` through `--export`, so its "all 12 layers" jobs were very probably running a single
+  layer**; the failed BSF job logged 36 fits, consistent with 4 layers × 3 seeds × 3 folds rather
+  than the 108 that twelve layers would give. Either way the previous run's layer coverage was not
+  what the directory names claimed. The resubmission passes all twelve layers, verified by a
+  stubbed-`sbatch` dry run before anything was submitted.
+
+### Original resubmission commands, for reference
+
+The commands below reproduce the same campaign by hand; no `afterok` dependencies are needed now
+that both recordings are complete. Note the comma caveat above — prefer `submit_campaign.sh`.
 
 ```bash
 C=/ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge
