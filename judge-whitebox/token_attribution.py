@@ -23,9 +23,17 @@ def answer_token_ids(tokenizer):
 
 
 def _gap_logits(model, embeds, attention_mask, id1, id2):
-    """Differentiable gap per batch row, from input embeddings."""
-    out = model(inputs_embeds=embeds, attention_mask=attention_mask)
-    return out.logits[:, -1, id1] - out.logits[:, -1, id2]
+    """Differentiable gap per batch row, from input embeddings.
+
+    Only the last position's two answer logits are needed, so the final hidden
+    state is projected onto the difference of their unembedding rows. Running
+    the full head instead would materialise vocabulary-wide logits at every
+    position, several gigabytes per forward, all of it kept for the backward.
+    """
+    head = model.get_output_embeddings()
+    assert getattr(head, "bias", None) is None, "unembedding bias would break this shortcut"
+    hidden = model.get_decoder()(inputs_embeds=embeds, attention_mask=attention_mask)
+    return hidden.last_hidden_state[:, -1] @ (head.weight[id1] - head.weight[id2])
 
 
 def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
@@ -43,13 +51,18 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
     device = next(model.parameters()).device
     input_ids = input_ids.to(device)
     attention_mask = attention_mask.to(device)
+    assert int(attention_mask[0, -1]) == 1, "the gap is read at the last position, which is padding"
     id1, id2 = answer_token_ids(tokenizer)
 
     embeds = model.get_input_embeddings()(input_ids).detach()
     baseline = torch.zeros_like(embeds)
     delta = embeds - baseline
 
-    total = torch.zeros_like(embeds)
+    # Accumulate and reduce in float64. Summing thousands of gradients and then
+    # 4096 embedding dimensions in float32 loses small and cancelling terms, and
+    # that error would land in the completeness figure as if it were quadrature
+    # error.
+    total = torch.zeros(embeds.shape, device=device, dtype=torch.float64)
     for start in range(0, steps, step_batch):
         rows = min(step_batch, steps - start)
         alphas = ((torch.arange(start, start + rows, device=device, dtype=torch.float64) + 0.5)
@@ -57,10 +70,10 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
         point = (baseline + alphas * delta).detach().requires_grad_(True)
         gaps = _gap_logits(model, point, attention_mask.expand(rows, -1), id1, id2)
         grad, = torch.autograd.grad(gaps.sum(), point)
-        total += grad.sum(0, keepdim=True)
+        total += grad.double().sum(0, keepdim=True)
 
-    attributions = (total / steps) * delta
-    scores = attributions.sum(-1)[0].double().cpu().numpy()
+    attributions = (total / steps) * delta.double()
+    scores = attributions.sum(-1)[0].cpu().numpy()
     assert np.isfinite(scores).all(), "non-finite token scores"
 
     with torch.no_grad():
@@ -119,6 +132,7 @@ def write_attributions(rows, out_path):
             "score": row["scores"], "gap": row["gap"],
             "baseline_gap": row["baseline_gap"],
             "completeness_error": row["completeness_error"]}))
+    assert frames, "no prompts to attribute; check the split, limit and shard count"
     return write_table(pd.concat(frames, ignore_index=True), out_path)
 
 

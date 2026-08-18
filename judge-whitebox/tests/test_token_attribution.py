@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 from transformers import AutoModelForCausalLM, Qwen3Config
 
@@ -204,3 +205,27 @@ def test_attribution_table_keeps_the_baseline_gap_and_character_offsets(tmp_path
     assert table.baseline_gap.tolist() == [0.25, 0.25]
     assert table.char_start.tolist() == [0, 1]
     assert table.char_end.tolist() == [1, 5]
+
+
+def test_gap_shortcut_matches_running_the_full_head():
+    """Projecting the last hidden state must equal the answer-logit difference."""
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    ids = torch.tensor([[3, 4, 5, 6, 7]])
+    mask = torch.ones_like(ids)
+    id1, id2 = token_attribution.answer_token_ids(tokenizer)
+
+    with torch.no_grad():
+        shortcut = token_attribution._gap_logits(model, model.get_input_embeddings()(ids),
+                                                 mask, id1, id2)
+        full = model(input_ids=ids).logits[:, -1]
+
+    assert shortcut.item() == pytest.approx((full[0, id1] - full[0, id2]).item(), abs=1e-5)
+
+
+def test_attribution_refuses_when_the_last_position_is_padding():
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    ids = torch.tensor([[3, 4, 5, 0]])
+    mask = torch.tensor([[1, 1, 1, 0]])
+
+    with pytest.raises(AssertionError, match="padding"):
+        token_attribution.attribute_tokens(model, tokenizer, ids, mask, steps=2)
