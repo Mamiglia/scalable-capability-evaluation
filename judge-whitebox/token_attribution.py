@@ -13,6 +13,7 @@ import wbprompts
 
 STEP_BATCH_DEFAULT = 4
 BASELINE_DEFAULT = "mean"
+QUADRATURE_DEFAULT = "gauss"
 
 
 def answer_token_ids(tokenizer):
@@ -37,8 +38,25 @@ def _gap_logits(model, embeds, attention_mask, id1, id2):
     return hidden.last_hidden_state[:, -1] @ (head.weight[id1] - head.weight[id2])
 
 
+def quadrature_points(steps, kind):
+    """Sample positions along the baseline-to-prompt path, and their weights.
+
+    Midpoint spaces samples evenly and weights them equally. Gauss-Legendre
+    chooses both positions and weights so a smooth integrand needs far fewer
+    samples for the same accuracy. Weights sum to one either way.
+    """
+    if kind == "midpoint":
+        alphas = (np.arange(steps) + 0.5) / steps
+        return alphas, np.full(steps, 1.0 / steps)
+    if kind == "gauss":
+        nodes, weights = np.polynomial.legendre.leggauss(steps)
+        return (nodes + 1.0) / 2.0, weights / 2.0
+    raise ValueError(f"unknown quadrature: {kind}")
+
+
 def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
-                     step_batch=STEP_BATCH_DEFAULT, baseline_kind=BASELINE_DEFAULT):
+                     step_batch=STEP_BATCH_DEFAULT, baseline_kind=BASELINE_DEFAULT,
+                     quadrature=QUADRATURE_DEFAULT):
     """Integrated-gradient attribution of the gap to each input token.
 
     Interpolation points are the same sequence with different embeddings, so
@@ -73,17 +91,21 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
     # 4096 embedding dimensions in float32 loses small and cancelling terms, and
     # that error would land in the completeness figure as if it were quadrature
     # error.
+    positions, weights = quadrature_points(steps, quadrature)
     total = torch.zeros(embeds.shape, device=device, dtype=torch.float64)
     for start in range(0, steps, step_batch):
-        rows = min(step_batch, steps - start)
-        alphas = ((torch.arange(start, start + rows, device=device, dtype=torch.float64) + 0.5)
-                  / steps).view(rows, 1, 1).to(embeds.dtype)
+        chunk = slice(start, min(start + step_batch, steps))
+        rows = len(positions[chunk])
+        alphas = torch.tensor(positions[chunk], device=device,
+                              dtype=torch.float64).view(rows, 1, 1).to(embeds.dtype)
+        chunk_weights = torch.tensor(weights[chunk], device=device,
+                                     dtype=torch.float64).view(rows, 1, 1)
         point = (baseline + alphas * delta).detach().requires_grad_(True)
         gaps = _gap_logits(model, point, attention_mask.expand(rows, -1), id1, id2)
         grad, = torch.autograd.grad(gaps.sum(), point)
-        total += grad.double().sum(0, keepdim=True)
+        total += (grad.double() * chunk_weights).sum(0, keepdim=True)
 
-    attributions = (total / steps) * delta.double()
+    attributions = total * delta.double()
     scores = attributions.sum(-1)[0].cpu().numpy()
     assert np.isfinite(scores).all(), "non-finite token scores"
 
@@ -95,13 +117,14 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
 
 
 def attribute_rows(model, tokenizer, df, c, steps, step_batch=STEP_BATCH_DEFAULT,
-                   baseline_kind=BASELINE_DEFAULT):
+                   baseline_kind=BASELINE_DEFAULT, quadrature=QUADRATURE_DEFAULT):
     """Yield one attribution record per rendered prompt."""
     for _, row in df.iterrows():
         meta = token_manifold_record.prompt_token_meta(row, tokenizer, c)
         enc = tokenizer(meta["prompt"], return_tensors="pt")
         result = attribute_tokens(model, tokenizer, enc["input_ids"],
-                                  enc["attention_mask"], steps, step_batch, baseline_kind)
+                                  enc["attention_mask"], steps, step_batch, baseline_kind,
+                                  quadrature)
         assert len(result["scores"]) == len(meta["input_ids"])
         yield {"pair_uid": row["pair_uid"], "item": row["item"], "order": int(row["order"]),
                "gap": result["gap"], "baseline_gap": result["baseline_gap"],
@@ -198,13 +221,14 @@ def select_shard(df, index, count):
 
 
 def completeness_sweep(model, tokenizer, df, c, step_counts, n_prompts, seed,
-                       step_batch=STEP_BATCH_DEFAULT, baseline_kind=BASELINE_DEFAULT):
+                       step_batch=STEP_BATCH_DEFAULT, baseline_kind=BASELINE_DEFAULT,
+                       quadrature=QUADRATURE_DEFAULT):
     """Relative completeness error per prompt at each step count."""
     sample = df.sample(n=min(n_prompts, len(df)), random_state=seed)
     rows = []
     for steps in step_counts:
         for record in attribute_rows(model, tokenizer, sample, c, steps, step_batch,
-                                     baseline_kind):
+                                     baseline_kind, quadrature):
             span = abs(record["gap"] - record["baseline_gap"])
             rows.append({"steps": steps, "pair_uid": record["pair_uid"],
                          "order": record["order"],
@@ -228,6 +252,9 @@ def build_parser(c):
                         help="model precision; bfloat16 matches how the judges are run")
     parser.add_argument("--step-batch", type=int, default=STEP_BATCH_DEFAULT,
                         help="integration steps run per forward/backward pass")
+    parser.add_argument("--quadrature", default=QUADRATURE_DEFAULT,
+                        choices=("gauss", "midpoint"),
+                        help="how the path integral is sampled")
     parser.add_argument("--baseline", default=BASELINE_DEFAULT, choices=("mean", "zeros"),
                         help="integrated-gradient baseline; zeros is degenerate under RMSNorm")
     parser.add_argument("--chunk-prompts", type=int, default=20,
@@ -268,7 +295,8 @@ def main():
         step_counts = [int(s) for s in args.sweep_steps.split(",")]
         write_table(completeness_sweep(model, tokenizer, df, c, step_counts,
                                        args.sweep_prompts, args.sweep_seed,
-                                       args.step_batch, args.baseline), args.out)
+                                       args.step_batch, args.baseline,
+                                       args.quadrature), args.out)
         return
     done = completed_prompts(args.out) if pathlib.Path(args.out).exists() else set()
     if done:
@@ -279,7 +307,7 @@ def main():
         print("nothing left to attribute", flush=True)
         return
     write_attribution_parts(attribute_rows(model, tokenizer, df, c, args.steps,
-                                           args.step_batch, args.baseline),
+                                           args.step_batch, args.baseline, args.quadrature),
                             args.out, args.chunk_prompts)
 
 

@@ -285,3 +285,26 @@ def test_mean_baseline_is_not_degenerate():
 
     assert zeros["baseline_gap"] == pytest.approx(0.0, abs=1e-6)
     assert mean["baseline_gap"] != pytest.approx(0.0, abs=1e-6)
+
+
+def test_quadrature_weights_sum_to_one_and_sit_inside_the_path():
+    for kind in ("midpoint", "gauss"):
+        positions, weights = token_attribution.quadrature_points(16, kind)
+
+        assert weights.sum() == pytest.approx(1.0)
+        assert (positions > 0).all() and (positions < 1).all()
+
+
+def test_gauss_needs_far_fewer_samples_than_midpoint_on_a_smooth_integrand():
+    """The whole reason to switch: same accuracy, a fraction of the forward passes."""
+    curve = lambda a: np.exp(-3 * a) * np.cos(4 * a)      # smooth, like a well-behaved path
+
+    def integrate(n, kind):
+        positions, weights = token_attribution.quadrature_points(n, kind)
+        return float((weights * curve(positions)).sum())
+
+    exact = integrate(4096, "midpoint")
+    gauss_8 = abs(integrate(8, "gauss") - exact)
+    midpoint_8 = abs(integrate(8, "midpoint") - exact)
+
+    assert gauss_8 < midpoint_8 / 100
