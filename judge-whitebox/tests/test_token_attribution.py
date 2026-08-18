@@ -241,3 +241,32 @@ def test_attribution_defaults_to_the_precision_the_judges_run_at():
 
     assert args.dtype == "bfloat16"
     assert inspect.signature(verdicts.load_model).parameters["dtype"].default == torch.bfloat16
+
+
+def _fake_row(uid, order):
+    return {"pair_uid": uid, "item": "it0", "order": order, "gap": 1.0, "baseline_gap": 0.1,
+            "completeness_error": 0.0, "scores": np.array([0.5, 0.5]), "input_ids": [3, 4],
+            "offsets": [(0, 1), (1, 2)], "group_id": np.array([3, 5], dtype=np.int8),
+            "token_text": ["a", "b"]}
+
+
+def test_parts_are_written_as_the_run_goes_and_resume_skips_them(tmp_path):
+    """A long metered run must not lose everything to one failure."""
+    rows = [_fake_row(f"p{i}", i % 2) for i in range(5)]
+
+    written = token_attribution.write_attribution_parts(iter(rows), tmp_path, chunk_prompts=2)
+
+    assert len(written) == 3
+    assert token_attribution.completed_prompts(tmp_path) == {
+        ("p0", 0), ("p1", 1), ("p2", 0), ("p3", 1), ("p4", 0)}
+    assert len(token_attribution.read_attribution_parts(tmp_path)) == 10
+
+
+def test_resuming_appends_parts_without_overwriting(tmp_path):
+    token_attribution.write_attribution_parts(iter([_fake_row("p0", 0)]), tmp_path, 1)
+
+    token_attribution.write_attribution_parts(iter([_fake_row("p1", 1)]), tmp_path, 1)
+
+    assert sorted(p.name for p in tmp_path.glob("part_*.parquet")) == [
+        "part_00000.parquet", "part_00001.parquet"]
+    assert token_attribution.completed_prompts(tmp_path) == {("p0", 0), ("p1", 1)}

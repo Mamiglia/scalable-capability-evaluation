@@ -116,24 +116,67 @@ def write_table(table, out_path):
     return out_path
 
 
+def prompt_frame(row):
+    """One prompt's attributions as long-format rows, one per token."""
+    groups = token_manifold_record.STRUCTURAL_GROUPS
+    return pd.DataFrame({
+        "pair_uid": row["pair_uid"], "item": row["item"], "order": row["order"],
+        "position": range(len(row["scores"])), "token_id": row["input_ids"],
+        "token_text": row["token_text"],
+        "group": [groups[int(g)] for g in row["group_id"]],
+        "char_start": [int(start) for start, _ in row["offsets"]],
+        "char_end": [int(end) for _, end in row["offsets"]],
+        "score": row["scores"], "gap": row["gap"],
+        "baseline_gap": row["baseline_gap"],
+        "completeness_error": row["completeness_error"]})
+
+
 def write_attributions(rows, out_path):
     """Write the long-format token table atomically to a new path."""
     _refuse_existing(out_path)  # fail before spending a forward pass
-    groups = token_manifold_record.STRUCTURAL_GROUPS
-    frames = []
-    for row in rows:
-        frames.append(pd.DataFrame({
-            "pair_uid": row["pair_uid"], "item": row["item"], "order": row["order"],
-            "position": range(len(row["scores"])), "token_id": row["input_ids"],
-            "token_text": row["token_text"],
-            "group": [groups[int(g)] for g in row["group_id"]],
-            "char_start": [int(start) for start, _ in row["offsets"]],
-            "char_end": [int(end) for _, end in row["offsets"]],
-            "score": row["scores"], "gap": row["gap"],
-            "baseline_gap": row["baseline_gap"],
-            "completeness_error": row["completeness_error"]}))
+    frames = [prompt_frame(row) for row in rows]
     assert frames, "no prompts to attribute; check the split, limit and shard count"
     return write_table(pd.concat(frames, ignore_index=True), out_path)
+
+
+def completed_prompts(out_dir):
+    """Prompts already written to a part file, as (pair_uid, order)."""
+    out_dir = pathlib.Path(out_dir)
+    done = set()
+    for part in sorted(out_dir.glob("part_*.parquet")):
+        table = pd.read_parquet(part, columns=["pair_uid", "order"]).drop_duplicates()
+        done.update((str(uid), int(order)) for uid, order in table.to_numpy())
+    return done
+
+
+def write_attribution_parts(rows, out_dir, chunk_prompts):
+    """Write attributions in numbered parts so an interrupted run can resume.
+
+    A long run on metered hardware must not lose everything to one failure, so
+    each chunk lands on disk before the next is computed.
+    """
+    assert chunk_prompts > 0
+    out_dir = pathlib.Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    existing = len(list(out_dir.glob("part_*.parquet")))
+    buffer, written = [], []
+    for row in rows:
+        buffer.append(prompt_frame(row))
+        if len(buffer) >= chunk_prompts:
+            written.append(write_table(pd.concat(buffer, ignore_index=True),
+                                       out_dir / f"part_{existing + len(written):05d}.parquet"))
+            buffer = []
+    if buffer:
+        written.append(write_table(pd.concat(buffer, ignore_index=True),
+                                   out_dir / f"part_{existing + len(written):05d}.parquet"))
+    return written
+
+
+def read_attribution_parts(out_dir):
+    """Every part in one table, for analysis once a run has finished."""
+    parts = sorted(pathlib.Path(out_dir).glob("part_*.parquet"))
+    assert parts, f"no parts in {out_dir}"
+    return pd.concat([pd.read_parquet(p) for p in parts], ignore_index=True)
 
 
 def select_shard(df, index, count):
@@ -172,6 +215,8 @@ def build_parser(c):
                         help="model precision; bfloat16 matches how the judges are run")
     parser.add_argument("--step-batch", type=int, default=STEP_BATCH_DEFAULT,
                         help="integration steps run per forward/backward pass")
+    parser.add_argument("--chunk-prompts", type=int, default=20,
+                        help="prompts per part file; a part on disk survives an interruption")
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1,
                         help="split the prompts across this many jobs")
@@ -210,8 +255,16 @@ def main():
                                        args.sweep_prompts, args.sweep_seed,
                                        args.step_batch), args.out)
         return
-    write_attributions(attribute_rows(model, tokenizer, df, c, args.steps, args.step_batch),
-                       args.out)
+    done = completed_prompts(args.out) if pathlib.Path(args.out).exists() else set()
+    if done:
+        keep = [(str(u), int(o)) not in done for u, o in zip(df["pair_uid"], df["order"])]
+        print(f"resuming: {len(done)} prompts already written, {sum(keep)} to go", flush=True)
+        df = df[keep]
+    if df.empty:
+        print("nothing left to attribute", flush=True)
+        return
+    write_attribution_parts(attribute_rows(model, tokenizer, df, c, args.steps, args.step_batch),
+                            args.out, args.chunk_prompts)
 
 
 if __name__ == "__main__":
