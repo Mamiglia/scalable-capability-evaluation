@@ -178,3 +178,14 @@ def test_attribution_sbatch_refuses_an_existing_destination():
     assert "source ./wb_common.sh" in text
     assert "destination exists" in text
     assert "pip install" not in text
+
+
+def test_attribution_does_not_populate_parameter_gradients():
+    """Only the input embeddings need gradients; weight grads would waste the GPU."""
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    ids = torch.tensor([[3, 4, 5, 6]])
+
+    token_attribution.attribute_tokens(model, tokenizer, ids, torch.ones_like(ids), steps=4)
+
+    assert all(p.grad is None for p in model.parameters())
+    assert not any(p.requires_grad for p in model.parameters())

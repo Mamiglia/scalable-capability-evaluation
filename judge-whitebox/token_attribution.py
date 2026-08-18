@@ -36,6 +36,9 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
     their gaps gives each row its own gradient.
     """
     assert steps > 0 and step_batch > 0
+    # Only the input embeddings need gradients; tracking the weights as well
+    # buffers parameter gradients that are never read and exhausts the GPU.
+    model.requires_grad_(False)
     device = next(model.parameters()).device
     input_ids = input_ids.to(device)
     attention_mask = attention_mask.to(device)
