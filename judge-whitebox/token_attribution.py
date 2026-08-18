@@ -1,7 +1,13 @@
 """Token attribution to a judge's answer-logit gap."""
 
+import os
+import pathlib
+
+import pandas as pd
 import torch
 
+import token_manifold_record
+import wbpairs
 import wbprompts
 
 
@@ -47,3 +53,76 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps):
         baseline_gap = float(_gap_logit(model, baseline, attention_mask, id1, id2))
     return {"scores": scores, "gap": gap, "baseline_gap": baseline_gap,
             "completeness_error": float(scores.sum() - (gap - baseline_gap))}
+
+
+def attribute_rows(model, tokenizer, df, c, steps):
+    """Yield one attribution record per rendered prompt."""
+    for _, row in df.iterrows():
+        meta = token_manifold_record.prompt_token_meta(row, tokenizer, c)
+        enc = tokenizer(meta["prompt"], return_tensors="pt")
+        result = attribute_tokens(model, tokenizer, enc["input_ids"],
+                                  enc["attention_mask"], steps)
+        assert len(result["scores"]) == len(meta["input_ids"])
+        yield {"pair_uid": row["pair_uid"], "item": row["item"], "order": int(row["order"]),
+               "gap": result["gap"], "completeness_error": result["completeness_error"],
+               "scores": result["scores"], "input_ids": list(meta["input_ids"]),
+               "offsets": list(meta["offsets"]), "group_id": meta["group_id"],
+               "token_text": [tokenizer.decode([i]) for i in meta["input_ids"]]}
+
+
+def write_attributions(rows, out_path):
+    """Write the long-format token table atomically to a new path."""
+    out_path = pathlib.Path(out_path)
+    tmp = out_path.with_name(out_path.name + ".partial")
+    if out_path.exists() or tmp.exists():
+        raise FileExistsError(out_path if out_path.exists() else tmp)
+    groups = token_manifold_record.STRUCTURAL_GROUPS
+    frames = []
+    for row in rows:
+        frames.append(pd.DataFrame({
+            "pair_uid": row["pair_uid"], "item": row["item"], "order": row["order"],
+            "position": range(len(row["scores"])), "token_id": row["input_ids"],
+            "token_text": row["token_text"],
+            "group": [groups[int(g)] for g in row["group_id"]],
+            "score": row["scores"], "gap": row["gap"],
+            "completeness_error": row["completeness_error"]}))
+    table = pd.concat(frames, ignore_index=True)
+    table.to_parquet(tmp, index=False)
+    os.replace(tmp, out_path)
+    return out_path
+
+
+def main():
+    import argparse
+
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    import wbconfig
+
+    c = wbconfig.cfg()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--fold", required=True, choices=("A", "B"))
+    parser.add_argument("--fold-seed", type=int,
+                        default=c.get("token_manifold", {}).get("fold_seed", 0))
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--split", default=c["verdicts"]["eval_split"])
+    parser.add_argument("--steps", type=int, default=256)
+    parser.add_argument("--out", required=True)
+    args = parser.parse_args()
+
+    path = wbconfig.resolve_model(args.model, c)
+    tokenizer = AutoTokenizer.from_pretrained(path)
+    model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32,
+                                                 device_map="auto")
+    model.eval()
+
+    pairs = wbpairs.load_pairs(c, args.split)
+    folds = token_manifold_record.balanced_item_folds(pairs, args.fold_seed)
+    df = token_manifold_record.select_fold(pairs, folds, args.fold)
+    df = token_manifold_record.limit_pairs(df, args.limit)
+    write_attributions(attribute_rows(model, tokenizer, df, c, args.steps), args.out)
+
+
+if __name__ == "__main__":
+    main()

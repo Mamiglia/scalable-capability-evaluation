@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
 import torch
 from transformers import AutoModelForCausalLM, Qwen3Config
 
@@ -45,3 +49,26 @@ def test_attribution_is_not_uniform_across_tokens():
     scores = token_attribution.attribute_tokens(model, tokenizer, ids, mask, steps=64)["scores"]
 
     assert scores.std() > 1e-8
+
+
+def test_write_attributions_produces_one_row_per_token(tmp_path):
+    rows = [{"pair_uid": "p0", "item": "it0", "order": 0, "gap": 1.5,
+             "completeness_error": 0.01, "scores": np.array([0.5, 1.0]),
+             "input_ids": [3, 4], "offsets": [(0, 1), (1, 2)],
+             "group_id": np.array([3, 5], dtype=np.int8),
+             "token_text": ["a", "b"]}]
+
+    out = token_attribution.write_attributions(iter(rows), tmp_path / "attr.parquet")
+
+    table = pd.read_parquet(out)
+    assert len(table) == 2
+    assert table.group.tolist() == ["transcript_1", "answer_readout"]
+    assert table.score.tolist() == [0.5, 1.0]
+
+
+def test_attribution_sbatch_refuses_an_existing_destination():
+    text = (Path(__file__).parents[1] / "sbatch" / "token_attribution.sbatch").read_text()
+
+    assert "source ./wb_common.sh" in text
+    assert "destination exists" in text
+    assert "pip install" not in text
