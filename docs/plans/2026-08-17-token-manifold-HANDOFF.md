@@ -2,6 +2,11 @@
 
 ## One-line state
 
+**Status 2026-08-18 morning:** both corrected recordings are COMPLETE and verified on Ceph; all
+fourteen downstream analysis jobs failed on a launcher bug and produced no output. The launcher is
+fixed and staged, and the resubmission commands are below under "All 14 downstream jobs failed".
+Nothing is currently queued — the campaign is waiting on the user to submit.
+
 **Critical correction, 2026-08-18:** the original 100-pair activation pilot is superseded for
 science because its order-preserving limit contained only four Qwen items and five Llama items.
 It remains an engineering/method-calibration artefact only. A tested deterministic item-round-robin
@@ -57,18 +62,111 @@ Corrected immutable recording jobs:
 Check these jobs roughly every 30 minutes, per user preference. Do not delete or overwrite old or
 new Ceph artefacts.
 
-The downstream campaign is frozen to
-`$C/staging/whitebox/code_snapshot_4a46b76` and queued with Slurm `afterok` dependencies:
+Both recordings **COMPLETED** and are verified on Ceph: 30 GB (Qwen, 12 layers
+`0,3,7,10,13,16,20,23,26,29,33,36`) and 23 GB (Llama, 12 layers `0,3,5,8,10,13,15,18,20,23,25,28`),
+each 100 pairs / 200 prompts / 20 items with `limit_sampling=item_round_robin_v1`. The expensive
+stage of the campaign is done and does not need repeating.
+
+## All 14 downstream jobs failed — launcher bug, no science lost
 
 | Model | timeline | CEBRA all 12 | BSF all 12 | BatchTopK all 12 | raw / PCA / random controls |
 |---|---:|---:|---:|---:|---:|
 | Qwen | 3392182 | 3392183 | 3392184 | 3392185 | 3392186 / 3392187 / 3392188 |
 | Llama | 3392189 | 3392190 | 3392191 | 3392192 | 3392193 / 3392194 / 3392195 |
 
-CEBRA uses all eight latent dimensions, three seeds and three item folds. The reconstructive-method
-and matched-control screens use the same semantic-blind 32-relative-position sample and item folds.
-All paths are new under `item_balanced_core100_v2`; jobs cannot start unless the corresponding
-recording exits successfully.
+Every one of these is dead. Two independent causes, both in the launcher, neither in the analysis
+code or the recordings:
+
+**1. `wb_common.sh` was never sourced (all 14 jobs).** The campaign was submitted from
+`code_snapshot_4a46b76/`, but that directory only carried `sbatch/wb_common.sh`, and the sbatch
+sources it as a bare relative path. The source failed, which also meant `set -euo pipefail` was
+never enabled, so each job continued silently with `OUT` unset, computed for as long as 1h50m, and
+only then died trying to write to `/token_manifold/...` (permission denied at the filesystem root).
+The twelve method/control jobs completed their full fits and threw every result away at the final
+write.
+
+**2. The two timeline jobs were OOM-killed** at ~3 minutes with 96G/80G requested. This is a
+resource request, not a defect: `timeline` holds all twelve layers in host RAM at once, and the
+comparable pilot job 3391796 peaked at 111 GB RSS against a 180G request. Timeline needs `--mem`
+around 200G.
+
+A third latent problem surfaced while diagnosing: `WB_MANIFOLD_VENV` pointed at a venv that does not
+exist anywhere on Ceph. `deps/token_manifold_overlay_v1` is a `pip install --target` overlay holding
+cebra, bsf, sklearn and scipy but **no torch and no numpy** — it is meant to layer on top of the
+judge_ft venv, not to be activated. The jobs only found torch at all because `--export=ALL` carried
+interpreter state in from the submitting shell. That is unreproducible, so the sbatch now sets the
+overlay explicitly via `WB_MANIFOLD_OVERLAY` on `PYTHONPATH` and lets `wb_common.sh` supply the
+judge_ft venv underneath.
+
+### Launcher fixes applied
+
+- All eight `judge-whitebox/sbatch/*.sbatch` now use
+  `source ./wb_common.sh || { ...; exit 3; }`, so a job submitted from the wrong directory dies in
+  about one second instead of after two hours of GPU time. This was the shared line in every
+  whitebox launcher, not just the token-manifold one.
+- `token_manifold.sbatch` replaces the four `source "$WB_MANIFOLD_VENV/bin/activate"` calls with an
+  explicit `PYTHONPATH` prepend of `WB_MANIFOLD_OVERLAY`.
+- The timeline usage comment now records the `--mem=200G` requirement.
+- `wb_common.sh` and the fixed `token_manifold.sbatch` are staged into the snapshot root
+  `code_snapshot_4a46b76/`; the snapshot's frozen analysis code is untouched.
+
+**Maintainer review point:** the `WB_MANIFOLD_VENV` → `WB_MANIFOLD_OVERLAY` change alters how the
+manifold stages resolve dependencies. It matches what the successful runs actually did, but it is an
+environment decision rather than a bug fix, so it is worth a look before the campaign is trusted.
+
+### Resubmission
+
+Nothing is queued. The commands below reproduce the intended campaign; no `afterok` dependencies are
+needed now that both recordings are complete. Run the smoke first — it costs about a minute and
+confirms the overlay/venv stack imports before committing fourteen jobs.
+
+```bash
+C=/ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge
+S=$C/staging/whitebox/code_snapshot_4a46b76
+OVERLAY=$C/staging/whitebox/deps/token_manifold_overlay_v1
+R=$C/staging/whitebox/token_manifold/item_balanced_core100_v2
+MQ=$R/record_Qwen3-8B_A/manifest.json
+ML=$R/record_Llama-3.2-3B-Instruct_B/manifest.json
+QL=0,3,7,10,13,16,20,23,26,29,33,36
+LL=0,3,5,8,10,13,15,18,20,23,25,28
+cd $S
+
+# 0. environment smoke: must print torch, numpy, sklearn, cebra and bsf versions.
+sbatch --partition=cpu --gres= --mem=8G --time=00:10:00 --wrap \
+  "cd $S && source ./wb_common.sh && export PYTHONPATH=$OVERLAY:\$PYTHONPATH && \
+   python -c 'import torch,numpy,sklearn,cebra,bsf;print(torch.__version__,numpy.__version__,sklearn.__version__,cebra.__version__)'"
+
+# 1. timelines (large host RAM, no GPU work of consequence)
+sbatch --mem=200G --export=ALL,WB_STAGE=timeline,WB_TAG=item_balanced_core100_v2,WB_RUN=qwen,WB_MANIFEST=$MQ,WB_MANIFOLD_OVERLAY=$OVERLAY token_manifold.sbatch
+sbatch --mem=200G --export=ALL,WB_STAGE=timeline,WB_TAG=item_balanced_core100_v2,WB_RUN=llama,WB_MANIFEST=$ML,WB_MANIFOLD_OVERLAY=$OVERLAY token_manifold.sbatch
+
+# 2. Qwen methods and matched controls, all twelve layers
+for M in cebra bsf batchtopk; do
+  sbatch --export=ALL,WB_STAGE=trajectory,WB_TAG=item_balanced_core100_v2,WB_RUN=qwen_${M}_all12_v1,WB_METHOD=$M,WB_MANIFEST=$MQ,WB_LAYERS=$QL,WB_SEEDS=0,1,2,WB_POSITIONS=32,WB_CV_FOLDS=3,WB_MANIFOLD_OVERLAY=$OVERLAY token_manifold.sbatch
+done
+for M in raw pca random; do
+  sbatch --export=ALL,WB_STAGE=trajectory,WB_TAG=item_balanced_core100_v2,WB_RUN=qwen_controls_all12_v1,WB_METHOD=$M,WB_MANIFEST=$MQ,WB_LAYERS=$QL,WB_SEEDS=0,1,2,WB_POSITIONS=32,WB_CV_FOLDS=3,WB_MANIFOLD_OVERLAY=$OVERLAY token_manifold.sbatch
+done
+
+# 3. Llama methods and matched controls, all twelve layers
+for M in cebra bsf batchtopk; do
+  sbatch --export=ALL,WB_STAGE=trajectory,WB_TAG=item_balanced_core100_v2,WB_RUN=llama_${M}_all12_v1,WB_METHOD=$M,WB_MANIFEST=$ML,WB_LAYERS=$LL,WB_SEEDS=0,1,2,WB_POSITIONS=32,WB_CV_FOLDS=3,WB_MANIFOLD_OVERLAY=$OVERLAY token_manifold.sbatch
+done
+for M in raw pca random; do
+  sbatch --export=ALL,WB_STAGE=trajectory,WB_TAG=item_balanced_core100_v2,WB_RUN=llama_controls_all12_v1,WB_METHOD=$M,WB_MANIFEST=$ML,WB_LAYERS=$LL,WB_SEEDS=0,1,2,WB_POSITIONS=32,WB_CV_FOLDS=3,WB_MANIFOLD_OVERLAY=$OVERLAY token_manifold.sbatch
+done
+```
+
+The `WB_RUN` values above reproduce the original destination directory names exactly, recovered from
+the failed jobs' tracebacks, so the intended output layout under `item_balanced_core100_v2` is
+preserved. CEBRA still uses all eight latent dimensions, three seeds and three item folds; the
+reconstructive-method and matched-control screens use the same semantic-blind 32-relative-position
+sample and item folds.
+
+Note when reading the results: `trajectory.csv` scores are grouped by
+`(structural_group, relative_decile)`, and the finest of those cells can hold a single row, which
+makes `r2` undefined and produces the `UndefinedMetricWarning` flood seen in the logs. The `n_rows`
+column is there to filter those cells; the fits themselves are unaffected.
 
 ## Research questions that bind the corrected analysis
 

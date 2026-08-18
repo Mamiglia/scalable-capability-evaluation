@@ -10,7 +10,7 @@
 #SBATCH --output=/ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge/logs/%x-%j.out
 
 # Verdict runs. Array 0-1 = normal / inverted.
-source wb_common.sh
+source ./wb_common.sh || { echo "wb_common.sh not found in $PWD; submit from a dir that has it" >&2; exit 3; }
 MNAME="${WB_MODEL:-Qwen3-8B}"
 VAR="base"; [ -n "${WB_ADAPTER:-}" ] && VAR="ft"
 INV=(); TAG="norm"

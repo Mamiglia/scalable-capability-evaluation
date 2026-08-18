@@ -11,9 +11,10 @@
 
 # User-gated stages; submit from staging/whitebox/code after reviewing the storage estimate.
 # sbatch --export=ALL,WB_STAGE=record,WB_TAG=pilot,WB_MODEL=Qwen3-8B,WB_FOLD=A token_manifold.sbatch
-# sbatch --export=ALL,WB_STAGE=timeline,WB_TAG=pilot,WB_RUN=qwen,WB_MANIFEST=/path/manifest.json,WB_MANIFOLD_VENV=/path/venv token_manifold.sbatch
-# sbatch --export=ALL,WB_STAGE=bakeoff,WB_TAG=pilot,WB_RUN=qwen,WB_MANIFEST=/path/manifest.json,WB_LAYER=12,WB_MANIFOLD_VENV=/path/venv token_manifold.sbatch
-source wb_common.sh
+# timeline holds every layer in host RAM at once: override --mem well above the 80G default.
+# sbatch --mem=200G --export=ALL,WB_STAGE=timeline,WB_TAG=pilot,WB_RUN=qwen,WB_MANIFEST=/path/manifest.json,WB_MANIFOLD_OVERLAY=/path/overlay token_manifold.sbatch
+# sbatch --export=ALL,WB_STAGE=bakeoff,WB_TAG=pilot,WB_RUN=qwen,WB_MANIFEST=/path/manifest.json,WB_LAYER=12,WB_MANIFOLD_OVERLAY=/path/overlay token_manifold.sbatch
+source ./wb_common.sh || { echo "wb_common.sh not found in $PWD; submit from a dir that has it" >&2; exit 3; }
 
 STAGE="${WB_STAGE:?set WB_STAGE=estimate|record|timeline|bakeoff|trajectory|trace|crossfit}"
 TAG="${WB_TAG:?set a new WB_TAG}"
@@ -40,7 +41,7 @@ case "$STAGE" in
     python token_manifold_record.py "${ARGS[@]}"
     ;;
   timeline)
-    source "${WB_MANIFOLD_VENV:?set WB_MANIFOLD_VENV}/bin/activate"
+    export PYTHONPATH="${WB_MANIFOLD_OVERLAY:?set WB_MANIFOLD_OVERLAY to the manifold dependency overlay dir}${PYTHONPATH:+:$PYTHONPATH}"
     RUN="${WB_RUN:?set a model-specific WB_RUN}"
     MANIFEST="${WB_MANIFEST:?set WB_MANIFEST}"
     DEST="$ROOT/timeline_${RUN}.csv"
@@ -48,7 +49,7 @@ case "$STAGE" in
     python token_manifold_discover.py timeline --manifest "$MANIFEST" --out "$DEST"
     ;;
   bakeoff)
-    source "${WB_MANIFOLD_VENV:?set WB_MANIFOLD_VENV}/bin/activate"
+    export PYTHONPATH="${WB_MANIFOLD_OVERLAY:?set WB_MANIFOLD_OVERLAY to the manifold dependency overlay dir}${PYTHONPATH:+:$PYTHONPATH}"
     RUN="${WB_RUN:?set a model-specific WB_RUN}"
     MANIFEST="${WB_MANIFEST:?set WB_MANIFEST}"
     LAYER="${WB_LAYER:?set WB_LAYER}"
@@ -58,7 +59,7 @@ case "$STAGE" in
       --methods "${WB_METHODS:-cebra,bsf,sae}" --seeds "${WB_SEEDS:-0,1,2,3,4}" --out "$DEST"
     ;;
   trajectory)
-    source "${WB_MANIFOLD_VENV:?set WB_MANIFOLD_VENV}/bin/activate"
+    export PYTHONPATH="${WB_MANIFOLD_OVERLAY:?set WB_MANIFOLD_OVERLAY to the manifold dependency overlay dir}${PYTHONPATH:+:$PYTHONPATH}"
     RUN="${WB_RUN:?set a model-specific WB_RUN}"
     METHOD="${WB_METHOD:?set WB_METHOD=cebra|bsf|sae}"
     MANIFEST="${WB_MANIFEST:?set WB_MANIFEST}"
@@ -72,7 +73,7 @@ case "$STAGE" in
     python token_manifold_discover.py "${ARGS[@]}"
     ;;
   trace)
-    source "${WB_MANIFOLD_VENV:?set WB_MANIFOLD_VENV}/bin/activate"
+    export PYTHONPATH="${WB_MANIFOLD_OVERLAY:?set WB_MANIFOLD_OVERLAY to the manifold dependency overlay dir}${PYTHONPATH:+:$PYTHONPATH}"
     RUN="${WB_RUN:?set a model-specific WB_RUN}"
     METHOD="${WB_METHOD:?set WB_METHOD=cebra|bsf|sae}"
     MANIFEST="${WB_MANIFEST:?set WB_MANIFEST}"
@@ -86,7 +87,7 @@ case "$STAGE" in
     python token_manifold_discover.py "${ARGS[@]}"
     ;;
   crossfit)
-    source "${WB_MANIFOLD_VENV:?set WB_MANIFOLD_VENV}/bin/activate"
+    export PYTHONPATH="${WB_MANIFOLD_OVERLAY:?set WB_MANIFOLD_OVERLAY to the manifold dependency overlay dir}${PYTHONPATH:+:$PYTHONPATH}"
     RUN="${WB_RUN:?set a model-specific WB_RUN}"
     MANIFEST="${WB_MANIFEST:?set WB_MANIFEST}"
     LAYER="${WB_LAYER:?set one physical WB_LAYER}"

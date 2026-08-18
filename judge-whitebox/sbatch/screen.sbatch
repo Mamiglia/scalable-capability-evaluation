@@ -16,7 +16,7 @@
 #   sbatch --export=ALL,WB_MODEL=Qwen3-0.6B screen.sbatch
 #   sbatch --export=ALL,WB_MODEL=Qwen3-0.6B,WB_ADAPTER=/path/to/adapter screen.sbatch
 # Submit from judge-whitebox/ on ceph (holds screen.py, config.yaml, wb_common.sh).
-source wb_common.sh
+source ./wb_common.sh || { echo "wb_common.sh not found in $PWD; submit from a dir that has it" >&2; exit 3; }
 
 MNAME="${WB_MODEL:-Qwen3-8B}"
 ADAPTER="${WB_ADAPTER:-$C/staging/judge_ft/out/adapters/final}"

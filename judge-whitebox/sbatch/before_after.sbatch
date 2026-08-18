@@ -13,7 +13,7 @@
 # but holds BOTH decomps in RAM (2x33GB for 8B) -> big --mem. Reuses the banked decomps + judging
 # screens. Submit from staging/whitebox/code:
 #   sbatch --export=ALL,BA_DA=<base decomp>,BA_DB=<ft decomp>,BA_SA=<base judging screen>,BA_SB=<ft judging screen>,BA_TAG=q8b_migration sbatch/before_after.sbatch
-source wb_common.sh
+source ./wb_common.sh || { echo "wb_common.sh not found in $PWD; submit from a dir that has it" >&2; exit 3; }
 echo "=== before_after $BA_TAG $(date) ==="
 python before_after.py --decomp-a "$BA_DA" --decomp-b "$BA_DB" \
   --screen-a "$BA_SA" --screen-b "$BA_SB" --tag "$BA_TAG"

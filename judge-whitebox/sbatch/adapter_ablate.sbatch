@@ -14,7 +14,7 @@
 # OOM'd a 40GB A100 before. WB_ADAPTER is required -- this ablates one specific fine-tune.
 #   sbatch --export=ALL,WB_MODEL=Qwen3-8B,WB_ADAPTER=/path/to/adapter adapter_ablate.sbatch
 # Submit from judge-whitebox/ on ceph (holds adapter_ablate.py, config.yaml, wb_common.sh).
-source wb_common.sh
+source ./wb_common.sh || { echo "wb_common.sh not found in $PWD; submit from a dir that has it" >&2; exit 3; }
 
 MNAME="${WB_MODEL:-Qwen3-8B}"
 ADAPTER="${WB_ADAPTER:?set WB_ADAPTER=path to the LoRA adapter}"

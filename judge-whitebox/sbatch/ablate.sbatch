@@ -16,7 +16,7 @@
 #   sbatch --export=ALL,WB_MODEL=Qwen3-0.6B,WB_VARIANT=base,WB_COMPONENTS=$OUT/importance_base06.csv ablate.sbatch
 #   sbatch --export=ALL,WB_MODEL=Qwen3-8B,WB_VARIANT=ft,WB_ADAPTER=/path/to/adapter,WB_COMPONENTS=$OUT/importance_ft8b.csv ablate.sbatch
 # Submit from judge-whitebox/ on ceph (holds ablate.py, config.yaml, wb_common.sh).
-source wb_common.sh
+source ./wb_common.sh || { echo "wb_common.sh not found in $PWD; submit from a dir that has it" >&2; exit 3; }
 
 MNAME="${WB_MODEL:-Qwen3-8B}"
 VARIANT="${WB_VARIANT:?set WB_VARIANT=base|ft}"

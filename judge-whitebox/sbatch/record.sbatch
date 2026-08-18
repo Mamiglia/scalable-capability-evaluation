@@ -14,7 +14,7 @@
 #   WB_SINGLE=1: single-transcript neutral read frame (geometry); one task, no inversion.
 # Submit from staging/whitebox/code: sbatch --array=0-1 --export=ALL,WB_MODEL=...,WB_LIMIT=...,WB_PAIRS=... [WB_ADAPTER=...] sbatch/record.sbatch
 #                                    sbatch          --export=ALL,WB_SINGLE=1,WB_MODEL=...,WB_PAIRS=... [WB_ADAPTER=...] sbatch/record.sbatch
-source wb_common.sh
+source ./wb_common.sh || { echo "wb_common.sh not found in $PWD; submit from a dir that has it" >&2; exit 3; }
 MNAME="${WB_MODEL:-Qwen3-8B}"
 VAR="base"; [ -n "${WB_ADAPTER:-}" ] && VAR="ft"
 mkdir -p "$OUT/resid"

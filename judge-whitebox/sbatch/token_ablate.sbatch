@@ -14,7 +14,7 @@
 # h100 for the 8B; override --gres=gpu:l40s:1 for the 3B. Submit from judge-whitebox/ on ceph.
 #   sbatch --export=ALL,WB_MODEL=Qwen3-8B,WB_MODE=ft,WB_ADAPTER=/path/to/loo_gpqa adapter token_ablate.sbatch
 #   sbatch --export=ALL,WB_MODEL=Qwen3-8B,WB_MODE=base token_ablate.sbatch
-source wb_common.sh
+source ./wb_common.sh || { echo "wb_common.sh not found in $PWD; submit from a dir that has it" >&2; exit 3; }
 
 MNAME="${WB_MODEL:-Qwen3-8B}"
 MODE="${WB_MODE:?set WB_MODE=base|ft}"
