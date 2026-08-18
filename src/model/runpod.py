@@ -24,7 +24,7 @@ DEFAULTS = {
     "container_disk_in_gb": 40,
     "port": 8000,
     "ready_timeout": 1800,
-    "terminate_after": "4h",
+    "terminate_after": "12h",
     "keep_alive": 0,
     "model_args": {},
     "vllm_args": [],
