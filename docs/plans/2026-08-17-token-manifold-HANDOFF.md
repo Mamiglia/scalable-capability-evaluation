@@ -148,7 +148,27 @@ Two further traps found while resubmitting, both worth remembering:
   what the directory names claimed. The resubmission passes all twelve layers, verified by a
   stubbed-`sbatch` dry run before anything was submitted.
 
-### First corrected result: no linear verdict information inside Qwen transcripts; a weak one in Llama
+### RETRACTED — the timeline below was fitted with an unregularised ridge
+
+**Do not use the numbers in this section.** Every one of the 1,224 cells in both
+timelines selected `alpha=100`, the maximum of the default grid `0.1,1,10,100`, so the penalty was
+never actually chosen by cross-validation — it was pinned at the edge of the grid. That is what
+produced the impossible-looking result that Qwen carries *no* linear verdict information anywhere in
+its transcripts, and it also explains why the fits came out below their own shuffled null: an
+under-regularised ridge on 4096-dimensional residuals overfits the training items and fails on
+held-out ones, while the shuffled control cannot overfit and so lands nearer zero. The Qwen/Llama
+asymmetry is very likely just dimensionality (4096 vs 3072), not a difference between the models.
+
+Fixed in `838bb4a`: the timeline CLI now defaults to the same `0.01 … 1e6` grid
+`grouped_code_predictions` already used, and any alpha landing on either end of the grid raises a
+warning instead of passing silently. Re-running as jobs 3392452 (Qwen) and 3392453 (Llama) from a new
+snapshot `code_snapshot_838bb4a`, writing `timeline_{qwen,llama}_wide_alpha.csv`. The old snapshot is
+untouched so the twelve running trajectory jobs are unaffected — they decode through
+`grouped_code_predictions` and always had the wide grid.
+
+The retained text below records what was claimed and why it was wrong.
+
+### Superseded: no linear verdict information inside Qwen transcripts; a weak one in Llama
 
 Both timelines finished (3392423 in 10m25s, 3392424 in 8m48s) and are pulled to
 `judge-whitebox/out/token_manifold/item_balanced_core100_v2/timeline_{qwen,llama}.csv`.
