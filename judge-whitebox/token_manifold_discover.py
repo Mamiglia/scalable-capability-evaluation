@@ -7,6 +7,7 @@ import math
 import os
 import pathlib
 import time
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -113,6 +114,10 @@ def _oof_ridge(X, gap, prompt_idx, item, weights, alphas, cv_folds, fit_idx):
         score = r2_score(y[fit_idx], pred[fit_idx], sample_weight=weights[fit_idx])
         if score > best_score:
             best_alpha, best_score = alpha, score
+    if len(alphas) > 1 and best_alpha in (min(alphas), max(alphas)):
+        warnings.warn(f"ridge alpha {best_alpha} sits at the edge of {alphas}; "
+                      "widen the grid or the fit is not regularization-selected",
+                      RuntimeWarning)
     return best_alpha, predict(best_alpha, all_tokens=True)
 
 
@@ -237,6 +242,10 @@ def grouped_code_predictions(code_train, gap_train, item_train, code_test,
         score = r2_score(gap_train, pred)
         if score > best_score:
             best_alpha, best_score = alpha, score
+    if len(alphas) > 1 and best_alpha in (min(alphas), max(alphas)):
+        warnings.warn(f"ridge alpha {best_alpha} sits at the edge of {alphas}; "
+                      "widen the grid or the fit is not regularization-selected",
+                      RuntimeWarning)
     mean = code_train.mean(axis=0)
     scale = code_train.std(axis=0)
     scale[scale < 1e-6] = 1
@@ -775,7 +784,8 @@ def main():
     timeline = subparsers.add_parser("timeline")
     timeline.add_argument("--manifest", required=True)
     timeline.add_argument("--out", required=True)
-    timeline.add_argument("--alphas", default="0.1,1,10,100")
+    timeline.add_argument("--alphas",
+                          default="0.01,0.1,1,10,100,1000,10000,100000,1000000")
     timeline.add_argument("--cv-folds", type=int, default=5)
     timeline.add_argument("--seed", type=int, default=0)
     bakeoff = subparsers.add_parser("bakeoff")

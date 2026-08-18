@@ -117,6 +117,15 @@ def test_ridge_timeline_finds_planted_layer_and_uses_item_groups():
     assert set(oof["item"]) == set(data["item"])
 
 
+def test_ridge_timeline_warns_when_the_chosen_alpha_pins_to_the_grid_edge():
+    """A boundary alpha means the grid, not cross-validation, picked the fit."""
+    data = planted_token_data(n_items=20, prompts_per_item=2, tokens=6,
+                              layers=2, d=40, signal_layer=1, seed=3)
+
+    with pytest.warns(RuntimeWarning, match="edge of"):
+        discover.ridge_timeline(data, alphas=(1e-6, 1e-5), cv_folds=5)
+
+
 def test_ridge_timeline_is_invariant_to_feature_scales():
     data = planted_token_data(n_items=20, prompts_per_item=2, tokens=6,
                               layers=4, d=10, signal_layer=2, seed=1)
@@ -570,7 +579,7 @@ def test_sbatch_has_explicit_stages_and_never_installs_packages():
     for stage in ("estimate", "record", "timeline", "bakeoff", "trajectory", "trace",
                   "crossfit"):
         assert stage in text
-    assert "WB_MANIFOLD_VENV" in text
+    assert "WB_MANIFOLD_OVERLAY" in text
     assert "WB_RUN" in text
     assert "timeline_${RUN}.csv" in text
     assert "bakeoff_${RUN}_L${LAYER}" in text
