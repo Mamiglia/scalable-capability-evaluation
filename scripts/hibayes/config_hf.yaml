@@ -1,0 +1,87 @@
+# Full-style judge GLM on the 2026-08-17 HF GPQA snapshot. Same model, checks,
+# and communicators as config.yaml; only the data source and the single
+# transcript condition differ. Capability scale: pooled HF GPQA benchmark
+# accuracy (the HF models have no ECI estimate), standardised in prepare_hf.py.
+data_loader:
+  paths:
+    extracted_data:
+      - analysis/hibayes/hf_gpqa_glm.csv
+
+data_process:
+  processors:
+    - extract_observed_feature: {feature_name: chosen_left}
+    - extract_features:
+        categorical_features: [judge, item, transcript_condition]
+        continuous_features:
+          - length_difference_sd
+          - capability_difference_sd
+          - same_model_family
+          - self_comparison
+          - personal_pronouns_difference_sd
+          - hedging_difference_sd
+          - backtracking_difference_sd
+          - uncertainty_difference_sd
+          - confidence_difference_sd
+          - questions_difference_sd
+        category_order:
+          transcript_condition: [hf_gpqa]
+
+model:
+  path: scripts/hibayes/model.py
+  models:
+    - name: judge_feature_logistic_model
+      config:
+        tag: with_style
+        pool_judge_effects: true
+        predictors:
+          - length_difference_sd
+          - capability_difference_sd
+          - same_model_family
+          - self_comparison
+          - personal_pronouns_difference_sd
+          - hedging_difference_sd
+          - backtracking_difference_sd
+          - uncertainty_difference_sd
+          - confidence_difference_sd
+          - questions_difference_sd
+        fit:
+          samples: 2500
+          warmup: 2000
+          chains: 4
+          seed: 0
+          target_accept: 0.95
+
+check:
+  checkers:
+    - prior_predictive_check: {num_samples: 200}
+    - prior_predictive_plot: {interactive: false, kind: cumulative}
+    - divergences
+    - r_hat
+    - ess_bulk
+    - ess_tail
+    - bfmi
+    - loo
+    - posterior_predictive_plot: {interactive: false, kind: cumulative, num_samples: 200}
+
+communicate:
+  path: scripts/hibayes/communicators.py
+  communicators:
+    - judge_feature_report:
+        plot_exclude:
+          - self_comparison
+        predictors:
+          - length_difference_sd
+          - capability_difference_sd
+          - same_model_family
+          - self_comparison
+          - personal_pronouns_difference_sd
+          - hedging_difference_sd
+          - backtracking_difference_sd
+          - uncertainty_difference_sd
+          - confidence_difference_sd
+          - questions_difference_sd
+    - trace_plot: {vars: [judge_intercepts, judge_predictor_effects, item_sigma], best_model: false}
+
+platform:
+  device_type: cpu
+  chain_method: parallel
