@@ -246,3 +246,12 @@ def test_main_estimate_only_prints_json_and_writes_nothing(tmp_path, monkeypatch
     estimate = json.loads(capsys.readouterr().out)
     assert estimate["n_prompts"] > 0 and estimate["n_layers"] == 3
     assert not out.exists()
+
+
+def test_select_fold_all_keeps_every_item():
+    df = pd.DataFrame({"item": ["a", "a", "b", "b"], "row": range(4)})
+
+    out = record.select_fold(df, {"a": "B", "b": "A"}, "all")
+
+    assert out.row.tolist() == [0, 1, 2, 3]
+    assert set(out.item) == {"a", "b"}

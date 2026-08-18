@@ -38,9 +38,11 @@ def balanced_item_folds(df, seed):
 
 
 def select_fold(df, folds, name):
-    """Return one fold without reordering rows or splitting items."""
-    assert name in {"A", "B"}
+    """Return one fold, or every item when name is "all", without reordering rows."""
+    assert name in {"A", "B", "all"}
     assert set(df["item"]) <= set(folds)
+    if name == "all":
+        return df.copy()
     return df[df["item"].map(folds) == name].copy()
 
 
@@ -249,7 +251,7 @@ def main():
     c = wbconfig.cfg()
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
-    parser.add_argument("--fold", required=True, choices=("A", "B"))
+    parser.add_argument("--fold", required=True, choices=("A", "B", "all"))
     parser.add_argument("--fold-seed", type=int,
                         default=c.get("token_manifold", {}).get("fold_seed", 0))
     parser.add_argument("--layers", default="auto")

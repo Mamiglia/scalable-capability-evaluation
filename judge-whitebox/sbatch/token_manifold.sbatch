@@ -24,20 +24,22 @@ mkdir -p "$ROOT"
 case "$STAGE" in
   estimate)
     MODEL="${WB_MODEL:?set WB_MODEL}"
-    FOLD="${WB_FOLD:?set WB_FOLD=A|B}"
+    FOLD="${WB_FOLD:?set WB_FOLD=A|B|all}"
     ARGS=(--model "$MODEL" --fold "$FOLD" --layers "${WB_LAYERS:-auto}"
           --out /unused --estimate-only)
     [ -n "${WB_LIMIT:-}" ] && ARGS+=(--limit "$WB_LIMIT")
+    [ -n "${WB_SPLIT:-}" ] && ARGS+=(--split "$WB_SPLIT")
     python token_manifold_record.py "${ARGS[@]}"
     ;;
   record)
     MODEL="${WB_MODEL:?set WB_MODEL}"
-    FOLD="${WB_FOLD:?set WB_FOLD=A|B}"
+    FOLD="${WB_FOLD:?set WB_FOLD=A|B|all}"
     DEST="$ROOT/record_${MODEL}_${FOLD}"
     [ ! -e "$DEST" ] || { echo "destination exists: $DEST"; exit 1; }
     ARGS=(--model "$MODEL" --fold "$FOLD" --layers "${WB_LAYERS:-auto}"
           --shard-prompts "${WB_SHARD_PROMPTS:-8}" --out "$DEST")
     [ -n "${WB_LIMIT:-}" ] && ARGS+=(--limit "$WB_LIMIT")
+    [ -n "${WB_SPLIT:-}" ] && ARGS+=(--split "$WB_SPLIT")
     python token_manifold_record.py "${ARGS[@]}"
     ;;
   timeline)
