@@ -102,24 +102,28 @@ class TestParseJudgeOutput:
         assert parse_judge_output("ANSWER: 128")[0] is None
 
     def test_verdict_without_format(self):
-        """A judge that names its pick without the ANSWER line still counts as answered."""
-        assert parse_judge_output("Transcript 1 is verbose. Transcript 2 is stronger.")[0] == "2"
-        assert parse_judge_output("Both are fine.")[0] is None
+        """A pick stated in prose without the ANSWER line is not a verdict."""
+        assert parse_judge_output("Transcript 1 is verbose. Transcript 2 is stronger.")[0] is None
 
 
-def test_consistency_metric():
+def test_pair_metrics():
     from inspect_ai.scorer import CORRECT, INCORRECT, NOANSWER, SampleScore, Score
-    from judge.scorer import consistency
+    from judge.scorer import consistent_accuracy, length_corr, position_bias
 
-    def sample(sid, value):
-        return SampleScore(sample_id=sid, score=Score(value=value))
+    def sample(sid, value, answer, chars):
+        return SampleScore(sample_id=sid, score=Score(value=value, answer=answer),
+                           sample_metadata={"chars_1": chars[0], "chars_2": chars[1]})
 
-    scores = [
-        sample("q1_1", CORRECT), sample("q1_2", CORRECT),      # same model both orders
-        sample("q2_1", CORRECT), sample("q2_2", INCORRECT),    # position 1 both times
-        sample("q3_1", NOANSWER), sample("q3_2", NOANSWER),    # no verdict
+    scores = [  # metrics see reduced values: 1.0 / 0.0, and None answer for no verdict
+        sample("q1_1", CORRECT, "1", (10, 5)), sample("q1_2", CORRECT, "2", (5, 10)),      # right both orders
+        sample("q2_1", CORRECT, "1", (10, 5)), sample("q2_2", INCORRECT, "1", (5, 10)),    # position 1 both times
+        sample("q3_1", NOANSWER, None, (1, 2)), sample("q3_2", NOANSWER, None, (2, 1)),    # no verdict
     ]
-    assert consistency()(scores) == 1 / 3
+    assert consistent_accuracy()(scores) == pytest.approx(1 / 3)
+    assert position_bias()(scores) == pytest.approx(-0.5)   # 3x "1", 1x "2" over 4 answered
+    assert length_corr()(scores) == pytest.approx(0.5773502691896258)  # phi of x=[1,0,1,0], y=[1,0,1,1]
+    assert length_corr()([]) == 0.0
+    assert position_bias()([]) == 0.0
 
 
 class TestJudgeScorer:
@@ -146,7 +150,7 @@ class TestJudgeScorer:
         assert score.value == CORRECT
         assert score.answer == "1"
         assert score.explanation == "Model 1 is better."
-        assert score.metadata == {"format": True, "confidence": 5}
+        assert score.metadata == {"confidence": 5}
 
     @pytest.mark.asyncio
     async def test_scorer_incorrect_answer(self):
@@ -169,7 +173,7 @@ class TestJudgeScorer:
         assert score.value == INCORRECT
         assert score.answer == "2"
         assert score.explanation == "Model 2 is better."
-        assert score.metadata == {"format": True, "confidence": 4}
+        assert score.metadata == {"confidence": 4}
 
     @pytest.mark.asyncio
     async def test_scorer_no_answer(self):
@@ -192,7 +196,7 @@ class TestJudgeScorer:
         assert score.value == NOANSWER
         assert score.answer is None
         assert score.explanation is None
-        assert score.metadata == {"format": False}
+        assert score.metadata == {}
 
     @pytest.mark.asyncio
     async def test_scorer_target_as_list(self):
@@ -222,11 +226,11 @@ def test_answer_rate_metric():
 
     from judge.scorer import answer_rate
 
-    scores = [
-        SampleScore(score=Score(value=CORRECT)),
-        SampleScore(score=Score(value=INCORRECT)),
-        SampleScore(score=Score(value=NOANSWER)),
-        SampleScore(score=Score(value=NOANSWER)),
+    scores = [  # values arrive epoch-reduced (floats); the verdict lives in ``answer``
+        SampleScore(score=Score(value=1.0, answer="1")),
+        SampleScore(score=Score(value=0.0, answer="2")),
+        SampleScore(score=Score(value=0.0, answer=None)),
+        SampleScore(score=Score(value=0.0, answer=None)),
     ]
     assert answer_rate()(scores) == 0.5
     assert answer_rate()([]) == 0.0

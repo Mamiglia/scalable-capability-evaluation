@@ -1,8 +1,9 @@
 import re
+from statistics import StatisticsError, correlation
 
 from inspect_ai.scorer import (
     Score, Target, CORRECT, INCORRECT, NOANSWER,
-    Metric, SampleScore, accuracy, metric, scorer, stderr
+    Metric, SampleScore, accuracy, metric, scorer, stderr, value_to_float
 )
 from inspect_ai.solver import TaskState
 
@@ -10,9 +11,7 @@ def parse_judge_output(output_text: str):
     """
     Parses ANSWER, CONFIDENCE, and EXPLANATION from the judge model's output text.
 
-    ``answer`` comes from the ``ANSWER:`` line; when it is missing, ``lenient_answer`` is
-    the last "Transcript/Model/Response 1|2" the judge mentions, for judges that state a
-    verdict but ignore the format (Phi-3 does this a lot).
+    ``answer`` comes from the ``ANSWER:`` line only; a verdict stated in prose is no verdict.
     """
     if not output_text:
         return None, None, None
@@ -23,9 +22,6 @@ def parse_judge_output(output_text: str):
     # own 'ANSWER: 128' before its verdict must not be read as '1'.
     answers = re.findall(r'ANSWER:[*_]*\s*(?:(?:Model|Transcript)\s+)?[*_$]*([12])(?!\d)', output_text, re.IGNORECASE)
     answer = answers[-1] if answers else None
-    if answer is None:
-        mentions = re.findall(r'\b(?:transcript|model|response)\s*#?\s*([12])\b', output_text, re.IGNORECASE)
-        answer = mentions[-1] if mentions else None
 
     # Parse CONFIDENCE on a 1-5 scale (e.g., 'CONFIDENCE: 4', '**CONFIDENCE:** 5')
     conf_match = re.search(r'CONFIDENCE:[*_]*\s*[*_$]*([0-9]+(?:\.[0-9]+)?)', output_text, re.IGNORECASE)
@@ -44,59 +40,96 @@ def parse_judge_output(output_text: str):
 
     return answer, confidence, explanation
 
+# Metrics see epoch-reduced scores, where CORRECT/INCORRECT/NOANSWER have already become
+# 1.0/0.0/0.0 -- so "answered" is read off ``Score.answer`` and "correct" via value_to_float.
+_to_float = value_to_float()
+
+
+def _answered(sample: SampleScore) -> bool:
+    return sample.score.answer is not None
+
+
+def _correct(sample: SampleScore) -> bool:
+    return _to_float(sample.score.value) == 1.0
+
+
 @metric
 def answer_rate() -> Metric:
-    """Fraction of judgements with a verdict, in the reply format or not.
+    """Fraction of judgements with an ``ANSWER:`` verdict.
 
     Reported separately because ``accuracy`` counts a missing verdict as wrong, which
-    would hide a judge that keeps refusing or rambling.
+    would hide a judge that keeps refusing, rambling, or ignoring the format.
     """
 
     def metric_fn(scores: list[SampleScore]) -> float:
         if not scores:
             return 0.0
-        answered = sum(sample.score.value != NOANSWER for sample in scores)
+        answered = sum(_answered(sample) for sample in scores)
         return answered / len(scores)
 
     return metric_fn
 
 
 @metric
-def format_rate() -> Metric:
-    """Fraction of judgements that used the ``ANSWER:`` line (see ``parse_judge_output``)."""
+def position_bias() -> Metric:
+    """Mean of +1 for a "2" verdict and -1 for a "1" verdict, over answered samples.
+
+    Orders are counterbalanced, so a judge reading the transcripts sits near 0; -1 is pure
+    primacy (always picks Transcript 1), +1 pure recency.
+    """
 
     def metric_fn(scores: list[SampleScore]) -> float:
-        if not scores:
+        answers = [s.score.answer for s in scores if _answered(s)]
+        if not answers:
             return 0.0
-        formatted = sum(bool((sample.score.metadata or {}).get("format")) for sample in scores)
-        return formatted / len(scores)
+        return sum(1 if a == "2" else -1 for a in answers) / len(answers)
 
     return metric_fn
 
 
 @metric
-def consistency() -> Metric:
-    """Fraction of question pairs where the judge picked the same model in both orders.
+def consistent_accuracy() -> Metric:
+    """Fraction of questions where the judge picked the right model in *both* orders.
 
-    Sample ids are ``<question>_1`` and ``<question>_2`` (see ``responses_to_sample``); the
-    two orders name the same model iff both verdicts are correct or both are wrong. Below
-    0.5 means the judge is mostly reading position, not the transcripts.
+    Sample ids are ``<question>_1`` and ``<question>_2`` (see ``responses_to_sample``).
+    ``accuracy`` gives half credit to a split pair, so a pure position-reader scores 0.5
+    there and 0 here.
     """
 
     def metric_fn(scores: list[SampleScore]) -> float:
         by_question: dict[str, list] = {}
         for sample in scores:
-            by_question.setdefault(str(sample.sample_id).rsplit("_", 1)[0], []).append(sample.score.value)
+            by_question.setdefault(str(sample.sample_id).rsplit("_", 1)[0], []).append(_correct(sample))
         pairs = [values for values in by_question.values() if len(values) == 2]
         if not pairs:
             return 0.0
-        agree = sum(a == b and a != NOANSWER for a, b in pairs)
-        return agree / len(pairs)
+        return sum(a and b for a, b in pairs) / len(pairs)
 
     return metric_fn
 
 
-@scorer(metrics=[accuracy(), stderr(), answer_rate(), format_rate(), consistency()])
+@metric
+def length_corr() -> Metric:
+    """Phi correlation between "Transcript 1 is longer" and "judge picked 1", over answered
+    samples (``chars_1/2`` from the sample metadata). +1 = always picks the longer one."""
+
+    def metric_fn(scores: list[SampleScore]) -> float:
+        xs, ys = [], []
+        for s in scores:
+            md = s.sample_metadata or {}
+            if not _answered(s) or "chars_1" not in md:
+                continue
+            xs.append(int(md["chars_1"] > md["chars_2"]))
+            ys.append(int(s.score.answer == "1"))
+        try:
+            return correlation(xs, ys)
+        except StatisticsError:  # fewer than two points, or a constant side
+            return 0.0
+
+    return metric_fn
+
+
+@scorer(metrics=[accuracy(), stderr(), answer_rate(), position_bias(), consistent_accuracy(), length_corr()])
 def judge_scorer():
     async def score(state: TaskState, target: Target):
         output_text = state.output.completion if state.output else ""
@@ -110,9 +143,7 @@ def judge_scorer():
         else:
             value = INCORRECT
 
-        metadata = {"format": bool(re.search(r"ANSWER:", output_text, re.IGNORECASE))}
-        if confidence is not None:
-            metadata["confidence"] = confidence
+        metadata = {"confidence": confidence} if confidence is not None else {}
 
         return Score(value=value, answer=answer, explanation=explanation, metadata=metadata)
     return score
