@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import numpy as np
@@ -229,3 +230,14 @@ def test_attribution_refuses_when_the_last_position_is_padding():
 
     with pytest.raises(AssertionError, match="padding"):
         token_attribution.attribute_tokens(model, tokenizer, ids, mask, steps=2)
+
+
+def test_attribution_defaults_to_the_precision_the_judges_run_at():
+    """bfloat16 matches verdicts.load_model, so attribution explains the deployed model."""
+    import verdicts
+
+    parser = token_attribution.build_parser({"verdicts": {"eval_split": "eval_mm"}})
+    args = parser.parse_args(["--model", "m", "--fold", "all", "--out", "o"])
+
+    assert args.dtype == "bfloat16"
+    assert inspect.signature(verdicts.load_model).parameters["dtype"].default == torch.bfloat16

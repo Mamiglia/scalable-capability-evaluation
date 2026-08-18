@@ -168,6 +168,8 @@ def build_parser(c):
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--split", default=c["verdicts"]["eval_split"])
     parser.add_argument("--steps", type=int, default=256)
+    parser.add_argument("--dtype", default="bfloat16", choices=("bfloat16", "float32"),
+                        help="model precision; bfloat16 matches how the judges are run")
     parser.add_argument("--step-batch", type=int, default=STEP_BATCH_DEFAULT,
                         help="integration steps run per forward/backward pass")
     parser.add_argument("--shard-index", type=int, default=0)
@@ -183,17 +185,17 @@ def build_parser(c):
 
 
 def main():
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
+    import verdicts
     import wbconfig
 
     c = wbconfig.cfg()
     args = build_parser(c).parse_args()
 
-    path = wbconfig.resolve_model(args.model, c)
-    tokenizer = AutoTokenizer.from_pretrained(path)
-    model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float32,
-                                                 device_map="auto")
+    # Same loader the judging and the recordings use, so attribution explains
+    # the model that actually produces the verdicts rather than a higher
+    # precision copy of it.
+    dtype = getattr(torch, args.dtype)
+    model, tokenizer, _ = verdicts.load_model(args.model, None, c, dtype=dtype)
     model.eval()
 
     pairs = wbpairs.load_pairs(c, args.split)
