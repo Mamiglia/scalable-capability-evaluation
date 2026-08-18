@@ -3,6 +3,7 @@
 import os
 import pathlib
 
+import numpy as np
 import pandas as pd
 import torch
 
@@ -60,6 +61,7 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
 
     attributions = (total / steps) * delta
     scores = attributions.sum(-1)[0].double().cpu().numpy()
+    assert np.isfinite(scores).all(), "non-finite token scores"
 
     with torch.no_grad():
         gap = float(_gap_logits(model, embeds, attention_mask, id1, id2)[0])
@@ -112,7 +114,10 @@ def write_attributions(rows, out_path):
             "position": range(len(row["scores"])), "token_id": row["input_ids"],
             "token_text": row["token_text"],
             "group": [groups[int(g)] for g in row["group_id"]],
+            "char_start": [int(start) for start, _ in row["offsets"]],
+            "char_end": [int(end) for _, end in row["offsets"]],
             "score": row["scores"], "gap": row["gap"],
+            "baseline_gap": row["baseline_gap"],
             "completeness_error": row["completeness_error"]}))
     return write_table(pd.concat(frames, ignore_index=True), out_path)
 

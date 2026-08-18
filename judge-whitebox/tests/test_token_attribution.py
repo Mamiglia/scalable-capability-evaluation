@@ -72,7 +72,7 @@ def test_attribution_is_not_uniform_across_tokens():
 
 
 def test_write_attributions_produces_one_row_per_token(tmp_path):
-    rows = [{"pair_uid": "p0", "item": "it0", "order": 0, "gap": 1.5,
+    rows = [{"pair_uid": "p0", "item": "it0", "order": 0, "gap": 1.5, "baseline_gap": 0.25,
              "completeness_error": 0.01, "scores": np.array([0.5, 1.0]),
              "input_ids": [3, 4], "offsets": [(0, 1), (1, 2)],
              "group_id": np.array([3, 5], dtype=np.int8),
@@ -189,3 +189,18 @@ def test_attribution_does_not_populate_parameter_gradients():
 
     assert all(p.grad is None for p in model.parameters())
     assert not any(p.requires_grad for p in model.parameters())
+
+
+def test_attribution_table_keeps_the_baseline_gap_and_character_offsets(tmp_path):
+    """The baseline offset and offsets are needed downstream; dropping them means re-running."""
+    rows = [{"pair_uid": "p0", "item": "it0", "order": 0, "gap": 1.5, "baseline_gap": 0.25,
+             "completeness_error": 0.01, "scores": np.array([0.5, 1.0]),
+             "input_ids": [3, 4], "offsets": [(0, 1), (1, 5)],
+             "group_id": np.array([3, 5], dtype=np.int8), "token_text": ["a", "bcde"]}]
+
+    out = token_attribution.write_attributions(iter(rows), tmp_path / "a.parquet")
+
+    table = pd.read_parquet(out)
+    assert table.baseline_gap.tolist() == [0.25, 0.25]
+    assert table.char_start.tolist() == [0, 1]
+    assert table.char_end.tolist() == [1, 5]
