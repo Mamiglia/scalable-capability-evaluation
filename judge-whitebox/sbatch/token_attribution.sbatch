@@ -22,6 +22,6 @@ DEST="$OUT/token_attribution/$TAG/attributions_${MODEL}_${FOLD}.parquet"
 mkdir -p "$(dirname "$DEST")"
 
 ARGS=(--model "$MODEL" --fold "$FOLD" --split "${WB_SPLIT:?set WB_SPLIT}" \
-      --steps "${WB_STEPS:-64}" --out "$DEST")
+      --steps "${WB_STEPS:-256}" --out "$DEST")
 [ -n "${WB_LIMIT:-}" ] && ARGS+=(--limit "$WB_LIMIT")
 python token_attribution.py "${ARGS[@]}"
