@@ -366,10 +366,6 @@ def main():
                             args.out, args.chunk_prompts)
 
 
-if __name__ == "__main__":
-    main()
-
-
 def occlusion_scores(model, tokenizer, input_ids, attention_mask, span_size,
                      batch_spans=8, baseline_kind=BASELINE_DEFAULT):
     """Change in the gap when each span of tokens is replaced by the baseline embedding.
@@ -405,3 +401,7 @@ def occlusion_scores(model, tokenizer, input_ids, attention_mask, span_size,
             occluded = _gap_logits(model, batch, attention_mask.expand(len(chunk), -1), id1, id2)
             scores.extend(gap - float(v) for v in occluded)
     return {"gap": gap, "spans": spans, "scores": np.asarray(scores, dtype=np.float64)}
+
+
+if __name__ == "__main__":
+    main()
