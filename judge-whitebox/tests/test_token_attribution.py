@@ -337,3 +337,34 @@ def test_occlusion_matches_a_directly_edited_prompt():
     with torch.no_grad():
         direct = out["gap"] - float(token_attribution._gap_logits(model, edited, mask, id1, id2)[0])
     assert out["scores"][2] == pytest.approx(direct, abs=1e-4)
+
+
+def test_random_mask_draws_are_the_requested_size_and_reproducible():
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    ids = torch.tensor([[3, 4, 5, 6, 7, 8, 9, 10]])
+    mask = torch.ones_like(ids)
+
+    a = token_attribution.random_mask_scores(model, tokenizer, ids, mask, n_draws=6,
+                                             mask_size=3, seed=0)
+    b = token_attribution.random_mask_scores(model, tokenizer, ids, mask, n_draws=6,
+                                             mask_size=3, seed=0)
+
+    assert all(len(set(d)) == 3 for d in a["draws"])
+    assert a["deltas"].shape == (6,)
+    assert np.allclose(a["deltas"], b["deltas"])
+
+
+def test_random_mask_recovers_planted_additive_effects():
+    """The regression that turns draws into per-token effects must invert cleanly."""
+    rng = np.random.default_rng(0)
+    n_tokens, n_draws, mask_size = 12, 400, 4
+    truth = rng.normal(size=n_tokens)
+    draws = [rng.choice(n_tokens, size=mask_size, replace=False) for _ in range(n_draws)]
+    design = np.zeros((n_draws, n_tokens))
+    for row, idx in enumerate(draws):
+        design[row, idx] = 1.0
+    deltas = design @ truth
+
+    fitted, *_ = np.linalg.lstsq(design, deltas, rcond=None)
+
+    assert np.allclose(fitted, truth, atol=1e-6)

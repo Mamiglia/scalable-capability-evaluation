@@ -116,6 +116,47 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
             "completeness_error": float(scores.sum() - (gap - baseline_gap))}
 
 
+def random_mask_scores(model, tokenizer, input_ids, attention_mask, n_draws, mask_size,
+                       seed, batch_draws=8, baseline_kind=BASELINE_DEFAULT):
+    """Gap change when a random subset of tokens is blanked, over many draws.
+
+    A single token rarely moves the gap far enough to measure, and its effect
+    with every other token present is only its contribution at one corner of
+    the input space. Blanking mask_size tokens drawn at random gives a
+    measurable change and, across draws, constrains every token in many
+    different contexts. Per-token effects are recovered afterwards by
+    regressing the change on the draw indicators.
+    """
+    assert n_draws > 0 and mask_size > 0 and batch_draws > 0
+    model.requires_grad_(False)
+    device = next(model.parameters()).device
+    input_ids = input_ids.to(device)
+    attention_mask = attention_mask.to(device)
+    id1, id2 = answer_token_ids(tokenizer)
+
+    table = model.get_input_embeddings()
+    embeds = table(input_ids).detach()
+    filler = (torch.zeros_like(embeds[0, 0]) if baseline_kind == "zeros"
+              else table.weight.detach().mean(0))
+    n_tokens = embeds.shape[1]
+    rng = np.random.default_rng(seed)
+    draws = [rng.choice(n_tokens, size=min(mask_size, n_tokens), replace=False)
+             for _ in range(n_draws)]
+
+    with torch.no_grad():
+        gap = float(_gap_logits(model, embeds, attention_mask, id1, id2)[0])
+        deltas = []
+        for start in range(0, n_draws, batch_draws):
+            chunk = draws[start:start + batch_draws]
+            batch = embeds.expand(len(chunk), -1, -1).clone()
+            for row, idx in enumerate(chunk):
+                batch[row, idx] = filler
+            masked = _gap_logits(model, batch, attention_mask.expand(len(chunk), -1), id1, id2)
+            deltas.extend(gap - float(v) for v in masked)
+    return {"gap": gap, "draws": draws, "deltas": np.asarray(deltas, dtype=np.float64),
+            "n_tokens": n_tokens}
+
+
 def occlusion_rows(model, tokenizer, df, c, span_size, batch_spans=8,
                    baseline_kind=BASELINE_DEFAULT):
     """Yield one occlusion record per rendered prompt."""
@@ -132,6 +173,21 @@ def occlusion_rows(model, tokenizer, df, c, span_size, batch_spans=8,
             "group": [groups[int(meta["group_id"][lo])] for lo in starts],
             "text": [tokenizer.decode(meta["input_ids"][lo:hi]) for lo, hi in out["spans"]],
             "score": out["scores"], "gap": out["gap"]})
+
+
+def random_mask_rows(model, tokenizer, df, c, n_draws, mask_size, seed, batch_draws=8,
+                     baseline_kind=BASELINE_DEFAULT):
+    """Yield one long-format table of random-mask draws per prompt."""
+    for _, row in df.iterrows():
+        meta = token_manifold_record.prompt_token_meta(row, tokenizer, c)
+        enc = tokenizer(meta["prompt"], return_tensors="pt")
+        out = random_mask_scores(model, tokenizer, enc["input_ids"], enc["attention_mask"],
+                                 n_draws, mask_size, seed, batch_draws, baseline_kind)
+        yield pd.DataFrame({
+            "pair_uid": row["pair_uid"], "item": row["item"], "order": int(row["order"]),
+            "draw": range(len(out["deltas"])),
+            "masked_positions": [d.tolist() for d in out["draws"]],
+            "delta": out["deltas"], "gap": out["gap"], "n_tokens": out["n_tokens"]})
 
 
 def write_occlusion_parts(frames, out_dir, chunk_prompts):
@@ -293,6 +349,12 @@ def build_parser(c):
                         help="measure the gap change when each span of this many tokens is "
                              "replaced by the baseline, instead of integrating gradients")
     parser.add_argument("--batch-spans", type=int, default=8)
+    parser.add_argument("--mask-draws", type=int, default=None,
+                        help="blank this many random token subsets per prompt, and record the "
+                             "gap change; per-token effects are regressed from the draws")
+    parser.add_argument("--mask-size", type=int, default=32,
+                        help="tokens blanked per draw")
+    parser.add_argument("--mask-seed", type=int, default=0)
     parser.add_argument("--quadrature", default=QUADRATURE_DEFAULT,
                         choices=("gauss", "midpoint"),
                         help="how the path integral is sampled")
@@ -339,6 +401,21 @@ def main():
                                        args.step_batch, args.baseline,
                                        args.quadrature), args.out)
         return
+    if args.mask_draws:
+        done = completed_prompts(args.out) if pathlib.Path(args.out).exists() else set()
+        if done:
+            keep = [(str(u), int(o)) not in done for u, o in zip(df["pair_uid"], df["order"])]
+            print(f"resuming: {len(done)} done, {sum(keep)} to go", flush=True)
+            df = df[keep]
+        if df.empty:
+            print("nothing left to mask", flush=True)
+            return
+        write_occlusion_parts(random_mask_rows(model, tokenizer, df, c, args.mask_draws,
+                                               args.mask_size, args.mask_seed,
+                                               args.batch_spans, args.baseline),
+                              args.out, args.chunk_prompts)
+        return
+
     if args.occlude_span:
         done = completed_prompts(args.out) if pathlib.Path(args.out).exists() else set()
         if done:

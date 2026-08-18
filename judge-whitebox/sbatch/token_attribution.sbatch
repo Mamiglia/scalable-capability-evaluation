@@ -43,7 +43,14 @@ if [ -n "${WB_SWEEP_STEPS:-}" ]; then
   [ -n "${WB_SWEEP_SEED:-}" ] && ARGS+=(--sweep-seed "$WB_SWEEP_SEED")
 else
   DEST="$OUT/token_attribution/$TAG/attributions_${MODEL}_${FOLD}${SHARD_SUFFIX}.parquet"
-  ARGS+=(--steps "${WB_STEPS:?set WB_STEPS from the sweep}")
+  if [ -n "${WB_MASK_DRAWS:-}" ]; then
+    ARGS+=(--mask-draws "$WB_MASK_DRAWS" --mask-size "${WB_MASK_SIZE:-32}"
+           --batch-spans "${WB_BATCH_SPANS:-8}")
+  elif [ -n "${WB_OCCLUDE_SPAN:-}" ]; then
+    ARGS+=(--occlude-span "$WB_OCCLUDE_SPAN" --batch-spans "${WB_BATCH_SPANS:-8}")
+  else
+    ARGS+=(--steps "${WB_STEPS:?set WB_STEPS from the sweep}")
+  fi
   [ -n "${WB_DTYPE:-}" ] && ARGS+=(--dtype "$WB_DTYPE")
 fi
 [ ! -e "$DEST" ] || { echo "destination exists: $DEST"; exit 1; }
