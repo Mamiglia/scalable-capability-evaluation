@@ -148,6 +148,45 @@ Two further traps found while resubmitting, both worth remembering:
   what the directory names claimed. The resubmission passes all twelve layers, verified by a
   stubbed-`sbatch` dry run before anything was submitted.
 
+### First corrected result: the pilot's Qwen readout peak does not survive item balancing
+
+Both timelines finished (3392423 in 10m25s, 3392424 in 8m48s) and are pulled to
+`judge-whitebox/out/token_manifold/item_balanced_core100_v2/timeline_{qwen,llama}.csv`. The readout
+structural group has exactly one relative-decile cell per layer, so these are pooled held-out R2
+values, directly comparable to the pilot numbers quoted earlier in this document.
+
+Qwen3-8B, readout group, R2 by physical layer:
+
+| | 0 | 3 | 7 | 10 | 13 | 16 | 20 | 23 | 26 | 29 | 33 | 36 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| pilot, 4 items | -0.142 | -0.152 | -0.156 | -0.159 | -0.147 | -0.154 | -0.158 | -0.118 | **+0.403** | **+0.416** | **+0.411** | +0.036 |
+| corrected, 20 items | -0.051 | -0.062 | -0.060 | -0.070 | -0.069 | -0.065 | -0.068 | -0.012 | +0.045 | +0.067 | +0.043 | **+0.145** |
+
+Llama-3.2-3B-Instruct, readout group:
+
+| | 0 | 3 | 5 | 8 | 10 | 13 | 15 | 18 | 20 | 23 | 25 | 28 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| pilot, 5 items | -0.097 | -0.084 | -0.092 | -0.092 | -0.094 | -0.094 | -0.070 | -0.005 | -0.012 | +0.005 | **+0.038** | -0.014 |
+| corrected, 20 items | -0.015 | -0.020 | -0.014 | -0.023 | -0.020 | -0.015 | -0.012 | +0.024 | +0.033 | +0.052 | **+0.066** | +0.039 |
+
+Read this carefully, because it changes the picture the pilot painted:
+
+- **The Qwen "strong late readout locator" was largely an item-clustering artefact.** At physical
+  layer 29 the pilot reported R2 0.416; with twenty items the same cell gives 0.067. The sharp
+  26/29/33 plateau flattens out entirely.
+- What survives in Qwen is a smaller signal that peaks at the **last recorded layer, 36** (+0.145),
+  which is precisely where the pilot showed almost nothing (+0.036). The layer profile is close to
+  reversed, so any layer choice inherited from the pilot is unsafe.
+- **Llama is qualitatively stable and slightly stronger**: same peak layer, 25, rising 0.038 to
+  0.066, with the late layers now consistently positive rather than straddling zero. Llama's pilot
+  had five items and a weak signal, so there was less to inflate.
+- Shuffled-gap nulls stay where they should (-0.014 Qwen, -0.037 Llama), so the surviving positives
+  are real relative to the control, just much smaller than advertised.
+
+Because Qwen now peaks at the edge of the recorded range, the twelve-layer sweep should be checked
+for whether the signal is still climbing at 36. If it is, the layer set itself needs extending
+before any layer is frozen for phrase localisation.
+
 ### Original resubmission commands, for reference
 
 The commands below reproduce the same campaign by hand; no `afterok` dependencies are needed now
