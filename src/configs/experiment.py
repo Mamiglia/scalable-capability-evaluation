@@ -1,7 +1,6 @@
 """Judge experiment configuration dataclass."""
 
 import hashlib
-import warnings
 from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
@@ -10,6 +9,7 @@ from typing import Any, Dict, List, Literal, Tuple
 from configs.task import TaskConfig
 from configs.model import ModelConfig
 from configs.base import DraccusConfig
+from configs.logs import logger
 from configs.paths import get_eval_path, is_successful_eval
 
 
@@ -106,10 +106,8 @@ class ExperimentConfig(DraccusConfig):
         if self.mode == "paired":
             n = min(len(major_evals), len(minor_evals))
             if n != len(major_evals) or n != len(minor_evals):
-                warnings.warn(
-                    f"{self.task_name}: trimming paired evals from "
-                    f"major={len(major_evals)}, minor={len(minor_evals)} to {n}"
-                )
+                logger.warning("%s: trimming paired evals from major=%d, minor=%d to %d",
+                               self.task_name, len(major_evals), len(minor_evals), n)
             return list(zip(major_evals[:n], minor_evals[:n]))
         if self.mode == "combinatorial":
             return [(m, n) for m in major_evals for n in minor_evals]

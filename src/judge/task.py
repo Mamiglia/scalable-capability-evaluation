@@ -5,6 +5,7 @@ from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
 from configs.experiment import ExperimentConfig
+from configs.logs import logger
 from judge.dataset import MAX_LENGTH, build_dataset
 from judge.scorer import judge_scorer
 
@@ -24,8 +25,11 @@ def judge_task(
     truncate_frac: float | None = None,
     experiment_name: str | None = None,
     task_name: str | None = None,
-) -> Task:
-    """Build the judging task that compares one major eval log against one minor log."""
+) -> Task | None:
+    """Build the judging task that compares one major eval log against one minor log.
+
+    Returns None when no question survives the filters (e.g. both models never agree on a
+    correct answer), since inspect refuses an empty dataset."""
     major_path = Path(major_path)
     minor_path = Path(minor_path)
 
@@ -46,18 +50,23 @@ def judge_task(
         # read that as a failure.
         system_prompt = TRUNCATED_SYSTEM_PROMPT
 
+    dataset = build_dataset(
+        major_path=major_path,
+        minor_path=minor_path,
+        max_len=max_length,
+        require_both_correct=require_both_correct,
+        include_reverse=include_reverse,
+        include_reasoning=include_reasoning,
+        truncate_frac=truncate_frac,
+    )
+    if len(dataset) == 0:
+        logger.warning("%s: no samples after filtering (%s vs %s), skipping", name, major_path, minor_path)
+        return None
+
     return Task(
         name=name,
         description="Judge the responses of two AI models to the same input prompt.",
-        dataset=build_dataset(
-            major_path=major_path,
-            minor_path=minor_path,
-            max_len=max_length,
-            require_both_correct=require_both_correct,
-            include_reverse=include_reverse,
-            include_reasoning=include_reasoning,
-            truncate_frac=truncate_frac,
-        ),
+        dataset=dataset,
         solver=[system_message(system_prompt), generate()],
         scorer=judge_scorer(),
         metadata={
@@ -86,18 +95,18 @@ def build_judge_tasks(experiment: ExperimentConfig) -> list[Task]:
         # Inspect builds file:// URLs from log paths, so "#" in the filename truncates the path
         # at urlparse() time and breaks header reads.
         task_name = experiment.task_name if len(pairs) == 1 else f"{experiment.task_name}+{index}"
-        tasks.append(
-            judge_task(
-                major_path=major,
-                minor_path=minor,
-                system_prompt=experiment.system_prompt,
-                max_length=experiment.max_length,
-                require_both_correct=experiment.require_both_correct,
-                include_reverse=experiment.include_reverse,
-                include_reasoning=experiment.include_reasoning,
-                truncate_frac=experiment.truncate_frac or None,
-                experiment_name=experiment.name,
-                task_name=task_name,
-            )
+        task = judge_task(
+            major_path=major,
+            minor_path=minor,
+            system_prompt=experiment.system_prompt,
+            max_length=experiment.max_length,
+            require_both_correct=experiment.require_both_correct,
+            include_reverse=experiment.include_reverse,
+            include_reasoning=experiment.include_reasoning,
+            truncate_frac=experiment.truncate_frac or None,
+            experiment_name=experiment.name,
+            task_name=task_name,
         )
+        if task is not None:
+            tasks.append(task)
     return tasks
