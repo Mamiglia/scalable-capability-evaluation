@@ -28,6 +28,26 @@ class DigitTokenizer:
     def encode(self, text, add_special_tokens=False):
         return [{"1": 1, "2": 2}[text]]
 
+    def __call__(self, text, return_tensors=None):
+        ids = FAKE_TOKEN_IDS
+        return {"input_ids": torch.tensor([ids]), "attention_mask": torch.ones(1, len(ids),
+                                                                               dtype=torch.long)}
+
+    def decode(self, ids):
+        return "".join(str(i) for i in ids)
+
+
+FAKE_TOKEN_IDS = [3, 4, 5, 6, 7, 8]
+
+
+def fake_token_meta(row, tokenizer, c):
+    """Fixed prompt tokens so no real tokenizer or prompt template is needed."""
+    n = len(FAKE_TOKEN_IDS)
+    return {"prompt": "abcdef", "input_ids": list(FAKE_TOKEN_IDS),
+            "offsets": [(i, i + 1) for i in range(n)],
+            "group_id": np.zeros(n, dtype=np.int8),
+            "group_names": token_attribution.token_manifold_record.STRUCTURAL_GROUPS}
+
 
 def test_attributions_sum_to_the_gap_difference():
     model, tokenizer = make_tiny_model(), DigitTokenizer()
@@ -64,6 +84,41 @@ def test_write_attributions_produces_one_row_per_token(tmp_path):
     assert len(table) == 2
     assert table.group.tolist() == ["transcript_1", "answer_readout"]
     assert table.score.tolist() == [0.5, 1.0]
+
+
+def test_completeness_sweep_reports_one_row_per_prompt_and_step_count(monkeypatch):
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    monkeypatch.setattr(token_attribution.token_manifold_record, "prompt_token_meta",
+                        fake_token_meta)
+    df = pd.DataFrame([{"pair_uid": "p0", "item": "it0", "order": 0},
+                       {"pair_uid": "p1", "item": "it1", "order": 1}])
+
+    table = token_attribution.completeness_sweep(
+        model, tokenizer, df, {}, step_counts=(4, 8), n_prompts=2, seed=0)
+
+    assert sorted(table.steps.unique()) == [4, 8]
+    assert len(table) == 4
+    assert (table.relative_error >= 0).all()
+
+
+def test_completeness_sweep_error_falls_with_more_steps(monkeypatch):
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    monkeypatch.setattr(token_attribution.token_manifold_record, "prompt_token_meta",
+                        fake_token_meta)
+    df = pd.DataFrame([{"pair_uid": "p0", "item": "it0", "order": 0}])
+
+    table = token_attribution.completeness_sweep(
+        model, tokenizer, df, {}, step_counts=(2, 512), n_prompts=1, seed=0)
+
+    by_steps = table.set_index("steps").relative_error
+    assert by_steps[512] < by_steps[2]
+
+
+def test_attribution_sbatch_exposes_the_sweep():
+    text = (Path(__file__).parents[1] / "sbatch" / "token_attribution.sbatch").read_text()
+
+    assert "WB_SWEEP_STEPS" in text
+    assert "--sweep-steps" in text
 
 
 def test_attribution_sbatch_refuses_an_existing_destination():

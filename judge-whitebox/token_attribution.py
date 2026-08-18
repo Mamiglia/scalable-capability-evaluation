@@ -64,18 +64,33 @@ def attribute_rows(model, tokenizer, df, c, steps):
                                   enc["attention_mask"], steps)
         assert len(result["scores"]) == len(meta["input_ids"])
         yield {"pair_uid": row["pair_uid"], "item": row["item"], "order": int(row["order"]),
-               "gap": result["gap"], "completeness_error": result["completeness_error"],
+               "gap": result["gap"], "baseline_gap": result["baseline_gap"],
+               "completeness_error": result["completeness_error"],
                "scores": result["scores"], "input_ids": list(meta["input_ids"]),
                "offsets": list(meta["offsets"]), "group_id": meta["group_id"],
                "token_text": [tokenizer.decode([i]) for i in meta["input_ids"]]}
 
 
-def write_attributions(rows, out_path):
-    """Write the long-format token table atomically to a new path."""
+def _refuse_existing(out_path):
+    """Destination and its temporary file, refusing to overwrite either."""
     out_path = pathlib.Path(out_path)
     tmp = out_path.with_name(out_path.name + ".partial")
     if out_path.exists() or tmp.exists():
         raise FileExistsError(out_path if out_path.exists() else tmp)
+    return out_path, tmp
+
+
+def write_table(table, out_path):
+    """Write a parquet to a new path through a temporary file and a rename."""
+    out_path, tmp = _refuse_existing(out_path)
+    table.to_parquet(tmp, index=False)
+    os.replace(tmp, out_path)
+    return out_path
+
+
+def write_attributions(rows, out_path):
+    """Write the long-format token table atomically to a new path."""
+    _refuse_existing(out_path)  # fail before spending a forward pass
     groups = token_manifold_record.STRUCTURAL_GROUPS
     frames = []
     for row in rows:
@@ -86,10 +101,20 @@ def write_attributions(rows, out_path):
             "group": [groups[int(g)] for g in row["group_id"]],
             "score": row["scores"], "gap": row["gap"],
             "completeness_error": row["completeness_error"]}))
-    table = pd.concat(frames, ignore_index=True)
-    table.to_parquet(tmp, index=False)
-    os.replace(tmp, out_path)
-    return out_path
+    return write_table(pd.concat(frames, ignore_index=True), out_path)
+
+
+def completeness_sweep(model, tokenizer, df, c, step_counts, n_prompts, seed):
+    """Relative completeness error per prompt at each step count."""
+    sample = df.sample(n=min(n_prompts, len(df)), random_state=seed)
+    rows = []
+    for steps in step_counts:
+        for record in attribute_rows(model, tokenizer, sample, c, steps):
+            span = abs(record["gap"] - record["baseline_gap"])
+            rows.append({"steps": steps, "pair_uid": record["pair_uid"],
+                         "order": record["order"],
+                         "relative_error": abs(record["completeness_error"]) / max(span, 1e-12)})
+    return pd.DataFrame(rows)
 
 
 def main():
@@ -108,6 +133,11 @@ def main():
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--split", default=c["verdicts"]["eval_split"])
     parser.add_argument("--steps", type=int, default=256)
+    parser.add_argument("--sweep-steps", default=None,
+                        help="comma-separated step counts; writes a completeness sweep "
+                             "instead of an attribution table")
+    parser.add_argument("--sweep-prompts", type=int, default=20)
+    parser.add_argument("--sweep-seed", type=int, default=0)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
@@ -121,6 +151,12 @@ def main():
     folds = token_manifold_record.balanced_item_folds(pairs, args.fold_seed)
     df = token_manifold_record.select_fold(pairs, folds, args.fold)
     df = token_manifold_record.limit_pairs(df, args.limit)
+
+    if args.sweep_steps:
+        step_counts = [int(s) for s in args.sweep_steps.split(",")]
+        write_table(completeness_sweep(model, tokenizer, df, c, step_counts,
+                                       args.sweep_prompts, args.sweep_seed), args.out)
+        return
     write_attributions(attribute_rows(model, tokenizer, df, c, args.steps), args.out)
 
 
