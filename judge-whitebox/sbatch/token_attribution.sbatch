@@ -12,6 +12,9 @@
 # Submit from a directory holding wb_common.sh.
 # The split must match the recording's split, or the table and the states describe different prompts.
 # sbatch --export=ALL,WB_MODEL=Qwen3-8B,WB_FOLD=A,WB_SPLIT=train,WB_TAG=attr_v1 token_attribution.sbatch
+# Split the prompts over an array: WB_SHARDS must equal the array size, one shard per task.
+# sbatch --array=0-7 --export=ALL,WB_SHARDS=8,WB_MODEL=Qwen3-8B,WB_FOLD=all,\
+#   WB_SPLIT=train,WB_TAG=attr_v1,WB_STEPS=256 token_attribution.sbatch
 # Set WB_SWEEP_STEPS (comma-separated) to measure where the integral converges instead;
 # run that first and take WB_STEPS from it. Its commas would split a --export list, so
 # export it in the environment:
@@ -20,17 +23,25 @@
 source ./wb_common.sh || { echo "wb_common.sh not found in $PWD" >&2; exit 3; }
 
 MODEL="${WB_MODEL:?set WB_MODEL}"
-FOLD="${WB_FOLD:?set WB_FOLD=A|B}"
+FOLD="${WB_FOLD:?set WB_FOLD=A|B|all}"
 TAG="${WB_TAG:?set a new WB_TAG}"
 
-ARGS=(--model "$MODEL" --fold "$FOLD" --split "${WB_SPLIT:?set WB_SPLIT}")
+# One shard per array task; a plain submission is the single shard 0 of 1.
+SHARDS="${WB_SHARDS:-1}"
+SHARD="${SLURM_ARRAY_TASK_ID:-0}"
+SHARD_SUFFIX=""
+[ "$SHARDS" -gt 1 ] && SHARD_SUFFIX="_shard${SHARD}of${SHARDS}"
+
+ARGS=(--model "$MODEL" --fold "$FOLD" --split "${WB_SPLIT:?set WB_SPLIT}"
+      --shard-index "$SHARD" --shard-count "$SHARDS")
+[ -n "${WB_STEP_BATCH:-}" ] && ARGS+=(--step-batch "$WB_STEP_BATCH")
 if [ -n "${WB_SWEEP_STEPS:-}" ]; then
-  DEST="$OUT/token_attribution/$TAG/completeness_sweep_${MODEL}_${FOLD}.parquet"
+  DEST="$OUT/token_attribution/$TAG/completeness_sweep_${MODEL}_${FOLD}${SHARD_SUFFIX}.parquet"
   ARGS+=(--sweep-steps "$WB_SWEEP_STEPS")
   [ -n "${WB_SWEEP_PROMPTS:-}" ] && ARGS+=(--sweep-prompts "$WB_SWEEP_PROMPTS")
   [ -n "${WB_SWEEP_SEED:-}" ] && ARGS+=(--sweep-seed "$WB_SWEEP_SEED")
 else
-  DEST="$OUT/token_attribution/$TAG/attributions_${MODEL}_${FOLD}.parquet"
+  DEST="$OUT/token_attribution/$TAG/attributions_${MODEL}_${FOLD}${SHARD_SUFFIX}.parquet"
   ARGS+=(--steps "${WB_STEPS:?set WB_STEPS from the sweep}")
 fi
 [ ! -e "$DEST" ] || { echo "destination exists: $DEST"; exit 1; }

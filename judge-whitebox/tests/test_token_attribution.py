@@ -114,6 +114,57 @@ def test_completeness_sweep_error_falls_with_more_steps(monkeypatch):
     assert by_steps[512] < by_steps[2]
 
 
+def test_batched_steps_match_one_step_at_a_time():
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    ids = torch.tensor([[3, 4, 5, 6, 7, 8]])
+    mask = torch.ones_like(ids)
+
+    one = token_attribution.attribute_tokens(model, tokenizer, ids, mask, steps=9, step_batch=1)
+    many = token_attribution.attribute_tokens(model, tokenizer, ids, mask, steps=9, step_batch=4)
+
+    assert np.allclose(one["scores"], many["scores"], rtol=0, atol=1e-6)
+    assert abs(one["gap"] - many["gap"]) < 1e-6
+
+
+def test_shards_partition_the_prompts():
+    df = pd.DataFrame({"pair_uid": [f"p{i // 2}" for i in range(10)],
+                       "order": [i % 2 for i in range(10)]})
+
+    shards = [token_attribution.select_shard(df, i, 3) for i in range(3)]
+
+    assert [len(s) for s in shards] == [4, 3, 3]
+    seen = pd.concat(shards).sort_index()
+    assert seen.index.is_unique
+    assert seen.equals(df)
+
+
+def test_parser_accepts_both_folds_and_all():
+    parser = token_attribution.build_parser({"verdicts": {"eval_split": "test"}})
+
+    for fold in ("A", "B", "all"):
+        args = parser.parse_args(["--model", "m", "--fold", fold, "--out", "o.parquet"])
+        assert args.fold == fold
+
+
+def test_parser_defaults_a_single_shard_and_a_step_batch():
+    parser = token_attribution.build_parser({"verdicts": {"eval_split": "test"}})
+
+    args = parser.parse_args(["--model", "m", "--fold", "A", "--out", "o.parquet"])
+
+    assert (args.shard_index, args.shard_count) == (0, 1)
+    assert args.step_batch == token_attribution.STEP_BATCH_DEFAULT
+
+
+def test_attribution_sbatch_runs_as_a_shard_array():
+    text = (Path(__file__).parents[1] / "sbatch" / "token_attribution.sbatch").read_text()
+
+    assert "SLURM_ARRAY_TASK_ID" in text
+    assert "WB_SHARDS" in text
+    assert "--shard-index" in text and "--shard-count" in text
+    dests = [line for line in text.splitlines() if line.strip().startswith("DEST=")]
+    assert dests and all("${SHARD_SUFFIX}" in line for line in dests)
+
+
 def test_attribution_sbatch_exposes_the_sweep():
     text = (Path(__file__).parents[1] / "sbatch" / "token_attribution.sbatch").read_text()
 
