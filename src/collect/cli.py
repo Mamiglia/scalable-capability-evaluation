@@ -8,8 +8,10 @@ from inspect_ai import eval_set
 
 from collect.runner import eval_runner
 from configs import ModelConfig, TaskConfig, flag_parse, kv_pair
+from configs.logs import log_to, logger
 from configs.paths import get_eval_path, is_successful_eval, task_args_with_defaults
 from model import Model
+
 
 
 def _run_eval_worker(
@@ -30,18 +32,16 @@ def _run_eval_worker(
     if model_arg:
         model_config.model_args.update(dict(model_arg))
 
-    print(
-        f"Running repeat {repeat + 1}/{repeats} for benchmark "
-        f"'{bench.name}' and model '{model_config.slug}'"
-    )
-
     target_dir = get_eval_path(
         task=bench,
         model=model_config,
         base_dir=eval_extra_args.get("log_dir", "data"),
     ) / f"{repeat}"
+    log_to(target_dir)
+    logger.info("Running repeat %d/%d for benchmark '%s' and model '%s'",
+                repeat + 1, repeats, bench.name, model_config.slug)
     if any(is_successful_eval(path) for path in target_dir.glob("*.eval")):
-        print(f"Skipping completed repeat {repeat + 1}: {target_dir}")
+        logger.info("Skipping completed repeat %d: %s", repeat + 1, target_dir)
         return 0
 
     # The hash dir is opaque; leave the args it was computed from next to it, so old data

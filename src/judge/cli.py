@@ -9,6 +9,7 @@ from inspect_ai import eval_set
 
 from collect.runner import eval_runner
 from configs import ExperimentConfig, flag_parse
+from configs.logs import log_to, logger
 from judge.task import build_judge_tasks
 from model import Model
 
@@ -33,8 +34,9 @@ def _run_experiments(experiments: list[ExperimentConfig], display: str | None = 
     A single eval_set shares one connection pool, retries, resumes and displays on its own;
     the log dir may already hold other pairs of the same condition, hence allow_dirty.
     """
-    tasks = [task for exp in experiments for task in build_judge_tasks(exp)]
     exp = experiments[0]
+    log_to(exp.log_dir)
+    tasks = [task for exp in experiments for task in build_judge_tasks(exp)]
     # Judging is API-bound and every task is small: run them all at once, with a wide
     # connection pool. Both are overridable from the CLI (--max-tasks / --max-connections).
     concurrency = {"max_tasks": len(tasks), "max_connections": 64}
@@ -48,7 +50,7 @@ def _run_experiments(experiments: list[ExperimentConfig], display: str | None = 
             **concurrency | model.eval_kwargs() | exp.eval_kwargs(),
         )
     if not success:
-        print(f"Judge run failed in {exp.log_dir}")
+        logger.error("Judge run failed in %s", exp.log_dir)
     return 0 if success else 1
 
 

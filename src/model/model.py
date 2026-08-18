@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import json
-import logging
 import signal
 import threading
 from types import FrameType
 from typing import Any
 
 from configs import ModelConfig
+from configs.logs import logger
 from model import runpod
 from model.session import RunpodSession
 
-LOGGER = logging.getLogger(__name__)
 
 # Excluded from the session key: they do not change the container, so runs that differ
 # only in these can still share a pod.
@@ -87,7 +86,7 @@ class Model:
         except Exception:
             if exc_type is None:
                 raise
-            LOGGER.exception("Failed to release Runpod session")
+            logger.exception("Failed to release Runpod session")
         finally:
             self._restore_signal()
 
@@ -103,7 +102,7 @@ class Model:
             # OpenRouter provider pins mean nothing to a vLLM pod; pod args come from
             # runpod.model_args instead.
             if self.config.model_args:
-                LOGGER.warning(
+                logger.warning(
                     "model '%s' is served from Runpod, so model_args %s are ignored; "
                     "use runpod.model_args instead",
                     self.config.name,

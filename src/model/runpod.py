@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 import re
 import shlex
@@ -14,8 +13,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from configs.logs import logger
 
-LOGGER = logging.getLogger(__name__)
 DURATION = re.compile(r"(\d+(?:\.\d+)?)([smhd])")
 DEFAULTS = {
     "image": "vllm/vllm-openai:latest",
@@ -175,7 +174,7 @@ def _create_pod_once(config: dict[str, Any], gpu_id: str) -> str:
     if config.get("name"):
         command.append(f"--name={config['name']}")
     command.extend(create_args)
-    LOGGER.info("Creating Runpod for %s on %s", config["model"], gpu_id)
+    logger.info("Creating Runpod for %s on %s", config["model"], gpu_id)
     output = _run(command).stdout
     try:
         pod_id = json.loads(output)["id"]
@@ -203,11 +202,11 @@ def create(config: dict[str, Any]) -> tuple[str, str]:
         except Exception as exc:
             if not any(marker in str(exc).lower() for marker in OUT_OF_CAPACITY):
                 raise
-            LOGGER.warning("GPU %s unavailable for %s (%s)", gpu, config["model"], exc)
+            logger.warning("GPU %s unavailable for %s (%s)", gpu, config["model"], exc)
             last_exc = exc
             continue
         if gpu != requested:
-            LOGGER.warning(
+            logger.warning(
                 "Runpod %s runs %s on %s, not the configured %s — results are not "
                 "comparable to runs pinned to %s",
                 pod_id, config["model"], gpu, requested, requested,
@@ -242,5 +241,5 @@ def wait(pod_id: str, port: int, timeout: float) -> str:
 
 
 def terminate(pod_id: str) -> None:
-    LOGGER.info("Terminating Runpod %s", pod_id)
+    logger.info("Terminating Runpod %s", pod_id)
     _run(["runpodctl", "pod", "delete", pod_id])

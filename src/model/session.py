@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from typing import Any
 
+from configs.logs import logger
 from model import runpod, sessions
 from model.multiton import Multiton
 
-LOGGER = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2.0  # seconds between checks while another process starts the pod
 
@@ -51,7 +50,7 @@ class RunpodSession(metaclass=Multiton):
                 return self.base_url
             if self.pod_id:
                 # Our pod died: give back its registry reference before replacing it.
-                LOGGER.warning("Runpod %s is unhealthy, replacing it", self.pod_id)
+                logger.warning("Runpod %s is unhealthy, replacing it", self.pod_id)
                 sessions.drop(self.key)
                 sessions.unregister(self.key, only_if_unused=True)
                 self.pod_id = self.base_url = None
@@ -108,7 +107,7 @@ class RunpodSession(metaclass=Multiton):
                     self.pod_id = entry["pod_id"]
                     self.gpu = entry.get("gpu")
                     return entry["base_url"]
-                LOGGER.warning("Registered Runpod %s is unhealthy, discarding", entry["pod_id"])
+                logger.warning("Registered Runpod %s is unhealthy, discarding", entry["pod_id"])
                 sessions.drop(self.key)
                 sessions.unregister(self.key, only_if_unused=True)
             elif is_creating:
@@ -154,6 +153,6 @@ class RunpodSession(metaclass=Multiton):
         try:
             runpod.terminate(pod_id)
         except Exception:
-            LOGGER.exception(
+            logger.exception(
                 "Failed to terminate Runpod %s — check the console, it is still billing", pod_id
             )
