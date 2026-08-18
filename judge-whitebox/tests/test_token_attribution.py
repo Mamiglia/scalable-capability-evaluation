@@ -270,3 +270,18 @@ def test_resuming_appends_parts_without_overwriting(tmp_path):
     assert sorted(p.name for p in tmp_path.glob("part_*.parquet")) == [
         "part_00000.parquet", "part_00001.parquet"]
     assert token_attribution.completed_prompts(tmp_path) == {("p0", 0), ("p1", 1)}
+
+
+def test_mean_baseline_is_not_degenerate():
+    """A zero baseline gives a zero hidden state under RMSNorm, so the path is pathological."""
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    ids = torch.tensor([[3, 4, 5, 6]])
+    mask = torch.ones_like(ids)
+
+    zeros = token_attribution.attribute_tokens(model, tokenizer, ids, mask, steps=8,
+                                               baseline_kind="zeros")
+    mean = token_attribution.attribute_tokens(model, tokenizer, ids, mask, steps=8,
+                                              baseline_kind="mean")
+
+    assert zeros["baseline_gap"] == pytest.approx(0.0, abs=1e-6)
+    assert mean["baseline_gap"] != pytest.approx(0.0, abs=1e-6)

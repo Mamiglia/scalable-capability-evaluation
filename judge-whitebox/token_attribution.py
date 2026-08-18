@@ -12,6 +12,7 @@ import wbpairs
 import wbprompts
 
 STEP_BATCH_DEFAULT = 4
+BASELINE_DEFAULT = "mean"
 
 
 def answer_token_ids(tokenizer):
@@ -37,7 +38,7 @@ def _gap_logits(model, embeds, attention_mask, id1, id2):
 
 
 def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
-                     step_batch=STEP_BATCH_DEFAULT):
+                     step_batch=STEP_BATCH_DEFAULT, baseline_kind=BASELINE_DEFAULT):
     """Integrated-gradient attribution of the gap to each input token.
 
     Interpolation points are the same sequence with different embeddings, so
@@ -54,8 +55,18 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
     assert int(attention_mask[0, -1]) == 1, "the gap is read at the last position, which is padding"
     id1, id2 = answer_token_ids(tokenizer)
 
-    embeds = model.get_input_embeddings()(input_ids).detach()
-    baseline = torch.zeros_like(embeds)
+    table = model.get_input_embeddings()
+    embeds = table(input_ids).detach()
+    if baseline_kind == "zeros":
+        baseline = torch.zeros_like(embeds)
+    elif baseline_kind == "mean":
+        # Zeros are degenerate under RMSNorm: the normalised stream stays put
+        # until alpha is almost zero, then the integrand spikes and the integral
+        # needs impractically many steps. The mean token embedding has a typical
+        # norm, so the path is smooth.
+        baseline = table.weight.detach().mean(0).expand_as(embeds).contiguous()
+    else:
+        raise ValueError(f"unknown baseline: {baseline_kind}")
     delta = embeds - baseline
 
     # Accumulate and reduce in float64. Summing thousands of gradients and then
@@ -83,13 +94,14 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
             "completeness_error": float(scores.sum() - (gap - baseline_gap))}
 
 
-def attribute_rows(model, tokenizer, df, c, steps, step_batch=STEP_BATCH_DEFAULT):
+def attribute_rows(model, tokenizer, df, c, steps, step_batch=STEP_BATCH_DEFAULT,
+                   baseline_kind=BASELINE_DEFAULT):
     """Yield one attribution record per rendered prompt."""
     for _, row in df.iterrows():
         meta = token_manifold_record.prompt_token_meta(row, tokenizer, c)
         enc = tokenizer(meta["prompt"], return_tensors="pt")
         result = attribute_tokens(model, tokenizer, enc["input_ids"],
-                                  enc["attention_mask"], steps, step_batch)
+                                  enc["attention_mask"], steps, step_batch, baseline_kind)
         assert len(result["scores"]) == len(meta["input_ids"])
         yield {"pair_uid": row["pair_uid"], "item": row["item"], "order": int(row["order"]),
                "gap": result["gap"], "baseline_gap": result["baseline_gap"],
@@ -186,12 +198,13 @@ def select_shard(df, index, count):
 
 
 def completeness_sweep(model, tokenizer, df, c, step_counts, n_prompts, seed,
-                       step_batch=STEP_BATCH_DEFAULT):
+                       step_batch=STEP_BATCH_DEFAULT, baseline_kind=BASELINE_DEFAULT):
     """Relative completeness error per prompt at each step count."""
     sample = df.sample(n=min(n_prompts, len(df)), random_state=seed)
     rows = []
     for steps in step_counts:
-        for record in attribute_rows(model, tokenizer, sample, c, steps, step_batch):
+        for record in attribute_rows(model, tokenizer, sample, c, steps, step_batch,
+                                     baseline_kind):
             span = abs(record["gap"] - record["baseline_gap"])
             rows.append({"steps": steps, "pair_uid": record["pair_uid"],
                          "order": record["order"],
@@ -215,6 +228,8 @@ def build_parser(c):
                         help="model precision; bfloat16 matches how the judges are run")
     parser.add_argument("--step-batch", type=int, default=STEP_BATCH_DEFAULT,
                         help="integration steps run per forward/backward pass")
+    parser.add_argument("--baseline", default=BASELINE_DEFAULT, choices=("mean", "zeros"),
+                        help="integrated-gradient baseline; zeros is degenerate under RMSNorm")
     parser.add_argument("--chunk-prompts", type=int, default=20,
                         help="prompts per part file; a part on disk survives an interruption")
     parser.add_argument("--shard-index", type=int, default=0)
@@ -253,7 +268,7 @@ def main():
         step_counts = [int(s) for s in args.sweep_steps.split(",")]
         write_table(completeness_sweep(model, tokenizer, df, c, step_counts,
                                        args.sweep_prompts, args.sweep_seed,
-                                       args.step_batch), args.out)
+                                       args.step_batch, args.baseline), args.out)
         return
     done = completed_prompts(args.out) if pathlib.Path(args.out).exists() else set()
     if done:
@@ -263,7 +278,8 @@ def main():
     if df.empty:
         print("nothing left to attribute", flush=True)
         return
-    write_attribution_parts(attribute_rows(model, tokenizer, df, c, args.steps, args.step_batch),
+    write_attribution_parts(attribute_rows(model, tokenizer, df, c, args.steps,
+                                           args.step_batch, args.baseline),
                             args.out, args.chunk_prompts)
 
 
