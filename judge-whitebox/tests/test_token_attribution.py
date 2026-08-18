@@ -354,6 +354,65 @@ def test_random_mask_draws_are_the_requested_size_and_reproducible():
     assert np.allclose(a["deltas"], b["deltas"])
 
 
+def test_additivity_probe_draws_disjoint_pairs_and_skips_oversized_k():
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    ids = torch.tensor([[3, 4, 5, 6, 7, 8, 9, 10]])
+    mask = torch.ones_like(ids)
+
+    out = token_attribution.additivity_probe(model, tokenizer, ids, mask,
+                                             k_values=[2, 4, 5], n_triples=3, seed=0)
+    again = token_attribution.additivity_probe(model, tokenizer, ids, mask,
+                                               k_values=[2, 4, 5], n_triples=3, seed=0)
+
+    assert sorted({r["k"] for r in out["records"]}) == [2, 4]  # 2*5 > 8 tokens
+    for r in out["records"]:
+        assert len(r["positions_a"]) == len(r["positions_b"]) == r["k"]
+        assert not set(r["positions_a"]) & set(r["positions_b"])
+    assert np.allclose([r["delta_union"] for r in out["records"]],
+                       [r["delta_union"] for r in again["records"]])
+
+
+def test_additivity_probe_union_delta_matches_direct_blanking():
+    """delta_union must be the measured joint effect, not a derived sum."""
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    ids = torch.tensor([[3, 4, 5, 6, 7, 8, 9, 10]])
+    mask = torch.ones_like(ids)
+    id1, id2 = token_attribution.answer_token_ids(tokenizer)
+
+    out = token_attribution.additivity_probe(model, tokenizer, ids, mask,
+                                             k_values=[2], n_triples=2, seed=1)
+
+    table = model.get_input_embeddings()
+    embeds = table(ids).detach()
+    filler = table.weight.detach().mean(0)
+    for r in out["records"]:
+        edited = embeds.clone()
+        edited[0, r["positions_a"] + r["positions_b"]] = filler
+        direct = r["gap"] - float(token_attribution._gap_logits(model, edited, mask,
+                                                                id1, id2)[0])
+        assert abs(r["delta_union"] - direct) < 1e-4
+
+
+def test_additivity_rows_write_and_resume(monkeypatch, tmp_path):
+    model, tokenizer = make_tiny_model(), DigitTokenizer()
+    monkeypatch.setattr(token_attribution.token_manifold_record, "prompt_token_meta",
+                        fake_token_meta)
+    df = pd.DataFrame([{"pair_uid": "p0", "item": "it0", "order": 0},
+                       {"pair_uid": "p1", "item": "it1", "order": 1}])
+
+    token_attribution.write_occlusion_parts(
+        token_attribution.additivity_rows(model, tokenizer, df, {}, k_values=[1, 2],
+                                          n_triples=2, seed=0),
+        tmp_path, chunk_prompts=1)
+
+    table = token_attribution.read_attribution_parts(tmp_path)
+    assert len(table) == 2 * 2 * 2  # prompts x k values x triples
+    assert set(table.columns) >= {"pair_uid", "order", "k", "triple", "delta_a",
+                                  "delta_b", "delta_union", "positions_a",
+                                  "positions_b", "gap", "n_tokens"}
+    assert token_attribution.completed_prompts(tmp_path) == {("p0", 0), ("p1", 1)}
+
+
 def test_random_mask_recovers_planted_additive_effects():
     """The regression that turns draws into per-token effects must invert cleanly."""
     rng = np.random.default_rng(0)

@@ -116,6 +116,35 @@ def attribute_tokens(model, tokenizer, input_ids, attention_mask, steps,
             "completeness_error": float(scores.sum() - (gap - baseline_gap))}
 
 
+def _blank_setup(model, tokenizer, input_ids, attention_mask, baseline_kind):
+    """Embeddings, filler row and answer ids shared by every blanking method."""
+    model.requires_grad_(False)
+    device = next(model.parameters()).device
+    input_ids = input_ids.to(device)
+    attention_mask = attention_mask.to(device)
+    id1, id2 = answer_token_ids(tokenizer)
+    table = model.get_input_embeddings()
+    embeds = table(input_ids).detach()
+    filler = (torch.zeros_like(embeds[0, 0]) if baseline_kind == "zeros"
+              else table.weight.detach().mean(0))
+    return embeds, attention_mask, filler, id1, id2
+
+
+def _masked_deltas(model, embeds, attention_mask, draws, filler, id1, id2, batch_draws):
+    """gap − gap(blanked) for each index set in draws, batched."""
+    with torch.no_grad():
+        gap = float(_gap_logits(model, embeds, attention_mask, id1, id2)[0])
+        deltas = []
+        for start in range(0, len(draws), batch_draws):
+            chunk = draws[start:start + batch_draws]
+            batch = embeds.expand(len(chunk), -1, -1).clone()
+            for row, idx in enumerate(chunk):
+                batch[row, idx] = filler
+            masked = _gap_logits(model, batch, attention_mask.expand(len(chunk), -1), id1, id2)
+            deltas.extend(gap - float(v) for v in masked)
+    return gap, np.asarray(deltas, dtype=np.float64)
+
+
 def random_mask_scores(model, tokenizer, input_ids, attention_mask, n_draws, mask_size,
                        seed, batch_draws=8, baseline_kind=BASELINE_DEFAULT):
     """Gap change when a random subset of tokens is blanked, over many draws.
@@ -128,33 +157,49 @@ def random_mask_scores(model, tokenizer, input_ids, attention_mask, n_draws, mas
     regressing the change on the draw indicators.
     """
     assert n_draws > 0 and mask_size > 0 and batch_draws > 0
-    model.requires_grad_(False)
-    device = next(model.parameters()).device
-    input_ids = input_ids.to(device)
-    attention_mask = attention_mask.to(device)
-    id1, id2 = answer_token_ids(tokenizer)
-
-    table = model.get_input_embeddings()
-    embeds = table(input_ids).detach()
-    filler = (torch.zeros_like(embeds[0, 0]) if baseline_kind == "zeros"
-              else table.weight.detach().mean(0))
+    embeds, attention_mask, filler, id1, id2 = _blank_setup(
+        model, tokenizer, input_ids, attention_mask, baseline_kind)
     n_tokens = embeds.shape[1]
     rng = np.random.default_rng(seed)
     draws = [rng.choice(n_tokens, size=min(mask_size, n_tokens), replace=False)
              for _ in range(n_draws)]
+    gap, deltas = _masked_deltas(model, embeds, attention_mask, draws, filler,
+                                 id1, id2, batch_draws)
+    return {"gap": gap, "draws": draws, "deltas": deltas, "n_tokens": n_tokens}
 
-    with torch.no_grad():
-        gap = float(_gap_logits(model, embeds, attention_mask, id1, id2)[0])
-        deltas = []
-        for start in range(0, n_draws, batch_draws):
-            chunk = draws[start:start + batch_draws]
-            batch = embeds.expand(len(chunk), -1, -1).clone()
-            for row, idx in enumerate(chunk):
-                batch[row, idx] = filler
-            masked = _gap_logits(model, batch, attention_mask.expand(len(chunk), -1), id1, id2)
-            deltas.extend(gap - float(v) for v in masked)
-    return {"gap": gap, "draws": draws, "deltas": np.asarray(deltas, dtype=np.float64),
-            "n_tokens": n_tokens}
+
+def additivity_probe(model, tokenizer, input_ids, attention_mask, k_values, n_triples,
+                     seed, batch_draws=8, baseline_kind=BASELINE_DEFAULT):
+    """Blank two disjoint size-k subsets separately and jointly, per k.
+
+    If token effects were additive, delta(S1 ∪ S2) = delta(S1) + delta(S2);
+    the residual measures interaction at scale k. The singles double as the
+    delta-magnitude-versus-k measurement. Sizes with 2k > T are skipped, since
+    two disjoint subsets no longer fit.
+    """
+    assert n_triples > 0 and batch_draws > 0 and k_values
+    embeds, attention_mask, filler, id1, id2 = _blank_setup(
+        model, tokenizer, input_ids, attention_mask, baseline_kind)
+    n_tokens = embeds.shape[1]
+    rng = np.random.default_rng(seed)
+
+    records = []
+    for k in k_values:
+        if 2 * k > n_tokens:
+            continue
+        triples = []
+        for _ in range(n_triples):
+            both = rng.choice(n_tokens, size=2 * k, replace=False)
+            triples.append((both[:k], both[k:]))
+        draws = [s for a, b in triples for s in (a, b, np.concatenate([a, b]))]
+        gap, deltas = _masked_deltas(model, embeds, attention_mask, draws, filler,
+                                     id1, id2, batch_draws)
+        for i, (a, b) in enumerate(triples):
+            d1, d2, d12 = deltas[3 * i:3 * i + 3]
+            records.append({"k": k, "triple": i, "delta_a": d1, "delta_b": d2,
+                            "delta_union": d12, "positions_a": a.tolist(),
+                            "positions_b": b.tolist(), "gap": gap})
+    return {"records": records, "n_tokens": n_tokens}
 
 
 def occlusion_rows(model, tokenizer, df, c, span_size, batch_spans=8,
@@ -188,6 +233,22 @@ def random_mask_rows(model, tokenizer, df, c, n_draws, mask_size, seed, batch_dr
             "draw": range(len(out["deltas"])),
             "masked_positions": [d.tolist() for d in out["draws"]],
             "delta": out["deltas"], "gap": out["gap"], "n_tokens": out["n_tokens"]})
+
+
+def additivity_rows(model, tokenizer, df, c, k_values, n_triples, seed, batch_draws=8,
+                    baseline_kind=BASELINE_DEFAULT):
+    """Yield one long-format table of additivity triples per prompt."""
+    for _, row in df.iterrows():
+        meta = token_manifold_record.prompt_token_meta(row, tokenizer, c)
+        enc = tokenizer(meta["prompt"], return_tensors="pt")
+        out = additivity_probe(model, tokenizer, enc["input_ids"], enc["attention_mask"],
+                               k_values, n_triples, seed, batch_draws, baseline_kind)
+        frame = pd.DataFrame(out["records"])
+        frame.insert(0, "pair_uid", row["pair_uid"])
+        frame.insert(1, "item", row["item"])
+        frame.insert(2, "order", int(row["order"]))
+        frame["n_tokens"] = out["n_tokens"]
+        yield frame
 
 
 def write_occlusion_parts(frames, out_dir, chunk_prompts):
@@ -355,6 +416,12 @@ def build_parser(c):
     parser.add_argument("--mask-size", type=int, default=32,
                         help="tokens blanked per draw")
     parser.add_argument("--mask-seed", type=int, default=0)
+    parser.add_argument("--additivity-ks", default=None,
+                        help="comma-separated subset sizes; for each, blank two disjoint "
+                             "subsets separately and jointly to measure interaction at that "
+                             "scale")
+    parser.add_argument("--additivity-triples", type=int, default=64,
+                        help="disjoint-pair draws per subset size")
     parser.add_argument("--quadrature", default=QUADRATURE_DEFAULT,
                         choices=("gauss", "midpoint"),
                         help="how the path integral is sampled")
@@ -401,6 +468,22 @@ def main():
                                        args.step_batch, args.baseline,
                                        args.quadrature), args.out)
         return
+    if args.additivity_ks:
+        k_values = [int(k) for k in args.additivity_ks.split(",")]
+        done = completed_prompts(args.out) if pathlib.Path(args.out).exists() else set()
+        if done:
+            keep = [(str(u), int(o)) not in done for u, o in zip(df["pair_uid"], df["order"])]
+            print(f"resuming: {len(done)} done, {sum(keep)} to go", flush=True)
+            df = df[keep]
+        if df.empty:
+            print("nothing left to probe", flush=True)
+            return
+        write_occlusion_parts(additivity_rows(model, tokenizer, df, c, k_values,
+                                              args.additivity_triples, args.mask_seed,
+                                              args.batch_spans, args.baseline),
+                              args.out, args.chunk_prompts)
+        return
+
     if args.mask_draws:
         done = completed_prompts(args.out) if pathlib.Path(args.out).exists() else set()
         if done:
