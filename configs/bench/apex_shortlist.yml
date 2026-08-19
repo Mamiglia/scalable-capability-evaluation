@@ -1,0 +1,4 @@
+name: apex_shortlist
+task: tasks/apex.py@apex
+task_args:
+  dataset: MathArena/apex-shortlist
