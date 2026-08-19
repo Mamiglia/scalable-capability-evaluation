@@ -1,0 +1,21 @@
+# Humanity's Last Exam, whole static set (cais/hle, pinned revision).
+#
+# include_multi_modal: false — the 342 image questions are dropped, leaving all 2158
+# text-only ones. Most models in the pair set have no vision input, and inspect fails a
+# task on the first sample error, so an image question would abort the whole run for
+# them rather than just scoring zero.
+#
+# graders must stay a single role: upstream defaults to [grader, grader_2], and two
+# scorers make judge.util.extract_score refuse every sample. The "grader" role resolves
+# to openrouter/google/gemma-4-31b-it via inspect_evals' run_configs/default.yaml.
+name: hle
+task: inspect_evals/hle
+task_args:
+  include_multi_modal: false
+  only_hle_verified_gold: false
+  rolling: false
+  judge_prompt: original
+  max_grader_attempts: 3
+  graders: grader
+  category: null
+  subject: null

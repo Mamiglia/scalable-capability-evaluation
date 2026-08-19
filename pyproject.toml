@@ -5,14 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    # inspect_evals[math] extra: without it the sympy scorer silently marks everything wrong
+    "antlr4-python3-runtime~=4.11.0",
     "draccus>=0.11.6",
     "ijson>=3.5.1",
     "inspect-ai>=0.3.249",
-    "inspect-evals @ git+https://github.com/Mamiglia/inspect_evals.git@core-bench-fix-v2",
+    "inspect-evals @ git+https://github.com/UKGovernmentBEIS/inspect_evals.git@main",
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
     "numpyro>=0.15",
-    "openai>=2.49.0",
+    "openai>=3.1.0",   # inspect-ai's OpenRouter provider requires it
     "pandas>=3.0.5",
     "pyarrow>=25.0.0",
     "pytest>=9.1.1",
