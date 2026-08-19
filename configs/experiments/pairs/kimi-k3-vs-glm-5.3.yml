@@ -1,0 +1,3 @@
+name: kimi-k3-vs-glm-5.3
+major: !include ../../models/moonshotai/kimi-k3.yml
+minor: !include ../../models/zai/glm-5.3.yml

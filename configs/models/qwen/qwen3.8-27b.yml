@@ -1,0 +1,12 @@
+# Quantization: Unquantized BF16 (AkashML) - the only bf16 endpoint; the rest serve fp8.
+name: Qwen/Qwen3.8-27B
+slug: openrouter/qwen/qwen3.8-27b
+release_date: '2026-08-14'
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: true
+model_args:
+  provider:
+    only: [akashml/bf16]
+    allow_fallbacks: false

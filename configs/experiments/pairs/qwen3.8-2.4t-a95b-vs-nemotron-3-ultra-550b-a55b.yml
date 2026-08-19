@@ -1,0 +1,3 @@
+name: qwen3.8-2.4t-a95b-vs-nemotron-3-ultra-550b-a55b
+major: !include ../../models/qwen/qwen3.8-2.4t-a95b.yml
+minor: !include ../../models/nvidia/nemotron-3-ultra-550b-a55b.yml

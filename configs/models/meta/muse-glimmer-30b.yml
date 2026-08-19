@@ -1,0 +1,12 @@
+# Quantization: Unquantized BF16 (Parasail) - DeepInfra also serves bf16 but caps output at 16k.
+name: meta-models/Muse-Glimmer-30B
+slug: openrouter/meta/muse-glimmer-30b
+release_date: '2026-08-10'
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: true
+model_args:
+  provider:
+    only: [parasail/bf16]
+    allow_fallbacks: false

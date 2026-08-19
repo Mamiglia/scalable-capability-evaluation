@@ -1,0 +1,12 @@
+# Quantization: FP8 (Venice) - the only non-fp4 declared endpoint; DeepInfra/BaseTen serve fp4.
+name: nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16
+slug: openrouter/nvidia/nemotron-3-ultra-550b-a55b
+release_date: '2026-06-04'
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: true
+model_args:
+  provider:
+    only: [venice/fp8]
+    allow_fallbacks: false

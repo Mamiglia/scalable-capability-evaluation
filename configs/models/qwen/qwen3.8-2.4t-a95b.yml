@@ -1,0 +1,12 @@
+# Quantization: FP8 (SiliconFlow) - no bf16 endpoint exists; the rest are fp4/nvfp4 or undeclared.
+name: Qwen/Qwen3.8-2.4T-A95B
+slug: openrouter/qwen/qwen3.8-2.4t-a95b
+release_date: '2026-08-12'
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: true
+model_args:
+  provider:
+    only: [siliconflow/fp8]
+    allow_fallbacks: false

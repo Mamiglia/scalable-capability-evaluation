@@ -1,0 +1,3 @@
+name: gemini-3.5-flash-vs-kimi-k2.6
+major: !include ../../models/google/gemini-3.5-flash.yml
+minor: !include ../../models/moonshotai/kimi-k2.6.yml

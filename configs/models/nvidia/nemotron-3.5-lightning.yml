@@ -1,0 +1,12 @@
+# Quantization: Unquantized BF16 (DeepInfra)
+name: nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16
+slug: openrouter/nvidia/nemotron-3.5-lightning
+release_date: '2026-08-11'
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: true
+model_args:
+  provider:
+    only: [deepinfra/bf16]
+    allow_fallbacks: false

@@ -1,0 +1,3 @@
+name: nemotron-3.5-lightning-vs-qwen3.5-4b
+major: !include ../../models/nvidia/nemotron-3.5-lightning.yml
+minor: !include ../../models/qwen/qwen3.5-4b.yml

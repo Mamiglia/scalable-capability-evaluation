@@ -1,0 +1,12 @@
+# Quantization: FP8 (Z.AI) - single endpoint. Closed weights: Artificial Analysis lists
+# GLM-5.3 as API-only, unlike every other model in the pair set.
+name: z-ai/glm-5.3
+release_date: '2026-08-18'
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: true
+model_args:
+  provider:
+    only: [z-ai/fp8]
+    allow_fallbacks: false

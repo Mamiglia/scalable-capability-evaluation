@@ -1,0 +1,3 @@
+name: nemotron-3.5-lightning-vs-deepseek-r1-0528
+major: !include ../../models/nvidia/nemotron-3.5-lightning.yml
+minor: !include ../../models/deepseek/deepseek-r1-0528.yml
