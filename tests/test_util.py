@@ -131,6 +131,21 @@ class TestExtractTranscript:
         assert "[Tool]: [Tool Output (solve)]: Solved" in res
         assert "[Assistant]: Done" in res
 
+    def test_extract_transcript_keeps_later_user_turns(self):
+        """Only the initial user prompt is dropped; scaffold user feedback stays."""
+        sample = SimpleNamespace(
+            messages=[
+                ChatMessageUser(content="Problem statement"),
+                ChatMessageAssistant(content="First try"),
+                ChatMessageUser(content="Incorrect, try again"),
+                ChatMessageAssistant(content="Second try"),
+            ]
+        )
+        res = extract_transcript(sample)
+        assert "Problem statement" not in res
+        assert "[User]: Incorrect, try again" in res
+        assert "[Assistant]: Second try" in res
+
     def test_extract_transcript_empty_sample(self):
         """Test transcript extraction when sample has no messages or output."""
         sample = SimpleNamespace()

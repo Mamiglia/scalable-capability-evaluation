@@ -117,8 +117,17 @@ def extract_transcript(sample: Sample, include_reasoning: bool = True) -> str:
     """
     messages = getattr(sample, "messages", None)
     if messages:
-        # Filter out system and initial user prompt
-        turns = [m for m in messages if getattr(m, "role", None) not in ("system", "user")]
+        # Filter out system messages and the initial user prompt; later user turns are
+        # scaffold feedback (retry prompts etc.) and stay in the transcript.
+        turns, seen_user = [], False
+        for m in messages:
+            role = getattr(m, "role", None)
+            if role == "system":
+                continue
+            if role == "user" and not seen_user:
+                seen_user = True
+                continue
+            turns.append(m)
         if turns:
             return format_message(turns, include_reasoning=include_reasoning)
         return format_message(messages, include_reasoning=include_reasoning)
