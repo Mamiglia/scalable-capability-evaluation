@@ -13,6 +13,8 @@ Optional knobs:
                      transcripts cut to that fraction of the shorter one
                      (logs under trunc-<pct>/)
   include_reasoning: judges see candidates' reasoning (protocol default: false)
+  min_correct:       drop comparisons where either model has fewer than this many
+                     correct samples (default 0: keep all)
 
 Each comparison runs in two phases: first the first phase1_items items of
 every comparison (so every analysis has low-n data early), then the rest.
@@ -28,6 +30,7 @@ from pathlib import Path
 
 import yaml
 from inspect_ai import eval_set
+from inspect_ai.log import read_eval_log
 
 from configs.paths import is_successful_eval
 from judge.task import judge_task
@@ -38,6 +41,13 @@ DEFAULT_PHASE1_ITEMS = 20
 def has_success_log(directory: Path) -> bool:
     """Whether this phase already produced a finished log, so it can be skipped."""
     return any(is_successful_eval(path) for path in directory.glob("*.eval"))
+
+
+def correct_count(path: str | Path) -> int:
+    """Number of correct samples in an eval log, from the header's accuracy."""
+    results = read_eval_log(str(path), header_only=True).results
+    accuracy = results.scores[0].metrics["accuracy"].value
+    return round(accuracy * results.completed_samples)
 
 
 def main() -> int:
@@ -58,6 +68,15 @@ def main() -> int:
     include_reasoning = bool(cfg.get("include_reasoning", False))
     # Per-judge OpenRouter routing (endpoint pins); keyed by judge slug.
     judge_model_args = cfg.get("judge_model_args") or {}
+    # Models with fewer correct samples than this don't qualify for judging.
+    min_correct = cfg.get("min_correct") or 0
+    qualified = set(paths)
+    if min_correct:
+        counts = {model: correct_count(path) for model, path in paths.items()}
+        for model in sorted(paths):
+            if counts[model] < min_correct:
+                qualified.discard(model)
+                print(f"DROP {model}: {counts[model]} correct < min_correct={min_correct}")
 
     tasks = {}
 
@@ -81,6 +100,8 @@ def main() -> int:
         for frac in fracs:
             root = log_root if frac is None else log_root / f"trunc-{int(frac * 100)}"
             for judge, major, minor in cfg["comparisons"]:
+                if major not in qualified or minor not in qualified:
+                    continue
                 judge_short = judge.split("/")[-1]
                 pair_dir = root / judge_short / f"{major}-vs-{minor}"
                 if frac is None and has_success_log(pair_dir):
