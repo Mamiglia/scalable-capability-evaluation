@@ -1,10 +1,12 @@
 # Quantization: FP8 Fallback (SiliconFlow)
+# pin: was order: SiliconFlow (preference); now binding. fp8 at 163k.
 name: deepseek-ai/DeepSeek-R1-0528
 slug: openrouter/deepseek/deepseek-r1-0528
 release_date: '2025-05-28'
 model_args:
   provider:
-    order:
-    - SiliconFlow
-    quantizations:
-    - fp8
+    only:
+    - siliconflow/fp8
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 163840

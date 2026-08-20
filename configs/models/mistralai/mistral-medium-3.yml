@@ -1,8 +1,12 @@
 # Quantization: Proprietary Direct (Mistral)
+# pin: first-party; no declared output cap, so bounded by context.
 name: mistralai/mistral-medium-3
 slug: openrouter/mistralai/mistral-medium-3
 release_date: '2025-05-07'
 model_args:
   provider:
-    order:
-    - Mistral
+    only:
+    - mistral
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 131072

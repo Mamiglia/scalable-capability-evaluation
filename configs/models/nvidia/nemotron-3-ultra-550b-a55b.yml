@@ -1,4 +1,7 @@
-# Quantization: FP8 (Venice) - the only non-fp4 declared endpoint; DeepInfra/BaseTen serve fp4.
+# pin: Together, NVFP4 (stated in Together's serverless docs; OpenRouter reports 'unknown').
+# Was venice/fp8, which hard-caps at 16384 whatever max_tokens says, truncating ~25% of
+# GPQA. Every endpoint with real headroom is 4-bit, so this trades fp8 for completeness.
+# max_tokens 500000 not 512288: the context window is shared with the prompt.
 name: nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16
 slug: openrouter/nvidia/nemotron-3-ultra-550b-a55b
 release_date: '2026-06-04'
@@ -6,7 +9,9 @@ generate_args:
   extra_body:
     reasoning:
       enabled: true
+  max_tokens: 500000
 model_args:
   provider:
-    only: [venice/fp8]
+    only:
+    - together
     allow_fallbacks: false

@@ -1,7 +1,11 @@
 # Quantization: Proprietary Direct (Novita)
+# pin: sole endpoint; Novita does not declare a quantization for this model.
 name: inclusionai/ling-2.6-flash
 release_date: '2026-04-28'
 model_args:
   provider:
-    order:
-    - Novita
+    only:
+    - novita
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 32768

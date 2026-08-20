@@ -3,7 +3,12 @@
 name: anthropic/claude-sonnet-4.5
 release_date: '2025-09-29'
 model_args:
-  provider: {only: [anthropic], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  provider:
+    only:
+    - anthropic
+    allow_fallbacks: false
 generate_args:
   extra_body:
-    reasoning: {enabled: true}
+    reasoning:
+      enabled: true
+  max_tokens: 64000

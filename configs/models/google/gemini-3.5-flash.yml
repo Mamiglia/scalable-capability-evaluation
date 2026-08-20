@@ -3,4 +3,10 @@ name: google/gemini-3.5-flash
 slug: openrouter/google/gemini-3.5-flash
 release_date: '2026-05-19'
 model_args:
-  provider: {}
+  provider:
+    only:
+    - google-vertex
+    - google-ai-studio
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 65536

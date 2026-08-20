@@ -6,7 +6,9 @@ generate_args:
   extra_body:
     reasoning:
       enabled: true
+  max_tokens: 131072
 model_args:
   provider:
-    only: [parasail/bf16]
+    only:
+    - parasail/bf16
     allow_fallbacks: false

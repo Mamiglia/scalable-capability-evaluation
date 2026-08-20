@@ -1,9 +1,11 @@
 # Quantization: Unquantized BF16 (Crusoe)
+# pin: bf16 with no declared cap; bounded by context.
 name: moonshotai/kimi-k2.6
 release_date: '2026-01-20'
 model_args:
   provider:
-    order:
-    - Crusoe
-    quantizations:
-    - bf16
+    only:
+    - crusoe/bf16
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 262144

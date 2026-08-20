@@ -1,10 +1,12 @@
 # Quantization: FP8 Fallback (GMICloud)
+# pin: was order: GMICloud (preference); now binding.
 name: zai-org/GLM-5.2
 slug: openrouter/z-ai/glm-5.2
 release_date: 2026-06-13/2026-06-16
 model_args:
   provider:
-    order:
-    - GMICloud
-    quantizations:
-    - fp8
+    only:
+    - gmicloud/fp8
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 262144

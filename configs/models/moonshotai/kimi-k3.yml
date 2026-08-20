@@ -1,10 +1,11 @@
-# Quantization: Unquantized BF16 (DeepInfra)
+# pin: Moonshot first-party, mxfp4, no declared output cap. Was deepinfra/bf16, whose 16384 cap truncated 87% of APEX and ~11% of GPQA; baseten/fp8 has the headroom but 429s persistently. No fp8-or-better endpoint with headroom is reachable for this model.
 name: moonshotai/Kimi-K3
 slug: openrouter/moonshotai/kimi-k3
 release_date: '2026-07-16'
 model_args:
   provider:
-    order:
-    - DeepInfra
-    quantizations:
-    - bf16
+    only:
+    - moonshotai
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 262144

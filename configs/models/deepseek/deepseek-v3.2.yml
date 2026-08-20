@@ -1,4 +1,5 @@
 # Quantization: FP8 Fallback (StreamLake)
+# pin: was order: StreamLake, fp8 but capped at 64k; SiliconFlow is fp8 at 163k.
 name: deepseek-ai/DeepSeek-V3.2
 slug: openrouter/deepseek/deepseek-v3.2
 release_date: '2025-12-01'
@@ -6,9 +7,9 @@ generate_args:
   extra_body:
     reasoning:
       enabled: true
+  max_tokens: 163840
 model_args:
   provider:
-    order:
-    - StreamLake
-    quantizations:
-    - fp8
+    only:
+    - siliconflow/fp8
+    allow_fallbacks: false

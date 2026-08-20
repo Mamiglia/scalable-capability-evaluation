@@ -1,10 +1,11 @@
 # atlas-cloud/fp8 is the only fp8 endpoint (Z.AI first-party serves fp4).
+# pin: was order: [NovitaAI] + quantizations: [bf16]; the bf16 filter is what bound it to Novita, the name never matched a provider slug.
 name: z-ai/glm-4.6
 release_date: '2025-09-30'
-
 model_args:
   provider:
-    order:
-    - NovitaAI
-    quantizations:
-    - bf16
+    only:
+    - novita/bf16
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 131072
