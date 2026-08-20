@@ -1,6 +1,10 @@
 from typing import Any
 from inspect_ai.model import ChatMessage
 from inspect_ai.dataset import Sample
+from inspect_ai.scorer import value_to_float
+
+# CORRECT/"C" -> 1, INCORRECT/"I" -> 0, numbers -> themselves, unparseable -> 0.
+_score_to_float = value_to_float()
 
 # Content the judge cannot read: shown as a marker so the transcript stays coherent.
 PLACEHOLDER_BLOCKS = {
@@ -139,6 +143,18 @@ def extract_transcript(sample: Sample, include_reasoning: bool = True) -> str:
     return ""
 
 
+def _is_correct(value: Any) -> bool:
+    """Correct if the scorer's value is 1.0 (full score)
+
+    Covers every scorer we collect: choice/match store the string "C"; SWE-bench stores a
+    float 1.0/0.0 from its in-container test run; HLE nests the label under "score" in a
+    dict alongside a confidence.
+    """
+    if isinstance(value, dict):
+        value = value.get("score", 0)
+    return _score_to_float(value) >= 1.0
+
+
 def extract_score(sample: Sample) -> bool:
     """
     Whether the sample was scored correct.
@@ -152,4 +168,4 @@ def extract_score(sample: Sample) -> bool:
             f"sample {getattr(sample, 'id', '?')} has several scores ({sorted(scores)}); "
             f"cannot tell which one decides correctness"
         )
-    return any(score.value == "C" for score in scores.values())
+    return any(_is_correct(score.value) for score in scores.values())

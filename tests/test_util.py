@@ -165,6 +165,20 @@ class TestExtractScore:
         sample = SimpleNamespace(scores={"scorer": Score(value="I")})
         assert extract_score(sample) is False
 
+    def test_extract_score_swe_bench_float(self):
+        """SWE-bench's test-run scorer stores a float 1.0/0.0, not 'C'/'I'."""
+        assert extract_score(SimpleNamespace(scores={"s": Score(value=1.0)})) is True
+        assert extract_score(SimpleNamespace(scores={"s": Score(value=0.0)})) is False
+
+    def test_extract_score_hle_dict(self):
+        """HLE nests the label under 'score' alongside a confidence."""
+        assert extract_score(SimpleNamespace(scores={"s": Score(value={"score": "C", "confidence": 80})})) is True
+        assert extract_score(SimpleNamespace(scores={"s": Score(value={"score": "I", "confidence": 80})})) is False
+
+    def test_extract_score_no_scores(self):
+        """A sample with no scores is not correct."""
+        assert extract_score(SimpleNamespace(scores={})) is False
+
 
 class TestStripThink:
     """Inline DeepSeek <think> CoT must be dropped when reasoning is excluded."""
