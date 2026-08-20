@@ -1,0 +1,10 @@
+# SWE-bench Verified mini (MariusHobbhahn/swe-bench-verified-mini) — agentic: a react
+# agent with bash_session/text_editor/python tools, message_limit 30, tool_timeout 210s.
+#
+# Default docker sandbox: each instance's environment (repo at base_commit + built deps)
+# comes from its image ghcr.io/epoch-research/swe-bench.eval.x86_64.{id}. Run on a
+# docker-capable x86 host (the 'earth' desktop) — NOT a RunPod pod, which can't run
+# containers. Env needs swebench>=3.0.15,<4 (latest 5.x breaks the grader import); the
+# collect run supplies it with `uv run --with 'swebench>=3.0.15,<4'`.
+name: swe_bench_mini
+task: inspect_evals/swe_bench_verified_mini
