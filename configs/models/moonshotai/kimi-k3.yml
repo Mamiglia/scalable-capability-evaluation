@@ -1,3 +1,7 @@
+# deliberate: pinned to moonshotai/mxfp4, a 4-bit endpoint, though deepinfra/bf16 and
+# baseten/fp8 exist. Their output caps are 16384 and 262144 against the 1032192 this
+# config needs, so higher precision costs most of the generation length. k3 numbers are
+# measured at 4-bit; say so when reporting them.
 # pin: Moonshot first-party, mxfp4, no declared output cap. Was deepinfra/bf16, whose 16384 cap truncated 87% of APEX and ~11% of GPQA; baseten/fp8 has the headroom but 429s persistently. No fp8-or-better endpoint with headroom is reachable for this model.
 name: moonshotai/Kimi-K3
 slug: openrouter/moonshotai/kimi-k3
@@ -8,4 +12,4 @@ model_args:
     - moonshotai
     allow_fallbacks: false
 generate_args:
-  max_tokens: 262144
+  max_tokens: 1032192

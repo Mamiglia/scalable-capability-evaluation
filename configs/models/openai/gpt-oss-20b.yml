@@ -4,7 +4,8 @@ slug: openrouter/openai/gpt-oss-20b
 release_date: '2025-08-05'
 model_args:
   provider:
-    order:
-    - DeepInfra
+    only:
+    - deepinfra/bf16
+    allow_fallbacks: false
     quantizations:
     - bf16

@@ -4,7 +4,8 @@ slug: openrouter/moonshotai/kimi-k2-thinking
 release_date: '2025-11-06'
 model_args:
   provider:
-    order:
-    - Novita
+    only:
+    - novita/bf16
+    allow_fallbacks: false
     quantizations:
     - bf16

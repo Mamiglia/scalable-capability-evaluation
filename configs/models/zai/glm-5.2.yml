@@ -9,4 +9,4 @@ model_args:
     - gmicloud/fp8
     allow_fallbacks: false
 generate_args:
-  max_tokens: 262144
+  max_tokens: 1032192

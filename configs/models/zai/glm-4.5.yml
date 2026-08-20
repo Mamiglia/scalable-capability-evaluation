@@ -4,7 +4,8 @@ slug: openrouter/z-ai/glm-4.5
 release_date: '2025-07-28'
 model_args:
   provider:
-    order:
-    - Z.AI
+    only:
+    - z-ai/fp8
+    allow_fallbacks: false
     quantizations:
     - fp8

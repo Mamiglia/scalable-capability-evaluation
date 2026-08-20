@@ -4,7 +4,8 @@ slug: openrouter/deepseek/deepseek-v4-flash-0731
 release_date: '2026-07-31'
 model_args:
   provider:
-    order:
-    - Morph
+    only:
+    - morph/bf16
+    allow_fallbacks: false
     quantizations:
     - bf16

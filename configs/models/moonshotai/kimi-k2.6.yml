@@ -8,4 +8,4 @@ model_args:
     - crusoe/bf16
     allow_fallbacks: false
 generate_args:
-  max_tokens: 262144
+  max_tokens: 245760

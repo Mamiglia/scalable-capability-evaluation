@@ -11,7 +11,7 @@ generate_args:
   extra_body:
     min_p: 0.0
     repetition_penalty: 1.0
-  max_tokens: 262144
+  max_tokens: 245760
 runpod:
   use: false
   model: Qwen/Qwen3.5-9B

@@ -4,7 +4,8 @@ slug: openrouter/moonshotai/kimi-k2
 release_date: '2025-07-11'
 model_args:
   provider:
-    order:
-    - Novita
+    only:
+    - novita/fp8
+    allow_fallbacks: false
     quantizations:
     - fp8

@@ -9,4 +9,4 @@ model_args:
     - siliconflow/fp8
     allow_fallbacks: false
 generate_args:
-  max_tokens: 163840
+  max_tokens: 147456

@@ -8,7 +8,8 @@ generate_args:
       enabled: true
 model_args:
   provider:
-    order:
-    - NextBit
+    only:
+    - nextbit/bf16
+    allow_fallbacks: false
     quantizations:
     - bf16

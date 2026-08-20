@@ -7,7 +7,7 @@ generate_args:
   extra_body:
     reasoning:
       enabled: true
-  max_tokens: 262144
+  max_tokens: 245760
 model_args:
   provider:
     only:

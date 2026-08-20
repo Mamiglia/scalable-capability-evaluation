@@ -4,7 +4,8 @@ slug: openrouter/nvidia/nemotron-3-super-120b-a12b
 release_date: '2026-03-11'
 model_args:
   provider:
-    order:
-    - DeepInfra
+    only:
+    - deepinfra/bf16
+    allow_fallbacks: false
     quantizations:
     - bf16
