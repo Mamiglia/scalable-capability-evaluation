@@ -1,4 +1,2 @@
 name: apex_2025
-task: tasks/apex.py@apex
-task_args:
-  dataset: MathArena/apex_2025
+task: matharena/apex_2025
