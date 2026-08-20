@@ -203,9 +203,11 @@ judge_model_args:
       order: [SiliconFlow]
       quantizations: [fp8]
   openrouter/deepseek/deepseek-v4-flash-0731:
+    # Morph (the only bf16 endpoint) returns empty/garbled completions on the long
+    # agentic CTF transcripts (~33% no-answer); DeepInfra fp8 judges them cleanly.
     provider:
-      order: [Morph]
-      quantizations: [bf16]
+      order: [DeepInfra]
+      quantizations: [fp8]
   openrouter/google/gemma-4-31b-it:
     provider:
       order: [OpenInference]
