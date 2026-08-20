@@ -1,0 +1,4 @@
+h0 control: {1: 0.054388558143256605, 3: 0.11424758690955128, 6: 0.11808138520629474}
+random rank-1 control: mean 0.0375 max 0.0606
+random rank-3 control: mean 0.0620 max 0.0823
+random rank-6 control: mean 0.0815 max 0.0974
