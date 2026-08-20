@@ -1,11 +1,9 @@
-# Quantization: Unquantized BF16 (Morph)
+# deliberate: pin to deepinfra as Morph seems to serve a broken version of the model
 name: deepseek-ai/DeepSeek-V4-Flash-0731
 slug: openrouter/deepseek/deepseek-v4-flash-0731
 release_date: '2026-07-31'
 model_args:
   provider:
     only:
-    - morph/bf16
+    - deepinfra/fp8
     allow_fallbacks: false
-    quantizations:
-    - bf16
