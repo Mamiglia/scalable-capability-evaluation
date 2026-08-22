@@ -19,8 +19,10 @@ runpod:
   ready_timeout: 1800
   # Agentic runs (SWE-bench) outlast the 12h default.
   terminate_after: 24h
+  # Streamed: the Runpod HTTP proxy drops responses that take over 120s (Cloudflare 524),
+  # and a long thinking turn on the 32B easily does.
   model_args:
-    stream: false
+    stream: true
   # Native context 40960, served unscaled: agentic runs must cap --max-tokens (8192) so
   # prompts have room, and long trajectories end at the context limit.
   vllm_args:
