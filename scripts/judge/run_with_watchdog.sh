@@ -14,7 +14,7 @@ LOG_ROOT="${2:-logs/gpqa-pilot-rd2}"
 STALL_MIN="${3:-12}"
 
 pending_count() {
-  uv run python scripts/judge/run_judge_pilot.py --config "$CONFIG" --dry-run 2>/dev/null \
+  uv run python scripts/judge/run_judging.py --config "$CONFIG" --dry-run 2>/dev/null \
     | grep -oE '^[0-9]+ phase-runs pending' | grep -oE '^[0-9]+' | head -1
 }
 
@@ -38,14 +38,15 @@ while :; do
   [ "$pending" -eq 0 ] && break
 
   started=$(date +%s)
-  uv run python scripts/judge/run_judge_pilot.py --config "$CONFIG" >/dev/null 2>&1 &
+  uv run python scripts/judge/run_judging.py --config "$CONFIG" >/dev/null 2>&1 &
   runner=$!
   while kill -0 "$runner" 2>/dev/null; do
     sleep 60
     if [ "$(progress_age_min "$started")" -ge "$STALL_MIN" ]; then
       echo "[watchdog] no progress in ${STALL_MIN}m — restarting runner"
       kill -9 "$runner" 2>/dev/null
-      pkill -9 -f run_judge_pilot 2>/dev/null
+      # Only this config's runner: several watchdogs may run side by side.
+      pkill -9 -f "run_judging.py --config $CONFIG" 2>/dev/null
       sleep 5
       break
     fi

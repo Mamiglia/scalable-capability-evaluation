@@ -15,6 +15,8 @@ Optional knobs:
   include_reasoning: judges see candidates' reasoning (protocol default: false)
   min_correct:       drop comparisons where either model has fewer than this many
                      correct samples (default 0: keep all)
+  max_connections:   concurrent judge requests (default 40; lower for a
+                     self-served pod)
 
 Each comparison runs in two phases: first the first phase1_items items of
 every comparison (so every analysis has low-n data early), then the rest.
@@ -30,24 +32,36 @@ from pathlib import Path
 
 import yaml
 from inspect_ai import eval_set
-from inspect_ai.log import read_eval_log
+from inspect_ai.log import read_eval_log, read_eval_log_samples
 
-from configs.paths import is_successful_eval
 from judge.task import judge_task
+from judge.util import extract_score
 
 DEFAULT_PHASE1_ITEMS = 20
+DEFAULT_MAX_CONNECTIONS = 40
 
 
 def has_success_log(directory: Path) -> bool:
-    """Whether this phase already produced a finished log, so it can be skipped."""
-    return any(is_successful_eval(path) for path in directory.glob("*.eval"))
+    """Whether this phase already produced a finished log, so it can be skipped.
+
+    Phase logs always carry a sample_id block, so configs.paths.is_successful_eval
+    (which rejects partial runs) would call every phase pending; the log status alone
+    decides here."""
+    for path in directory.glob("*.eval"):
+        try:
+            if read_eval_log(str(path), header_only=True).status == "success":
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def correct_count(path: str | Path) -> int:
-    """Number of correct samples in an eval log, from the header's accuracy."""
-    results = read_eval_log(str(path), header_only=True).results
-    accuracy = results.scores[0].metrics["accuracy"].value
-    return round(accuracy * results.completed_samples)
+    """Number of correct samples in an eval log, counted over its samples.
+
+    The header metrics are not reliable here: the scorer metric name varies by
+    benchmark, and a log that did not finish cleanly has no results at all."""
+    return sum(extract_score(s) for s in read_eval_log_samples(str(path), all_samples_required=False))
 
 
 def main() -> int:
@@ -68,6 +82,7 @@ def main() -> int:
     include_reasoning = bool(cfg.get("include_reasoning", False))
     # Per-judge OpenRouter routing (endpoint pins); keyed by judge slug.
     judge_model_args = cfg.get("judge_model_args") or {}
+    max_connections = cfg.get("max_connections") or DEFAULT_MAX_CONNECTIONS
     # Models with fewer correct samples than this don't qualify for judging.
     min_correct = cfg.get("min_correct") or 0
     qualified = set(paths)
@@ -111,6 +126,9 @@ def main() -> int:
                 except ValueError as e:
                     print(f"SKIP {judge_short} {major}-vs-{minor}: {e}")
                     continue
+                if task is None:  # no both-correct overlap
+                    print(f"SKIP {judge_short} {major}-vs-{minor}: no samples after filtering")
+                    continue
                 ids = [s.id for s in task.dataset]
                 split = 2 * phase1_items
                 block = ids[:split] if phase == 1 else ids[split:]
@@ -138,7 +156,7 @@ def main() -> int:
             log_dir=str(phase_dir),
             sample_id=block,
             epochs=epochs,
-            max_connections=40,
+            max_connections=max_connections,
         )
         if not success:
             failures.append(f"phase{phase} {judge_short} on {major}-vs-{minor}")
