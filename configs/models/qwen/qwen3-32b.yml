@@ -17,8 +17,12 @@ runpod:
   gpu_count: 1
   container_disk_in_gb: 80
   ready_timeout: 1800
+  # Agentic runs (SWE-bench) outlast the 12h default.
+  terminate_after: 24h
   model_args:
     stream: false
+  # Native context 40960, served unscaled: agentic runs must cap --max-tokens (8192) so
+  # prompts have room, and long trajectories end at the context limit.
   vllm_args:
     - --dtype
     - bfloat16
