@@ -34,7 +34,7 @@ import yaml
 from inspect_ai import eval_set
 from inspect_ai.log import read_eval_log, read_eval_log_samples
 
-from judge.task import judge_task
+from judge.task import DEFAULT_SYSTEM_PROMPT, judge_task
 from judge.util import extract_score
 
 DEFAULT_PHASE1_ITEMS = 20
@@ -71,6 +71,11 @@ def main() -> int:
     parser.add_argument("--phase", type=int, choices=(1, 2),
                         help="run only this phase; default runs both")
     args = parser.parse_args()
+
+    # inspect's system_message() falls back to the path string itself when the file is
+    # missing, so the judges would silently run with no instructions.
+    if not Path(DEFAULT_SYSTEM_PROMPT).is_file():
+        raise SystemExit(f"system prompt file not found: {DEFAULT_SYSTEM_PROMPT} (run from the repo root)")
 
     cfg = yaml.safe_load(args.config.read_text())
     paths = cfg["transcripts"]
