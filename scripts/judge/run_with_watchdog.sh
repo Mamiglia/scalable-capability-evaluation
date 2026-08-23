@@ -38,7 +38,9 @@ while :; do
   [ "$pending" -eq 0 ] && break
 
   started=$(date +%s)
-  uv run python scripts/judge/run_judging.py --config "$CONFIG" >/dev/null 2>&1 &
+  mkdir -p "$LOG_ROOT"
+  # Runner output kept: request errors (rate limits, exhausted credit) only show up here.
+  uv run python scripts/judge/run_judging.py --config "$CONFIG" >>"$LOG_ROOT/runner.log" 2>&1 &
   runner=$!
   while kill -0 "$runner" 2>/dev/null; do
     sleep 60
