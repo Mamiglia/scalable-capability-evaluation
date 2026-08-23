@@ -173,3 +173,5 @@ judge_model_args:
       - SiliconFlow
       quantizations:
       - fp8
+      allow_fallbacks: false
+max_connections: 16
