@@ -1,5 +1,18 @@
-# Quantization: Unquantized BF16 (DeepInfra)
-# pin: was order: DeepInfra bf16 at 81920; Parasail is bf16 at 262k.
+# Quantization: FP8 (Together) — NOT bf16, unlike the rest of the pair set.
+# OpenRouter reports `unknown` for the together endpoint because Together declines to
+# declare precision there, but Together's own docs list Qwen/Qwen3.5-9B as FP8 at 262144
+# context (docs.together.ai/docs/serverless-models, checked 2026-08-24).
+# Both bf16 endpoints are broken for our purposes: parasail/bf16 returns responses whose
+# whole output is a reasoning part with empty text and no choices (0.000 on aime, plus
+# 429s), and deepinfra/bf16 does the same — a 2026-08-24 re-collection at
+# --max-connections 16 came back ~65% empty on gpqa and 94-100% empty on aime, with ~4
+# calls per sample and most never returning a provider at all. Together served 33/198 and
+# 30/198 of the healthy 2026-08-11 gpqa samples at ~9.4k median output.
+# The tag is the bare slug: `together/fp8` would not match, since OpenRouter does not know
+# the quantization. Neither Together nor OpenRouter publishes a max output cap for this
+# endpoint, so 81920 was checked directly on 2026-08-24: a live request at that cap came
+# back stop_reason=stop with non-empty text, so the endpoint accepts it.
+# See data/collection_runs.md, 2026-08-24.
 name: qwen/qwen3.5-9b
 slug: openrouter/qwen/qwen3.5-9b
 release_date: '2026-02-10'
@@ -11,7 +24,7 @@ generate_args:
   extra_body:
     min_p: 0.0
     repetition_penalty: 1.0
-  max_tokens: 245760
+  max_tokens: 81920
 runpod:
   use: false
   model: Qwen/Qwen3.5-9B
@@ -36,5 +49,5 @@ runpod:
 model_args:
   provider:
     only:
-    - parasail/bf16
+    - together
     allow_fallbacks: false
