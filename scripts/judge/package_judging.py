@@ -4,7 +4,10 @@ Source: <log_root>/epoch-<e>/<judge>/<major>-vs-<minor>/phase-{1,2}/*.eval (late
 successful log per phase). Output: <out>/pilot/<bench>/<judge>/<pair>/
 <ts>_<major>|<minor>-<e>_<eval_id>.eval with the two phases' samples concatenated.
 
-Usage: uv run python scripts/judge/package_judging.py <log_root> <bench> <out_dir>
+With <rejudge_root> (same layout, from rejudge_unanswered.py) a re-judged sample that
+parsed replaces the original unanswered one.
+
+Usage: uv run python scripts/judge/package_judging.py <log_root> <bench> <out_dir> [<rejudge_root>]
 """
 
 import sys
@@ -24,7 +27,8 @@ def latest_success(phase_dir: Path) -> Path | None:
 
 def main() -> int:
     log_root, bench, out_root = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
-    packaged, n_samples, skipped = 0, 0, []
+    rejudge_root = Path(sys.argv[4]) if len(sys.argv) > 4 else None
+    packaged, n_samples, overlaid, skipped = 0, 0, 0, []
     for epoch_dir in sorted(log_root.glob("epoch-*")):
         epoch = epoch_dir.name.split("-")[-1]
         for judge_dir in sorted(p for p in epoch_dir.iterdir() if p.is_dir()):
@@ -40,6 +44,17 @@ def main() -> int:
                     samples += list(read_eval_log(str(phase2)).samples or [])
                 ids = [(s.id, s.epoch) for s in samples]
                 assert len(ids) == len(set(ids)), f"duplicate samples in {pair_dir}"
+                if rejudge_root is not None:
+                    redone = {}
+                    for phase in ("phase-1", "phase-2"):
+                        path = latest_success(rejudge_root / epoch_dir.name / judge_dir.name / pair_dir.name / phase)
+                        for s in (read_eval_log(str(path)).samples or []) if path else []:
+                            if any(sc.answer is not None for sc in (s.scores or {}).values()):
+                                redone[(s.id, s.epoch)] = s
+                    for i, s in enumerate(samples):
+                        if (s.id, s.epoch) in redone and all(sc.answer is None for sc in (s.scores or {}).values()):
+                            samples[i] = redone[(s.id, s.epoch)]
+                            overlaid += 1
                 log.samples = samples
                 log.eval.config.sample_id = None
                 if log.results is not None:
@@ -52,7 +67,7 @@ def main() -> int:
                 assert len(read_eval_log(str(out)).samples) == len(samples), f"readback mismatch for {out}"
                 packaged += 1
                 n_samples += len(samples)
-    print(f"packaged {packaged} logs, {n_samples} samples; {len(skipped)} skipped")
+    print(f"packaged {packaged} logs, {n_samples} samples, {overlaid} re-judged verdicts overlaid; {len(skipped)} skipped")
     for line in skipped:
         print("  SKIP", line)
     return 0

@@ -35,7 +35,6 @@ from inspect_ai import eval_set
 from inspect_ai.log import read_eval_log
 
 from configs import ModelConfig
-from configs.paths import is_successful_eval
 from judge.task import judge_task
 from model import Model
 
@@ -57,8 +56,18 @@ def judge_config(slug: str) -> ModelConfig:
 
 
 def has_success_log(directory: Path) -> bool:
-    """Whether this phase already produced a finished log, so it can be skipped."""
-    return any(is_successful_eval(path) for path in directory.glob("*.eval"))
+    """Whether this phase already produced a finished log, so it can be skipped.
+
+    Phase logs always carry a sample_id block, so configs.paths.is_successful_eval
+    (which rejects partial runs) would call every phase pending; the log status alone
+    decides here."""
+    for path in directory.glob("*.eval"):
+        try:
+            if read_eval_log(str(path), header_only=True).status == "success":
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def correct_count(path: str | Path) -> int:
