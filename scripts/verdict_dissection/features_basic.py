@@ -90,7 +90,7 @@ def _term_pattern(term):
 
 def _count(terms, text):
     """Non-overlapping hits, longest term first so "wait" inside "oh wait" counts once."""
-    n = len(STANDALONE_I.findall(text)) if "I" in terms else 0
+    n = len(STANDALONE_I.findall(text)) if "I" in terms else 0      # "I" has its own case-sensitive rule
     others = sorted((t for t in terms if t != "I"), key=len, reverse=True)
     if others:
         n += len(re.findall("|".join(_term_pattern(t) for t in others), text.lower()))
@@ -100,9 +100,9 @@ def _count(terms, text):
 def basic_features(rendered, terms=TERMS):
     """Feature dict for one rendered transcript: log_chars, n_words, one
     <category>_count per term list, and formatting counts."""
-    text = _assistant_text(rendered)
+    text = _assistant_text(rendered)                                # tool/user blocks dropped
     out = {"log_chars": math.log(max(len(text), 1)), "n_words": float(len(text.split()))}
-    for name, words in terms.items():
+    for name, words in terms.items():                               # one count per term list
         out[f"{name}_count"] = float(_count(words, text))
     out["numbered_steps_count"] = float(len(NUMBERED.findall(text)))
     out["bullets_count"] = float(len(BULLET.findall(text)))

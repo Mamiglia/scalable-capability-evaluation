@@ -64,15 +64,16 @@ def read_rollouts(bench):
     root = ROOT / CFG["data"]["rollouts"] / bench / CFG["data"]["collections"][bench]
     models = canonical_models()
     rows = []
-    for model_dir in visible(root) if root.exists() else []:
+    for model_dir in visible(root) if root.exists() else []:          # data/<bench>/<collection>/<model>/
         if model_dir.name.lower() not in models or not model_dir.is_dir():
             continue
-        for epoch_dir in visible(model_dir):
+        for epoch_dir in visible(model_dir):                           # .../<model>/<epoch>/<one .eval>
             logs = [p for p in visible(epoch_dir) if p.suffix == ".eval"] if epoch_dir.is_dir() else []
             if len(logs) != 1 or read_eval_log(str(logs[0]), header_only=True).status != "success":
                 continue
-            for sample in read_eval_log_samples(str(logs[0]), all_samples_required=False):
-                text = strip_think(extract_transcript(sample, include_reasoning=False))   # as judging does
+            for sample in read_eval_log_samples(str(logs[0]), all_samples_required=False):   # one sample = one item
+                # render exactly what the judge reads: [Assistant]/[Tool] blocks, no reasoning
+                text = strip_think(extract_transcript(sample, include_reasoning=False))
                 rows.append({"bench": bench, "model": model_dir.name, "item": str(sample.id),
                              "epoch": int(epoch_dir.name), "question": str(sample.input),
                              "transcript": text, "correct": is_correct(sample)})
@@ -95,6 +96,7 @@ def calculate_raw_features(store, surprisal_cache=CACHE_DIR):
     """Feature columns for every transcript in `store`: the basic text features
     always; the surprisal features when the cache has every scorer's file for
     every transcript (otherwise those columns are left out and a note printed)."""
+    # surprisal is all-or-nothing: every transcript needs every scorer's .npz
     have_cache = all(cache_file(surprisal_cache, s, r.bench, r.model, r.item, r.epoch).exists()
                      for r in store.itertuples() for s in SCORERS)
     if not have_cache:
@@ -112,7 +114,7 @@ def normalise(raw):
     """z-score every feature column over all transcripts. Returns
     (design matrix, scaling table with each column's mean and sd)."""
     features = [c for c in raw.columns if c not in KEYS]
-    mean, sd = raw[features].mean(), raw[features].std().replace(0, 1.0)
+    mean, sd = raw[features].mean(), raw[features].std().replace(0, 1.0)   # sd 0 -> column stays 0, not NaN
     dm = raw.copy()
     dm[features] = (raw[features] - mean) / sd
     scaling = pd.DataFrame({"mean": mean, "sd": sd})
@@ -125,7 +127,9 @@ def build_dm(rebuild=False, surprisal_cache=CACHE_DIR):
     written to the output dir)."""
     if DM.exists() and not rebuild:
         return pd.read_parquet(DM)
+    # slow part: reading ~60k rollout logs; reused unless --rebuild
     store = pd.read_parquet(STORE) if STORE.exists() and not rebuild else build_transcript_store()
+    # fast part: features of the correct transcripts (only those ever get judged)
     raw = calculate_raw_features(store[store.correct], surprisal_cache)
     raw.to_parquet(RAW, index=False)
     dm, scaling = normalise(raw)

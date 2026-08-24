@@ -76,11 +76,11 @@ def surprisal_full_context(model, tokenizer, text, question=None, max_tokens=MAX
     ids, offsets = tokenise(tokenizer, text, max_tokens)
     if not ids:
         return np.zeros(0, dtype=np.float32), offsets
-    prefix = [tokenizer.bos_token_id]
+    prefix = [tokenizer.bos_token_id]               # context before the transcript: BOS, then the question if given
     if question:
         prefix += tokenizer(question + "\n\n", add_special_tokens=False)["input_ids"]
     bits = surprisal_of_tokens(model, torch.tensor([prefix + ids], device=model.device))[0]
-    return bits[len(prefix) - 1:], offsets          # transcript tokens only
+    return bits[len(prefix) - 1:], offsets          # drop the prefix's own bits; transcript tokens only
 
 
 @torch.no_grad()
@@ -151,8 +151,8 @@ def surprisal_features(text, bench, model, item, epoch, cache_dir=CACHE_DIR):
     scored). Missing cache file = error."""
     out = {}
     for scorer in SCORERS:
-        z = np.load(cache_file(cache_dir, scorer, bench, model, item, epoch))
-        keep = assistant_token_mask(text, z["offsets"])
+        z = np.load(cache_file(cache_dir, scorer, bench, model, item, epoch))   # full, noq, local, offsets
+        keep = assistant_token_mask(text, z["offsets"])                         # score the model's own words only
         for pass_name in ("full", "noq", "local"):
             out[f"surprisal_{pass_name}__{scorer}"] = float(z[pass_name][keep].sum())
         out[f"surprisal_chars__{scorer}"] = float((z["offsets"][keep, 1] - z["offsets"][keep, 0]).sum())
