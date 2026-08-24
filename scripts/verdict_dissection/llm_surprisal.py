@@ -132,10 +132,10 @@ def assistant_token_mask(text, offsets):
     return mask
 
 
-def cache_file(cache_dir, scorer, bench, model, item, epoch):
+def cache_file(cache_dir, scorer, bench, model, item, epoch, log):
     """Where one transcript's passes under one scorer are stored."""
     safe = lambda s: re.sub(r"[^\w.-]", "_", str(s))
-    return Path(cache_dir) / scorer / bench / f"{safe(model)}__{safe(item)}__ep{epoch}.npz"
+    return Path(cache_dir) / scorer / bench / f"{safe(model)}__{safe(item)}__ep{epoch}__{safe(log)}.npz"
 
 
 def score_and_cache(model, tokenizer, text, question, path):
@@ -151,14 +151,14 @@ def score_and_cache(model, tokenizer, text, question, path):
     os.replace(path.with_suffix(".tmp.npz"), path)   # never a half-written file under the final name
 
 
-def surprisal_features(text, bench, model, item, epoch, cache_dir=CACHE_DIR):
+def surprisal_features(text, bench, model, item, epoch, log, cache_dir=CACHE_DIR):
     """Features for one transcript from the cache, for every scorer:
     surprisal_full__<scorer>, surprisal_noq__<scorer>, surprisal_local__<scorer>
     (total bits over assistant tokens) and surprisal_chars__<scorer> (chars
     scored). Missing cache file = error."""
     out = {}
     for scorer in SCORERS:
-        z = np.load(cache_file(cache_dir, scorer, bench, model, item, epoch))   # full, noq, local, offsets
+        z = np.load(cache_file(cache_dir, scorer, bench, model, item, epoch, log))   # full, noq, local, offsets
         keep = assistant_token_mask(text, z["offsets"])                         # score the model's own words only
         for pass_name in ("full", "noq", "local"):
             out[f"surprisal_{pass_name}__{scorer}"] = float(z[pass_name][keep].sum())
@@ -172,14 +172,14 @@ if __name__ == "__main__":
     cache_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else CACHE_DIR
     scorers = {sys.argv[3]: SCORERS[sys.argv[3]]} if len(sys.argv) > 3 else SCORERS
     for scorer, hf_id in scorers.items():
-        todo = [r for r in store.itertuples() if not cache_file(cache_dir, scorer, r.bench, r.model, r.item, r.epoch).exists()]
+        todo = [r for r in store.itertuples() if not cache_file(cache_dir, scorer, r.bench, r.model, r.item, r.epoch, r.log).exists()]
         print(f"{scorer}: {len(todo)} of {len(store)} transcripts to score", flush=True)
         if not todo:
             continue
         model, tokenizer = load_scorer(hf_id)
         t0 = time.time()
         for i, r in enumerate(todo):
-            score_and_cache(model, tokenizer, r.transcript, r.question, cache_file(cache_dir, scorer, r.bench, r.model, r.item, r.epoch))
+            score_and_cache(model, tokenizer, r.transcript, r.question, cache_file(cache_dir, scorer, r.bench, r.model, r.item, r.epoch, r.log))
             if i % 50 == 0:
                 print(f"  {i + 1}/{len(todo)}  {time.time() - t0:.0f}s", flush=True)
         del model

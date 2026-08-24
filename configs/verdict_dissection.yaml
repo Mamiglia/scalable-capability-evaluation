@@ -16,8 +16,10 @@ data:
     hle: f0ab1992
     intercode: 463eb861
     swe_bench_mini: 477dc96c
-    mbpp: 4871cf01
   out_dir: judge_results/verdict_dissection
+  judging: /Volumes/T7/data/hf-judging               # LASR-G5/judging mirror; <subset>/<judge>/<pair>/*.eval
+  judging_subsets: [pilot/gpqa, pilot/intercode, pilot/swe_bench_mini,
+                    aime/aime2024, aime/aime2025, aime/aime2026]
 
 surprisal:
   models:                           # base models, one per family; short name -> HF id
