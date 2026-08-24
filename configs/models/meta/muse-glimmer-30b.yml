@@ -6,7 +6,7 @@ generate_args:
   extra_body:
     reasoning:
       enabled: true
-  max_tokens: 114688
+  max_tokens: 65536  # capped so input + output fits Parasail's 131072 context (was 114688, 400'd on long CTF transcripts)
 model_args:
   provider:
     only:
