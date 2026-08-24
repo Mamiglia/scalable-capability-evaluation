@@ -84,3 +84,11 @@ def test_score_and_cache_writes_once(tiny, tmp_path):
     z = np.load(path)
     assert len(z["full"]) == len(z["noq"]) == len(z["local"]) == len(z["offsets"])
     assert not path.with_suffix(".tmp.npz").exists()
+
+
+def test_tokenizer_without_bos_uses_eos(tiny):
+    model, tok = tiny
+    tok.bos_token_id = None           # Qwen-style tokenizer
+    bits, _ = surprisal_full_context(model, tok, TEXT, question="Q?")
+    local, _ = surprisal_local_window(model, tok, TEXT, window=8)
+    assert len(bits) == len(local) > 0

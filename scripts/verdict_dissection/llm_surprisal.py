@@ -56,6 +56,12 @@ def tokenise(tokenizer, text, max_tokens=MAX_TOKENS):
     return ids, offsets
 
 
+def start_token(tokenizer):
+    """Token that stands for "start of text": BOS where the tokenizer has one,
+    otherwise EOS (Qwen has no BOS; its pretraining separates documents with EOS)."""
+    return tokenizer.bos_token_id if tokenizer.bos_token_id is not None else tokenizer.eos_token_id
+
+
 @torch.no_grad()
 def surprisal_of_tokens(model, token_rows):
     """Bits of surprisal of every token but the first, per row of a (batch, n)
@@ -77,7 +83,7 @@ def surprisal_full_context(model, tokenizer, text, question=None, max_tokens=MAX
     ids, offsets = tokenise(tokenizer, text, max_tokens)
     if not ids:
         return np.zeros(0, dtype=np.float32), offsets
-    prefix = [tokenizer.bos_token_id]               # context before the transcript: BOS, then the question if given
+    prefix = [start_token(tokenizer)]               # context before the transcript: BOS, then the question if given
     if question:
         prefix += tokenizer(question + "\n\n", add_special_tokens=False)["input_ids"]
     bits = surprisal_of_tokens(model, torch.tensor([prefix + ids], device=model.device))[0]
@@ -94,7 +100,7 @@ def surprisal_local_window(model, tokenizer, text, window=WINDOW, max_tokens=MAX
     n = len(ids)
     if n == 0:
         return np.zeros(0, dtype=np.float32), offsets
-    bos, pad = tokenizer.bos_token_id, tokenizer.pad_token_id or 0
+    bos, pad = start_token(tokenizer), tokenizer.pad_token_id or 0
     bits = np.empty(n, dtype=np.float32)
     head = min(2 * window, n)                       # first segment scored whole
     bits[:head] = surprisal_of_tokens(model, torch.tensor([[bos] + ids[:head]], device=model.device))[0]

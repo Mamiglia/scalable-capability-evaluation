@@ -17,8 +17,6 @@ data:
     intercode: 463eb861
     swe_bench_mini: 477dc96c
     mbpp: 4871cf01
-  eci_table: external_data/epoch-eci/eci_scores.csv
-  eci_extra: {ling-2.6-flash: 131.8, qwen3-32b: 130.0}
   out_dir: judge_results/verdict_dissection
 
 surprisal:
