@@ -1,15 +1,12 @@
 """Deterministic per-transcript features: length, term counts (pronouns,
-hedging, backtracking, ...), formatting. Operates on the assistant spans of a
-rendered `[Role]: text` transcript; bare text counts as one assistant span.
-
-Usage (spot check):
-  uv run python scripts/verdict_dissection/features_basic.py "<text>"
+hedging, backtracking, ...), formatting. Raw counts; normalisation happens in
+main.py. Operates on the assistant spans of a rendered `[Role]: text`
+transcript; bare text counts as one assistant span.
 """
 import math
 import re
-import sys
 
-# Term lists, hits per 1000 assistant words, matched case-insensitively as whole
+# Term lists, counted over the assistant text, matched case-insensitively as whole
 # words/phrases (standalone "I" excepted, see STANDALONE_I). Started from the
 # lexicon validated on real GPQA transcripts for the earlier GLM and extended by
 # hand. Left out on purpose because they fire on subject vocabulary rather than
@@ -53,7 +50,6 @@ TERMS = {
                  "rather", "despite", "even though", "still", "otherwise", "alternatively",
                  "unlike"],
 }
-WORDS_PER_RATE = 1000
 
 # Standalone "I" is case-sensitive and must be followed by a lowercase word or
 # a contraction, so the identity matrix, moment of inertia, iodine, "H I" and
@@ -102,20 +98,14 @@ def _count(terms, text):
 
 
 def basic_features(rendered, terms=TERMS):
+    """Feature dict for one rendered transcript: log_chars, n_words, one
+    <category>_count per term list, and formatting counts."""
     text = _assistant_text(rendered)
-    n_chars = max(len(text), 1)
-    n_words = max(len(text.split()), 1)
-
-    out = {"log_chars": math.log(n_chars), "n_words": float(n_words)}
+    out = {"log_chars": math.log(max(len(text), 1)), "n_words": float(len(text.split()))}
     for name, words in terms.items():
-        out[f"{name}_per_kword"] = WORDS_PER_RATE * _count(words, text) / n_words
-    out["numbered_steps_per_kword"] = WORDS_PER_RATE * len(NUMBERED.findall(text)) / n_words
-    out["bullets_per_kword"] = WORDS_PER_RATE * len(BULLET.findall(text)) / n_words
-    out["code_density"] = sum(m.end() - m.start() for m in CODE.finditer(text)) / n_chars
-    out["latex_density"] = sum(m.end() - m.start() for m in LATEX.finditer(CODE.sub("", text))) / n_chars
+        out[f"{name}_count"] = float(_count(words, text))
+    out["numbered_steps_count"] = float(len(NUMBERED.findall(text)))
+    out["bullets_count"] = float(len(BULLET.findall(text)))
+    out["code_chars"] = float(sum(m.end() - m.start() for m in CODE.finditer(text)))
+    out["latex_chars"] = float(sum(m.end() - m.start() for m in LATEX.finditer(CODE.sub("", text))))
     return out
-
-
-if __name__ == "__main__":
-    for k, v in basic_features(sys.argv[1]).items():
-        print(f"{k:40s} {v:.4f}")
