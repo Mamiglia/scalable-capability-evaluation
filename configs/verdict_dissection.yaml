@@ -9,27 +9,6 @@ data:
   eci_extra: {ling-2.6-flash: 131.8, qwen3-32b: 130.0}
   out_dir: judge_results/verdict_dissection
 
-# matches per 1000 assistant chars, case-insensitive regex
-style_lexicons:
-  personal_pronouns: ["\\bI\\b", "\\bwe\\b", "\\bmy\\b", "\\bour\\b", "\\bme\\b", "\\bus\\b"]
-  hedging: ["\\bmight\\b", "\\bperhaps\\b", "\\bpossibly\\b", "\\bseems?\\b", "\\blikely\\b", "\\bprobably\\b"]
-  backtracking: ["\\bwait\\b", "\\bactually\\b", "\\bhmm\\b", "\\bon second thought\\b", "\\blet me reconsider\\b"]
-  uncertainty: ["\\bnot sure\\b", "\\bunclear\\b", "\\buncertain\\b"]
-  confidence: ["\\bclearly\\b", "\\bobviously\\b", "\\bcertainly\\b", "\\bdefinitely\\b"]
-  questions: ["\\?"]
-
-# a sentence takes the first class (in this order) whose cue it contains;
-# specific cues before generic ones ("let me check" before "let ")
-connective_classes:
-  verification: ["let me check", "let me verify", "double-check", "to confirm", "substituting back"]
-  premise: ["because", "since", "given that"]
-  inference: ["therefore", "thus", "hence", "it follows", "which means", "this implies"]
-  contrast: ["however", "but ", "although", "on the other hand"]
-  assumption: ["suppose", "assume", "let ", "consider ", "if we"]
-
-conclusion_tail_frac: 0.2          # last fifth of assistant chars = concluding section
-answer_markers: ["final answer", "the answer is", "answer:", "\\\\boxed"]
-
 entropy:
   model: meta-llama/Llama-3.2-3B    # base, not instruct
   window_tokens: 32                 # local-context pass
