@@ -111,6 +111,11 @@ def main() -> int:
                 except ValueError as e:
                     print(f"SKIP {judge_short} {major}-vs-{minor}: {e}")
                     continue
+                if task is None:
+                    # judge_task returns None when no question survives filtering
+                    # (e.g. no both-correct overlap, or a transcript log with no samples).
+                    print(f"SKIP {judge_short} {major}-vs-{minor}: no samples after filtering")
+                    continue
                 ids = [s.id for s in task.dataset]
                 split = 2 * phase1_items
                 block = ids[:split] if phase == 1 else ids[split:]
