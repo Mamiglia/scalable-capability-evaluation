@@ -1,0 +1,6 @@
+# Terminal-Bench 2.1 (89 tasks) via inspect-harbor, pinned to revision 6 (current `latest`).
+# Task images are linux/amd64 only — needs an x86_64 host, see AGENTS.md.
+name: terminal_bench_2_1
+task: inspect_harbor/terminal_bench_2_1
+task_args:
+  ref: sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a

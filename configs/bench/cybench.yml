@@ -1,0 +1,5 @@
+# 39 CTF challenges (default "hard" variant), docker sandbox.
+# The agent gets unrestricted network access, so inspect_evals refuses to build the
+# task unless CYBENCH_ACKNOWLEDGE_RISKS=1 is set in the environment.
+name: cybench
+task: inspect_evals/cybench
