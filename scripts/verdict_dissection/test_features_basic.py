@@ -1,4 +1,4 @@
-"""features_basic checks: span exclusion, term rules, conclusion split, formatting."""
+"""features_basic checks: span exclusion, term rules, formatting."""
 import math
 import sys
 from pathlib import Path
@@ -24,21 +24,11 @@ def test_overlapping_terms_count_once():
     assert one == 1000.0 / 3          # 3 words, one hit
 
 
-def test_conclusion_split():
-    body = "The derivation proceeds cleanly. " * 40
-    tail = "Perhaps this might possibly be wrong. "
-    f = basic_features(body + tail)
-    assert f["hedging_per_kword_conclusion"] > f["hedging_per_kword"]
+def test_formatting():
+    f = basic_features("1. First\n2. Second\n```py\ncode\n```\n- bullet")
+    assert f["numbered_steps_per_kword"] > 0 and f["bullets_per_kword"] > 0
+    assert f["code_density"] > 0 and f["latex_density"] == 0
 
 
-def test_formatting_and_answer_marker():
-    text = "1. First\n2. Second\n```py\ncode\n```\nFinal answer: 42"
-    f = basic_features(text)
-    assert f["numbered_steps_per_kword"] > 0 and f["code_density"] > 0
-    assert f["answer_marker_present"] == 1.0
-    assert 0.5 < f["answer_marker_position"] <= 1.0
-
-
-def test_no_answer_marker():
-    f = basic_features("Just some text with no marker.")
-    assert f["answer_marker_present"] == 0.0 and f["answer_marker_position"] == 1.0
+def test_verification_inflections():
+    assert basic_features("I verified it and am checking again.")["verification_per_kword"] == 1000.0 * 2 / 7

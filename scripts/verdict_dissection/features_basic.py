@@ -9,37 +9,56 @@ import math
 import re
 import sys
 
-# Term lists, hits per 1000 assistant words. The first six categories are the
-# lexicon validated on real GPQA transcripts for the earlier GLM (trims: "my"
-# fired on the mass variable My, "correction" on "Maxwell's correction",
-# "clearly" on one item's own question wording, bare "appears" on NMR/colour
-# senses). The last three are new and unvalidated.
+# Term lists, hits per 1000 assistant words, matched case-insensitively as whole
+# words/phrases (standalone "I" excepted, see STANDALONE_I). Started from the
+# lexicon validated on real GPQA transcripts for the earlier GLM and extended by
+# hand. Left out on purpose because they fire on subject vocabulary rather than
+# the writer's style: "error", "correction", "approximately", "unknown", "test",
+# "clearly", bare "appears".
 TERMS = {
-    "personal_pronouns": ["I", "me", "we", "our", "us"],
-    "hedging": ["perhaps", "possibly", "might", "may", "seems", "appears to", "likely",
-                "presumably", "arguably", "I think", "I believe", "could be"],
-    "backtracking": ["wait", "actually", "on second thought", "let me reconsider", "oh wait",
-                     "scratch that", "I made a mistake"],
-    "uncertainty": ["unsure", "not sure", "uncertain", "unclear", "ambiguous", "guess", "hard to say"],
-    "confidence": ["obviously", "certainly", "definitely", "undoubtedly", "of course"],
+    "personal_pronouns": ["I", "me", "my", "mine", "myself", "we", "our", "ours", "us", "ourselves"],
+    "hedging": ["perhaps", "possibly", "might", "may", "maybe", "seems", "seem", "seemed",
+                "seemingly", "appears to", "appear to", "appeared to", "likely", "unlikely",
+                "presumably", "arguably", "probably", "potentially", "I think", "I believe",
+                "I suspect", "I assume", "could be", "may be", "tends to", "generally",
+                "typically", "in general", "sort of", "kind of"],
+    "backtracking": ["wait", "actually", "on second", "let me reconsider", "reconsider",
+                     "rethink", "re-examine", "scratch that", "I made a mistake", "mistake",
+                     "oh wait", "hold on", "hmm", "hmmm", "no wait", "never mind", "I was wrong",
+                     "that's wrong", "that's not right", "not right", "let me redo", "try again",
+                     "start over", "go back", "backtrack"],
+    "uncertainty": ["unsure", "not sure", "not certain", "uncertain", "unclear", "ambiguous",
+                    "guess", "guessing", "hard to say", "hard to tell", "difficult to say",
+                    "I don't know", "don't know", "not confident", "can't be sure",
+                    "cannot be sure", "doubt", "doubtful", "questionable"],
+    "confidence": ["obviously", "certainly", "definitely", "undoubtedly", "of course", "surely",
+                   "without doubt", "no doubt", "indeed", "evidently", "unquestionably",
+                   "must be", "it is clear", "it's clear", "absolutely", "for sure",
+                   "straightforward", "trivially", "trivial"],
     "questions": ["?"],
     # new, unvalidated
-    "verification": ["let me check", "let me verify", "double-check", "double check",
-                     "sanity check", "to confirm", "check that", "check"],
+    "verification": ["check", "checks", "checked", "checking", "recheck", "re-check",
+                     "confirm", "confirms", "confirmed", "confirming",
+                     "double-check", "double-checks", "double-checked", "double-checking",
+                     "cross-check", "verify", "verifies", "verified", "verifying",
+                     "validate", "validated", "validating", "make sure", "making sure",
+                     "sanity check", "plug back", "plugging back", "substitute back",
+                     "substituting back", "plug in", "plugging in", "let me see if"],
     "connectives": ["therefore", "thus", "hence", "because", "since", "it follows",
-                    "which means", "this implies", "consequently"],
-    "contrast": ["however", "but", "although", "though", "on the other hand",
-                 "nevertheless", "whereas"],
+                    "follows that", "which means", "this means", "means that", "this implies",
+                    "implies", "implying", "consequently", "so that", "as a result",
+                    "given that", "leads to", "in turn", "accordingly", "thereby"],
+    "contrast": ["however", "but", "although", "though", "on the other hand", "nevertheless",
+                 "nonetheless", "whereas", "yet", "in contrast", "conversely", "instead",
+                 "rather", "despite", "even though", "still", "otherwise", "alternatively",
+                 "unlike"],
 }
-ANSWER_MARKERS = ["final answer", "the answer is", "answer:", r"\\boxed"]
-CONCLUSION_TAIL_FRAC = 0.2   # last fifth of assistant chars = concluding section
 WORDS_PER_RATE = 1000
 
 # Standalone "I" is case-sensitive and must be followed by a lowercase word or
 # a contraction, so the identity matrix, moment of inertia, iodine, "H I" and
 # symbol definitions ("where I is ...") don't count as the pronoun.
 STANDALONE_I = re.compile(r"\bI(?=(?:'[a-z])|(?:\s+[a-z]))(?!\s+is\b)")
-
 MARKER = re.compile(r"(?:^|\n\n)\[(\w+)\]: ")
 NUMBERED = re.compile(r"^\s*\d+[.)]\s", re.M)
 BULLET = re.compile(r"^\s*[-*•]\s", re.M)
@@ -48,7 +67,11 @@ LATEX = re.compile(r"\$\$.*?\$\$|\$[^$\n]*\$|\\\[.*?\\\]", re.S)
 
 
 def _assistant_text(text):
-    """Assistant blocks of a `[Role]: text` transcript; no markers = all assistant."""
+    """
+    Assistant blocks of a `[Role]: text` transcript; no markers = all assistant.
+    Especially important for agentic/multi-turn evals, where user messages
+    can be interspersed with model's.
+    """
     hits = list(MARKER.finditer(text))
     if not hits:
         return text
@@ -61,7 +84,10 @@ def _assistant_text(text):
 
 
 def _term_pattern(term):
-    """Whole word/phrase, whitespace-flexible; bare punctuation gets no \\b."""
+    """Regex for one term: lowercased, literal, matched as a whole word or
+    phrase (\\b on both sides) with any whitespace allowed between the words.
+    A term with no word characters ("?") gets no \\b, since a word boundary
+    can't sit between punctuation and a space."""
     escaped = re.escape(term.lower()).replace(r"\ ", r"\s+")
     return escaped if re.search(r"\w", term) is None else rf"\b{escaped}\b"
 
@@ -75,25 +101,18 @@ def _count(terms, text):
     return n
 
 
-def basic_features(rendered, terms=TERMS, tail_frac=CONCLUSION_TAIL_FRAC):
+def basic_features(rendered, terms=TERMS):
     text = _assistant_text(rendered)
     n_chars = max(len(text), 1)
     n_words = max(len(text.split()), 1)
-    tail = text[int(len(text) * (1 - tail_frac)):]
-    n_tail_words = max(len(tail.split()), 1)
 
     out = {"log_chars": math.log(n_chars), "n_words": float(n_words)}
     for name, words in terms.items():
         out[f"{name}_per_kword"] = WORDS_PER_RATE * _count(words, text) / n_words
-        out[f"{name}_per_kword_conclusion"] = WORDS_PER_RATE * _count(words, tail) / n_tail_words
     out["numbered_steps_per_kword"] = WORDS_PER_RATE * len(NUMBERED.findall(text)) / n_words
     out["bullets_per_kword"] = WORDS_PER_RATE * len(BULLET.findall(text)) / n_words
     out["code_density"] = sum(m.end() - m.start() for m in CODE.finditer(text)) / n_chars
     out["latex_density"] = sum(m.end() - m.start() for m in LATEX.finditer(CODE.sub("", text))) / n_chars
-    marker = min((m.start() for pat in ANSWER_MARKERS
-                  for m in [re.search(pat, text, re.I)] if m), default=None)
-    out["answer_marker_present"] = float(marker is not None)
-    out["answer_marker_position"] = marker / n_chars if marker is not None else 1.0
     return out
 
 
