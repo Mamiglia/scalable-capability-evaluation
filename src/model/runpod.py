@@ -159,7 +159,7 @@ def _create_pod_once(config: dict[str, Any], gpu_id: str) -> str:
         f"--gpu-id={gpu_id}",
         f"--gpu-count={config['gpu_count']}",
         f"--container-disk-in-gb={config['container_disk_in_gb']}",
-        f"--ports={config['port']}/http",
+        f"--ports={config['port']}/http,{config['port']}/tcp",
         f"--terminate-after={_deadline(config['terminate_after'])}",
         "--docker-args="
         + shlex.join(
@@ -218,24 +218,46 @@ def create(config: dict[str, Any]) -> tuple[str, str]:
     ) from last_exc
 
 
-def wait(pod_id: str, port: int, timeout: float) -> str:
-    base_url = f"https://{pod_id}-{port}.proxy.runpod.net/v1"
+def direct_url(pod_id: str, port: int) -> str | None:
+    """The pod's public ``ip:port``, or None if Runpod has not mapped one.
+
+    The ``*.proxy.runpod.net`` route goes through Cloudflare, which cuts requests that
+    run for many minutes — long reasoning generations die mid-stream. A TCP mapping is
+    a direct connection with no such limit.
+    """
+    api_key = os.environ.get("RUNPOD_API_KEY")
+    if not api_key:
+        return None
     request = urllib.request.Request(
-        f"{base_url}/models", headers={"User-Agent": "small-judge/1.0"}
+        f"https://rest.runpod.io/v1/pods/{pod_id}",
+        headers={"Authorization": f"Bearer {api_key}"},
     )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            pod = json.load(response)
+    except Exception:
+        return None
+    public_port = (pod.get("portMappings") or {}).get(str(port))
+    if not public_port or not pod.get("publicIp"):
+        return None
+    return f"http://{pod['publicIp']}:{public_port}/v1"
+
+
+def wait(pod_id: str, port: int, timeout: float) -> str:
+    """Block until the pod serves an OpenAI API, and return the URL that reached it.
+
+    Declaring a TCP port stops Runpod's HTTP proxy from serving it, so the two routes
+    are tried independently rather than one gating the other.
+    """
+    proxy_url = f"https://{pod_id}-{port}.proxy.runpod.net/v1"
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(request, timeout=10) as response:
-                if 200 <= response.status < 300:
-                    return base_url
-        except urllib.error.HTTPError as exc:
-            if exc.code not in {403, 404, 502, 503, 504}:
-                raise RuntimeError(
-                    f"Runpod readiness failed with HTTP {exc.code}"
-                ) from exc
-        except (urllib.error.URLError, TimeoutError, ConnectionError):
-            pass
+        direct = direct_url(pod_id, port)
+        if direct and is_healthy(direct):
+            logger.info("Runpod %s reachable directly at %s", pod_id, direct)
+            return direct
+        if is_healthy(proxy_url):
+            return proxy_url
         time.sleep(min(5, max(0, deadline - time.monotonic())))
     raise TimeoutError(f"Runpod {pod_id} was not ready within {timeout:g}s")
 
