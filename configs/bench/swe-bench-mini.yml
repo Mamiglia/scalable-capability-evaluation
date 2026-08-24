@@ -1,0 +1,15 @@
+# SWE-bench Verified mini (MariusHobbhahn/swe-bench-verified-mini) — agentic: a react
+# agent with bash + python tools, tool_timeout 210s.
+#
+# solver: overrides the task's default scaffold (bash_session + text_editor, whose schemas
+# OpenAI's strict function-calling rejects) with a stateless bash + python scaffold every
+# provider accepts, so OpenAI models run and all transcripts stay comparable for judging.
+#
+# Default docker sandbox: each instance's environment (repo at base_commit + built deps)
+# comes from its image ghcr.io/epoch-research/swe-bench.eval.x86_64.{id}. Run on a
+# docker-capable x86 host (the 'earth' desktop) — NOT a RunPod pod, which can't run
+# containers. Env needs swebench>=3.0.15,<4 (latest 5.x breaks the grader import); the
+# collect run supplies it with `uv run --with 'swebench>=3.0.15,<4'`.
+name: swe_bench_mini
+task: inspect_evals/swe_bench_verified_mini
+solver: src/collect/swe_solver.py@swe_bash_python
