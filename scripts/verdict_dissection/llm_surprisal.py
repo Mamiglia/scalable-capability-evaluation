@@ -11,8 +11,9 @@ scored; normalise later. Per-token results are cached as one .npz per
 transcript and scorer, so the expensive part runs once, on a GPU. If the
 scorer models or settings change, delete the cache directory.
 
-Fill the cache (scores the correct transcripts of a store parquet):
-  uv run python scripts/verdict_dissection/llm_surprisal.py transcript_store.parquet [cache_dir]
+Fill the cache (scores the correct transcripts of a store parquet; one
+scorer per job on a cluster by naming it):
+  uv run python scripts/verdict_dissection/llm_surprisal.py transcript_store.parquet [cache_dir] [scorer]
 """
 import os
 import re
@@ -163,7 +164,8 @@ if __name__ == "__main__":
     store = pd.read_parquet(sys.argv[1])
     store = store[store.correct] if "correct" in store else store
     cache_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else CACHE_DIR
-    for scorer, hf_id in SCORERS.items():
+    scorers = {sys.argv[3]: SCORERS[sys.argv[3]]} if len(sys.argv) > 3 else SCORERS
+    for scorer, hf_id in scorers.items():
         todo = [r for r in store.itertuples() if not cache_file(cache_dir, scorer, r.bench, r.model, r.item, r.epoch).exists()]
         print(f"{scorer}: {len(todo)} of {len(store)} transcripts to score", flush=True)
         if not todo:
