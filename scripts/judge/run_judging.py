@@ -170,6 +170,7 @@ def main() -> int:
             success, _ = eval_set(
                 tasks=[get_task(judge_short, major, minor, frac)],
                 log_dir=str(phase_dir),
+                log_dir_allow_dirty=True,  # failed attempts under an older pin leave logs behind
                 sample_id=block,
                 epochs=epochs,
                 max_connections=40,
