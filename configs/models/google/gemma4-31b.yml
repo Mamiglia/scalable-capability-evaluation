@@ -5,6 +5,9 @@ name: google/gemma-4-31b-it
 slug: openrouter/google/gemma-4-31b-it
 release_date: '2026-03-31'
 generate_args:
+  # Novita rejects requests without an output cap ("input is longer than the model's
+  # context length"); the longest verdict incl. reasoning seen is ~4k tokens.
+  max_tokens: 16384
   extra_body:
     reasoning:
       enabled: true
