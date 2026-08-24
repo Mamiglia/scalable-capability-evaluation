@@ -25,7 +25,7 @@ TERMS = {
     "questions": ["?"],
     # new, unvalidated
     "verification": ["let me check", "let me verify", "double-check", "double check",
-                     "sanity check", "to confirm", "check that"],
+                     "sanity check", "to confirm", "check that", "check"],
     "connectives": ["therefore", "thus", "hence", "because", "since", "it follows",
                     "which means", "this implies", "consequently"],
     "contrast": ["however", "but", "although", "though", "on the other hand",
