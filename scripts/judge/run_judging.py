@@ -3,8 +3,9 @@
 The config (see gen_judge_config.py) has these sections:
   log_root:          where judge logs go
   transcripts:       model shortname -> eval log path
-  comparisons:       list of [judge, major, minor] rows
-  judge_model_args:  per-judge model args (endpoint pins), keyed by judge slug
+  comparisons:       list of [judge, major, minor] rows; the judge is an inspect
+                     slug whose model YAML under configs/models supplies the
+                     endpoint pin, generate args and runpod settings
 Optional knobs:
   phase1_items:      items judged in the early phase (default 20)
   epochs:            judge every sample this many times, to measure how much
@@ -26,16 +27,33 @@ Usage:
 """
 
 import argparse
+from contextlib import ExitStack
 from pathlib import Path
 
 import yaml
 from inspect_ai import eval_set
 from inspect_ai.log import read_eval_log
 
+from configs import ModelConfig
 from configs.paths import is_successful_eval
 from judge.task import judge_task
+from model import Model
 
 DEFAULT_PHASE1_ITEMS = 20
+MODEL_CONFIGS = Path("configs/models")
+
+
+def judge_config(slug: str) -> ModelConfig:
+    """The model YAML under configs/models whose inspect slug is ``slug``."""
+    found = []
+    for path in sorted(MODEL_CONFIGS.rglob("*.yml")):
+        config = ModelConfig.from_cli(yaml.safe_load(path.read_text()))
+        if config.slug == slug:
+            found.append((path, config))
+    if len(found) != 1:
+        paths = [str(path) for path, _ in found] or "none"
+        raise ValueError(f"judge {slug}: need exactly one model YAML in {MODEL_CONFIGS}, found {paths}")
+    return found[0][1]
 
 
 def has_success_log(directory: Path) -> bool:
@@ -66,8 +84,8 @@ def main() -> int:
     fracs = cfg.get("truncate_fracs") or [None]
     # Ablation switch: judges see candidates' reasoning. Protocol default stays False.
     include_reasoning = bool(cfg.get("include_reasoning", False))
-    # Per-judge OpenRouter routing (endpoint pins); keyed by judge slug.
-    judge_model_args = cfg.get("judge_model_args") or {}
+    if "judge_model_args" in cfg:
+        raise ValueError("judge_model_args is no longer read: endpoint pins live in the model YAMLs")
     # Models with fewer correct samples than this don't qualify for judging.
     min_correct = cfg.get("min_correct") or 0
     qualified = set(paths)
@@ -111,6 +129,11 @@ def main() -> int:
                 except ValueError as e:
                     print(f"SKIP {judge_short} {major}-vs-{minor}: {e}")
                     continue
+                if task is None:
+                    # judge_task returns None when no question survives filtering
+                    # (e.g. no both-correct overlap, or a transcript log with no samples).
+                    print(f"SKIP {judge_short} {major}-vs-{minor}: no samples after filtering")
+                    continue
                 ids = [s.id for s in task.dataset]
                 split = 2 * phase1_items
                 block = ids[:split] if phase == 1 else ids[split:]
@@ -130,18 +153,21 @@ def main() -> int:
         return 0
 
     failures = []
-    for phase, judge, judge_short, major, minor, frac, block, phase_dir in pending:
-        success, _ = eval_set(
-            tasks=[get_task(judge_short, major, minor, frac)],
-            model=judge,
-            model_args=judge_model_args.get(judge, {}),
-            log_dir=str(phase_dir),
-            sample_id=block,
-            epochs=epochs,
-            max_connections=40,
-        )
-        if not success:
-            failures.append(f"phase{phase} {judge_short} on {major}-vs-{minor}")
+    models = {}
+    with ExitStack() as stack:  # a judge's pod, if any, stays up from first use to the end
+        for phase, judge, judge_short, major, minor, frac, block, phase_dir in pending:
+            if judge not in models:
+                models[judge] = stack.enter_context(Model(judge_config(judge)))
+            success, _ = eval_set(
+                tasks=[get_task(judge_short, major, minor, frac)],
+                log_dir=str(phase_dir),
+                sample_id=block,
+                epochs=epochs,
+                max_connections=40,
+                **models[judge].eval_kwargs(),
+            )
+            if not success:
+                failures.append(f"phase{phase} {judge_short} on {major}-vs-{minor}")
     if failures:
         print(f"{len(failures)} FAILED runs (rest of queue completed):")
         for f in failures:
