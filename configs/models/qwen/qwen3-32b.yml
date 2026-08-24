@@ -4,6 +4,14 @@ slug: vllm/Qwen/Qwen3-32B
 release_date: "2025-04-28"
 
 generate_args:
+  # Native context is 40960 and we no longer stretch it (see runpod.vllm_args). vLLM 400s
+  # when prompt + max_tokens exceeds max-model-len, so this reserves room for the longest
+  # prompt we actually see: HLE is median 205 tokens, p99 1882, max 12105. Answers wanting
+  # more than 28k of output truncate — deliberate, we stop at the native limit.
+  max_tokens: 28672
+  # A queued request can sit token-less for a long time; the default read timeout fires
+  # and the sample dies.
+  timeout: 7200
   extra_body:
     reasoning:
       enabled: true
@@ -14,20 +22,26 @@ runpod:
   name: small-judge-qwen3-32b
   cloud_type: SECURE
   gpu_id: NVIDIA A100 80GB PCIe
-  gpu_count: 1
+  # 66GB of bf16 weights leaves ~10GB of KV on a single 80GB card — one sequence at
+  # 40960, i.e. no concurrency. Two cards give ~94GB of KV, roughly 8 full-length slots.
+  gpu_count: 2
   container_disk_in_gb: 80
-  ready_timeout: 1800
-  # Agentic runs (SWE-bench) outlast the 12h default.
-  terminate_after: 24h
-  # Streamed: the Runpod HTTP proxy drops responses that take over 120s (Cloudflare 524),
-  # and a long thinking turn on the 32B easily does.
-  model_args:
-    stream: true
-  # Native context 40960, served unscaled: agentic runs must cap --max-tokens (8192) so
-  # prompts have room, and long trajectories end at the context limit.
+  ready_timeout: 5400   # 66GB of weights plus TP init; 1800 killed pods that were still loading
+  # HLE is 2158 samples; the GPQA rate (198 in 68 min) puts a full pass at ~12h, right on
+  # the 12h default. The pod self-terminating mid-run reads as APIConnectionError and
+  # burns the eval-set retries restarting the whole task.
+  terminate_after: 30h
+  model_args: {}
   vllm_args:
     - --dtype
     - bfloat16
+    - --tensor-parallel-size
+    - "2"
+    # Stock Qwen3-32B stops at 40960. We used to stretch it to 131072 with YaRN, but that
+    # left KV cache for only ~2-3 full-length sequences on 2xA100, so requests queued
+    # token-less until the read timeout killed them. Native context, truncate the rest.
+    - --max-model-len
+    - "40960"
     - --enable-auto-tool-choice
     - --tool-call-parser
     - hermes

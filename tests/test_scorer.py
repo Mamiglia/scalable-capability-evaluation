@@ -122,8 +122,17 @@ def test_pair_metrics():
     assert consistent_accuracy()(scores) == pytest.approx(1 / 3)
     assert position_bias()(scores) == pytest.approx(-0.5)   # 3x "1", 1x "2" over 4 answered
     assert length_corr()(scores) == pytest.approx(0.5773502691896258)  # phi of x=[1,0,1,0], y=[1,0,1,1]
-    assert length_corr()([]) == 0.0
-    assert position_bias()([]) == 0.0
+    import math
+    assert math.isnan(length_corr()([]))       # no data != no length bias
+    assert math.isnan(position_bias()([]))
+
+    # epochs > 1: the mean reducer blanks ``answer`` unless every epoch agreed, so the
+    # metrics must read the pick rate off the value, not filter on the answer.
+    reduced = [SampleScore(sample_id="q4_1", score=Score(value=0.8, answer=None),
+                           sample_metadata={"chars_1": 10, "chars_2": 5}),
+               SampleScore(sample_id="q4_2", score=Score(value=0.2, answer=None),
+                           sample_metadata={"chars_1": 5, "chars_2": 10})]
+    assert position_bias()(reduced) == pytest.approx(-0.6)  # picks 1 in 80% of both orders
 
 
 class TestJudgeScorer:
