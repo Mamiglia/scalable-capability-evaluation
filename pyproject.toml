@@ -11,6 +11,7 @@ dependencies = [
     "ijson>=3.5.1",
     "inspect-ai>=0.3.249",
     "inspect-evals @ git+https://github.com/UKGovernmentBEIS/inspect_evals.git@main",
+    "matharena @ git+https://github.com/Mamiglia/inspect-matharena.git",
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
     "numpyro>=0.15",

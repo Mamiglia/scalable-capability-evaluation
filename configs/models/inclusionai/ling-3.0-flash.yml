@@ -1,0 +1,5 @@
+# deliberate: no pin (testing model, not part of serious evals)
+name: inclusionai/ling-3.0-flash
+release_date: '2026-08-21'
+model_args:
+  provider:

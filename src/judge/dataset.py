@@ -153,10 +153,12 @@ def responses_to_sample(
         ),
         target=target,
         # Length is itself a signal, and a cut transcript loses its answer: record both so
-        # the analysis can tell what the judge actually saw.
+        # the analysis can tell what the judge actually saw. ``chars_*`` are the *shown*
+        # lengths -- under ``truncate_frac`` the raw lengths are exactly what the condition
+        # removes, so correlating a verdict against them would measure the wrong thing.
         metadata={
-            "chars_1": len(first.text),
-            "chars_2": len(second.text),
+            "chars_1": len(text_1),
+            "chars_2": len(text_2),
             "truncated_1": len(first.text) > max_len,
             "truncated_2": len(second.text) > max_len,
         },

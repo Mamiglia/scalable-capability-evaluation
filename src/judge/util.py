@@ -152,4 +152,7 @@ def extract_score(sample: Sample) -> bool:
             f"sample {getattr(sample, 'id', '?')} has several scores ({sorted(scores)}); "
             f"cannot tell which one decides correctness"
         )
-    return any(score.value == "C" for score in scores.values())
+    # HLE-style scorers report {"score": "C"/"I"/nan, "confidence": int} instead of a
+    # bare grade; reading the dict as-is would mark every sample incorrect.
+    values = [score.value for score in scores.values()]
+    return any((v["score"] if isinstance(v, dict) else v) == "C" for v in values)

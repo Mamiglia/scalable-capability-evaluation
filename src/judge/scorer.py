@@ -1,4 +1,5 @@
 import re
+from math import nan
 from statistics import StatisticsError, correlation
 
 from inspect_ai.scorer import (
@@ -50,7 +51,23 @@ def _answered(sample: SampleScore) -> bool:
 
 
 def _correct(sample: SampleScore) -> bool:
-    return _to_float(sample.score.value) == 1.0
+    return _to_float(sample.score.value) > 0.5
+
+
+def _picked_1(sample: SampleScore) -> float | None:
+    """P(judge picked Transcript 1), or None if it never gave a verdict.
+
+    Read off the *value*, not ``Score.answer``: with epochs > 1 the mean reducer blanks
+    ``answer`` unless every epoch agreed, so filtering on it keeps only the samples the
+    judge was unanimous on -- exactly the ones a length heuristic drives (measured: 0.79
+    vs 0.63 on a 5-epoch run). The value is the fraction of epochs scored correct, and the
+    sample id suffix says which position was correct, so the pick rate follows.
+    """
+    value = _to_float(sample.score.value)
+    if sample.score.answer is None and value == 0.0:  # no verdict in any epoch
+        return None
+    target = str(sample.sample_id).rsplit("_", 1)[-1]
+    return value if target == "1" else 1.0 - value
 
 
 @metric
@@ -59,6 +76,9 @@ def answer_rate() -> Metric:
 
     Reported separately because ``accuracy`` counts a missing verdict as wrong, which
     would hide a judge that keeps refusing, rambling, or ignoring the format.
+
+    Caveat: with epochs > 1 the mean reducer keeps ``answer`` only when every epoch agreed,
+    so this reads as an epoch-unanimity rate rather than an answer rate.
     """
 
     def metric_fn(scores: list[SampleScore]) -> float:
@@ -79,10 +99,10 @@ def position_bias() -> Metric:
     """
 
     def metric_fn(scores: list[SampleScore]) -> float:
-        answers = [s.score.answer for s in scores if _answered(s)]
-        if not answers:
-            return 0.0
-        return sum(1 if a == "2" else -1 for a in answers) / len(answers)
+        picks = [p for p in map(_picked_1, scores) if p is not None]
+        if not picks:
+            return nan
+        return sum(1.0 - 2.0 * p for p in picks) / len(picks)
 
     return metric_fn
 
@@ -102,7 +122,7 @@ def consistent_accuracy() -> Metric:
             by_question.setdefault(str(sample.sample_id).rsplit("_", 1)[0], []).append(_correct(sample))
         pairs = [values for values in by_question.values() if len(values) == 2]
         if not pairs:
-            return 0.0
+            return nan
         return sum(a and b for a, b in pairs) / len(pairs)
 
     return metric_fn
@@ -110,21 +130,26 @@ def consistent_accuracy() -> Metric:
 
 @metric
 def length_corr() -> Metric:
-    """Phi correlation between "Transcript 1 is longer" and "judge picked 1", over answered
-    samples (``chars_1/2`` from the sample metadata). +1 = always picks the longer one."""
+    """Correlation between "Transcript 1 is longer" and P(judge picks 1), over samples that
+    got a verdict (``chars_1/2`` from the sample metadata). +1 = always picks the longer one.
+
+    NaN, not 0.0, when it cannot be computed -- logs collected before ``chars_1/2`` existed
+    carry no lengths, and "no data" must not read as "no length bias".
+    """
 
     def metric_fn(scores: list[SampleScore]) -> float:
         xs, ys = [], []
         for s in scores:
             md = s.sample_metadata or {}
-            if not _answered(s) or "chars_1" not in md:
+            picked_1 = _picked_1(s)
+            if picked_1 is None or "chars_1" not in md:
                 continue
-            xs.append(int(md["chars_1"] > md["chars_2"]))
-            ys.append(int(s.score.answer == "1"))
+            xs.append(float(md["chars_1"] > md["chars_2"]))
+            ys.append(picked_1)
         try:
             return correlation(xs, ys)
         except StatisticsError:  # fewer than two points, or a constant side
-            return 0.0
+            return nan
 
     return metric_fn
 

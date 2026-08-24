@@ -9,4 +9,4 @@ model_args:
     - gmicloud/fp8
     allow_fallbacks: false
 generate_args:
-  max_tokens: 1032192
+  max_tokens: 131072   # GMICloud rejects prompt+max_tokens > 1048576; the reprompt turn blew that
