@@ -12,6 +12,8 @@ Paid calls via OpenRouter, pinned to the OpenAI endpoints: run with --dry-run fi
 import argparse
 import hashlib
 import json
+import re
+import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -62,17 +64,18 @@ NON-FIRING TRANSCRIPTS:
 Do not output anything besides the feature. Please suggest exactly one description, starting with "-" and surrounded by quotes. Your response is:
 - \""""
 
-ANNOTATE_PROMPT = """Given the TRANSCRIPT (an AI model's answer to a question, or its tool-using trace), decide whether the CONCEPT is clearly present in it.
+ANNOTATE_PROMPT = """Below are numbered CONCEPTS and numbered TRANSCRIPTS (each an AI model's answer to a question, or its tool-using trace). For every concept, decide in which transcripts it is clearly present.
 
-- Only output "Yes" if the CONCEPT obviously and clearly applies to the transcript; otherwise output "No".
-- Do not judge whether the answer is good; only whether the CONCEPT is present.
+- Count a concept as present in a transcript only if it obviously and clearly applies to that transcript.
+- Do not judge whether an answer is good; only whether each concept is present.
 
-Output one of these exact strings: "Yes" or "No". Do not output anything else.
+Output a JSON object mapping each concept number to the list of transcript numbers where that concept is present, for example {{"1": [2, 5], "2": []}}. Include every concept number, even with an empty list. Do not output anything else.
 
-TRANSCRIPT:
-{text}
+CONCEPTS:
+{concepts}
 
-CONCEPT: "{concept}"
+{transcripts}
+
 Output:"""
 
 
@@ -113,9 +116,23 @@ def parse_description(reply: str) -> str:
     return reply.strip().strip('"').strip()
 
 
-def parse_yes_no(reply: str) -> float | None:
-    word = reply.strip().strip('"').strip(".").lower()
-    return {"yes": 1.0, "no": 0.0}.get(word)
+def parse_presence(reply: str, n_concepts: int, n_transcripts: int) -> np.ndarray | None:
+    """concept x transcript 0/1 matrix from the batched annotation reply, None if unparseable."""
+    match = re.search(r"\{.*\}", reply, re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    matrix = np.zeros((n_concepts, n_transcripts))
+    for concept, numbers in parsed.items():
+        if not str(concept).strip().isdigit() or not isinstance(numbers, list):
+            return None
+        for number in numbers:
+            if isinstance(number, int) and 1 <= int(concept) <= n_concepts and 1 <= number <= n_transcripts:
+                matrix[int(concept) - 1, number - 1] = 1.0
+    return matrix
 
 
 def fidelity(annotations: np.ndarray, activations: np.ndarray) -> tuple[float, float]:
@@ -133,25 +150,30 @@ class CachedAsker:
     Every cached record keeps the provider and model that actually served the call.
     """
 
-    def __init__(self, cache_path: Path, endpoints: dict[str, str], dry_run: bool = False):
-        self.cache_path, self.endpoints, self.dry_run = cache_path, endpoints, dry_run
+    def __init__(self, cache_path: Path, endpoints: dict[str, str], dry_run: bool = False,
+                 offline: bool = False):
+        self.cache_path, self.endpoints, self.dry_run, self.offline = cache_path, endpoints, dry_run, offline
         self.lock = threading.Lock()
         self.cache = {}
         self.chars = 0
         self.calls = 0
+        self.pending = []
         if cache_path.exists():
             for line in cache_path.read_text().splitlines():
                 record = json.loads(line)
                 self.cache[record["key"]] = record["reply"]
         self.client = None
 
-    def __call__(self, model: str, prompt: str, max_tokens: int) -> str:
+    def __call__(self, model: str, prompt: str, max_tokens: int) -> str | None:
         key = hashlib.sha256(f"{model}\0{prompt}".encode()).hexdigest()
         with self.lock:
             if key in self.cache:
                 return self.cache[key]
             self.chars += len(prompt)
             self.calls += 1
+            if self.offline:
+                self.pending.append({"key": key, "model": model, "prompt": prompt})
+                return None
         if self.dry_run:
             return ""
         if self.client is None:
@@ -178,9 +200,11 @@ class CachedAsker:
 
 def describe_features(activations: np.ndarray, labels: list[str], rows: pd.DataFrame,
                       groups: dict[str, list[str]], settings: dict, ask, width: int,
-                      *, workers: int = 8) -> pd.DataFrame:
+                      *, workers: int = 8) -> pd.DataFrame | None:
+    """Returns the feature table, or None while replies are still pending (offline mode)."""
     threshold = settings["p_value_threshold"] if settings.get("p_value_threshold") else 0.05 / width
     texts = [truncate_words(text, settings["max_words"]) for text in rows["transcript"]]
+    batch = settings["annotation_batch_size"]
     candidate_tasks, scoring = [], {}
     for column, label in enumerate(labels):
         group = label.split(":")[0]
@@ -204,47 +228,61 @@ def describe_features(activations: np.ndarray, labels: list[str], rows: pd.DataF
 
     def interpret(task):
         label, candidate, prompt = task
-        return label, candidate, parse_description(ask(settings["interpreter_model"], prompt,
-                                                       settings["interpreter_max_tokens"]))
+        reply = ask(settings["interpreter_model"], prompt, settings["interpreter_max_tokens"])
+        return label, candidate, None if reply is None else parse_description(reply)
 
     with ThreadPoolExecutor(workers) as pool:
         descriptions = list(pool.map(interpret, candidate_tasks))
-    annotate_tasks = [(label, candidate, description, int(row))
-                      for label, candidate, description in descriptions
-                      for row in scoring[label]["score_rows"]]
+    if any(description is None for _, _, description in descriptions):
+        return None
+    candidates = {}
+    for label, candidate, description in descriptions:
+        candidates.setdefault(label, []).append((candidate, description))
+
+    annotate_tasks = []
+    for label, items in candidates.items():
+        score_rows = scoring[label]["score_rows"]
+        for start in range(0, len(score_rows), batch):
+            annotate_tasks.append((label, score_rows[start:start + batch]))
 
     def annotate(task):
-        label, candidate, description, row = task
-        prompt = ANNOTATE_PROMPT.format(text=texts[row], concept=description)
-        return label, candidate, row, parse_yes_no(ask(settings["annotator_model"], prompt,
-                                                       settings["annotator_max_tokens"]))
+        label, batch_rows = task
+        items = candidates[label]
+        prompt = ANNOTATE_PROMPT.format(
+            concepts="\n".join(f'{number}. "{description}"' for number, (_, description) in enumerate(items, 1)),
+            transcripts="\n\n".join(f"TRANSCRIPT {number}:\n{texts[row]}" for number, row in enumerate(batch_rows, 1)))
+        reply = ask(settings["annotator_model"], prompt, settings["annotator_max_tokens"])
+        return label, batch_rows, None if reply is None else parse_presence(reply, len(items), len(batch_rows))
 
     with ThreadPoolExecutor(workers) as pool:
         annotations = list(pool.map(annotate, annotate_tasks))
-    answers = {}
-    for label, candidate, row, answer in annotations:
-        answers.setdefault((label, candidate), {})[row] = np.nan if answer is None else answer
+    if getattr(ask, "pending", None):
+        return None
+    answers = {}      # (label, candidate) -> {row: 0/1 or nan}
+    for label, batch_rows, matrix in annotations:
+        for position, (candidate, _) in enumerate(candidates[label]):
+            store = answers.setdefault((label, candidate), {})
+            for number, row in enumerate(batch_rows):
+                store[int(row)] = np.nan if matrix is None else matrix[position, number]
 
     records = []
     for column, label in enumerate(labels):
         info = scoring[label]
-        candidates = []
-        for other_label, candidate, description in descriptions:
-            if other_label != label:
-                continue
+        scored = []
+        for candidate, description in candidates.get(label, []):
             rows_scored = info["score_rows"]
             annotation = np.array([answers[(label, candidate)].get(int(row), np.nan) for row in rows_scored])
             correlation, p_value = fidelity(annotation, activations[rows_scored, column])
-            candidates.append({"candidate": candidate, "description": description,
-                               "correlation": correlation, "p_value": p_value,
-                               "n_scored": int((~np.isnan(annotation)).sum())})
+            scored.append({"candidate": candidate, "description": description,
+                           "correlation": correlation, "p_value": p_value,
+                           "n_scored": int((~np.isnan(annotation)).sum())})
         record = {"feature": label, "group": info["group"], "prevalence": info["prevalence"],
-                  "n_candidates": len(candidates), "candidates_json": json.dumps(candidates)}
-        if not candidates:
+                  "n_candidates": len(scored), "candidates_json": json.dumps(scored)}
+        if not scored:
             records.append(record | {"description": None, "correlation": None, "p_value": None,
                                      "kept": False, "reason": "too_few_firing_transcripts"})
             continue
-        best = max(candidates, key=lambda item: item["correlation"])
+        best = max(scored, key=lambda item: item["correlation"])
         kept = (best["p_value"] <= threshold and best["correlation"] >= settings["min_correlation"]
                 and info["prevalence"] >= settings["min_prevalence"])
         reason = None if kept else ("low_prevalence" if info["prevalence"] < settings["min_prevalence"]
@@ -261,6 +299,9 @@ def main():
     parser.add_argument("--config", type=Path, default=Path("configs/workstream_b.yaml"))
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true", help="count prompt characters and calls, call nothing")
+    parser.add_argument("--offline", action="store_true",
+                        help="call nothing; write uncached prompts to pending.jsonl in the output dir, "
+                             "to be answered elsewhere and appended to llm_cache.jsonl as {key, reply}")
     parser.add_argument("--max-features", type=int, help="describe only the first N features (smoke)")
     parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
@@ -274,10 +315,19 @@ def main():
     if args.max_features:
         labels, activations = labels[:args.max_features], activations[:, :args.max_features]
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    ask = CachedAsker(args.output_dir / "llm_cache.jsonl", settings["openrouter_endpoints"], dry_run=args.dry_run)
+    ask = CachedAsker(args.output_dir / "llm_cache.jsonl", settings["openrouter_endpoints"],
+                      dry_run=args.dry_run, offline=args.offline)
     table = describe_features(activations, labels, rows, groups, settings, ask, width, workers=args.workers)
     if args.dry_run:
         print(f"features={len(labels)} calls={ask.calls} prompt_chars={ask.chars} (~{ask.chars // 4} tokens)")
+        return
+    if table is None:
+        pending_path = args.output_dir / "pending.jsonl"
+        pending_path.write_text("".join(json.dumps(item) + "\n" for item in ask.pending))
+        by_model = {}
+        for item in ask.pending:
+            by_model[item["model"]] = by_model.get(item["model"], 0) + 1
+        print(f"pending prompts written to {pending_path}: {by_model}")
         return
     table.to_csv(args.output_dir / "feature_descriptions.csv", index=False)
     print(f"features={len(table)} kept={int(table.kept.sum())} "

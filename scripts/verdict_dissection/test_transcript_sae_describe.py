@@ -1,3 +1,5 @@
+import json
+import re
 import sys
 from pathlib import Path
 
@@ -6,11 +8,12 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 from transcript_sae_describe import (describe_features, fidelity, interpretation_examples,
-                                     parse_description, parse_yes_no, scoring_examples, truncate_words)
+                                     parse_description, parse_presence, scoring_examples, truncate_words)
 
 SETTINGS = {"interpreter_model": "fake", "annotator_model": "fake", "interpreter_max_tokens": 10,
             "annotator_max_tokens": 10, "n_candidates": 2, "interpret_examples": 3,
             "contrast_examples": 2, "top_percentile": 50, "scoring_examples": 20, "max_words": 40,
+            "annotation_batch_size": 7,
             "min_correlation": 0.0, "p_value_threshold": None, "min_prevalence": 0.05, "seed": 0}
 
 
@@ -28,7 +31,8 @@ def test_example_sampling_and_parsing():
     scored = scoring_examples(activations, 20, 0)
     assert len(scored) == 12 and all(activations[scored] != 0)
     assert parse_description('- "uses numbered steps"') == "uses numbered steps"
-    assert parse_yes_no(" Yes. ") == 1.0 and parse_yes_no("no") == 0.0 and parse_yes_no("maybe") is None
+    matrix = parse_presence('Sure: {"1": [2, 3], "2": []}', 2, 3)
+    assert matrix.tolist() == [[0, 1, 1], [0, 0, 0]] and parse_presence("no json", 2, 3) is None
     assert truncate_words("a b c d e f", 4) == "a b\n[...middle of transcript truncated...]\ne f"
 
 
@@ -52,10 +56,14 @@ def test_describe_features_keeps_the_best_faithful_candidate():
     def ask(model, prompt, max_tokens):
         if prompt.startswith("# Task Overview"):
             return next(interpretations)
-        # annotator: "long answer" is present exactly on the positively firing rows
-        row = int(prompt.split("TRANSCRIPT:\n")[1].split()[1])
-        present = row < 20
-        return "Yes" if ("long answer" in prompt and present) or ("short answer" in prompt and not present and row % 2) else "No"
+        # batched annotator: concept "long answer" is present exactly on the positively firing rows
+        concepts = re.findall(r'^\d+\. "(.*)"$', prompt.split("CONCEPTS:\n")[1].split("\n\nTRANSCRIPT")[0], re.M)
+        numbers = [int(m) for m in re.findall(r"TRANSCRIPT \d+:\ntranscript (\d+) ", prompt)]
+        present = {}
+        for index, concept in enumerate(concepts, 1):
+            present[str(index)] = [n + 1 for n, row in enumerate(numbers)
+                                   if (concept == "long answer" and row < 20) or (concept == "short answer" and row >= 20 and row % 2)]
+        return json.dumps(present)
 
     table = describe_features(activations, ["gpqa:0", "gpqa:1"], rows, {"gpqa": ["gpqa"]},
                               SETTINGS, ask, width=2, workers=1)
@@ -64,3 +72,21 @@ def test_describe_features_keeps_the_best_faithful_candidate():
     assert first.correlation > 0.5 and first.p_value < 0.025 and first.n_candidates == 2
     second = table.iloc[1]
     assert not second.kept and second.reason == "too_few_firing_transcripts"
+
+
+def test_offline_mode_returns_none_while_prompts_are_pending():
+    rows = group_rows(40)
+    activations = np.zeros((40, 1))
+    activations[:10, 0] = np.arange(10, 0, -1)
+
+    class Offline:
+        def __init__(self):
+            self.pending = []
+
+        def __call__(self, model, prompt, max_tokens):
+            self.pending.append({"model": model, "prompt": prompt})
+            return None
+
+    ask = Offline()
+    assert describe_features(activations, ["gpqa:0"], rows, {"gpqa": ["gpqa"]}, SETTINGS, ask, width=1, workers=1) is None
+    assert len(ask.pending) == SETTINGS["n_candidates"] and all(item["model"] == "fake" for item in ask.pending)

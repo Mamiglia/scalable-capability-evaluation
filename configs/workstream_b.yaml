@@ -108,6 +108,7 @@ descriptions:
   contrast_examples: 10
   top_percentile: 95
   scoring_examples: 300
+  annotation_batch_size: 20   # transcripts per fidelity call; all of a feature's candidates are judged together
   max_words: 256
   min_correlation: 0.0
   p_value_threshold: null   # null = 0.05 / width (Bonferroni over the dictionary)
