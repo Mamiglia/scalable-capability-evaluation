@@ -3,7 +3,7 @@
 const GROUP_LABELS = { gpqa: "GPQA", aime: "AIME", intercode: "InterCode", swe_bench_mini: "SWE-bench mini" };
 const BUCKETS = [
   ["top", "Top"], ["50-90%", "50–90% quantile"], ["10-50%", "10–50% quantile"],
-  ["0-10%", "0–10% quantile"], ["contrast", "Same question, activation 0"], ["negative", "Most negative"],
+  ["0-10%", "0–10% quantile"], ["contrast", "Same question, zero activation"], ["negative", "Most negative"],
 ];
 const SNIPPETS = 3;         // peaks shown per example
 const state = { index: null, feature: 0, group: "gpqa", data: null, traces: null, blind: false };
@@ -48,14 +48,16 @@ function renderSidebar() {
 }
 
 const EXPLANATION = `
-<h2>What this page shows</h2>
-<p><b>Features.</b> Each transcript is embedded once (Qwen3-Embedding-4B, transcript only), centred on its question's mean embedding, and passed through one sparse autoencoder (WIMHF BatchTopK, 32 features, 4 active per transcript, signed) fitted across all benchmarks. Zero = not among the transcript's 4 active features.</p>
-<p><b>Names.</b> Named per benchmark: an LLM proposes 5 descriptions from firing vs same-question non-firing transcripts; a second LLM rates 300 transcripts blind and the best-correlating description wins. <b>Kept</b> = prevalence ≥ 5%, ≥ 10 firing questions, fidelity r &gt; 0 at p ≤ 0.05/32. Significant negative fidelity is kept as <i>does NOT: …</i>. Not kept says nothing about the feature, only that it has no verified name in that benchmark.</p>
-<p><b>Panels.</b> Nonzero activation histogram · per-model mean activation vs accuracy (Spearman ρ) · among judged pairs that differ on the feature, how often the judge picks the higher-activation side, per judge, and how often that side is the more accurate model (orange); 0.5 = no association.</p>
-<p><b>Examples.</b> Top 10; samples from the 50–90 / 10–50 / 0–10% quantiles of positive activations; same-question zero-activation contrasts; most negative; per model its top, most negative and two zeros.</p>
-<p><b>Traces.</b> The transcript is re-embedded at every prefix (one masked forward pass), giving the feature's value as the text is read left to right; green/red = text that raises/lowers it. Final value matches the stored activation to ~0.01. Transcripts over 16k tokens are not traced.</p>
-<p><b>Blind mode.</b> Names hidden, 4 firing + 4 contrasts shuffled; guess, then reveal.</p>
-<p><b>GLM.</b> Each feature is one regressor (left − right) in every benchmark; name a slope only where the cell is kept, pool across benchmarks only where the names agree.</p>`;
+<h2>Method</h2>
+<p>Transcripts are embedded with Qwen3-Embedding-4B (final layer, last token, transcript without the question). Each embedding is centred on the mean embedding of answers to the same question and renormalised. A BatchTopK sparse autoencoder (32 features, 4 active per transcript, signed activations, WIMHF recipe) is fitted on a training set balanced across benchmarks and applied to all 17,451 transcripts. An activation of zero means the feature is not among the transcript's 4 active features.</p>
+<p>Names are assigned per benchmark. A language model is shown firing transcripts and zero-activation answers to the same questions and writes 5 candidate descriptions. A second model rates 300 transcripts for each candidate without seeing activations; the candidate with the highest Pearson correlation between its ratings and the activation is the name. The name is kept if prevalence ≥ 5%, at least 10 questions have a firing transcript, and r &gt; 0 with p ≤ 0.05/32. When the best candidate has a significant negative correlation it is kept as its negation ("does NOT: …"). Not kept means no verified name in that benchmark, not that the feature is absent.</p>
+<p>Traces: the transcript is re-embedded at every prefix in one forward pass (one extra end token per prefix, masked to its prefix), which gives the feature value after each token. Green marks text where the value rises, red where it falls. The value at the last token equals the stored activation to within 0.03. Transcripts over 16k tokens are not traced.</p>
+<h2>Panels</h2>
+<p>Histogram of nonzero activations. Mean activation of each model against its accuracy on the benchmark, with Spearman ρ over models. Judged pairs in which the two transcripts differ on the feature: the fraction where the judge picked the transcript with the higher activation, per judge, and the fraction where that transcript is from the more accurate model (orange). 0.5 means no association; bars are Wilson 95% intervals.</p>
+<h2>Examples</h2>
+<p>Top 10 activations; samples from the 50–90%, 10–50% and 0–10% quantiles of positive activations; zero-activation answers to the same questions as the top examples; the 5 most negative; and for each model its highest, lowest and two zero-activation transcripts. Blind mode hides the names and shows 4 firing and 4 zero-activation transcripts in random order.</p>
+<h2>Use in the GLM</h2>
+<p>Each feature is one regressor, left minus right activation, in every benchmark. A slope is given its name only where the feature × benchmark cell is kept; slopes are pooled across benchmarks only where the four names describe the same behaviour.</p>`;
 
 function renderExplanation() {
   $("#header").innerHTML = EXPLANATION;
@@ -113,7 +115,7 @@ function panelDistribution(group) {
   const zeroShare = 1 - group.prevalence, maxc = Math.max(...nonzero, 1);
   const x = (v) => pad.l + ((v - edges[0]) / (edges[edges.length - 1] - edges[0] || 1)) * (W - pad.l - pad.r);
   const svg = svgEl("svg", { width: W, height: H });
-  svg.dataset.caption = `activation (${(zeroShare * 100).toFixed(0)}% zero, not drawn)`;
+  svg.dataset.caption = `nonzero activations (${(zeroShare * 100).toFixed(0)}% are zero)`;
   nonzero.forEach((c, i) => {
     const mid = (edges[i] + edges[i + 1]) / 2, h = (c / maxc) * (H - pad.t - pad.b);
     svg.append(svgEl("rect", { x: x(edges[i]), width: Math.max(x(edges[i + 1]) - x(edges[i]) - 0.5, 0.5), y: H - pad.b - h, height: h, fill: mid > 0 ? "#2f7d32" : "#a33" }));
@@ -142,7 +144,7 @@ function panelByModel(group) {
   const x = (a) => pad.l + a * (W - pad.l - pad.r), y = (v) => H - pad.b - ((v - lo) / span) * (H - pad.t - pad.b);
   const svg = svgEl("svg", { width: W, height: H });
   const rho = spearman(rows.map((m) => m.accuracy), ys);
-  svg.dataset.caption = `per model: mean activation vs accuracy, ρ = ${rho == null ? "–" : rho.toFixed(2)}`;
+  svg.dataset.caption = `model accuracy vs mean activation, ρ = ${rho == null ? "–" : rho.toFixed(2)}`;
   svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: y(0), y2: y(0), stroke: "#bbb" }));
   svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: H - pad.b, y2: H - pad.b, stroke: "#999" }));
   rows.forEach((m) => {
@@ -164,7 +166,7 @@ function panelAgreement(group) {
   const W = 320, H = 12 + rows.length * 15 + 30, pad = { l: 125, r: 38, t: 10, b: 26 };
   const x = (v) => pad.l + ((v - 0.2) / 0.6) * (W - pad.l - pad.r);
   const svg = svgEl("svg", { width: W, height: H });
-  svg.dataset.caption = "pairs differing on the feature: higher side wins";
+  svg.dataset.caption = "P(higher activation picked), pairs differing on the feature";
   for (const v of [0.3, 0.5, 0.7]) {
     svg.append(svgEl("line", { x1: x(v), x2: x(v), y1: pad.t, y2: H - pad.b, stroke: v === 0.5 ? "#999" : "#eee", "stroke-dasharray": v === 0.5 ? "3 3" : "" }));
     axisText(svg, x(v), H - pad.b + 12, v, "middle", "axis");
@@ -254,8 +256,8 @@ function snippets(example, trace) {
   });
   const full = el("div", { class: "text full" }, ...segmentSpans(example, trace, 0, inc.length, inc, scale));
   full.hidden = true;
-  const toggle = el("button", { class: "linkish", onclick: () => { full.hidden = !full.hidden; pre.hidden = !pre.hidden; toggle.textContent = full.hidden ? "show full transcript" : "show snippets"; } }, "show full transcript");
-  return [el("div", { class: "trace-row" }, el("span", { class: "trace-legend" }, `feature value along the transcript · final ${fmt(trace.final, 3)}, stored ${fmt(example.activation, 3)}`), toggle), traceChart(trace, inc, scale), pre, full];
+  const toggle = el("button", { class: "linkish", onclick: () => { full.hidden = !full.hidden; pre.hidden = !pre.hidden; toggle.textContent = full.hidden ? "full transcript" : "show snippets"; } }, "full transcript");
+  return [el("div", { class: "trace-row" }, el("span", { class: "trace-legend" }, `value along the transcript; last token ${fmt(trace.final, 3)}, stored ${fmt(example.activation, 3)}`), toggle), traceChart(trace, inc, scale), pre, full];
 }
 
 function plainText(example) {
@@ -263,7 +265,7 @@ function plainText(example) {
   const pre = el("div", { class: "text" }, head, rest ? el("span", { class: "gap" }, " …") : "");
   if (!rest) return [pre];
   const full = el("div", { class: "text full" }, example.transcript); full.hidden = true;
-  const toggle = el("button", { class: "linkish", onclick: () => { full.hidden = !full.hidden; pre.hidden = !pre.hidden; toggle.textContent = full.hidden ? "show full transcript" : "show less"; } }, "show full transcript");
+  const toggle = el("button", { class: "linkish", onclick: () => { full.hidden = !full.hidden; pre.hidden = !pre.hidden; toggle.textContent = full.hidden ? "full transcript" : "show less"; } }, "full transcript");
   return [el("div", { class: "trace-row" }, el("span", { class: "trace-legend" }, "not traced yet"), toggle), pre, full];
 }
 
@@ -278,7 +280,7 @@ function card(example, opts = {}) {
     el("span", {}, `picked ${fmt(example.pick_rate)} (n=${example.pick_n})`),
     el("span", { class: "dim" }, `${example.bench} · ${example.item} · ep${example.epoch} · ${example.split.replace("representation_", "")}`),
     el("details", { class: "question" }, el("summary", {}, "question"), el("div", { class: "text" }, example.question)),
-    opts.guess ? el("label", { class: "guess" }, el("input", { type: "checkbox" }), " my guess: fires") : "");
+    opts.guess ? el("label", { class: "guess" }, el("input", { type: "checkbox" }), " fires") : "");
   const trace = state.traces && state.traces[exampleKey(example)];
   const c = el("div", { class: "card" }, meta, ...(trace ? snippets(example, trace) : plainText(example)));
   if (opts.role) c.dataset.role = opts.role;
@@ -322,12 +324,12 @@ function renderExamples(group) {
     cards.forEach((c) => {
       const guessed = c.querySelector(".guess input").checked, fires = c.dataset.role === "firing";
       c.classList.add(fires ? "revealed-firing" : "revealed-contrast");
-      c.querySelector(".guess").append(fires ? " → does fire" : " → does not fire (same-question contrast)");
+      c.querySelector(".guess").append(fires ? ": fires" : ": zero");
       if (guessed === fires) right++;
     });
-    reveal.replaceWith(el("div", { class: "desc" }, `${right}/${cards.length} correct. Label: ${group.description && group.description.text ? group.description.text : "(none)"}`));
+    reveal.replaceWith(el("div", { class: "desc" }, `${right}/${cards.length} correct. Name: ${group.description && group.description.text ? group.description.text : "(none)"}`));
   } }, "reveal");
-  box.replaceChildren(el("section", { class: "bucket" }, el("h3", {}, "4 firing + 4 contrasts, shuffled — tick the ones that fire"), reveal, ...cards));
+  box.replaceChildren(el("section", { class: "bucket" }, el("h3", {}, "4 firing, 4 zero, random order"), reveal, ...cards));
 }
 
 function renderMain() {
