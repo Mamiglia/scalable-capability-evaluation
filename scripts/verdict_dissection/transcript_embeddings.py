@@ -667,7 +667,7 @@ def load_passed_dense_gate(directory: str | Path, family: str,
     report = json.loads((directory / "dense_gate.json").read_text())
     if report.get("status") != "passed" or report.get("approval_required"):
         raise ValueError(f"full {family} extraction requires a passed dense gate")
-    if expected_identity is not None and manifest.get("dense_identity") != expected_identity:
+    if expected_identity is not None and manifest.get("dense_identity") != json_ready(expected_identity):
         raise ValueError(f"full {family} extraction requires a matching dense gate identity")
     return manifest
 

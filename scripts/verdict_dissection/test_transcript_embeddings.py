@@ -585,6 +585,11 @@ def test_dense_gate_report_is_hashed_and_refuses_failed_as_prerequisite(tmp_path
     verify_artifact_files(tmp_path / "gate", manifest)
     assert manifest["gate_status"] == "passed"
     assert load_passed_dense_gate(tmp_path / "gate", "qwen") == manifest
+    # the manifest round-trips through JSON, so a tuple-valued spec must still match
+    identity = {"model": {"hidden_layers": (24, 30)}, "family": "qwen"}
+    write_dense_gate_report(tmp_path / "tuple", report, {"probe": "a" * 64}, family="qwen",
+                            identity=identity)
+    assert load_passed_dense_gate(tmp_path / "tuple", "qwen", identity)["gate_status"] == "passed"
 
     write_dense_gate_report(tmp_path / "failed", {"status": "failed"}, {}, family="qwen")
     with pytest.raises(ValueError, match="passed dense gate"):
