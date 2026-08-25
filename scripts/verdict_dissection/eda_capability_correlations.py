@@ -6,12 +6,7 @@ import numpy as np
 import pandas as pd
 
 
-def capability_correlations(transcripts, dictionary, min_models=5):
-    """Return one feature correlation per benchmark item.
-
-    Repeated correct rollouts are averaged within model and item before ranks
-    are computed, so each model contributes once to each item.
-    """
+def _model_item_means(transcripts, dictionary, min_models):
     if min_models < 2:
         raise ValueError("min_models must be at least 2")
     features = dictionary.feature.tolist()
@@ -29,6 +24,17 @@ def capability_correlations(transcripts, dictionary, min_models=5):
                                     sort=False)[["accuracy"] + features]
                 .mean())
     groups = dictionary.set_index("feature").group
+    return features, groups, by_model
+
+
+def capability_correlations(transcripts, dictionary, min_models=5):
+    """Return one feature correlation per benchmark item.
+
+    Repeated correct rollouts are averaged within model and item before ranks
+    are computed, so each model contributes once to each item.
+    """
+    features, groups, by_model = _model_item_means(
+        transcripts, dictionary, min_models)
     rows = []
     for (bench, item), frame in by_model.groupby(["bench", "item"], sort=False):
         capability_rank = frame.accuracy.rank(method="average")
@@ -46,6 +52,34 @@ def capability_correlations(transcripts, dictionary, min_models=5):
             "min_models": min_models,
         }))
     return pd.concat(rows, ignore_index=True)
+
+
+def benchmark_correlations(transcripts, dictionary, min_models=5):
+    """Pooled within-item rank correlation for each benchmark and feature."""
+    features, groups, by_model = _model_item_means(
+        transcripts, dictionary, min_models)
+    rows = []
+    for bench, benchmark in by_model.groupby("bench", sort=False):
+        for feature in features:
+            x_parts, y_parts, n_items = [], [], 0
+            for _, item in benchmark.groupby("item", sort=False):
+                valid = item[[feature, "accuracy"]].dropna()
+                if (len(valid) < min_models or valid[feature].nunique() < 2
+                        or valid.accuracy.nunique() < 2):
+                    continue
+                x = valid[feature].rank(method="average").to_numpy(dtype=float)
+                y = valid.accuracy.rank(method="average").to_numpy(dtype=float)
+                x_parts.append((x - x.mean()) / x.std())
+                y_parts.append((y - y.mean()) / y.std())
+                n_items += 1
+            rho = (float(np.mean(np.concatenate(x_parts) * np.concatenate(y_parts)))
+                   if x_parts else np.nan)
+            rows.append({"bench": bench, "feature": feature,
+                         "group": groups[feature], "within_item_rank_rho": rho,
+                         "n_items": n_items,
+                         "n_observations": sum(len(x) for x in x_parts),
+                         "min_models": min_models})
+    return pd.DataFrame(rows)
 
 
 def _summary(frame, keys):

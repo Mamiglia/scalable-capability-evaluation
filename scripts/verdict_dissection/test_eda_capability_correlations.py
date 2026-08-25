@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-from eda_capability_correlations import capability_correlations, summarise
+from eda_capability_correlations import (benchmark_correlations,
+                                         capability_correlations, summarise)
 
 
 def test_correlations_are_within_item_and_average_model_repeats():
@@ -51,3 +52,23 @@ def test_too_few_models_returns_missing_correlation():
     got = capability_correlations(transcripts, dictionary, min_models=3)
     assert got.n_models.item() == 2
     assert np.isnan(got.spearman_rho.item())
+
+
+def test_benchmark_correlation_pools_rank_residuals_within_item():
+    rows = []
+    for item, item_shift in (("q1", 0.0), ("q2", 100.0)):
+        for model, accuracy, value in (("weak", 0.2, 1.0),
+                                       ("mid", 0.5, 2.0),
+                                       ("strong", 0.8, 3.0)):
+            rows.append({"bench": "bench", "item": item, "model": model,
+                         "accuracy": accuracy, "positive": value + item_shift,
+                         "negative": -value + item_shift})
+    dictionary = pd.DataFrame({
+        "feature": ["positive", "negative"], "group": ["g", "g"]})
+
+    got = benchmark_correlations(pd.DataFrame(rows), dictionary, min_models=3)
+    got = got.set_index("feature")
+    assert np.isclose(got.loc["positive", "within_item_rank_rho"], 1.0)
+    assert np.isclose(got.loc["negative", "within_item_rank_rho"], -1.0)
+    assert set(got.n_items) == {2}
+    assert set(got.n_observations) == {6}
