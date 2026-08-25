@@ -2,8 +2,8 @@
 // Each example shows snippets around the text segments that move the feature most, shaded by their contribution.
 const GROUP_LABELS = { gpqa: "GPQA", aime: "AIME", intercode: "InterCode", swe_bench_mini: "SWE-bench mini" };
 const BUCKETS = [
-  ["top", "Top activations"], ["50-90%", "Quantile 50–90% of positive activations"], ["10-50%", "Quantile 10–50%"],
-  ["0-10%", "Quantile 0–10%"], ["contrast", "Same-question contrasts (activation 0)"], ["negative", "Most negative"],
+  ["top", "Top"], ["50-90%", "50–90% quantile"], ["10-50%", "10–50% quantile"],
+  ["0-10%", "0–10% quantile"], ["contrast", "Same question, activation 0"], ["negative", "Most negative"],
 ];
 const SNIPPETS = 3;         // peaks shown per example
 const state = { index: null, feature: 0, group: "gpqa", data: null, traces: null, blind: false };
@@ -44,7 +44,7 @@ function renderSidebar() {
       el("span", { class: "label" + (g.kept ? "" : " unkept"), title: label }, label),
       el("span", { class: "prev", title: "prevalence: share of this benchmark's transcripts where the feature is nonzero" }, `${(g.prevalence * 100).toFixed(0)}%`));
   }), el("li", { class: "explain" + (state.feature === "explain" ? " active" : ""), onclick: () => { state.feature = "explain"; renderSidebar(); renderExplanation(); } },
-    el("span", { class: "num" }, "?"), el("span", { class: "label" }, "Explanation — what is shown here")));
+    el("span", { class: "num" }, "?"), el("span", { class: "label" }, "Explanation")));
 }
 
 const EXPLANATION = `
@@ -77,21 +77,20 @@ async function selectFeature(i) {
 function renderHeader(group) {
   const d = group.description;
   const stats = el("div", { class: "stats" },
-    `${GROUP_LABELS[state.group]} · n = ${group.n} · prevalence ${(group.prevalence * 100).toFixed(1)}%`,
-    d ? ` · fidelity r = ${fmt(d.correlation, 3)}, p = ${d.p_value == null ? "–" : d.p_value.toExponential(1)}` : " · not named (too few firing questions)",
-    d && d.reason ? ` · ${d.reason.replaceAll("_", " ")}` : "",
-    state.traces ? ` · ${Object.keys(state.traces).length} traced` : " · no traces yet");
+    `n ${group.n} · fires ${(group.prevalence * 100).toFixed(1)}%`,
+    d ? ` · fidelity r ${fmt(d.correlation, 2)}, p ${d.p_value == null ? "–" : d.p_value.toExponential(0)}` : " · not named",
+    d && d.reason ? ` · ${d.reason.replaceAll("_", " ")}` : "");
   if (state.blind) {
     $("#header").replaceChildren(el("h2", {}, `shared:${state.feature} @ ${GROUP_LABELS[state.group]}`),
-      el("div", { class: "desc" }, "[label hidden — read the examples, then reveal]"), stats);
+      el("div", { class: "desc" }, "[name hidden]"), stats);
     return;
   }
   $("#header").replaceChildren(
     el("h2", {}, `shared:${state.feature} @ ${GROUP_LABELS[state.group]}`,
-      d ? el("span", { class: "badge " + (d.kept ? "kept" : "unkept") }, d.kept ? (d.reason === "negated_candidate" ? "kept (negated label)" : "kept") : "label not kept") : ""),
+      d ? el("span", { class: "badge " + (d.kept ? "kept" : "unkept") }, d.kept ? (d.reason === "negated_candidate" ? "kept, negated" : "kept") : "not kept") : ""),
     el("div", { class: "desc" }, d && d.text ? d.text : "(no description)"),
     stats,
-    d && d.candidates.length ? el("details", { class: "candidates" }, el("summary", {}, `${d.candidates.length} candidate descriptions (fidelity r)`),
+    d && d.candidates.length ? el("details", { class: "candidates" }, el("summary", {}, "candidates"),
       el("ol", {}, ...d.candidates.map((c) => el("li", {}, `${fmt(c.correlation, 3)} — ${c.description}`)))) : "",
     el("table", { class: "names" }, ...state.index.groups.map((g) => {
       const gd = state.data.groups[g].description;
@@ -114,7 +113,7 @@ function panelDistribution(group) {
   const zeroShare = 1 - group.prevalence, maxc = Math.max(...nonzero, 1);
   const x = (v) => pad.l + ((v - edges[0]) / (edges[edges.length - 1] - edges[0] || 1)) * (W - pad.l - pad.r);
   const svg = svgEl("svg", { width: W, height: H });
-  svg.dataset.caption = `activation over ${group.n} transcripts (${(zeroShare * 100).toFixed(0)}% exactly zero, not drawn)`;
+  svg.dataset.caption = `activation (${(zeroShare * 100).toFixed(0)}% zero, not drawn)`;
   nonzero.forEach((c, i) => {
     const mid = (edges[i] + edges[i + 1]) / 2, h = (c / maxc) * (H - pad.t - pad.b);
     svg.append(svgEl("rect", { x: x(edges[i]), width: Math.max(x(edges[i + 1]) - x(edges[i]) - 0.5, 0.5), y: H - pad.b - h, height: h, fill: mid > 0 ? "#2f7d32" : "#a33" }));
@@ -143,7 +142,7 @@ function panelByModel(group) {
   const x = (a) => pad.l + a * (W - pad.l - pad.r), y = (v) => H - pad.b - ((v - lo) / span) * (H - pad.t - pad.b);
   const svg = svgEl("svg", { width: W, height: H });
   const rho = spearman(rows.map((m) => m.accuracy), ys);
-  svg.dataset.caption = `mean activation per model vs the model's accuracy on this benchmark · Spearman ρ = ${rho == null ? "–" : rho.toFixed(2)}`;
+  svg.dataset.caption = `per model: mean activation vs accuracy, ρ = ${rho == null ? "–" : rho.toFixed(2)}`;
   svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: y(0), y2: y(0), stroke: "#bbb" }));
   svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: H - pad.b, y2: H - pad.b, stroke: "#999" }));
   rows.forEach((m) => {
@@ -165,7 +164,7 @@ function panelAgreement(group) {
   const W = 320, H = 12 + rows.length * 15 + 30, pad = { l: 125, r: 38, t: 10, b: 26 };
   const x = (v) => pad.l + ((v - 0.2) / 0.6) * (W - pad.l - pad.r);
   const svg = svgEl("svg", { width: W, height: H });
-  svg.dataset.caption = "judged pairs whose two transcripts differ on the feature: share where the higher-activation side is picked by the judge / belongs to the more accurate model (95% CI)";
+  svg.dataset.caption = "pairs differing on the feature: higher side wins";
   for (const v of [0.3, 0.5, 0.7]) {
     svg.append(svgEl("line", { x1: x(v), x2: x(v), y1: pad.t, y2: H - pad.b, stroke: v === 0.5 ? "#999" : "#eee", "stroke-dasharray": v === 0.5 ? "3 3" : "" }));
     axisText(svg, x(v), H - pad.b + 12, v, "middle", "axis");
@@ -177,7 +176,6 @@ function panelAgreement(group) {
     svg.append(svgEl("circle", { cx: x(Math.min(0.8, Math.max(0.2, r.p))), cy: y, r: 3.5, fill: cap ? "#c77d00" : "#1f4e9c" }));
     axisText(svg, W - pad.r + 4, y + 4, `n=${r.n}`, "start", "axis");
   });
-  axisText(svg, x(0.5), H - 4, "0.5 = judge indifferent to the feature", "middle", "axis");
   return svg;
 }
 
@@ -257,7 +255,7 @@ function snippets(example, trace) {
   const full = el("div", { class: "text full" }, ...segmentSpans(example, trace, 0, inc.length, inc, scale));
   full.hidden = true;
   const toggle = el("button", { class: "linkish", onclick: () => { full.hidden = !full.hidden; pre.hidden = !pre.hidden; toggle.textContent = full.hidden ? "show full transcript" : "show snippets"; } }, "show full transcript");
-  return [el("div", { class: "trace-row" }, el("span", { class: "trace-legend" }, `feature value as the transcript is read left to right (final ${fmt(trace.final, 3)}, stored ${fmt(example.activation, 3)}); green/red = text that raises/lowers it`), toggle), traceChart(trace, inc, scale), pre, full];
+  return [el("div", { class: "trace-row" }, el("span", { class: "trace-legend" }, `feature value along the transcript · final ${fmt(trace.final, 3)}, stored ${fmt(example.activation, 3)}`), toggle), traceChart(trace, inc, scale), pre, full];
 }
 
 function plainText(example) {
@@ -276,8 +274,8 @@ function card(example, opts = {}) {
     opts.hideActivation ? "" : el("span", { class: "act " + cls }, fmt(example.activation, 3)),
     opts.bucketTag ? el("span", { class: "tag" }, opts.bucketTag) : "",
     el("span", {}, el("b", {}, example.model)),
-    el("span", {}, `model acc ${fmt(example.accuracy)}`),
-    el("span", {}, `judges pick ${fmt(example.pick_rate)} (n=${example.pick_n})`),
+    el("span", {}, `acc ${fmt(example.accuracy)}`),
+    el("span", {}, `picked ${fmt(example.pick_rate)} (n=${example.pick_n})`),
     el("span", { class: "dim" }, `${example.bench} · ${example.item} · ep${example.epoch} · ${example.split.replace("representation_", "")}`),
     el("details", { class: "question" }, el("summary", {}, "question"), el("div", { class: "text" }, example.question)),
     opts.guess ? el("label", { class: "guess" }, el("input", { type: "checkbox" }), " my guess: fires") : "");
@@ -293,7 +291,7 @@ function renderByModel(group) {
   if (!rows.length) return "";
   const order = group.by_model.map((m) => m.model);
   const models = [...new Set(rows.map((e) => e.model))].sort((a, b) => order.indexOf(b) - order.indexOf(a));
-  const section = el("section", { class: "bucket" }, el("h3", {}, `By model (${models.length}; top, most negative, zero-activation) — click a model to expand`));
+  const section = el("section", { class: "bucket" }, el("h3", {}, "By model"));
   for (const model of models) {
     const mine = rows.filter((e) => e.model === model);
     const info = group.by_model.find((m) => m.model === model) || {};
@@ -329,7 +327,7 @@ function renderExamples(group) {
     });
     reveal.replaceWith(el("div", { class: "desc" }, `${right}/${cards.length} correct. Label: ${group.description && group.description.text ? group.description.text : "(none)"}`));
   } }, "reveal");
-  box.replaceChildren(el("section", { class: "bucket" }, el("h3", {}, "4 firing + 4 same-question contrasts, shuffled — tick the ones you think fire"), reveal, ...cards));
+  box.replaceChildren(el("section", { class: "bucket" }, el("h3", {}, "4 firing + 4 contrasts, shuffled — tick the ones that fire"), reveal, ...cards));
 }
 
 function renderMain() {
