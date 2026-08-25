@@ -90,19 +90,32 @@ def truncate_words(text: str, max_words: int) -> str:
 
 def interpretation_examples(activations: np.ndarray, rows: pd.DataFrame, *, n_firing: int,
                             n_zero: int, top_percentile: float, seed: int) -> dict[str, np.ndarray]:
-    """Random n_firing rows from the top percentile of positive activations (or simply the
-    top n_firing rows when that bin is smaller), plus n_zero zero rows."""
+    """n_firing rows from the top percentile of positive activations, at most one per item
+    (walking down the activation order when the top bin has too few items), plus n_zero
+    zero-activation rows drawn from those same items so the contrast is within-item."""
     rng = np.random.default_rng(seed)
     positive = np.flatnonzero(activations > 0)
     if not len(positive):
         return {"firing": np.array([], dtype=int), "zero": np.array([], dtype=int)}
+    items = rows["item_group_key"].to_numpy()
     cutoff = np.percentile(activations[positive], top_percentile)
     top = positive[activations[positive] >= cutoff]
-    if len(top) < n_firing:
-        top = positive[np.argsort(-activations[positive], kind="stable")[:n_firing]]
-    zero = np.flatnonzero(activations == 0)
-    return {"firing": rng.choice(top, size=min(n_firing, len(top)), replace=False),
-            "zero": rng.choice(zero, size=min(n_zero, len(zero)), replace=False)}
+    rest = positive[activations[positive] < cutoff]
+    order = np.concatenate([rng.permutation(top), rest[np.argsort(-activations[rest], kind="stable")]])
+    firing, seen = [], set()
+    for row in order:
+        if items[row] not in seen:
+            seen.add(items[row])
+            firing.append(row)
+        if len(firing) == n_firing:
+            break
+    zero_by_item = {}
+    for row in rng.permutation(np.flatnonzero(activations == 0)):
+        zero_by_item.setdefault(items[row], row)
+    zero = [zero_by_item[items[row]] for row in firing if items[row] in zero_by_item]
+    spare = [row for item, row in zero_by_item.items() if item not in seen]
+    zero += list(rng.permutation(spare)[:max(0, n_zero - len(zero))]) if spare else []
+    return {"firing": np.array(firing, dtype=int), "zero": np.array(zero[:n_zero], dtype=int)}
 
 
 def scoring_examples(activations: np.ndarray, n: int, seed: int) -> np.ndarray:
@@ -201,6 +214,27 @@ class CachedAsker:
         return reply
 
 
+def feature_group(label: str) -> str:
+    """'gpqa:3' -> 'gpqa'; a shared feature described within one group, 'shared:3@aime' -> 'aime'."""
+    return label.split("@")[1] if "@" in label else label.split(":")[0]
+
+
+def split_shared_by_group(activations: np.ndarray, labels: list[str], shared: str,
+                          groups: list[str]) -> tuple[np.ndarray, list[str]]:
+    """Replace each shared column by one copy per group, labelled 'shared:i@group', so shared
+    features are named and scored within each benchmark group."""
+    columns, out_labels = [], []
+    for column, label in enumerate(labels):
+        if label.split(":")[0] == shared:
+            for group in groups:
+                columns.append(activations[:, column])
+                out_labels.append(f"{label}@{group}")
+        else:
+            columns.append(activations[:, column])
+            out_labels.append(label)
+    return np.stack(columns, axis=1), out_labels
+
+
 def describe_features(activations: np.ndarray, labels: list[str], rows: pd.DataFrame,
                       groups: dict[str, list[str]], settings: dict, ask, width: int,
                       *, workers: int = 8) -> pd.DataFrame | None:
@@ -210,7 +244,7 @@ def describe_features(activations: np.ndarray, labels: list[str], rows: pd.DataF
     batch = settings["annotation_batch_size"]
     candidate_tasks, scoring = [], {}
     for column, label in enumerate(labels):
-        group = label.split(":")[0]
+        group = feature_group(label)
         mask = rows["benchmark"].isin(groups[group]).to_numpy()
         group_index = np.flatnonzero(mask)
         values = activations[mask, column]
@@ -306,17 +340,22 @@ def main():
                         help="call nothing; write uncached prompts to pending.jsonl in the output dir, "
                              "to be answered elsewhere and appended to llm_cache.jsonl as {key, reply}")
     parser.add_argument("--max-features", type=int, help="describe only the first N features (smoke)")
+    parser.add_argument("--groups", nargs="+", help="describe only features of these fit groups (e.g. shared)")
     parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
     config = yaml.safe_load(args.config.read_text())
     settings, groups, width = config["descriptions"], dict(config["sae"]["fit_groups"]), config["sae"]["width"]
-    if config["sae"].get("shared_group"):
-        groups[config["sae"]["shared_group"]["name"]] = sorted({b for bs in groups.values() for b in bs})
     rows = pd.read_parquet(args.dense_dir / "report_rows.parquet")
     if not pd.read_parquet(args.sae_dir / "rows.parquet")["transcript_key"].equals(rows["transcript_key"]):
         raise ValueError("report rows are not in SAE row order")
     activations = np.load(args.sae_dir / "activations.npy", allow_pickle=False)
     labels = [str(label) for label in np.load(args.sae_dir / "feature_labels.npy", allow_pickle=False)]
+    if args.groups:
+        keep = [i for i, label in enumerate(labels) if label.split(":")[0] in args.groups]
+        labels, activations = [labels[i] for i in keep], activations[:, keep]
+    if config["sae"].get("shared_group"):
+        activations, labels = split_shared_by_group(activations, labels, config["sae"]["shared_group"]["name"],
+                                                    list(groups))
     if args.max_features:
         labels, activations = labels[:args.max_features], activations[:, :args.max_features]
     args.output_dir.mkdir(parents=True, exist_ok=True)

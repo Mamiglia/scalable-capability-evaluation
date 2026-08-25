@@ -7,8 +7,9 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-from transcript_sae_describe import (describe_features, fidelity, interpretation_examples,
-                                     parse_description, parse_presence, scoring_examples, truncate_words)
+from transcript_sae_describe import (describe_features, feature_group, fidelity, interpretation_examples,
+                                     parse_description, parse_presence, scoring_examples,
+                                     split_shared_by_group, truncate_words)
 
 SETTINGS = {"interpreter_model": "fake", "annotator_model": "fake", "interpreter_max_tokens": 10,
             "annotator_max_tokens": 10, "n_candidates": 2, "interpret_examples": 3,
@@ -17,20 +18,25 @@ SETTINGS = {"interpreter_model": "fake", "annotator_model": "fake", "interpreter
             "min_correlation": 0.0, "p_value_threshold": None, "min_prevalence": 0.05, "seed": 0}
 
 
-def group_rows(n):
+def group_rows(n, items=10):
     return pd.DataFrame({"transcript_key": [f"k{i}" for i in range(n)], "benchmark": ["gpqa"] * n,
+                         "item_group_key": [f"item{i % items}" for i in range(n)],
                          "transcript": [f"transcript {i} " + "x " * 100 for i in range(n)]})
 
 
 def test_example_sampling_and_parsing():
     activations = np.array([10, 9, 8, 7, 6, 5, 4, 3, 2, 1, -1, -2] + [0] * 8, dtype=float)
-    chosen = interpretation_examples(activations, group_rows(20), n_firing=3, n_zero=2,
-                                     top_percentile=50, seed=0)
+    rows = group_rows(20)                                    # items repeat every 10 rows
+    chosen = interpretation_examples(activations, rows, n_firing=3, n_zero=2, top_percentile=50, seed=0)
     assert set(chosen["firing"]) <= {0, 1, 2, 3, 4} and len(chosen["firing"]) == 3
     assert all(activations[chosen["zero"]] == 0) and len(chosen["zero"]) == 2
-    short_bin = interpretation_examples(activations, group_rows(20), n_firing=4, n_zero=1,
-                                        top_percentile=99, seed=0)
-    assert sorted(short_bin["firing"]) == [0, 1, 2, 3]      # bin too small -> top-4 by activation
+    items = rows["item_group_key"].to_numpy()
+    assert set(items[chosen["zero"]]) <= set(items[chosen["firing"]])   # contrasts come from the firing items
+    short_bin = interpretation_examples(activations, rows, n_firing=4, n_zero=1, top_percentile=99, seed=0)
+    assert sorted(short_bin["firing"]) == [0, 1, 2, 3]      # bin too small -> walk down by activation
+    one_item = interpretation_examples(activations, group_rows(20, items=1), n_firing=3, n_zero=2,
+                                       top_percentile=50, seed=0)
+    assert len(one_item["firing"]) == 1                     # at most one firing row per item
     scored = scoring_examples(activations, 20, 0)
     assert len(scored) == 12 and all(activations[scored] != 0)
     assert parse_description('- "uses numbered steps"') == "uses numbered steps"
@@ -93,3 +99,11 @@ def test_offline_mode_returns_none_while_prompts_are_pending():
     ask = Offline()
     assert describe_features(activations, ["gpqa:0"], rows, {"gpqa": ["gpqa"]}, SETTINGS, ask, width=1, workers=1) is None
     assert len(ask.pending) == SETTINGS["n_candidates"] and all(item["model"] == "fake" for item in ask.pending)
+
+
+def test_shared_features_split_into_one_column_per_group():
+    activations = np.array([[1.0, 2.0], [3.0, 4.0]])
+    split, labels = split_shared_by_group(activations, ["gpqa:0", "shared:0"], "shared", ["gpqa", "aime"])
+    assert labels == ["gpqa:0", "shared:0@gpqa", "shared:0@aime"]
+    assert split[:, 1].tolist() == split[:, 2].tolist() == [2.0, 4.0]
+    assert feature_group("shared:0@aime") == "aime" and feature_group("gpqa:3") == "gpqa"
