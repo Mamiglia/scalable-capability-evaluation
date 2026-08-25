@@ -1,8 +1,8 @@
 """Write the hibayes input tables for the three GLMs from the design matrices.
 
-    uv run python scripts/verdict_dissection/glm/prepare.py <output_dir>
+    uv run python scripts/verdict_dissection/glm/prepare.py <output_dir> [--grouped]
 
-Each output has the predictors from predictors.yaml, the target, the grouping columns and a
+`--grouped` reads the grouped design matrices and predictors-grouped.yaml instead. Each output has the predictors from predictors.yaml, the target, the grouping columns and a
 boolean `test` column (confirmation items). Pair inputs rename the left-minus-right `d_`
 columns to the bare feature names so all three fits share one predictor list.
 """
@@ -58,9 +58,12 @@ def _bare_names(pair, predictors):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--grouped", action="store_true")
     args = parser.parse_args()
     design_matrices = Path(yaml.safe_load((ROOT / "configs/design_matrices.yaml").read_text())["output_root"])
-    predictors = yaml.safe_load((HERE / "predictors.yaml").read_text())
+    if args.grouped:
+        design_matrices = design_matrices / "grouped"
+    predictors = yaml.safe_load((HERE / ("predictors-grouped.yaml" if args.grouped else "predictors.yaml")).read_text())
 
     transcript = pd.read_parquet(design_matrices / "transcript.parquet")
     missing = [name for name in predictors if name not in transcript]
