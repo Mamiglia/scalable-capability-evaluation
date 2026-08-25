@@ -153,7 +153,7 @@ def main():
                                     "final": float(pre[-1, feature])}
             if activation != 0:
                 checks.append(abs(float(pre[-1, feature]) - activation))
-        if n % 25 == 0 or n == len(keys):
+        if n % 250 == 0 or n == len(keys):
             print(f"traced {n}/{len(keys)}, skipped {skipped}, "
                   f"max |final - stored| {max(checks) if checks else float('nan'):.4f}", flush=True)
             for feature, values in traces.items():
