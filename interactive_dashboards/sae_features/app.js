@@ -91,7 +91,7 @@ function axisText(svg, x, y, text, anchor = "middle", cls = "") {
 
 function panelDistribution(group) {
   const { counts, edges } = group.histogram;
-  const W = 300, H = 160, pad = { l: 34, r: 8, t: 10, b: 30 };
+  const W = 300, H = 160, pad = { l: 34, r: 22, t: 10, b: 30 };
   const nonzero = counts.map((c, i) => (edges[i] <= 0 && edges[i + 1] > 0 ? 0 : c));
   const zeroShare = 1 - group.prevalence, maxc = Math.max(...nonzero, 1);
   const x = (v) => pad.l + ((v - edges[0]) / (edges[edges.length - 1] - edges[0] || 1)) * (W - pad.l - pad.r);
