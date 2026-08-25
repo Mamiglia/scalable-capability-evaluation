@@ -46,7 +46,7 @@ def discourse_edges(nodes, trees_by_part, texts_by_part):
                 edges.extend(_edge(a, b, "discourse", "within_leaf", "NN") for a, b in zip(ids, ids[1:]))
                 return ids[0] if ids else None
             left, right = head(tree["left"]), head(tree["right"])
-            if left is not None and right is not None:
+            if left is not None and right is not None and left != right:
                 edges.append(_edge(min(left, right), max(left, right), "discourse",
                                    tree["relation"], tree["nuclearity"]))
             nucleus = right if tree["nuclearity"] == "SN" else left

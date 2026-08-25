@@ -198,6 +198,14 @@ def test_discourse_edges_follow_nucleus_heads():
         (1, 2): "causal", (2, 3): "restatement"}
 
 
+def test_discourse_edges_collapse_leaves_merged_into_one_node():
+    text = "Now, continue."
+    nodes = [node(0, "question", None), node(1, "assistant_edu", 0, 13, 27, text)]
+    tree = {"start": 0, "end": len(text), "relation": "joint", "nuclearity": "NN",
+            "left": {"start": 0, "end": 4}, "right": {"start": 5, "end": len(text)}}
+    assert discourse_edges(nodes, {(0, 0): [tree]}, {(0, 0): (text, 13)}) == []
+
+
 def test_tool_edges_link_outputs_to_calls_and_to_the_next_assistant_part():
     nodes = [node(0, "question", None), node(1, "assistant_edu", 0, 13, 20),
              node(2, "tool_call", 0, 21, 40, call_id="c1"), node(3, "tool_output", 1, 50, 60, call_id="c1"),
