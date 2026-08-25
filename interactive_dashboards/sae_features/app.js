@@ -1,5 +1,12 @@
-// Shared-SAE feature viewer: reads data/index.json, data/feature_NN.json and optional data/traces/feature_NN.json.
+// Shared-SAE feature dashboard: data/index.json, data/feature_NN.json and, when traced, data/traces/feature_NN.json.
+// Each example shows snippets around the text segments that move the feature most, shaded by their contribution.
 const GROUP_LABELS = { gpqa: "GPQA", aime: "AIME", intercode: "InterCode", swe_bench_mini: "SWE-bench mini" };
+const BUCKETS = [
+  ["top", "Top activations"], ["50-90%", "Quantile 50–90% of positive activations"], ["10-50%", "Quantile 10–50%"],
+  ["0-10%", "Quantile 0–10%"], ["contrast", "Same-question contrasts (activation 0)"], ["negative", "Most negative"],
+];
+const WINDOW = 12;          // segments either side of a peak in a snippet
+const SNIPPETS = 2;         // peaks shown per example
 const state = { index: null, feature: 0, group: "gpqa", data: null, traces: null, blind: false };
 
 const $ = (sel) => document.querySelector(sel);
@@ -10,24 +17,27 @@ const el = (tag, attrs = {}, ...children) => {
     else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
     else node.setAttribute(k, v);
   }
-  for (const c of children.flat()) node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  for (const c of children.flat()) if (c !== "" && c != null) node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return node;
+};
+const svgEl = (tag, attrs = {}) => {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
   return node;
 };
 const fmt = (x, d = 2) => (x == null ? "–" : Number(x).toFixed(d));
-const exampleKey = (e) => [e.bench, e.item, e.model, e.epoch].join("|");
+const exampleKey = (e) => [e.bench, e.item, e.model, e.epoch, e.log].join("|");
 
 async function loadJson(path) {
   const r = await fetch(path);
-  if (!r.ok) return null;
-  return r.json();
+  return r.ok ? r.json() : null;
 }
 
+// ---- sidebar -------------------------------------------------------------------------------
 function renderSidebar() {
-  const tabs = $("#group-tabs");
-  tabs.replaceChildren(...state.index.groups.map((g) =>
+  $("#group-tabs").replaceChildren(...state.index.groups.map((g) =>
     el("button", { class: g === state.group ? "active" : "", onclick: () => { state.group = g; renderSidebar(); renderMain(); } }, GROUP_LABELS[g] || g)));
-  const list = $("#feature-list");
-  list.replaceChildren(...state.index.features.map((f) => {
+  $("#feature-list").replaceChildren(...state.index.features.map((f) => {
     const g = f.groups[state.group];
     const label = state.blind ? "" : (g.text || "(no description)");
     return el("li", { class: f.feature === state.feature ? "active" : "", onclick: () => selectFeature(f.feature) },
@@ -43,20 +53,23 @@ async function selectFeature(i) {
   [state.data, state.traces] = await Promise.all([loadJson(`data/feature_${id}.json`), loadJson(`data/traces/feature_${id}.json`)]);
   renderSidebar();
   renderMain();
+  $("#main").scrollTop = 0;
 }
 
+// ---- header + density ----------------------------------------------------------------------
 function renderHeader(group) {
-  const h = $("#header");
   const d = group.description;
   const stats = el("div", { class: "stats" },
     `${GROUP_LABELS[state.group]} · n = ${group.n} · prevalence ${(group.prevalence * 100).toFixed(1)}%`,
     d ? ` · fidelity r = ${fmt(d.correlation, 3)}, p = ${d.p_value == null ? "–" : d.p_value.toExponential(1)}` : " · not named (too few firing questions)",
-    d && d.reason ? ` · ${d.reason.replaceAll("_", " ")}` : "");
+    d && d.reason ? ` · ${d.reason.replaceAll("_", " ")}` : "",
+    state.traces ? ` · ${Object.keys(state.traces).length} traced` : " · no traces yet");
   if (state.blind) {
-    h.replaceChildren(el("h2", {}, `shared:${state.feature} @ ${GROUP_LABELS[state.group]}`), el("div", { class: "desc" }, "[label hidden — read the examples, then reveal]"), stats);
+    $("#header").replaceChildren(el("h2", {}, `shared:${state.feature} @ ${GROUP_LABELS[state.group]}`),
+      el("div", { class: "desc" }, "[label hidden — read the examples, then reveal]"), stats);
     return;
   }
-  h.replaceChildren(
+  $("#header").replaceChildren(
     el("h2", {}, `shared:${state.feature} @ ${GROUP_LABELS[state.group]}`,
       d ? el("span", { class: "badge " + (d.kept ? "kept" : "unkept") }, d.kept ? "kept" : "not kept") : ""),
     el("div", { class: "desc" }, d && d.text ? d.text : "(no description)"),
@@ -66,96 +79,135 @@ function renderHeader(group) {
 }
 
 function renderHistogram(group) {
-  const box = $("#histogram");
-  if (!group.histogram) { box.replaceChildren(); return; }
+  if (!group.histogram) { $("#histogram").replaceChildren(); return; }
   const { counts, edges } = group.histogram;
   const W = 520, H = 110, pad = 28, maxc = Math.max(...counts, 1);
   const x = (v) => pad + ((v - edges[0]) / (edges[edges.length - 1] - edges[0] || 1)) * (W - 2 * pad);
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  const svg = svgEl("svg", { width: W, height: H });
   counts.forEach((c, i) => {
-    const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    const mid = (edges[i] + edges[i + 1]) / 2;
-    r.setAttribute("x", x(edges[i])); r.setAttribute("width", Math.max(x(edges[i + 1]) - x(edges[i]) - 0.5, 0.5));
-    const h = Math.log1p(c) / Math.log1p(maxc) * (H - 2 * pad);
-    r.setAttribute("y", H - pad - h); r.setAttribute("height", h);
-    r.setAttribute("fill", mid > 0 ? "#2f7d32" : mid < 0 ? "#a33" : "#999");
-    svg.append(r);
+    const mid = (edges[i] + edges[i + 1]) / 2, h = Math.log1p(c) / Math.log1p(maxc) * (H - 2 * pad);
+    svg.append(svgEl("rect", { x: x(edges[i]), width: Math.max(x(edges[i + 1]) - x(edges[i]) - 0.5, 0.5), y: H - pad - h, height: h,
+      fill: mid > 0 ? "#2f7d32" : mid < 0 ? "#a33" : "#999" }));
   });
   for (const v of [edges[0], 0, edges[edges.length - 1]]) {
-    const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    t.setAttribute("x", x(v)); t.setAttribute("y", H - 8); t.setAttribute("text-anchor", "middle"); t.textContent = fmt(v, 2);
-    svg.append(t);
+    const t = svgEl("text", { x: x(v), y: H - 8, "text-anchor": "middle" }); t.textContent = fmt(v, 2); svg.append(t);
   }
-  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  label.setAttribute("x", pad); label.setAttribute("y", 12); label.textContent = "activation histogram (log count; zero bin included)";
-  svg.append(label);
-  box.replaceChildren(svg);
+  const label = svgEl("text", { x: pad, y: 12 }); label.textContent = "activation density (log count; zero bin included)"; svg.append(label);
+  $("#histogram").replaceChildren(svg);
 }
 
-function traceColour(v, scale) {
-  const a = Math.min(Math.abs(v) / (scale || 1), 1) * 0.75;
-  return v >= 0 ? `rgba(46,125,50,${a})` : `rgba(170,51,51,${a})`;
-}
-
-function transcriptNode(example) {
-  const trace = state.traces && state.traces[exampleKey(example)];
-  const pre = el("pre", {});
-  if (!trace) { pre.textContent = example.transcript; return [pre]; }
-  const scale = Math.max(...trace.values.map(Math.abs), 1e-6);
-  let cursor = 0;
-  trace.offsets.forEach(([s, e], i) => {
-    if (s > cursor) pre.append(example.transcript.slice(cursor, s));
-    pre.append(el("span", { class: "t", style: `background:${traceColour(trace.values[i], scale)}`, title: fmt(trace.values[i], 3) }, example.transcript.slice(s, e)));
-    cursor = e;
+// ---- traces --------------------------------------------------------------------------------
+// increments: how much each text segment moves the feature (prefix value after − before),
+// smoothed over neighbouring segments so shading marks regions rather than single-token jitter
+const SMOOTH = 3;
+function increments(trace) {
+  const raw = trace.values.map((v, i) => v - (i ? trace.values[i - 1] : 0));
+  return raw.map((_, i) => {
+    const from = Math.max(0, i - SMOOTH), to = Math.min(raw.length, i + SMOOTH + 1);
+    let sum = 0; for (let j = from; j < to; j++) sum += raw[j];
+    return sum / (to - from);
   });
-  if (cursor < example.transcript.length) pre.append(example.transcript.slice(cursor));
-  return [pre, el("div", { class: "trace-legend" }, `per-token pre-activation of the prefix embedding; final value ${fmt(trace.final, 3)} vs stored ${fmt(example.activation, 3)}`)];
 }
 
+function shade(v, scale) {
+  const a = Math.min(Math.abs(v) / (scale || 1), 1) * 0.85;
+  return v >= 0 ? `rgba(46,125,50,${a})` : `rgba(200,60,60,${a})`;
+}
+
+function segmentSpans(example, trace, from, to, inc, scale) {
+  const out = [];
+  for (let i = from; i < to; i++) {
+    const [s, e] = trace.spans[i];
+    out.push(el("span", { class: "seg", style: `background:${shade(inc[i], scale)}`, title: `Δ ${fmt(inc[i], 3)} · prefix value ${fmt(trace.values[i], 3)}` },
+      example.transcript.slice(s, e)));
+  }
+  return out;
+}
+
+function sparkline(trace) {
+  const W = 220, H = 36, vals = trace.values, n = vals.length;
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), span = hi - lo || 1;
+  const px = (i) => (i / Math.max(n - 1, 1)) * W, py = (v) => H - ((v - lo) / span) * (H - 4) - 2;
+  const svg = svgEl("svg", { width: W, height: H, class: "spark" });
+  svg.append(svgEl("line", { x1: 0, x2: W, y1: py(0), y2: py(0), stroke: "#bbb", "stroke-width": 1 }));
+  svg.append(svgEl("polyline", { points: vals.map((v, i) => `${px(i)},${py(v)}`).join(" "), fill: "none", stroke: "#1f4e9c", "stroke-width": 1.2 }));
+  return svg;
+}
+
+function snippets(example, trace) {
+  const inc = increments(trace), scale = Math.max(...inc.map(Math.abs), 1e-6);
+  // peaks: centres of the windows where the prefix value changes most over the window, non-overlapping
+  const gain = trace.values.map((v, i) => Math.abs(v - trace.values[Math.max(0, i - WINDOW)]));
+  const order = gain.map((g, i) => [g, i]).sort((a, b) => b[0] - a[0]);
+  const windows = [];
+  for (const [, i] of order) {
+    if (windows.length >= SNIPPETS) break;
+    if (windows.some(([f, t]) => i >= f - WINDOW && i < t + WINDOW)) continue;
+    windows.push([Math.max(0, i - WINDOW), Math.min(inc.length, i + WINDOW + 1)]);
+  }
+  windows.sort((a, b) => a[0] - b[0]);
+  const pre = el("div", { class: "text" });
+  windows.forEach(([f, t], k) => {
+    if (k === 0 && f > 0) pre.append(el("span", { class: "gap" }, "… "));
+    pre.append(...segmentSpans(example, trace, f, t, inc, scale));
+    pre.append(el("span", { class: "gap" }, t < inc.length ? " … " : ""));
+  });
+  const full = el("div", { class: "text full" }, ...segmentSpans(example, trace, 0, inc.length, inc, scale));
+  full.hidden = true;
+  const toggle = el("button", { class: "linkish", onclick: () => { full.hidden = !full.hidden; pre.hidden = !pre.hidden; toggle.textContent = full.hidden ? "show full transcript" : "show snippets"; } }, "show full transcript");
+  return [el("div", { class: "trace-row" }, sparkline(trace), el("span", { class: "trace-legend" }, `prefix value along the transcript · final ${fmt(trace.final, 3)} (stored ${fmt(example.activation, 3)})`), toggle), pre, full];
+}
+
+function plainText(example) {
+  const head = example.transcript.slice(0, 600), rest = example.transcript.length > 600;
+  const pre = el("div", { class: "text" }, head, rest ? el("span", { class: "gap" }, " …") : "");
+  if (!rest) return [pre];
+  const full = el("div", { class: "text full" }, example.transcript); full.hidden = true;
+  const toggle = el("button", { class: "linkish", onclick: () => { full.hidden = !full.hidden; pre.hidden = !pre.hidden; toggle.textContent = full.hidden ? "show full transcript" : "show less"; } }, "show full transcript");
+  return [el("div", { class: "trace-row" }, el("span", { class: "trace-legend" }, "not traced yet"), toggle), pre, full];
+}
+
+// ---- example cards -------------------------------------------------------------------------
 function card(example, opts = {}) {
   const cls = example.activation > 0 ? "pos" : example.activation < 0 ? "neg" : "zero";
   const meta = el("div", { class: "meta" },
     opts.hideActivation ? "" : el("span", { class: "act " + cls }, fmt(example.activation, 3)),
     el("span", {}, el("b", {}, example.model)),
-    el("span", {}, `acc ${fmt(example.accuracy)}`),
+    el("span", {}, `model acc ${fmt(example.accuracy)}`),
     el("span", {}, `judges pick ${fmt(example.pick_rate)} (n=${example.pick_n})`),
-    el("span", {}, `${example.bench} · ${example.item} · ep${example.epoch}`),
-    el("span", {}, example.split.replace("representation_", "")),
-    opts.guess ? el("span", { class: "guess" }, el("label", {}, el("input", { type: "checkbox" }), " firing?")) : "");
-  const body = el("div", { class: "body" },
-    el("details", { class: "question" }, el("summary", {}, "question"), el("pre", {}, example.question)),
-    ...transcriptNode(example));
-  const c = el("div", { class: "card" }, meta, body);
-  meta.addEventListener("click", (ev) => { if (ev.target.tagName !== "INPUT") c.classList.toggle("open"); });
+    el("span", { class: "dim" }, `${example.bench} · ${example.item} · ep${example.epoch} · ${example.split.replace("representation_", "")}`),
+    el("details", { class: "question" }, el("summary", {}, "question"), el("div", { class: "text" }, example.question)),
+    opts.guess ? el("label", { class: "guess" }, el("input", { type: "checkbox" }), " fires?") : "");
+  const trace = state.traces && state.traces[exampleKey(example)];
+  const c = el("div", { class: "card" }, meta, ...(trace ? snippets(example, trace) : plainText(example)));
   if (opts.role) c.dataset.role = opts.role;
   return c;
 }
 
 function renderExamples(group) {
   const box = $("#examples");
-  box.className = state.blind ? "blind" : "";
   if (!state.blind) {
-    box.replaceChildren(
-      el("div", { class: "column" }, el("h3", {}, `top firing (${group.firing.length})`), ...group.firing.map((e) => card(e))),
-      el("div", { class: "column" }, el("h3", {}, `same-question contrasts, activation 0 (${group.contrast.length})`), ...group.contrast.map((e) => card(e))),
-      el("div", { class: "column" }, el("h3", {}, `most negative (${group.negative.length})`), ...group.negative.map((e) => card(e))));
+    box.replaceChildren(...BUCKETS.map(([bucket, title]) => {
+      const rows = group.examples.filter((e) => e.bucket === bucket);
+      return rows.length ? el("section", { class: "bucket" }, el("h3", {}, `${title} (${rows.length})`), ...rows.map((e) => card(e))) : "";
+    }));
     return;
   }
-  const pool = [...group.firing.slice(0, 4).map((e) => ({ e, role: "firing" })), ...group.contrast.slice(0, 4).map((e) => ({ e, role: "contrast" }))];
+  const firing = group.examples.filter((e) => e.bucket === "top").slice(0, 4), contrast = group.examples.filter((e) => e.bucket === "contrast").slice(0, 4);
+  const pool = [...firing.map((e) => ({ e, role: "firing" })), ...contrast.map((e) => ({ e, role: "contrast" }))];
   for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
   const cards = pool.map(({ e, role }) => card(e, { hideActivation: true, guess: true, role }));
   const reveal = el("button", { class: "reveal", onclick: () => {
     let right = 0;
     cards.forEach((c) => {
-      const guessed = c.querySelector("input").checked, firing = c.dataset.role === "firing";
-      c.classList.add(firing ? "revealed-firing" : "revealed-contrast");
-      c.querySelector(".guess").append(firing ? " → firing" : " → contrast");
-      if (guessed === firing) right++;
+      const guessed = c.querySelector(".guess input").checked, fires = c.dataset.role === "firing";
+      c.classList.add(fires ? "revealed-firing" : "revealed-contrast");
+      c.querySelector(".guess").append(fires ? " → fires" : " → contrast");
+      if (guessed === fires) right++;
     });
     reveal.replaceWith(el("div", { class: "desc" }, `${right}/${cards.length} correct. Label: ${group.description && group.description.text ? group.description.text : "(none)"}`));
   } }, "reveal");
-  box.replaceChildren(el("div", { class: "column" }, el("h3", {}, "4 firing + 4 same-question contrasts, shuffled — tick the ones you think fire"), reveal, ...cards));
+  box.replaceChildren(el("section", { class: "bucket" }, el("h3", {}, "4 firing + 4 same-question contrasts, shuffled — tick the ones you think fire"), reveal, ...cards));
 }
 
 function renderMain() {

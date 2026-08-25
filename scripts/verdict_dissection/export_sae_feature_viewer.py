@@ -1,4 +1,6 @@
-"""Export the shared-SAE feature viewer data: per feature, descriptions, histograms and example transcripts."""
+"""Export the shared-SAE feature viewer data: per feature and benchmark, the description,
+activation histogram and example transcripts drawn from the top, from activation quantiles,
+from the most negative, and same-question zero-activation contrasts."""
 import argparse
 import json
 from pathlib import Path
@@ -11,6 +13,7 @@ KEYS = ["bench", "item", "model", "epoch", "log"]
 GROUPS = {"gpqa": ["gpqa"], "aime": ["aime2024", "aime2025", "aime2026"],
           "intercode": ["intercode"], "swe_bench_mini": ["swe_bench_mini"]}
 N_FEATURES = 32
+QUANTILE_BUCKETS = [("50-90%", 0.5, 0.9), ("10-50%", 0.1, 0.5), ("0-10%", 0.0, 0.1)]
 
 
 def pick_rates(verdicts):
@@ -33,32 +36,45 @@ def histogram(values, bins=40):
     return {"counts": counts.tolist(), "edges": edges.round(4).tolist()}
 
 
-def example(row, activation):
-    return {"activation": float(activation), "model": row.model, "bench": row.bench, "item": row["item"],
-            "epoch": int(row.epoch), "accuracy": None if pd.isna(row.accuracy) else float(row.accuracy),
+def example(row, activation, bucket):
+    return {"activation": float(activation), "bucket": bucket, "model": row.model, "bench": row.bench,
+            "item": row["item"], "epoch": int(row.epoch), "log": row.log,
+            "accuracy": None if pd.isna(row.accuracy) else float(row.accuracy),
             "pick_rate": None if pd.isna(row.pick_rate) else float(row.pick_rate),
             "pick_n": 0 if pd.isna(row.pick_n) else int(row.pick_n),
             "split": row.split_role, "question": row.question, "transcript": row.transcript}
 
 
-def feature_payload(feature, frame, descriptions, n_examples, seed):
-    """One feature's viewer record: per group, description, histogram, firing / negative / contrast examples."""
+def choose_examples(rows, column, n_top, n_quantile, n_negative, rng):
+    """Top, quantile-bucket, same-question contrast and most-negative rows, as (row, bucket)."""
+    positive = rows[rows[column] > 0].sort_values(column, ascending=False)
+    chosen = [(r, "top") for _, r in positive.head(n_top).iterrows()]
+    rest = positive.iloc[n_top:]
+    if len(rest):
+        ranks = 1 - np.arange(len(rest)) / len(rest)  # 1 = highest remaining activation
+        for name, low, high in QUANTILE_BUCKETS:
+            bucket = rest[(ranks >= low) & (ranks < high)]
+            if len(bucket):
+                take = rng.choice(len(bucket), size=min(n_quantile, len(bucket)), replace=False)
+                chosen += [(bucket.iloc[i], name) for i in sorted(take)]
+    silent = rows[rows[column] == 0]
+    for _, shown in positive.head(n_top).iterrows():
+        same_item = silent[silent["item"] == shown["item"]]
+        if len(same_item):
+            chosen.append((same_item.iloc[rng.integers(len(same_item))], "contrast"))
+    negative = rows[rows[column] < 0].sort_values(column)
+    chosen += [(r, "negative") for _, r in negative.head(n_negative).iterrows()]
+    return chosen
+
+
+def feature_payload(feature, frame, descriptions, n_top, n_quantile, n_negative, seed):
+    """One feature's viewer record: per group, description, histogram and bucketed examples."""
     column = f"sae_shared_{feature}"
     rng = np.random.default_rng(seed)
     groups = {}
     for group, benches in GROUPS.items():
         rows = frame[frame.bench.isin(benches)]
         values = rows[column].to_numpy()
-        firing = rows.iloc[np.argsort(-values)[:n_examples]]
-        firing = firing[firing[column] > 0]
-        negative = rows.iloc[np.argsort(values)[:n_examples]]
-        negative = negative[negative[column] < 0]
-        silent = rows[rows[column] == 0]
-        contrasts = []
-        for _, shown in firing.iterrows():
-            same_item = silent[silent["item"] == shown["item"]]
-            if len(same_item):
-                contrasts.append(same_item.iloc[rng.integers(len(same_item))])
         described = descriptions.get(f"shared:{feature}@{group}")
         groups[group] = {
             "n": int(len(rows)), "prevalence": float((values != 0).mean()) if len(rows) else 0.0,
@@ -70,9 +86,8 @@ def feature_payload(feature, frame, descriptions, n_examples, seed):
                 "p_value": None if pd.isna(described.p_value) else float(described.p_value),
                 "candidates": candidates(described.candidates_json) if isinstance(described.candidates_json, str) else [],
             },
-            "firing": [example(r, r[column]) for _, r in firing.iterrows()],
-            "negative": [example(r, r[column]) for _, r in negative.iterrows()],
-            "contrast": [example(r, 0.0) for r in contrasts],
+            "examples": [example(r, r[column], bucket)
+                         for r, bucket in choose_examples(rows, column, n_top, n_quantile, n_negative, rng)],
         }
     return {"feature": feature, "groups": groups}
 
@@ -98,7 +113,9 @@ def main():
     parser.add_argument("--descriptions", type=Path, default=ROOT / "judge_results/verdict_dissection/transcript_sae/descriptions-qwen-shared/feature_descriptions.csv")
     parser.add_argument("--accuracy", type=Path, default=Path("/Volumes/T7/judge-dissection/transcript-features/raw/model-benchmark-accuracy.parquet"))
     parser.add_argument("--output-dir", type=Path, default=ROOT / "interactive_dashboards/sae_features/data")
-    parser.add_argument("--n-examples", type=int, default=10)
+    parser.add_argument("--n-top", type=int, default=10)
+    parser.add_argument("--n-quantile", type=int, default=4, help="examples per quantile bucket")
+    parser.add_argument("--n-negative", type=int, default=5)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -107,13 +124,13 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
     index = []
     for feature in range(N_FEATURES):
-        payload = feature_payload(feature, frame, descriptions, args.n_examples, args.seed + feature)
+        payload = feature_payload(feature, frame, descriptions, args.n_top, args.n_quantile, args.n_negative,
+                                  args.seed + feature)
         (args.output_dir / f"feature_{feature:02d}.json").write_text(json.dumps(payload))
         index.append({"feature": feature, "groups": {
             g: {"prevalence": v["prevalence"], "kept": bool(v["description"] and v["description"]["kept"]),
                 "text": v["description"] and v["description"]["text"]} for g, v in payload["groups"].items()}})
-        print(f"feature {feature}: " + ", ".join(
-            f"{g} {len(v['firing'])}+{len(v['negative'])}-/{len(v['contrast'])}c" for g, v in payload["groups"].items()))
+        print(f"feature {feature}: " + ", ".join(f"{g} {len(v['examples'])}" for g, v in payload["groups"].items()))
     (args.output_dir / "index.json").write_text(json.dumps({"features": index, "groups": list(GROUPS)}))
 
 
