@@ -139,7 +139,8 @@ def make_features(store, nodes, edges, embeddings, split, cfg, out_dir):
         z = node_sae.transform(embeddings[n_mask])
         owner = nodes.loc[n_mask, "transcript_key"].map(position).to_numpy()
         sae_blocks = sae_blocks.combine_first(
-            _only(sae_block(z, owner, len(keys), "node_sae", sae["min_support"]), in_group))
+            _only(sae_block(z, owner, len(keys), f"node_sae_{group}", sae["min_support"], node_dev[n_mask]),
+                  in_group))
         e = edges[edges.transcript_key.map(lambda k: in_group[position[k]])]
         first_row = nodes.groupby("transcript_key")["row"].min()
         offset = e.transcript_key.map(first_row).to_numpy()
@@ -153,7 +154,7 @@ def make_features(store, nodes, edges, embeddings, split, cfg, out_dir):
         edge_sae = TopKSAE.fit(v[edge_dev], sae["width"], sae["top_k"], sae["iterations"], sae["batch_size"], sae["seed"])
         sae_blocks = sae_blocks.combine_first(
             _only(sae_block(edge_sae.transform(v), e.transcript_key.map(position).to_numpy(), len(keys),
-                            "edge_sae", sae["min_support"]), in_group))
+                            f"edge_sae_{group}", sae["min_support"], edge_dev), in_group))
         for name, model in (("node_sae", node_sae), ("edge_sae", edge_sae)):
             (out_dir / name).mkdir(exist_ok=True)
             np.savez(out_dir / name / f"{group}.npz", decoder=model.decoder, top_k=model.top_k)

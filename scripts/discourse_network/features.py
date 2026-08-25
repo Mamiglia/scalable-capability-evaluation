@@ -184,11 +184,12 @@ class EdgeSpace:
         return self.pca.transform(self.scaler.transform(self.pair_features(embeddings, edges))).astype(np.float32)
 
 
-def sae_block(activations, unit_owner, n_transcripts, prefix, min_support):
+def sae_block(activations, unit_owner, n_transcripts, prefix, min_support, support_mask=None):
     """Per-transcript mean activation and fraction of units active, for features active on at
     least min_support units. unit_owner[i] is the transcript index of unit i."""
     z, owner = np.asarray(activations), np.asarray(unit_owner)
-    retained = [j for j in range(z.shape[1]) if (z[:, j] > 0).sum() >= min_support]
+    support = z if support_mask is None else z[np.asarray(support_mask)]
+    retained = [j for j in range(z.shape[1]) if (support[:, j] > 0).sum() >= min_support]
     counts = np.maximum(np.bincount(owner, minlength=n_transcripts), 1)
     sums, active = np.zeros((n_transcripts, z.shape[1])), np.zeros((n_transcripts, z.shape[1]))
     np.add.at(sums, owner, z)

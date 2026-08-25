@@ -272,6 +272,13 @@ def test_sae_is_sparse_and_aggregates_per_transcript():
     assert any(c.endswith("_mean") for c in block.columns)
 
 
+def test_sae_support_is_selected_on_development_units_only():
+    z = np.array([[1, 0], [1, 0], [0, 1], [0, 1]], dtype=float)
+    block = sae_block(z, [0, 0, 1, 1], 2, "node_sae", min_support=2,
+                      support_mask=np.array([True, True, False, False]))
+    assert block.columns.tolist() == ["node_sae_f00_mean", "node_sae_f00_active"]
+
+
 def test_edge_space_is_pca_of_pair_features():
     emb = np.eye(5, dtype=np.float32)
     edges = [{"source_node_id": i, "target_node_id": i + 1} for i in range(4)] * 5
@@ -338,6 +345,10 @@ def test_pipeline_writes_tables(tmp_path):
     assert set(edges.edge_source) >= {"discourse", "similarity"} and (edges.relation == "causal").sum() == 6
     assert len(feats) == 6 and feats.topo_relation_causal.gt(0).all()
     assert any(c.startswith("node_sae_") for c in feats) and any(c.startswith("edge_sae_") for c in feats)
+    for group in ("gpqa", "intercode"):
+        assert any(c.startswith(f"node_sae_{group}_") for c in feats)
+        assert any(c.startswith(f"edge_sae_{group}_") for c in feats)
+    assert feats.loc[feats.bench == "intercode"].filter(like="node_sae_gpqa_").isna().all().all()
     assert feats.loc[feats.bench == "gpqa"].filter(like="_sae_").notna().any().any()
     assert len(pairs) == 1 and "d_topo_node_count" in pairs
     assert json.loads((tmp_path / "manifest.json").read_text())["rows"]["transcripts"] == 6
