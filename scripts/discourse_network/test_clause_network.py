@@ -226,3 +226,67 @@ def test_edge_space_is_pca_of_pair_features():
     edges = [{"source_node_id": i, "target_node_id": i + 1} for i in range(4)] * 5
     space = EdgeSpace.fit(emb, edges, components=3)
     assert space.transform(emb, edges).shape == (20, 3)
+
+
+# ---------------------------------------------------------------- build (end to end with fakes)
+
+import pandas as pd  # noqa: E402
+
+from discourse_network import build  # noqa: E402
+
+
+def fake_store(n=6):
+    rows = []
+    for i in range(n):
+        text = f"Let x{i}=1, so y={i}.\n\\[\nz={i}\n\\]\nANSWER: {i}"
+        rows.append({"bench": "gpqa" if i < 4 else "intercode", "model": f"m{i % 2}", "item": f"it{i // 2}", "epoch": 0,
+                     "log": "l", "sample_epoch": 1, "content_hash": f"h{i}", "question": "Q?",
+                     "transcript": "[Assistant]: " + text, "transcript_parts_json": json.dumps([assistant_part(text)]),
+                     "correct": True, "is_canonical": True})
+    return pd.DataFrame(rows)
+
+
+def fake_segments(store):
+    """What segment.py would write: two clauses per transcript and one causal tree over the masked text."""
+    clauses, trees = [], []
+    for r in store.itertuples():
+        text = json.loads(r.transcript_parts_json)[0]["content"]
+        cut, prose_end = text.index(", ") + 1, text.index("\n\\[")
+        keys = {k: getattr(r, k) for k in build.KEYS} | {"part_id": 0, "subpart_id": 0}
+        clauses += [keys | {"start": 13, "end": 13 + cut}, keys | {"start": 13 + cut + 1, "end": 13 + prose_end}]
+        masked_len = len(text[:prose_end]) + len("\nEQUATION\nEQUATION")
+        trees.append(keys | {"tree_json": json.dumps(
+            {"start": 0, "end": masked_len, "relation": "causal", "nuclearity": "NS",
+             "left": {"start": 0, "end": cut}, "right": {"start": cut + 1, "end": masked_len}})})
+    return pd.DataFrame(clauses), pd.DataFrame(trees)
+
+
+def fake_embed(texts, cfg):
+    rng = np.random.default_rng(0)
+    v = rng.normal(size=(len(texts), 8)).astype(np.float32)
+    return v / np.linalg.norm(v, axis=1, keepdims=True)
+
+
+def test_pipeline_writes_tables(tmp_path):
+    store = fake_store()
+    clauses, trees = fake_segments(store)
+    split = pd.DataFrame({"bench": store.bench, "item": store.item, "split": "representation_train"})
+    verdicts = pd.DataFrame([{"bench": "gpqa", "judge": "j", "item": "it1", "model_left": "m1", "model_right": "m0",
+                              "epoch_left": 0, "epoch_right": 0, "log_left": "l", "log_right": "l", "pick_left": 1}])
+    cfg = {"edges": {"max_parents": 3, "k_similar": 1, "similarity_threshold": -1.0},
+           "sae": {"width": 4, "top_k": 2, "iterations": 1, "batch_size": 8, "seed": 0, "min_support": 1,
+                   "edge_pca_components": 2, "benchmark_groups": {"gpqa": ["gpqa"], "intercode": ["intercode"]}},
+           "encoder": {}, "tool_types": {"inspect": ["ls"], "act": ["rm"]}, "python_write_markers": [],
+           "error_markers": ["Traceback"]}
+    build.run(store, clauses, trees, split, verdicts, cfg, tmp_path, embed=fake_embed)
+    nodes = pd.read_parquet(tmp_path / "nodes.parquet")
+    edges = pd.read_parquet(tmp_path / "edges.parquet")
+    feats = pd.read_parquet(tmp_path / "transcript_features.parquet")
+    pairs = pd.read_parquet(tmp_path / "pair_features.parquet")
+    assert nodes.kind.value_counts()["equation"] == 6 and nodes.kind.value_counts()["answer"] == 6
+    assert set(edges.edge_source) >= {"discourse", "similarity"} and (edges.relation == "causal").sum() == 6
+    assert len(feats) == 6 and feats.topo_relation_causal.gt(0).all()
+    assert any(c.startswith("node_sae_") for c in feats) and any(c.startswith("edge_sae_") for c in feats)
+    assert feats.loc[feats.bench == "gpqa"].filter(like="_sae_").notna().any().any()
+    assert len(pairs) == 1 and "d_topo_node_count" in pairs
+    assert json.loads((tmp_path / "manifest.json").read_text())["rows"]["transcripts"] == 6
