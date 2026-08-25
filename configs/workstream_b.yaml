@@ -46,7 +46,6 @@ models:
     padding_side: left
     dimension: 2560
     license: Apache-2.0
-    empty_input: eos
     overlap_sensitivity: [512, 2048]
   bge:
     model_id: BAAI/bge-m3
@@ -60,7 +59,6 @@ models:
     padding_side: right
     dimension: 1024
     license: MIT
-    empty_input: special_tokens_only
     overlap_sensitivity: [256, 1024]
 
 extraction:

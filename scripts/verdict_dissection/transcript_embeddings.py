@@ -49,7 +49,6 @@ class ModelSpec:
     padding_side: str
     dimension: int | None = None
     license: str | None = None
-    empty_input: str = "special_tokens_only"
 
 
 @dataclass(frozen=True)
@@ -201,13 +200,21 @@ def pool_chunks(vectors: np.ndarray, spans: list[tuple[int, int]], n_tokens: int
     return (pooled / norm).astype(np.float32)
 
 
+def special_token_frame(tokenizer) -> tuple[list[int], list[int]]:
+    """Prefix and suffix special tokens the tokenizer puts around one sequence."""
+    probe = tokenizer.encode("a", add_special_tokens=False)
+    framed = tokenizer("a")["input_ids"]
+    position = framed.index(probe[0])
+    return framed[:position], framed[position + len(probe):]
+
+
 def assemble_inputs(tokenizer, question: str, transcript: str, spec: ModelSpec) -> list[ChunkInputs]:
     transcript_ids = tokenizer.encode(transcript, add_special_tokens=False)
     question_ids = tokenizer.encode(question, add_special_tokens=False)
     header = tokenizer.encode("Question:\n", add_special_tokens=False)
     footer = tokenizer.encode("\n\nTranscript:\n", add_special_tokens=False)
-    specials = tokenizer.num_special_tokens_to_add(pair=False)
-    available = spec.question_envelope - len(header) - len(footer) - specials
+    prefix, suffix = special_token_frame(tokenizer)
+    available = spec.question_envelope - len(header) - len(footer) - len(prefix) - len(suffix)
     if available < 0:
         raise ValueError("conditioning labels exceed the question envelope")
     if len(question_ids) > available:
@@ -221,19 +228,8 @@ def assemble_inputs(tokenizer, question: str, transcript: str, spec: ModelSpec) 
     for start, end in chunk_spans(len(transcript_ids), spec.chunk_length, spec.overlap):
         chunk = transcript_ids[start:end]
         empty = len(transcript_ids) == 0
-        if empty and spec.empty_input == "eos":
-            if tokenizer.eos_token_id is None:
-                raise ValueError("empty Qwen input requires eos_token_id")
-            payload = [tokenizer.eos_token_id]
-        elif empty and spec.empty_input == "special_tokens_only":
-            payload = []
-        elif empty:
-            raise ValueError(f"unsupported empty-input rule: {spec.empty_input}")
-        else:
-            payload = chunk
-        plain = tokenizer.build_inputs_with_special_tokens(payload)
-        conditioned = tokenizer.build_inputs_with_special_tokens(
-            header + kept_question + footer + payload)
+        plain = prefix + chunk + suffix
+        conditioned = prefix + header + kept_question + footer + chunk + suffix
         if not plain:
             raise ValueError("empty transcript did not produce a model-valid input token")
         if len(plain) > spec.context or len(conditioned) > spec.context:
@@ -702,7 +698,7 @@ def load_spec(config_path: str | Path, family: str) -> tuple[ModelSpec, dict]:
         values["model_id"], values["revision"], values["context"],
         values["chunk_length"], values["overlap"], values["question_envelope"],
         values["pool"], tuple(values["hidden_layers"]), values["padding_side"],
-        values["dimension"], values["license"], values["empty_input"],
+        values["dimension"], values["license"],
     ), config
 
 

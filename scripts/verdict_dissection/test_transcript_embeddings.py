@@ -310,11 +310,8 @@ class WordTokenizer:
         assert not add_special_tokens
         return [self.ids.setdefault(word, len(self.ids) + 1) for word in text.split()]
 
-    def num_special_tokens_to_add(self, pair=False):
-        return 0
-
-    def build_inputs_with_special_tokens(self, ids):
-        return list(ids)
+    def __call__(self, text):
+        return {"input_ids": self.encode(text)}
 
 
 def test_assemble_inputs_reuses_spans_and_truncates_question_head_tail():
@@ -331,25 +328,36 @@ def test_assemble_inputs_reuses_spans_and_truncates_question_head_tail():
 
 
 class SpecialTokenizer(WordTokenizer):
-    eos_token_id = 99
+    """Frames one sequence like XLM-R: <s> ... </s>."""
 
-    def num_special_tokens_to_add(self, pair=False):
-        return 2
-
-    def build_inputs_with_special_tokens(self, ids):
-        return [101, *ids, 102]
+    def __call__(self, text):
+        return {"input_ids": [101, *self.encode(text), 102]}
 
 
-def test_empty_transcript_uses_explicit_qwen_and_bge_model_valid_layouts():
-    tokenizer = SpecialTokenizer()
-    qwen = ModelSpec("fake", "r", 12, 4, 1, 8, "last", (), "left",
-                     empty_input="eos")
-    bge = ModelSpec("fake", "r", 12, 4, 1, 8, "cls", (), "right",
-                    empty_input="special_tokens_only")
-    qwen_chunk = assemble_inputs(tokenizer, "", "", qwen)[0]
-    bge_chunk = assemble_inputs(tokenizer, "", "", bge)[0]
-    assert qwen_chunk.empty_transcript and qwen_chunk.transcript_ids == [101, 99, 102]
-    assert bge_chunk.empty_transcript and bge_chunk.transcript_ids == [101, 102]
+class SuffixTokenizer(WordTokenizer):
+    """Frames one sequence like Qwen3-Embedding: ... <|endoftext|>."""
+
+    def __call__(self, text):
+        return {"input_ids": [*self.encode(text), 99]}
+
+
+def test_chunks_carry_the_tokenizers_own_special_token_frame():
+    spec = ModelSpec("fake", "r", 12, 4, 1, 8, "last", (), "left")
+    framed = assemble_inputs(SpecialTokenizer(), "q", "t0 t1", spec)[0]
+    assert framed.transcript_ids == [101, 1, 2, 102]
+    assert framed.conditioned_ids[0] == 101 and framed.conditioned_ids[-3:] == [1, 2, 102]
+    suffixed = assemble_inputs(SuffixTokenizer(), "q", "t0 t1", spec)[0]
+    assert suffixed.transcript_ids == [1, 2, 99]
+
+
+def test_empty_transcript_is_the_special_token_frame_alone():
+    spec = ModelSpec("fake", "r", 12, 4, 1, 8, "last", (), "left")
+    xlmr = assemble_inputs(SpecialTokenizer(), "", "", spec)[0]
+    qwen = assemble_inputs(SuffixTokenizer(), "", "", spec)[0]
+    assert xlmr.empty_transcript and xlmr.transcript_ids == [101, 102]
+    assert qwen.empty_transcript and qwen.transcript_ids == [99]
+    with pytest.raises(ValueError, match="model-valid"):
+        assemble_inputs(WordTokenizer(), "", "", spec)
 
 
 def test_assembled_inputs_enforce_native_context_boundary():
