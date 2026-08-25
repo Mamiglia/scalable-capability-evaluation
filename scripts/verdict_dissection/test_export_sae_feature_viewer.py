@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from export_sae_feature_viewer import choose_examples, feature_payload, pick_rates
+from export_sae_feature_viewer import by_model_examples, choose_examples, feature_payload, pick_rates
 
 
 def _frame():
@@ -30,7 +30,7 @@ def test_choose_examples_buckets():
 def test_feature_payload_description_and_empty_group():
     described = pd.Series({"description": "does x", "kept": True, "reason": float("nan"), "correlation": 0.3,
                            "p_value": 0.001, "candidates_json": json.dumps([{"description": "does x", "correlation": 0.3, "p_value": 0.001}])})
-    payload = feature_payload(3, _frame(), {"shared:3@gpqa": described}, 2, 2, 5, seed=0)
+    payload = feature_payload(3, _frame(), {"shared:3@gpqa": described}, 2, 2, 5, 1, seed=0)
     gpqa = payload["groups"]["gpqa"]
     assert gpqa["description"]["kept"] and gpqa["description"]["reason"] is None
     assert gpqa["examples"][0]["bucket"] == "top" and gpqa["examples"][0]["log"] == "l0"
@@ -45,3 +45,15 @@ def test_pick_rates_pools_both_sides():
                              "log_left": ["la", "lb"], "log_right": ["lb", "la"], "pick_left": [True, True]})
     rates = pick_rates(verdicts).set_index("model")
     assert rates.loc["a", "pick_rate"] == 0.5 and rates.loc["a", "pick_n"] == 2
+
+
+def test_by_model_examples():
+    chosen = by_model_examples(_frame(), "sae_shared_3", n_zero=1, rng=np.random.default_rng(0))
+    by_bucket = {}
+    for r, b in chosen:
+        by_bucket.setdefault(b, []).append(r.model)
+    assert by_bucket["model top"][:2] == ["a", "b"] or "a" in by_bucket["model top"]
+    assert by_bucket["model negative"] == ["c"]
+    assert set(by_bucket["model zero"]) == {"b"}
+    tops = [r for r, b in chosen if b == "model top" and r.model == "a"]
+    assert len(tops) == 1 and tops[0]["item"] == "q1"

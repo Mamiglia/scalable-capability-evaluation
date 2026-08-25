@@ -52,3 +52,7 @@ details.candidates li { margin: 2px 0; }
 .card.revealed-firing { border-color: #1e6b1e; box-shadow: inset 3px 0 #1e6b1e; }
 .card.revealed-contrast { border-color: #aaa; box-shadow: inset 3px 0 #aaa; }
 .card .guess { margin-left: auto; font-size: 11px; }
+.model-head { padding: 5px 8px; border: 1px solid #e5e5e5; border-radius: 4px; margin-bottom: 4px; cursor: pointer; font-size: 12px; background: #fff; }
+.model-head:hover { background: #f3f6fb; }
+.model-body { margin: 0 0 8px 12px; }
+.tag { background: #eee; border-radius: 3px; padding: 0 5px; font-size: 10px; color: #555; }

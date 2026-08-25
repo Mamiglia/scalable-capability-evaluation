@@ -240,6 +240,7 @@ function card(example, opts = {}) {
   const cls = example.activation > 0 ? "pos" : example.activation < 0 ? "neg" : "zero";
   const meta = el("div", { class: "meta" },
     opts.hideActivation ? "" : el("span", { class: "act " + cls }, fmt(example.activation, 3)),
+    opts.bucketTag ? el("span", { class: "tag" }, opts.bucketTag) : "",
     el("span", {}, el("b", {}, example.model)),
     el("span", {}, `model acc ${fmt(example.accuracy)}`),
     el("span", {}, `judges pick ${fmt(example.pick_rate)} (n=${example.pick_n})`),
@@ -252,13 +253,32 @@ function card(example, opts = {}) {
   return c;
 }
 
+// per model: its top, its most negative and a couple of zero-activation transcripts, in accuracy order
+function renderByModel(group) {
+  const rows = group.examples.filter((e) => e.bucket.startsWith("model "));
+  if (!rows.length) return "";
+  const order = group.by_model.map((m) => m.model);
+  const models = [...new Set(rows.map((e) => e.model))].sort((a, b) => order.indexOf(b) - order.indexOf(a));
+  const section = el("section", { class: "bucket" }, el("h3", {}, `By model (${models.length}; top, most negative, zero-activation) — click a model to expand`));
+  for (const model of models) {
+    const mine = rows.filter((e) => e.model === model);
+    const info = group.by_model.find((m) => m.model === model) || {};
+    const body = el("div", { class: "model-body" }); body.hidden = true;
+    const head = el("div", { class: "model-head", onclick: () => { body.hidden = !body.hidden; if (!body.hidden && !body.childElementCount) body.append(...mine.map((e) => card(e, { bucketTag: e.bucket.replace("model ", "") }))); } },
+      el("b", {}, model), el("span", { class: "dim" }, ` acc ${fmt(info.accuracy)} · mean activation ${fmt(info.mean_activation, 3)} · n=${info.n} · `),
+      ...mine.map((e) => el("span", { class: "act " + (e.activation > 0 ? "pos" : e.activation < 0 ? "neg" : "zero") }, ` ${fmt(e.activation, 3)}`)));
+    section.append(head, body);
+  }
+  return section;
+}
+
 function renderExamples(group) {
   const box = $("#examples");
   if (!state.blind) {
     box.replaceChildren(...BUCKETS.map(([bucket, title]) => {
       const rows = group.examples.filter((e) => e.bucket === bucket);
       return rows.length ? el("section", { class: "bucket" }, el("h3", {}, `${title} (${rows.length})`), ...rows.map((e) => card(e))) : "";
-    }));
+    }), renderByModel(group));
     return;
   }
   const firing = group.examples.filter((e) => e.bucket === "top").slice(0, 4), contrast = group.examples.filter((e) => e.bucket === "contrast").slice(0, 4);

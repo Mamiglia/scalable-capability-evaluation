@@ -92,7 +92,21 @@ def choose_examples(rows, column, n_top, n_quantile, n_negative, rng):
     return chosen
 
 
-def feature_payload(feature, frame, descriptions, n_top, n_quantile, n_negative, seed):
+def by_model_examples(rows, column, n_zero, rng):
+    """Per model: its top, its most negative and n_zero zero-activation transcripts, as (row, bucket)."""
+    chosen = []
+    for model, part in rows.groupby("model", sort=True):
+        positive, negative, silent = part[part[column] > 0], part[part[column] < 0], part[part[column] == 0]
+        if len(positive):
+            chosen.append((positive.loc[positive[column].idxmax()], "model top"))
+        if len(negative):
+            chosen.append((negative.loc[negative[column].idxmin()], "model negative"))
+        for i in sorted(rng.choice(len(silent), size=min(n_zero, len(silent)), replace=False)) if len(silent) else []:
+            chosen.append((silent.iloc[i], "model zero"))
+    return chosen
+
+
+def feature_payload(feature, frame, descriptions, n_top, n_quantile, n_negative, n_model_zero, seed):
     """One feature's viewer record: per group, description, histogram and bucketed examples."""
     column = f"sae_shared_{feature}"
     rng = np.random.default_rng(seed)
@@ -114,7 +128,8 @@ def feature_payload(feature, frame, descriptions, n_top, n_quantile, n_negative,
                 "candidates": candidates(described.candidates_json) if isinstance(described.candidates_json, str) else [],
             },
             "examples": [example(r, r[column], bucket)
-                         for r, bucket in choose_examples(rows, column, n_top, n_quantile, n_negative, rng)],
+                         for r, bucket in choose_examples(rows, column, n_top, n_quantile, n_negative, rng)
+                         + by_model_examples(rows, column, n_model_zero, rng)],
         }
     return {"feature": feature, "groups": groups}
 
@@ -143,6 +158,7 @@ def main():
     parser.add_argument("--n-top", type=int, default=10)
     parser.add_argument("--n-quantile", type=int, default=4, help="examples per quantile bucket")
     parser.add_argument("--n-negative", type=int, default=5)
+    parser.add_argument("--n-model-zero", type=int, default=2, help="zero-activation examples per model")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -152,7 +168,7 @@ def main():
     index = []
     for feature in range(N_FEATURES):
         payload = feature_payload(feature, frame, descriptions, args.n_top, args.n_quantile, args.n_negative,
-                                  args.seed + feature)
+                                  args.n_model_zero, args.seed + feature)
         (args.output_dir / f"feature_{feature:02d}.json").write_text(json.dumps(payload))
         index.append({"feature": feature, "groups": {
             g: {"prevalence": v["prevalence"], "kept": bool(v["description"] and v["description"]["kept"]),
