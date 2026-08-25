@@ -96,9 +96,18 @@ sae:
   seed: 0
 
 descriptions:
-  describe_examples: 20
+  # WIMHF interpretation + fidelity (configs/*.json in rmovva/wimhf), adapted to single transcripts
+  interpreter_model: gpt-5
+  annotator_model: gpt-5-mini
+  interpreter_max_tokens: 20000
+  annotator_max_tokens: 2000
+  n_candidates: 5
+  interpret_examples: 10
   contrast_examples: 10
-  fidelity_examples: 20
-  example_chars: 4000
-  min_fidelity: 0.75
+  top_percentile: 95
+  scoring_examples: 300
+  max_words: 256
+  min_correlation: 0.0
+  p_value_threshold: null   # null = 0.05 / width (Bonferroni over the dictionary)
+  min_prevalence: 0.05
   seed: 0

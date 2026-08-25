@@ -5,58 +5,62 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-from transcript_sae_describe import (balanced_accuracy, choose_examples, describe_features,
-                                     parse_numbers, snippet)
+from transcript_sae_describe import (describe_features, fidelity, interpretation_examples,
+                                     parse_description, parse_yes_no, scoring_examples, truncate_words)
 
-SETTINGS = {"describe_examples": 3, "contrast_examples": 2, "fidelity_examples": 2,
-            "example_chars": 40, "min_fidelity": 0.75, "seed": 0}
+SETTINGS = {"interpreter_model": "fake", "annotator_model": "fake", "interpreter_max_tokens": 10,
+            "annotator_max_tokens": 10, "n_candidates": 2, "interpret_examples": 3,
+            "contrast_examples": 2, "top_percentile": 50, "scoring_examples": 20, "max_words": 40,
+            "min_correlation": 0.0, "p_value_threshold": None, "min_prevalence": 0.05, "seed": 0}
 
 
 def group_rows(n):
-    return pd.DataFrame({"transcript_key": [f"k{i}" for i in range(n)],
-                         "item_group_key": [f"item{i // 2}" for i in range(n)],
-                         "benchmark": ["gpqa"] * n,
-                         "transcript": [f"transcript {i} " + "x" * 100 for i in range(n)]})
+    return pd.DataFrame({"transcript_key": [f"k{i}" for i in range(n)], "benchmark": ["gpqa"] * n,
+                         "transcript": [f"transcript {i} " + "x " * 100 for i in range(n)]})
 
 
-def test_examples_are_item_deduplicated_and_disjoint():
-    rows = group_rows(20)
-    activations = np.array([10, 9, 8, 7, 6, 5, 4, 3, 2, 1] + [0] * 10, dtype=float)
-    chosen = choose_examples(activations, rows, n_describe=3, n_contrast=2, n_fidelity=2, seed=0)
-    assert chosen["describe"].tolist() == [0, 2, 4]          # one per item
-    assert chosen["held_active"].tolist() == [6, 8]
-    assert set(chosen["contrast"]).isdisjoint(chosen["held_inactive"])
-    assert all(activations[chosen["held_inactive"]] == 0) and len(chosen["held_inactive"]) == 2
+def test_example_sampling_and_parsing():
+    activations = np.array([10, 9, 8, 7, 6, 5, 4, 3, 2, 1, -1, -2] + [0] * 8, dtype=float)
+    chosen = interpretation_examples(activations, group_rows(20), n_firing=3, n_zero=2,
+                                     top_percentile=50, seed=0)
+    assert set(chosen["firing"]) <= {0, 1, 2, 3, 4} and len(chosen["firing"]) == 3
+    assert all(activations[chosen["zero"]] == 0) and len(chosen["zero"]) == 2
+    scored = scoring_examples(activations, 20, 0)
+    assert len(scored) == 12 and all(activations[scored] != 0)
+    assert parse_description('- "uses numbered steps"') == "uses numbered steps"
+    assert parse_yes_no(" Yes. ") == 1.0 and parse_yes_no("no") == 0.0 and parse_yes_no("maybe") is None
+    assert truncate_words("a b c d e f", 4) == "a b\n[...middle of transcript truncated...]\ne f"
 
 
-def test_fidelity_is_balanced_accuracy_over_parsed_numbers():
-    assert parse_numbers("The description applies to [1, 3].") == {1, 3}
-    assert parse_numbers("none") == set()
-    assert balanced_accuracy({1, 3}, np.array([True, False, True, False])) == 1.0
-    assert balanced_accuracy({1, 2}, np.array([True, False, True, False])) == 0.5
-    assert snippet("abcdefghij", 4) == "ab\n[...]\nij"
+def test_fidelity_is_signed_pearson_with_p_value():
+    activations = np.array([3.0, 2.0, 1.0, -1.0, -2.0, -3.0])
+    correlation, p_value = fidelity(np.array([1, 1, 1, 0, 0, 0], dtype=float), activations)
+    assert correlation > 0.9 and p_value < 0.05
+    assert fidelity(np.array([1, 1, 1, 1, 1, 1], dtype=float), activations) == (0.0, 1.0)
 
 
-def test_describe_features_keeps_only_faithful_descriptions():
-    rows = group_rows(40)
-    activations = np.zeros((40, 2))
-    activations[:10, 0] = np.arange(10, 0, -1)
-    activations[:10, 1] = np.arange(10, 0, -1)
-    replies = iter(["long answers", "[]", "short answers", "[1, 2, 3, 4]"])
+def test_describe_features_keeps_the_best_faithful_candidate():
+    rows = group_rows(80)
+    activations = np.zeros((80, 2))
+    activations[:20, 0] = np.arange(20, 0, -1)          # feature 0: fires on the first 20 rows
+    activations[20:30, 0] = -1.0                        # ... and negatively on ten more
+    activations[:3, 1] = [3, 2, 1]                      # feature 1: too rare for prevalence
+    activations[3:80, 1] = 0.0
 
-    def ask(system, user):
-        reply = next(replies)
-        if reply.startswith("["):
-            numbers = [number for number in range(1, 5)
-                       if f"=== Transcript {number} ===\ntranscript 6" in user
-                       or f"=== Transcript {number} ===\ntranscript 8" in user]
-            return str(numbers) if reply == "[]" else "[]"
-        return reply
+    interpretations = iter(['- "long answer"', '- "short answer"'])
 
-    logged = []
-    table = describe_features(activations, ["gpqa:0", "gpqa:5"], rows, {"gpqa": ["gpqa"]},
-                              SETTINGS, ask, logged.append)
-    assert table.feature.tolist() == ["gpqa:0", "gpqa:5"]
-    assert table.fidelity.tolist() == [1.0, 0.5] and table.kept.tolist() == [True, False]
-    assert table.description.tolist() == ["long answers", "short answers"]
-    assert len(logged) == 2 and len(logged[0]["held_out_keys"]) == 4
+    def ask(model, prompt, max_tokens):
+        if prompt.startswith("# Task Overview"):
+            return next(interpretations)
+        # annotator: "long answer" is present exactly on the positively firing rows
+        row = int(prompt.split("TRANSCRIPT:\n")[1].split()[1])
+        present = row < 20
+        return "Yes" if ("long answer" in prompt and present) or ("short answer" in prompt and not present and row % 2) else "No"
+
+    table = describe_features(activations, ["gpqa:0", "gpqa:1"], rows, {"gpqa": ["gpqa"]},
+                              SETTINGS, ask, width=2, workers=1)
+    first = table.iloc[0]
+    assert first.feature == "gpqa:0" and first.kept and first.description == "long answer"
+    assert first.correlation > 0.5 and first.p_value < 0.025 and first.n_candidates == 2
+    second = table.iloc[1]
+    assert not second.kept and second.reason == "too_few_firing_transcripts"
