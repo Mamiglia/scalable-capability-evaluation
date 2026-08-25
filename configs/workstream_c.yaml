@@ -1,0 +1,126 @@
+seed: 0
+stage_order: [nodes, attachments, edge_views, circuits]
+representation_policy: parallel_dense_cluster_sae_no_winner
+
+approved_exclusions:
+  - canonical_content_hash: f722885fd8226009cdf252e89092ee67a1294636f8318597aab7040e3198322d
+    freeze_contract_hash: a979476c1a66f4250ecd13543206954eca61ff3181fb956c724cbb98b216c87a
+    benchmark: gpqa
+    reason: max_length_unresolved
+    excluded_logs: 4
+    excluded_rows: 973
+
+population:
+  rule: "is_canonical & correct"
+  correctness_rule: judge.util.extract_score
+  development_splits: [representation_train, representation_validation]
+  confirmation_split: confirmation
+  confirmation_mode: apply_only
+
+segmentation:
+  primary:
+    code: tchewik/isanlp_rst
+    code_revision: 401e71835a0718267de9ef858fe88e137de33d13c
+    checkpoint: tchewik/isanlp_rst_v3
+    checkpoint_revision: eb1d5745f3a18b8894ce72abad3c2a76442d1107
+    tokenizer: FacebookAI/xlm-roberta-large
+    tokenizer_revision: c23d21b0620b635a76227c604d44e43a9f0ee389
+  comparison: punctuation_conjunction_v1
+
+candidates:
+  preceding: 8
+  semantic: 8
+  identifiers: 8
+  structural_context: 4
+  cap: 32
+  reservoir_multiplier: 2
+
+relations:
+  encoder: Alibaba-NLP/gte-modernbert-base
+  encoder_revision: e7f32e3c00f91d699e8c43b53106206bcc72bb22
+  chunk_tokens: 4096
+  overlap_tokens: 256
+  pca_components: 256
+  pca_max_pairs: 1000000
+  attachment_cs: [0.01, 0.1, 1.0, 10.0]
+  minimum_positive_edges: 200
+  maximum_parents: 3
+  calibration: platt
+  threshold_precision_floor: 0.65
+  threshold_recall_floor: 0.50
+  sensitivity:
+    maximum_parents: [2, 3, 4]
+    threshold_offsets: [-0.10, 0.0, 0.10]
+    candidate_caps: [16, 32, 64]
+  headline_topology_statistics:
+    [longest_path_edges, branch_nodes, convergence_nodes, weak_components,
+     long_range_edge_proportion, final_ancestor_fraction, abandoned_node_proportion,
+     question_integration, tool_feedback_integration]
+
+edge_views:
+  dense_dtype: float16
+  cluster_counts: [8, 16, 32, 64]
+  cluster_support_rate: 0.001
+  sae_width: 1024
+  sae_width_sensitivity: [512, 2048]
+  sae_top_k: 8
+  sae_top_k_sensitivity: [4, 16]
+  sae_support_rate: 0.0005
+  refits: 5
+  sae_epochs: 200
+  sae_batch_size: 512
+  sae_learning_rate: 0.001
+  sae_device: cuda
+  sae_dtype: bfloat16
+
+circuits:
+  path_edges: [2, 3, 4]
+  local_node_cap: 12
+  final_ancestry_node_cap: 64
+  learned_cap_per_transcript: 32
+  dense_pca_components: 512
+  cluster_counts: [8, 16, 32, 64]
+  cluster_support_rate: 0.001
+  sae_width: 2048
+  sae_width_sensitivity: [1024, 4096]
+  sae_top_k: 8
+  sae_top_k_sensitivity: [4, 16]
+  sae_support_rate: 0.0005
+  refits: 5
+  sae_epochs: 200
+  sae_batch_size: 512
+  sae_learning_rate: 0.001
+  sae_device: cuda
+  sae_dtype: bfloat16
+
+gates:
+  stopping_interval_full_width: 0.10
+  segmentation_overall_f1: 0.90
+  segmentation_subset_f1: 0.85
+  annotator_parent_set_f1: 0.70
+  candidate_recall: 0.95
+  attachment_f1_precision: 0.65
+  attachment_f1_recall: 0.50
+  subset_precision: 0.55
+  subset_recall: 0.40
+  topology_spearman: 0.80
+  synthetic_macro_f1: 0.80
+  synthetic_family_f1: 0.70
+  paraphrase_parent_f1: 0.75
+  dense_retrieval_requires_positive_bootstrap_interval: true
+  cluster_adjusted_rand: 0.60
+  matched_decoder_cosine: 0.80
+  matched_refits_required: 3
+  minimum_support: 50
+  edge_sae_median_active_features: 2
+  edge_sae_fraction_with_three_features: 0.25
+  recurrence_items: 10
+  recurrence_provider_groups: 3
+  circuit_encoder_macro_f1: 0.80
+
+execution:
+  heavy: swc_slurm_only
+  primary_partition: a100
+  fallback_partition: gpu_lowp
+  offline: true
+  immutable_outputs: true
