@@ -27,10 +27,10 @@ export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONHASHSEED=0
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 cd "$B_CODE_DIR"
 
+# every stage sees all canonical-correct transcripts (all three split roles)
 embed=("$B_VENV/bin/python" scripts/verdict_dissection/transcript_embeddings.py
-       --store "$B_STORE" --split "$B_SPLIT" --freeze "$B_FREEZE")
-sae=("$B_VENV/bin/python" scripts/verdict_dissection/transcript_sae.py)
-all_roles=(--roles representation_train representation_validation confirmation)
+       --store "$B_STORE" --split "$B_SPLIT" --freeze "$B_FREEZE"
+       --roles representation_train representation_validation confirmation)
 
 artifact_ok() {
   "$B_VENV/bin/python" -c \
@@ -86,29 +86,9 @@ case "$stage" in
       --output "$out"
     ;;
   qwen-extract|bge-extract)
-    # every canonical-correct transcript, all three split roles, one artifact
     out="$B_OUTPUT_ROOT/dense-$family"
-    run_artifact "$out" "${embed[@]}" --family "$family" --model-path "$model" "${all_roles[@]}" \
+    run_artifact "$out" "${embed[@]}" --family "$family" --model-path "$model" \
       --dense-gate "$B_OUTPUT_ROOT/$family-dense-gate" --output "$out"
-    ;;
-  qwen-sae|bge-sae)
-    dense="$B_OUTPUT_ROOT/dense-$family"
-    out="$B_OUTPUT_ROOT/sae-$family"
-    artifact_ok "$dense" || { echo "run $family-extract first"; exit 2; }
-    run_artifact "$out" "${sae[@]}" --dense-dir "$dense" --output "$out"
-    ;;
-  development-report)
-    : "${B_A1:?set B_A1 to the B-safe A1 transcript-key table}"
-    : "${B_A2_LLAMA:?set B_A2_LLAMA}"
-    : "${B_A2_QWEN:?set B_A2_QWEN}"
-    : "${B_A2_GEMMA:?set B_A2_GEMMA}"
-    out="$B_OUTPUT_ROOT/development-report"
-    run_artifact "$out" "${sae[@]}" --development-report \
-      --dense-dir "$B_OUTPUT_ROOT/dense-qwen" \
-      --sae-dir "$B_OUTPUT_ROOT/sae-qwen" \
-      --bge-sae-dir "$B_OUTPUT_ROOT/sae-bge" --a1 "$B_A1" \
-      --a2 "llama=$B_A2_LLAMA" --a2 "qwen=$B_A2_QWEN" --a2 "gemma=$B_A2_GEMMA" \
-      --output "$out"
     ;;
   *)
     echo "unknown stage: $stage" >&2

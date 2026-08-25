@@ -1,5 +1,4 @@
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -159,16 +158,6 @@ def test_dense_identity_covers_model_config_freeze_and_runtime():
     for field in manifest:
         changed = manifest | {field: "different"}
         assert dense_identity(changed) != identity
-
-
-def test_sae_cli_refuses_local_heavy_work(tmp_path):
-    script = Path(__file__).with_name("transcript_sae.py")
-    result = subprocess.run([
-        sys.executable, str(script), "--dense-dir", str(tmp_path / "missing"),
-        "--output", str(tmp_path / "out"),
-    ], capture_output=True, text=True)
-    assert result.returncode != 0
-    assert "Slurm-only" in result.stderr
 
 
 def test_bootstrap_samples_whole_items_within_benchmark():

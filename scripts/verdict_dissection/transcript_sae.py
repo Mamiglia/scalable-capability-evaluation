@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import math
 import json
-import os
 import platform
 from copy import deepcopy
 from pathlib import Path
@@ -871,10 +870,6 @@ def main() -> None:
     parser.add_argument("--a2", action="append", default=[], metavar="SCORER=PARQUET")
     parser.add_argument("--bge-sae-dir", type=Path)
     args = parser.parse_args()
-    if not os.environ.get("SLURM_JOB_ID"):
-        parser.error("SAE fitting/application is Slurm-only")
-    if not args.development_report and not torch.cuda.is_available():
-        parser.error("SAE fitting/application requires a CUDA GPU")
 
     config = yaml.safe_load(args.config.read_text())
     rows, inputs, dense_manifest = load_dense_artifacts(args.dense_dir)
