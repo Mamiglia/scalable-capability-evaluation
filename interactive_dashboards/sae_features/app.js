@@ -5,7 +5,6 @@ const BUCKETS = [
   ["top", "Top activations"], ["50-90%", "Quantile 50–90% of positive activations"], ["10-50%", "Quantile 10–50%"],
   ["0-10%", "Quantile 0–10%"], ["contrast", "Same-question contrasts (activation 0)"], ["negative", "Most negative"],
 ];
-const WINDOW = 15;          // segments either side of a peak in a snippet
 const SNIPPETS = 3;         // peaks shown per example
 const state = { index: null, feature: 0, group: "gpqa", data: null, traces: null, blind: false };
 
@@ -92,12 +91,12 @@ function axisText(svg, x, y, text, anchor = "middle", cls = "") {
 
 function panelDistribution(group) {
   const { counts, edges } = group.histogram;
-  const W = 300, H = 170, pad = { l: 34, r: 8, t: 22, b: 30 };
+  const W = 300, H = 160, pad = { l: 34, r: 8, t: 10, b: 30 };
   const nonzero = counts.map((c, i) => (edges[i] <= 0 && edges[i + 1] > 0 ? 0 : c));
   const zeroShare = 1 - group.prevalence, maxc = Math.max(...nonzero, 1);
   const x = (v) => pad.l + ((v - edges[0]) / (edges[edges.length - 1] - edges[0] || 1)) * (W - pad.l - pad.r);
-  const svg = svgEl("svg", { width: W, height: H, class: "panel" });
-  axisText(svg, pad.l, 12, `activation, ${group.n} transcripts (${(zeroShare * 100).toFixed(0)}% zero, not drawn)`, "start", "title");
+  const svg = svgEl("svg", { width: W, height: H });
+  svg.dataset.caption = `activation over ${group.n} transcripts (${(zeroShare * 100).toFixed(0)}% exactly zero, not drawn)`;
   nonzero.forEach((c, i) => {
     const mid = (edges[i] + edges[i + 1]) / 2, h = (c / maxc) * (H - pad.t - pad.b);
     svg.append(svgEl("rect", { x: x(edges[i]), width: Math.max(x(edges[i + 1]) - x(edges[i]) - 0.5, 0.5), y: H - pad.b - h, height: h, fill: mid > 0 ? "#2f7d32" : "#a33" }));
@@ -121,12 +120,12 @@ function spearman(xs, ys) {
 
 function panelByModel(group) {
   const rows = group.by_model.filter((m) => m.accuracy != null);
-  const W = 360, H = 170, pad = { l: 40, r: 8, t: 22, b: 30 };
+  const W = 360, H = 160, pad = { l: 40, r: 8, t: 10, b: 30 };
   const ys = rows.map((m) => m.mean_activation), lo = Math.min(0, ...ys), hi = Math.max(0, ...ys), span = hi - lo || 1;
   const x = (a) => pad.l + a * (W - pad.l - pad.r), y = (v) => H - pad.b - ((v - lo) / span) * (H - pad.t - pad.b);
-  const svg = svgEl("svg", { width: W, height: H, class: "panel" });
+  const svg = svgEl("svg", { width: W, height: H });
   const rho = spearman(rows.map((m) => m.accuracy), ys);
-  axisText(svg, pad.l, 12, `mean activation per model vs its accuracy · Spearman ρ = ${rho == null ? "–" : rho.toFixed(2)}`, "start", "title");
+  svg.dataset.caption = `mean activation per model vs the model's accuracy on this benchmark · Spearman ρ = ${rho == null ? "–" : rho.toFixed(2)}`;
   svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: y(0), y2: y(0), stroke: "#bbb" }));
   svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: H - pad.b, y2: H - pad.b, stroke: "#999" }));
   rows.forEach((m) => {
@@ -145,10 +144,10 @@ function panelAgreement(group) {
   const a = group.pair_agreement;
   if (!a) return svgEl("svg", { width: 10, height: 10 });
   const rows = [a.capability, ...a.judges].filter((r) => r.p != null);
-  const W = 420, H = 24 + rows.length * 17 + 30, pad = { l: 150, r: 40, t: 22, b: 26 };
+  const W = 420, H = 12 + rows.length * 17 + 30, pad = { l: 150, r: 40, t: 10, b: 26 };
   const x = (v) => pad.l + ((v - 0.2) / 0.6) * (W - pad.l - pad.r);
-  const svg = svgEl("svg", { width: W, height: H, class: "panel" });
-  axisText(svg, 6, 12, "pairs differing on the feature: share where the higher-activation side wins (95% CI)", "start", "title");
+  const svg = svgEl("svg", { width: W, height: H });
+  svg.dataset.caption = "judged pairs whose two transcripts differ on the feature: share where the higher-activation side is picked by the judge / belongs to the more accurate model (95% CI)";
   for (const v of [0.3, 0.5, 0.7]) {
     svg.append(svgEl("line", { x1: x(v), x2: x(v), y1: pad.t, y2: H - pad.b, stroke: v === 0.5 ? "#999" : "#eee", "stroke-dasharray": v === 0.5 ? "3 3" : "" }));
     axisText(svg, x(v), H - pad.b + 12, v, "middle", "axis");
@@ -166,7 +165,8 @@ function panelAgreement(group) {
 
 function renderSummary(group) {
   if (!group.histogram) { $("#summary").replaceChildren(); return; }
-  $("#summary").replaceChildren(panelDistribution(group), panelByModel(group), panelAgreement(group));
+  $("#summary").replaceChildren(...[panelDistribution(group), panelByModel(group), panelAgreement(group)].map((svg) =>
+    el("figure", { class: "panel" }, el("figcaption", {}, svg.dataset.caption || ""), svg)));
 }
 
 // ---- traces --------------------------------------------------------------------------------
@@ -214,16 +214,20 @@ function traceChart(trace, inc, scale) {
   return svg;
 }
 
+const SNIPPET_CHARS = 450;  // context either side of a peak
 function snippets(example, trace) {
-  const inc = increments(trace), scale = Math.max(...inc.map(Math.abs), 1e-6);
-  // peaks: centres of the windows where the prefix value changes most over the window, non-overlapping
-  const gain = trace.values.map((v, i) => Math.abs(v - trace.values[Math.max(0, i - WINDOW)]));
+  const inc = increments(trace), scale = Math.max(...inc.map(Math.abs), 1e-6), n = inc.length;
+  const charsBefore = (i, chars) => { let j = i; while (j > 0 && trace.spans[i][1] - trace.spans[j][0] < chars) j--; return j; };
+  const charsAfter = (i, chars) => { let j = i; while (j < n - 1 && trace.spans[j][1] - trace.spans[i][0] < chars) j++; return j + 1; };
+  // peaks: where the prefix value changes most over the preceding window, non-overlapping
+  const gain = trace.values.map((v, i) => Math.abs(v - trace.values[charsBefore(i, SNIPPET_CHARS)]));
   const order = gain.map((g, i) => [g, i]).sort((a, b) => b[0] - a[0]);
   const windows = [];
   for (const [, i] of order) {
     if (windows.length >= SNIPPETS) break;
-    if (windows.some(([f, t]) => i >= f - WINDOW && i < t + WINDOW)) continue;
-    windows.push([Math.max(0, i - WINDOW), Math.min(inc.length, i + WINDOW + 1)]);
+    const f = charsBefore(i, SNIPPET_CHARS), t = charsAfter(i, SNIPPET_CHARS);
+    if (windows.some(([wf, wt]) => f < wt && t > wf)) continue;
+    windows.push([f, t]);
   }
   windows.sort((a, b) => a[0] - b[0]);
   const pre = el("div", { class: "text" });
