@@ -78,9 +78,7 @@ sae:
   # one SAE per group; a group is a list of benchmarks that share a dictionary
   fit_groups:
     gpqa: [gpqa]
-    aime2024: [aime2024]
-    aime2025: [aime2025]
-    aime2026: [aime2026]
+    aime: [aime2024, aime2025, aime2026]   # ~700 training rows per year overfit; pooled generalises
     intercode: [intercode]
     swe_bench_mini: [swe_bench_mini]
   # BatchTopK SAE, WIMHF recipe (Movva et al. 2025, configs/*.json in rmovva/wimhf)
