@@ -87,3 +87,93 @@ def test_nodes_fall_back_to_sentences_and_type_tools():
     assert [n["kind"] for n in nodes] == ["question", "assistant_edu", "assistant_edu", "tool_call", "tool_output"]
     assert nodes[3]["tool_type"] == "inspect" and nodes[3]["is_final_sink"]
     assert nodes[4]["tool_type"] == "inspect" and nodes[4]["outcome"] == "error"
+
+
+# ---------------------------------------------------------------- segment
+
+from discourse_network.segment import segment_rows, segment_text  # noqa: E402
+
+
+class Leaf:
+    def __init__(self, start, end):
+        self.left = self.right = None
+        self.start, self.end, self.relation, self.nuclearity = start, end, None, None
+
+
+class Tree:
+    def __init__(self, left, right, relation, nuclearity):
+        self.left, self.right, self.relation, self.nuclearity = left, right, relation, nuclearity
+        self.start, self.end = left.start, right.end
+
+
+class FakeParser:
+    """Splits the masked text once at ', ' and joins the halves with elaboration/NS."""
+    def __call__(self, text):
+        cut = text.index(", ") + 1
+        return {"rst": [Tree(Leaf(0, cut), Leaf(cut + 1, len(text)), "elaboration", "NS")]}
+
+
+def test_segment_text_maps_clauses_and_tree_back_to_the_original():
+    text = "Let \\(c=1\\), so\n\\[\nM=1\n\\]\nholds."
+    clauses, trees = segment_text(FakeParser(), text)
+    assert [text[a:b] for a, b in clauses] == ["Let \\(c=1\\),", "so", "holds."]
+    assert trees[0]["relation"] == "elaboration" and trees[0]["left"] == {"start": 0, "end": 9}
+
+
+def test_segment_rows_uses_transcript_offsets():
+    text = "Let x, go."
+    row = {"bench": "b", "model": "m", "item": "i", "epoch": 0, "log": "l", "sample_epoch": 1,
+           "content_hash": "h", "transcript_parts_json": json.dumps([assistant_part(text)])}
+    clauses, trees = segment_rows([row], FakeParser())
+    assert clauses[["start", "end"]].values.tolist() == [[13, 19], [20, 23]]
+    assert json.loads(trees.tree_json.iloc[0])["nuclearity"] == "NS"
+
+
+# ---------------------------------------------------------------- edges
+
+from discourse_network.edges import cap_parents, discourse_edges, long_range_edges, tool_edges  # noqa: E402
+
+
+def node(i, kind, part, start=None, end=None, text="", **extra):
+    base = {"node_id": i, "kind": kind, "part_id": part, "start": start, "end": end, "text": text,
+            "role": "tool" if kind == "tool_output" else ("question" if kind == "question" else "assistant"),
+            "call_id": None, "tool_type": None, "outcome": None, "is_final_sink": False}
+    return base | extra
+
+
+def test_discourse_edges_follow_nucleus_heads():
+    text = "A, B. \\[\nx\n\\]"                    # masked: "A, B. EQUATION"
+    nodes = [node(0, "question", None), node(1, "assistant_edu", 0, 13, 15, "A,"),
+             node(2, "assistant_edu", 0, 16, 18, "B."), node(3, "equation", 0, 19, 13 + len(text))]
+    tree = {"start": 0, "end": 14, "relation": "causal", "nuclearity": "SN",
+            "left": {"start": 0, "end": 2},
+            "right": {"start": 3, "end": 14, "relation": "restatement", "nuclearity": "NN",
+                      "left": {"start": 3, "end": 5}, "right": {"start": 6, "end": 14}}}
+    edges = discourse_edges(nodes, {(0, 0): [tree]}, {(0, 0): (text, 13)})
+    assert {(e["source_node_id"], e["target_node_id"]): e["relation"] for e in edges} == {
+        (1, 2): "causal", (2, 3): "restatement"}
+
+
+def test_tool_edges_link_outputs_to_calls_and_to_the_next_assistant_part():
+    nodes = [node(0, "question", None), node(1, "assistant_edu", 0, 13, 20),
+             node(2, "tool_call", 0, 21, 40, call_id="c1"), node(3, "tool_output", 1, 50, 60, call_id="c1"),
+             node(4, "assistant_edu", 2, 70, 80)]
+    assert [(e["source_node_id"], e["target_node_id"], e["relation"]) for e in tool_edges(nodes)] == [
+        (2, 3, "tool_result"), (3, 4, "tool_response")]
+
+
+def test_long_range_edges_use_cosine_and_identifiers_outside_own_part():
+    nodes = [node(0, "question", None, text="find flag_1"), node(1, "assistant_edu", 0, 13, 20, "look for flag_1"),
+             node(2, "assistant_edu", 0, 21, 30, "then decode"), node(3, "assistant_edu", 2, 40, 50, "decode it now")]
+    emb = np.array([[1, 0], [0.9, 0.1], [0, 1], [0.1, 1.0]])
+    edges = long_range_edges(nodes, emb, k_similar=1, threshold=0.6)
+    assert {(e["source_node_id"], e["target_node_id"], e["edge_source"]) for e in edges} == {
+        (0, 1, "identifier"), (0, 1, "similarity"), (2, 3, "similarity")}
+
+
+def test_cap_parents_keeps_structure_first_then_best_cosine():
+    edges = [{"source_node_id": 1, "target_node_id": 5, "edge_source": "similarity", "cosine": 0.9},
+             {"source_node_id": 2, "target_node_id": 5, "edge_source": "discourse", "cosine": None},
+             {"source_node_id": 3, "target_node_id": 5, "edge_source": "similarity", "cosine": 0.7},
+             {"source_node_id": 4, "target_node_id": 5, "edge_source": "tool", "cosine": None}]
+    assert sorted(e["source_node_id"] for e in cap_parents(edges, max_parents=3)) == [1, 2, 4]
