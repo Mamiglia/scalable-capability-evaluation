@@ -18,7 +18,8 @@ case "$stage" in
   setup)
     # offline venv from the staged wheels; pip runs straight from its wheel
     [ -x "$venv/bin/python" ] || /usr/bin/python3.12 -m venv --without-pip "$venv"
-    "$venv/bin/python" "$staging"/wheels/pip-*.whl/pip install --no-index --find-links "$staging/wheels" \
+    pip_wheel=$(ls "$staging"/wheels/pip-*.whl)
+    "$venv/bin/python" "$pip_wheel/pip" install --no-index --find-links "$staging/wheels" \
       -r "$staging/wheels/linux-requirements.txt" "$staging"/wheels/hibayes-*.whl
     "$venv/bin/python" -c 'import hibayes.cli.full, numpyro, arviz; print("venv ok")'
     ;;
