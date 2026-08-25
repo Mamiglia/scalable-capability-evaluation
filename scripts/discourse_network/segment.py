@@ -34,10 +34,6 @@ def tree_dict(node, shift=0):
     return out
 
 
-def leaves(node):
-    return [node] if node.left is None else leaves(node.left) + leaves(node.right)
-
-
 def normalise_tree_spans(trees, text):
     """Snap ordered parser leaves to a complete partition of whole text tokens."""
     leaf_nodes = []
@@ -115,6 +111,14 @@ def _dict_leaves(node):
     return [node] if "left" not in node else _dict_leaves(node["left"]) + _dict_leaves(node["right"])
 
 
+def _write_parquet(frame, path):
+    partial = path.with_name(path.name + ".partial")
+    if path.exists() or partial.exists():
+        raise FileExistsError(path if path.exists() else partial)
+    frame.to_parquet(partial, index=False)
+    partial.replace(path)
+
+
 def segment_rows(rows, parser):
     """Clause and tree tables for store rows (dicts with A's keys and transcript_parts_json)."""
     clause_rows, tree_rows = [], []
@@ -154,9 +158,10 @@ def main():
     parser = Parser(hf_model_name=cfg["segmenter"]["model"], hf_model_version=cfg["segmenter"]["version"],
                     cuda_device=-1)
     clauses, trees = segment_rows(store.to_dict("records"), parser)
-    trees.to_parquet(out / f"shard-{args.shard}.trees.parquet", index=False)
-    clauses.to_parquet(done.with_suffix(".tmp.parquet"), index=False)
-    done.with_suffix(".tmp.parquet").rename(done)          # written last: its presence means the shard is done
+    tree_path = out / f"shard-{args.shard}.trees.parquet"
+    if not tree_path.exists():
+        _write_parquet(trees, tree_path)
+    _write_parquet(clauses, done)                          # written last: its presence means the shard is done
     print(f"shard {args.shard}: {len(store)} transcripts, {len(clauses)} clauses, {len(trees)} trees")
 
 

@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -352,6 +353,7 @@ def test_pipeline_writes_tables(tmp_path):
     assert feats.loc[feats.bench == "gpqa"].filter(like="_sae_").notna().any().any()
     assert len(pairs) == 1 and "d_topo_node_count" in pairs
     assert json.loads((tmp_path / "manifest.json").read_text())["rows"]["transcripts"] == 6
+    assert not list(tmp_path.rglob("*.partial"))
 
 
 def test_pipeline_can_stop_after_nodes(tmp_path):
@@ -370,6 +372,15 @@ def test_build_import_does_not_require_the_pair_builder():
     code = ("import sys; sys.path.insert(0, 'scripts'); sys.path.insert(0, 'scripts/verdict_dissection'); "
             "sys.modules['aggregate_surprisal'] = None; import discourse_network.build")
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_atomic_write_refuses_an_existing_partial(tmp_path):
+    path = tmp_path / "output.parquet"
+    partial = tmp_path / "output.parquet.partial"
+    partial.write_text("incomplete")
+    with pytest.raises(FileExistsError):
+        build._atomic(path, lambda target: target.write_text("replacement"))
+    assert partial.read_text() == "incomplete" and not path.exists()
 
 
 def test_make_nodes_keeps_rows_with_the_same_content_hash_separate():

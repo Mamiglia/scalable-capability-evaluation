@@ -20,7 +20,6 @@ RELATIONS = ["attribution", "background", "causal", "condition", "contrast", "el
              "explanation", "joint", "organization", "purpose", "restatement", "same-unit", "topic-change",
              "topic-comment", "within_leaf", "tool_result", "tool_response"]
 EDGE_SOURCES = ["discourse", "tool", "similarity", "identifier"]
-ASSISTANT_TEXT = {"assistant_edu", "equation", "code", "heading", "answer"}
 LONG_RANGE = 8                                     # parent more than this many nodes back
 
 

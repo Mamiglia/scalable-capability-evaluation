@@ -35,6 +35,26 @@ def transcript_key(row):
     return hashlib.sha256("|".join(str(row[k]) for k in KEYS).encode()).hexdigest()[:16]
 
 
+def _atomic(path, writer):
+    """Write beside the final path, then rename; never reuse a partial file."""
+    path = Path(path)
+    partial = path.with_name(path.name + ".partial")
+    if path.exists() or partial.exists():
+        raise FileExistsError(path if path.exists() else partial)
+    writer(partial)
+    partial.replace(path)
+
+
+def _save_npy(path, array):
+    with path.open("xb") as handle:
+        np.save(handle, array)
+
+
+def _save_npz(path, **arrays):
+    with path.open("xb") as handle:
+        np.savez(handle, **arrays)
+
+
 # ---------------------------------------------------------------- steps
 
 def make_nodes(store, clauses, cfg):
@@ -85,7 +105,8 @@ def embed_nodes(texts, cfg):
         part = todo[start:start + block]
         vectors = model.encode([text_of[d] for d in part], batch_size=cfg["batch_size"], normalize_embeddings=True,
                                convert_to_numpy=True, show_progress_bar=False)
-        np.savez(cache / f"block-{b:04d}.npz", hashes=np.array(part), vectors=vectors.astype(np.float32))
+        _atomic(cache / f"block-{b:04d}.npz",
+                lambda path: _save_npz(path, hashes=np.array(part), vectors=vectors.astype(np.float32)))
         known.update(zip(part, vectors))
         print(f"embedded chunks {min(start + block, len(todo))}/{len(todo)}", flush=True)
     dim = len(next(iter(known.values())))
@@ -157,7 +178,9 @@ def make_features(store, nodes, edges, embeddings, split, cfg, out_dir):
                             f"edge_sae_{group}", sae["min_support"], edge_dev), in_group))
         for name, model in (("node_sae", node_sae), ("edge_sae", edge_sae)):
             (out_dir / name).mkdir(exist_ok=True)
-            np.savez(out_dir / name / f"{group}.npz", decoder=model.decoder, top_k=model.top_k)
+            path = out_dir / name / f"{group}.npz"
+            if not path.exists():
+                _atomic(path, lambda partial: _save_npz(partial, decoder=model.decoder, top_k=model.top_k))
     return pd.concat([keys, topo, sae_blocks[sorted(sae_blocks.columns)]], axis=1)
 
 
@@ -174,37 +197,47 @@ def run(store, clauses, trees, split, verdicts, cfg, out_dir, embed=embed_nodes,
     out_dir.mkdir(parents=True, exist_ok=True)
     store = store[store.correct & store.is_canonical].sort_values(KEYS).reset_index(drop=True)
     if not (out_dir / "nodes.parquet").exists():
-        make_nodes(store, clauses, cfg).to_parquet(out_dir / "nodes.parquet", index=False)
+        frame = make_nodes(store, clauses, cfg)
+        _atomic(out_dir / "nodes.parquet", lambda path: frame.to_parquet(path, index=False))
     nodes = pd.read_parquet(out_dir / "nodes.parquet")
     if stop_after == "nodes":
         return nodes
     if not (out_dir / "node_embeddings.npy").exists():
         encoder_cfg = cfg["encoder"] | {"cache_dir": out_dir / "embed_cache"}
-        np.save(out_dir / "node_embeddings.npy", embed(nodes.text.fillna("").tolist(), encoder_cfg))
+        values = embed(nodes.text.fillna("").tolist(), encoder_cfg)
+        _atomic(out_dir / "node_embeddings.npy", lambda path: _save_npy(path, values))
     embeddings = np.load(out_dir / "node_embeddings.npy")
     if stop_after == "embeddings":
         return embeddings
     if not (out_dir / "edges.parquet").exists():
-        make_edges(store, nodes, embeddings, trees, cfg["edges"]).to_parquet(out_dir / "edges.parquet", index=False)
+        frame = make_edges(store, nodes, embeddings, trees, cfg["edges"])
+        _atomic(out_dir / "edges.parquet", lambda path: frame.to_parquet(path, index=False))
     edges = pd.read_parquet(out_dir / "edges.parquet")
     if stop_after == "edges":
         return edges
     if not (out_dir / "transcript_features.parquet").exists():
-        make_features(store, nodes, edges, embeddings, split, cfg, out_dir).to_parquet(
-            out_dir / "transcript_features.parquet", index=False)
+        frame = make_features(store, nodes, edges, embeddings, split, cfg, out_dir)
+        _atomic(out_dir / "transcript_features.parquet", lambda path: frame.to_parquet(path, index=False))
     features = pd.read_parquet(out_dir / "transcript_features.parquet")
     if stop_after == "features":
         return features
     from aggregate_surprisal import build_pairs
-    pairs = build_pairs(verdicts, features.drop(columns=["transcript_key"]))
-    pairs.to_parquet(out_dir / "pair_features.parquet", index=False)
-    (out_dir / "manifest.json").write_text(json.dumps({
-        "freeze": cfg.get("freeze"), "segmenter": cfg.get("segmenter"), "encoder": cfg.get("encoder"),
-        "config_hash": hashlib.sha256(json.dumps(cfg, sort_keys=True, default=str).encode()).hexdigest(),
-        "rows": {"transcripts": len(features), "nodes": len(nodes), "edges": len(edges), "pairs": len(pairs)},
-        "columns": {"topology": sum(c.startswith("topo_") for c in features),
-                    "node_sae": sum(c.startswith("node_sae_") for c in features),
-                    "edge_sae": sum(c.startswith("edge_sae_") for c in features)}}, indent=2))
+    pair_path = out_dir / "pair_features.parquet"
+    if not pair_path.exists():
+        pairs = build_pairs(verdicts, features.drop(columns=["transcript_key"]))
+        _atomic(pair_path, lambda path: pairs.to_parquet(path, index=False))
+    else:
+        pairs = pd.read_parquet(pair_path)
+    manifest_path = out_dir / "manifest.json"
+    if not manifest_path.exists():
+        manifest = json.dumps({
+            "freeze": cfg.get("freeze"), "segmenter": cfg.get("segmenter"), "encoder": cfg.get("encoder"),
+            "config_hash": hashlib.sha256(json.dumps(cfg, sort_keys=True, default=str).encode()).hexdigest(),
+            "rows": {"transcripts": len(features), "nodes": len(nodes), "edges": len(edges), "pairs": len(pairs)},
+            "columns": {"topology": sum(c.startswith("topo_") for c in features),
+                        "node_sae": sum(c.startswith("node_sae_") for c in features),
+                        "edge_sae": sum(c.startswith("edge_sae_") for c in features)}}, indent=2)
+        _atomic(manifest_path, lambda path: path.write_text(manifest))
     return features
 
 
