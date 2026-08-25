@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from transcript_sae import (dense_identity, explained_variance, load_dense_artifacts, load_sae,
+from transcript_sae import (centre_by_item, dense_identity, explained_variance, load_dense_artifacts, load_sae,
                             run_grouped_sae_suite, sha256_file, verify_artifact_files,
                             write_sae_artifacts)
 
@@ -107,3 +107,10 @@ def test_dense_identity_covers_model_config_freeze_and_runtime():
     for field in manifest:
         changed = manifest | {field: "different"}
         assert dense_identity(changed) != identity
+
+
+def test_centre_by_item_removes_the_item_mean():
+    inputs = np.array([[1.0, 2.0], [3.0, 4.0], [10.0, 10.0]], dtype=np.float32)
+    centred = centre_by_item(inputs, np.array(["a", "a", "b"]))
+    assert np.allclose(centred, [[-1.0, -1.0], [1.0, 1.0], [0.0, 0.0]])
+    assert inputs[0, 0] == 1.0     # input untouched

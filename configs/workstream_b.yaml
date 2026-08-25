@@ -81,6 +81,7 @@ sae:
     aime: [aime2024, aime2025, aime2026]   # ~700 training rows per year overfit; pooled generalises
     intercode: [intercode]
     swe_bench_mini: [swe_bench_mini]
+  centre_by_item: true   # subtract the item mean embedding: raw embeddings are ~80% question identity
   # BatchTopK SAE, WIMHF recipe (Movva et al. 2025, configs/*.json in rmovva/wimhf)
   width: 32
   top_k: 4

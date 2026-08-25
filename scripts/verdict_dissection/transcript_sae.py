@@ -55,9 +55,20 @@ def explained_variance(inputs: np.ndarray, reconstructions: np.ndarray) -> float
     return float(1 - np.square(inputs - reconstructions).sum() / total) if total else float("nan")
 
 
+def centre_by_item(inputs: np.ndarray, items: np.ndarray) -> np.ndarray:
+    """Subtract each item's mean embedding, leaving how a transcript differs from the
+    typical answer to its own question (question identity dominates raw embeddings)."""
+    centred = np.array(inputs, dtype=np.float32, copy=True)
+    for item in np.unique(items):
+        mask = items == item
+        centred[mask] -= centred[mask].mean(axis=0)
+    return centred
+
+
 def run_grouped_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict
                           ) -> tuple[dict[str, SparseAutoencoder], dict, dict]:
-    """One SAE per fit group (config['fit_groups']: group -> benchmarks).
+    """One SAE per fit group (config['fit_groups']: group -> benchmarks), on item-centred
+    embeddings when config['centre_by_item'] is set.
 
     Activations are stacked column-wise across groups and are zero for rows
     outside a feature's group; feature_labels gives 'group:feature' per column.
@@ -65,6 +76,8 @@ def run_grouped_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict
     inputs = np.asarray(inputs, dtype=np.float32)
     if len(inputs) != len(rows) or not {"split_role", "benchmark"} <= set(rows):
         raise ValueError("embedding rows and split metadata do not align")
+    if config.get("centre_by_item"):
+        inputs = centre_by_item(inputs, rows["item_group_key"].to_numpy())
     groups = config["fit_groups"]
     member = {bench: group for group, benches in groups.items() for bench in benches}
     if len(member) != sum(len(benches) for benches in groups.values()):
