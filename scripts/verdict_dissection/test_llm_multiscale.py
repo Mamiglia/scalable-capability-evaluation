@@ -8,8 +8,8 @@ import pytest
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).parent))
-from llm_multiscale import (SETTINGS, multiscale_features, rolling_surprisal,
-                            score_and_cache)
+from llm_multiscale import (SETTINGS, _prefix_values, multiscale_features,
+                            rolling_surprisal, score_and_cache)
 from llm_surprisal import SCORERS, cache_file, start_token, tokenise
 
 TINY = "hf-internal-testing/tiny-random-LlamaForCausalLM"
@@ -107,6 +107,32 @@ def test_invalid_existing_cache_is_never_overwritten(tiny, tmp_path):
     with pytest.raises(ValueError, match="refusing to overwrite"):
         score_and_cache(None, tok, TEXT, "Why?", assistant_parts(), path,
                         "a" * 64)
+
+
+def test_prefix_reuse_never_extends_beyond_8192(tmp_path):
+    offsets = np.column_stack((np.arange(8200), np.arange(1, 8201)))
+    path = tmp_path / "prefix.npz"
+    np.savez(path, content_hash="hash", offsets=offsets,
+             local=np.ones(8200), noq=np.ones(8200), full=np.ones(8200))
+    reused = _prefix_values(path, "hash", offsets)
+    assert all(len(values) == 8192 for values in reused.values())
+
+
+def test_complete_temporary_cache_is_promoted(tiny, tmp_path):
+    _, tok = tiny
+    content_hash = hashlib.sha256(TEXT.encode()).hexdigest()
+    _, offsets = tokenise(tok, TEXT, max_tokens=None)
+    path = tmp_path / "whole.npz"
+    temporary = path.with_suffix(".tmp.npz")
+    values = np.ones(len(offsets), dtype=np.float32)
+    np.savez(temporary, short=values, long=values, long_question=values,
+             offsets=offsets, assistant_mask=np.ones(len(offsets), dtype=bool),
+             content_hash=content_hash, short_history=32, short_block=32,
+             long_history=7168, long_block=1024)
+
+    score_and_cache(None, tok, TEXT, "Why?", assistant_parts(), path,
+                    content_hash)
+    assert path.exists() and not temporary.exists()
 
 
 def test_multiscale_feature_summaries(tmp_path):

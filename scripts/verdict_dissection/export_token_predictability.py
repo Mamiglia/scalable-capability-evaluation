@@ -11,8 +11,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from llm_surprisal import assistant_token_mask, cache_file
-from llm_multiscale import SETTINGS
+from llm_surprisal import SCORERS, assistant_token_mask, cache_file
+from llm_multiscale import SETTINGS, _matches
 
 
 KEYS = ["bench", "model", "item", "epoch", "log", "sample_epoch", "content_hash"]
@@ -76,11 +76,15 @@ def export_token_predictability(store_path, cache_dir, output_dir, batch_rows=10
     try:
         for row in selected.itertuples(index=False):
             parts = json.loads(row.transcript_parts_json)
-            for scorer_dir in sorted(p for p in cache_dir.iterdir() if p.is_dir()):
+            scorer_dirs = ([cache_dir / scorer for scorer in SCORERS] if rolling else
+                           sorted(p for p in cache_dir.iterdir() if p.is_dir()))
+            for scorer_dir in scorer_dirs:
                 scorer = scorer_dir.name
                 path = cache_file(cache_dir, scorer, row.bench, row.model, row.item,
                                   row.epoch, row.log, row.content_hash)
                 if not path.exists():
+                    if rolling:
+                        raise FileNotFoundError(f"missing rolling cache: {path}")
                     continue
                 with np.load(path, allow_pickle=False) as cache:
                     if cache["content_hash"].item() != row.content_hash:
@@ -91,10 +95,7 @@ def export_token_predictability(store_path, cache_dir, output_dir, batch_rows=10
                     n = len(offsets)
                     assistant = assistant_token_mask(row.transcript, offsets, parts)
                     if rolling:
-                        if (not np.array_equal(cache["assistant_mask"], assistant)
-                                or any(cache[f"{name}_history"].item() != history
-                                       or cache[f"{name}_block"].item() != block
-                                       for name, (history, block) in SETTINGS.items())):
+                        if not _matches(cache, row.content_hash, offsets, assistant):
                             raise ValueError(f"rolling cache settings mismatch: {path}")
                         short, long, long_question = (
                             _bits(cache, name, n, path)
@@ -114,7 +115,8 @@ def export_token_predictability(store_path, cache_dir, output_dir, batch_rows=10
                             "tail_eligible": token_index >= 8192,
                             "short_bits": _number(short_bit), "long_bits": _number(long_bit),
                             "long_question_bits": _number(question_bit),
-                            "context_gain_bits": _number(short_bit - long_bit),
+                            "context_gain_bits": (_number(short_bit - long_bit)
+                                                  if token_index >= 64 else None),
                             "question_gain_bits": _number(long_bit - question_bit),
                         })
                         written += 1

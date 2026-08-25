@@ -60,15 +60,20 @@ def _prefix_values(path, content_hash, offsets):
         return None
     try:
         with np.load(path) as source:
-            cap = len(source["offsets"])
+            source_offsets = source["offsets"]
+            source_n = len(source_offsets)
+            cap = min(source_n, 8192)
             if (source["content_hash"].item() != content_hash
-                    or not np.array_equal(source["offsets"], offsets[:cap])):
+                    or source_n > len(offsets)
+                    or not np.array_equal(source_offsets, offsets[:source_n])):
                 return None
             arrays = {"short": source["local"], "long": source["noq"],
                       "long_question": source["full"]}
-            if any(len(values) != cap or not np.isfinite(values).all() for values in arrays.values()):
+            if any(len(values) != source_n or not np.isfinite(values).all()
+                   for values in arrays.values()):
                 return None
-            return {name: values.astype(np.float32, copy=True) for name, values in arrays.items()}
+            return {name: values[:cap].astype(np.float32, copy=True)
+                    for name, values in arrays.items()}
     except (KeyError, OSError, ValueError):
         return None
 
@@ -159,6 +164,9 @@ def score_and_cache(model, tokenizer, text, question, parts, path, content_hash,
         raise ValueError(f"refusing to overwrite invalid cache: {path}")
     temporary = path.with_suffix(".tmp.npz")
     if temporary.exists():
+        if _valid(temporary, content_hash, offsets, assistant_mask):
+            os.rename(temporary, path)
+            return path
         raise ValueError(f"refusing to overwrite partial cache: {temporary}")
     reused = _prefix_values(Path(prefix_cache) if prefix_cache else None, content_hash, offsets)
     base, with_question = question_prefix(tokenizer, None), question_prefix(tokenizer, question)

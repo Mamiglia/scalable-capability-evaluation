@@ -99,22 +99,43 @@ def test_exports_whole_transcript_short_and_long_tokens(tmp_path):
     }])
     store_path, cache_dir = tmp_path / "store.parquet", tmp_path / "cache"
     store.to_parquet(store_path)
-    cache = cache_dir / "tiny" / "toy" / f"model__item__ep0__run__{content_hash[:16]}.npz"
-    cache.parent.mkdir(parents=True)
     offsets = np.array([[0, 6]] * 65, dtype=np.int32)
-    np.savez(cache, short=np.arange(65, dtype=float) + 5,
-             long=np.arange(65, dtype=float) + 3,
-             long_question=np.arange(65, dtype=float) + 2,
-             offsets=offsets, assistant_mask=np.ones(65, dtype=bool),
-             content_hash=content_hash, short_history=32, short_block=32,
-             long_history=7168, long_block=1024)
+    for scorer in ("llama", "qwen", "gemma"):
+        cache = cache_dir / scorer / "toy" / f"model__item__ep0__run__{content_hash[:16]}.npz"
+        cache.parent.mkdir(parents=True)
+        np.savez(cache, short=np.arange(65, dtype=float) + 5,
+                 long=np.arange(65, dtype=float) + 3,
+                 long_question=np.arange(65, dtype=float) + 2,
+                 offsets=offsets, assistant_mask=np.ones(65, dtype=bool),
+                 content_hash=content_hash, short_history=32, short_block=32,
+                 long_history=7168, long_block=1024)
 
     target = tmp_path / "raw" / "token-predictability-rolling"
     export_token_predictability(store_path, cache_dir, target, rolling=True)
-    rows = pq.read_table(target).to_pandas().sort_values("token_index")
+    rows = pq.read_table(target).to_pandas()
+    rows = rows[rows.scorer == "llama"].sort_values("token_index").reset_index(drop=True)
     assert rows.iloc[0][["short_bits", "long_bits", "long_question_bits",
-                         "context_gain_bits", "question_gain_bits"]].tolist() == [
-                             5.0, 3.0, 2.0, 2.0, 1.0]
+                         "question_gain_bits"]].tolist() == [5.0, 3.0, 2.0, 1.0]
+    assert pd.isna(rows.iloc[0].context_gain_bits)
     assert not bool(rows.iloc[63].context_eligible)
     assert bool(rows.iloc[64].context_eligible)
+    assert rows.iloc[64].context_gain_bits == 2.0
     assert not bool(rows.iloc[64].tail_eligible)
+
+
+def test_rolling_export_requires_every_configured_scorer(tmp_path):
+    text, content_hash = "answer", "a" * 64
+    store = pd.DataFrame([{
+        "bench": "toy", "model": "model", "item": "item", "epoch": 0,
+        "log": "run", "sample_epoch": 2, "content_hash": content_hash,
+        "transcript": text, "transcript_parts_json": json.dumps([{
+            "role": "assistant", "content": text, "start": 0,
+            "end": len(text), "bare": True}]),
+        "correct": True, "is_canonical": True,
+    }])
+    store_path, cache_dir = tmp_path / "store.parquet", tmp_path / "cache"
+    store.to_parquet(store_path)
+    cache_dir.mkdir()
+    with pytest.raises(FileNotFoundError, match="missing rolling cache"):
+        export_token_predictability(store_path, cache_dir,
+                                    tmp_path / "token-output", rolling=True)
