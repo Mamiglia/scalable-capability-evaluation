@@ -54,7 +54,7 @@ def test_describe_features_keeps_the_best_faithful_candidate():
     activations[:3, 1] = [3, 2, 1]                      # feature 1: too rare for prevalence
     activations[3:80, 1] = 0.0
 
-    interpretations = iter(['- "long answer"', '- "short answer"'])
+    interpretations = iter(['- "long answer"', '- "short answer"', '- "rare thing"', '- "rare thing"'])
 
     def ask(model, prompt, max_tokens):
         if prompt.startswith("# Task Overview"):
@@ -74,7 +74,7 @@ def test_describe_features_keeps_the_best_faithful_candidate():
     assert first.feature == "gpqa:0" and first.kept and first.description == "long answer"
     assert first.correlation > 0.5 and first.p_value < 0.025 and first.n_candidates == 2
     second = table.iloc[1]
-    assert not second.kept and second.reason == "too_few_firing_transcripts"
+    assert not second.kept and second.reason == "low_prevalence" and second.description == "rare thing"
 
 
 def test_offline_mode_returns_none_while_prompts_are_pending():
