@@ -87,9 +87,9 @@ sae:
   sensitivity_widths: [16, 64]
   top_k: 4
   learning_rate: 0.001
-  batch_size: 512
-  max_epochs: 200
-  patience: 20
+  batch_size: 64
+  max_epochs: 2000
+  patience: 50
   seeds: [0, 1, 2, 3, 4]
   min_decoder_cosine: 0.8
   min_noncanonical_matches: 3
