@@ -66,29 +66,29 @@ def boundaries(n_tokens, max_boundaries):
     return sorted(set(np.linspace(1, n_tokens, max_boundaries).round().astype(int).tolist()) | {n_tokens})
 
 
-def prefix_mask(n_tokens, bounds):
-    """Causal mask over the transcript; end token j sees tokens [0, bounds[j]) and itself."""
-    total = n_tokens + len(bounds)
-    mask = torch.zeros(total, total, dtype=torch.bool)
-    mask[:n_tokens, :n_tokens] = torch.tril(torch.ones(n_tokens, n_tokens, dtype=torch.bool))
+def query_mask(n_tokens, bounds):
+    """Mask for one end-token query per boundary against the cached transcript: query j sees tokens [0, bounds[j]) and itself."""
+    mask = torch.zeros(len(bounds), n_tokens + len(bounds), dtype=torch.bool)
     for j, t in enumerate(bounds):
-        mask[n_tokens + j, :t] = True
-        mask[n_tokens + j, n_tokens + j] = True
+        mask[j, :t] = True
+        mask[j, n_tokens + j] = True
     return mask
 
 
 def prefix_embeddings(model, tokenizer, ids, bounds, device):
-    """Unit-norm embedding of every prefix in one pass, in the order of bounds."""
+    """Unit-norm embedding of every prefix, in the order of bounds: one causal pass over the transcript with a
+    KV cache, then one pass of end-token queries against the cache, each masked to its own prefix."""
     prefix, suffix = special_token_frame(tokenizer)
     if prefix:
         raise ValueError("a non-empty special-token prefix is not handled")
     end = suffix[0]
     n = len(ids)
-    tokens = torch.tensor([ids + [end] * len(bounds)], device=device)
-    positions = torch.tensor([list(range(n)) + list(bounds)], device=device)
-    mask = prefix_mask(n, bounds)[None, None].to(device)
     with torch.inference_mode():
-        hidden = model(input_ids=tokens, attention_mask=mask, position_ids=positions).last_hidden_state[0, n:]
+        cache = model(input_ids=torch.tensor([ids], device=device), use_cache=True).past_key_values
+        hidden = model(input_ids=torch.tensor([[end] * len(bounds)], device=device),
+                       position_ids=torch.tensor([list(bounds)], device=device),
+                       attention_mask=query_mask(n, bounds)[None, None].to(device),
+                       past_key_values=cache, use_cache=True).last_hidden_state[0]
     return torch.nn.functional.normalize(hidden.float(), dim=1).cpu().numpy()
 
 
@@ -111,7 +111,7 @@ def main():
     parser.add_argument("--sae-dir", type=Path, default=ROOT / "judge_results/verdict_dissection/transcript_sae/sae-qwen")
     parser.add_argument("--model-path", type=Path, default=Path("/Volumes/T7/models/Qwen3-Embedding-4B-5cf2132a"))
     parser.add_argument("--device", default="mps")
-    parser.add_argument("--max-tokens", type=int, default=6144, help="skip longer transcripts")
+    parser.add_argument("--max-tokens", type=int, default=40000, help="skip longer transcripts")
     parser.add_argument("--max-boundaries", type=int, default=512)
     parser.add_argument("--limit", type=int, default=None, help="trace only the first N transcripts (smoke)")
     args = parser.parse_args()
