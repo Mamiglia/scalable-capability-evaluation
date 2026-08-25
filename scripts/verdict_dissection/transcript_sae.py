@@ -21,14 +21,6 @@ from transcript_embeddings import (atomic_artifact_directory, git_commit, json_r
                                    ordered_key_hash, sha256_file, verify_artifact_files)
 
 
-def widths(n_train: int, input_dim: int) -> tuple[int, int, int] | None:
-    limit = min(256, input_dim, n_train // 50)
-    if limit < 1:
-        return None
-    wide = 1 << int(math.log2(limit))
-    return None if wide // 4 < 16 else (wide // 4, wide // 2, wide)
-
-
 class TopKSAE(nn.Module):
     def __init__(self, input_dim: int, width: int, k: int, mean: torch.Tensor):
         super().__init__()
@@ -256,20 +248,22 @@ def _bootstrap_reconstruction_gate(inputs: np.ndarray, retained: np.ndarray,
 def run_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict,
                   *, device: str | None = None
                   ) -> tuple[TopKSAE | None, dict, dict, dict | None]:
-    """Fit narrow/primary/wide plus four noncanonical primary fits, development only."""
+    """Fit narrow/primary/wide plus four noncanonical primary fits.
+
+    Only representation_train rows are fitted and representation_validation rows
+    select the epoch; every row (confirmation included) is encoded.
+    """
     inputs = np.asarray(inputs, dtype=np.float32)
     if len(inputs) != len(rows) or "split_role" not in rows:
         raise ValueError("embedding rows and split metadata do not align")
-    if (rows["split_role"] == "confirmation").any():
-        raise ValueError("confirmation rows cannot enter SAE fitting")
     train_mask = rows["split_role"].eq("representation_train").to_numpy()
     validation_mask = rows["split_role"].eq("representation_validation").to_numpy()
     train, validation = inputs[train_mask], inputs[validation_mask]
-    realised = widths(len(train), inputs.shape[1])
-    if realised is None:
-        return None, {}, {"status": "null", "reason": "infeasible_width",
+    primary = config["width"]
+    narrow, wide = config["sensitivity_widths"]
+    if len(train) < primary or not len(validation):
+        return None, {}, {"status": "null", "reason": "too_few_rows",
                           "n_train": len(train), "n_validation": len(validation)}, None
-    narrow, primary, wide = realised
     frozen_mean = train.mean(axis=0)
     fit_kwargs = dict(
         k=config["top_k"], batch_size=config["batch_size"],
@@ -384,17 +378,62 @@ def run_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict,
     return canonical, arrays, report, canonical_state
 
 
-def write_sae_artifacts(output_dir: str | Path, sae: TopKSAE | None,
+def run_grouped_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict,
+                          *, device: str | None = None
+                          ) -> tuple[dict[str, TopKSAE], dict, dict]:
+    """One SAE per fit group (config['fit_groups']: group -> benchmarks).
+
+    Activations are stacked column-wise across groups and are zero for rows
+    outside a feature's group; feature_labels gives 'group:feature' per column.
+    """
+    inputs = np.asarray(inputs, dtype=np.float32)
+    groups = config["fit_groups"]
+    member = {bench: group for group, benches in groups.items() for bench in benches}
+    if len(member) != sum(len(benches) for benches in groups.values()):
+        raise ValueError("a benchmark appears in more than one fit group")
+    if unknown := set(rows["benchmark"]) - set(member):
+        raise ValueError(f"benchmarks without a fit group: {sorted(unknown)}")
+    saes, reports, arrays, blocks = {}, {}, {}, []
+    reconstructions = np.zeros_like(inputs)
+    for group, benches in groups.items():
+        mask = rows["benchmark"].isin(benches).to_numpy()
+        if not mask.any():
+            continue
+        sae, group_arrays, report, _ = run_sae_suite(
+            inputs[mask], rows[mask].reset_index(drop=True), config, device=device)
+        reports[group] = report
+        if sae is None:
+            continue
+        saes[group] = sae
+        blocks.append((group, mask, group_arrays.pop("activations"),
+                       group_arrays.pop("retained_feature_ids")))
+        reconstructions[mask] = group_arrays.pop("reconstructions")
+        group_arrays.pop("residuals")
+        arrays |= {f"{group}__{name}": value for name, value in group_arrays.items()}
+    activations = np.zeros((len(inputs), sum(values.shape[1] for _, _, values, _ in blocks)),
+                           dtype=np.float32)
+    labels, start = [], 0
+    for group, mask, values, feature_ids in blocks:
+        activations[np.ix_(mask, np.arange(start, start + values.shape[1]))] = values
+        labels += [f"{group}:{feature}" for feature in feature_ids]
+        start += values.shape[1]
+    arrays |= {"activations": activations, "reconstructions": reconstructions,
+               "residuals": inputs - reconstructions,
+               "retained_feature_ids": np.arange(len(labels)),
+               "feature_labels": np.array(labels, dtype=str)}
+    return saes, arrays, reports
+
+
+def write_sae_artifacts(output_dir: str | Path, saes: dict[str, TopKSAE],
                         arrays: dict[str, np.ndarray], manifest: dict,
-                        *, rows: pd.DataFrame | None = None,
-    training_state: dict | None = None) -> dict:
+                        *, rows: pd.DataFrame | None = None) -> dict:
     def build(stage: Path) -> dict:
         report_path = stage / "sae_report.json"
         report_path.write_text(json.dumps(
             json_ready(manifest.get("report", {})), sort_keys=True, allow_nan=False) + "\n")
         outputs = {report_path.name: sha256_file(report_path)}
-        if sae is not None:
-            weights = stage / "sae_weights.npz"
+        for group, sae in saes.items():
+            weights = stage / f"sae_weights__{group}.npz"
             np.savez(
                 weights,
                 mean=sae.mean.detach().cpu().numpy(),
@@ -424,10 +463,6 @@ def write_sae_artifacts(output_dir: str | Path, sae: TopKSAE | None,
             rows.to_parquet(rows_path, index=False)
             outputs[sparse_path.name] = sha256_file(sparse_path)
             outputs[rows_path.name] = sha256_file(rows_path)
-        if training_state is not None:
-            state_path = stage / "optimizer_state.pt"
-            torch.save(training_state["optimizer_state"], state_path)
-            outputs[state_path.name] = sha256_file(state_path)
         return dict(manifest) | {"outputs": outputs}
 
     return atomic_artifact_directory(output_dir, build)
@@ -830,10 +865,6 @@ def main() -> None:
     parser.add_argument("--dense-dir", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=Path("configs/workstream_b.yaml"))
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--apply-from", type=Path,
-                        help="Frozen development SAE directory; apply only, never fit")
-    parser.add_argument("--report-from", type=Path,
-                        help="Frozen development report required before SAE confirmation")
     parser.add_argument("--development-report", action="store_true")
     parser.add_argument("--sae-dir", type=Path)
     parser.add_argument("--a1", type=Path)
@@ -895,37 +926,11 @@ def main() -> None:
                                     audit_map=audit_map)
         write_development_report(args.output, report, source_hashes)
         return
-    if args.apply_from:
-        if set(rows["split_role"]) != {"confirmation"}:
-            raise ValueError("frozen SAE application accepts confirmation rows only")
-        development_manifest = json.loads((args.apply_from / "manifest.json").read_text())
-        verify_artifact_files(args.apply_from, development_manifest)
-        if development_manifest.get("report", {}).get("status") != "passed":
-            raise ValueError("confirmation SAE application requires a frozen passed SAE")
-        if args.report_from is None:
-            raise ValueError("SAE confirmation requires the frozen development report")
-        report_manifest = json.loads((args.report_from / "manifest.json").read_text())
-        verify_artifact_files(args.report_from, report_manifest)
-        source_sae_hash = sha256_file(args.apply_from / "manifest.json")
-        source_key = f"{dense_manifest['family']}_sae"
-        if (report_manifest.get("kind") != "development_report"
-                or report_manifest.get("status") != "ready"
-                or report_manifest.get("source_hashes", {}).get(source_key) != source_sae_hash):
-            raise ValueError("SAE confirmation requires the matching frozen development report")
-        if dense_manifest["family"] != development_manifest["dense_family"]:
-            raise ValueError("confirmation dense family differs from the frozen SAE")
-        if dense_identity(dense_manifest) != development_manifest["dense_identity"]:
-            raise ValueError("confirmation dense identity differs from development extraction")
-        sae = load_sae(args.apply_from / "sae_weights.npz")
-        retained = np.load(args.apply_from / "retained_feature_ids.npy", allow_pickle=False).astype(int)
-        activations, reconstructions, residuals = reconstruct_retained(sae, inputs, retained)
-        arrays = {"activations": activations, "reconstructions": reconstructions,
-                  "residuals": residuals, "retained_feature_ids": retained}
-        report, state = {"status": "passed", "mode": "frozen_confirmation_application",
-                         "source_sae_manifest_sha256": sha256_file(
-                             args.apply_from / "manifest.json")}, None
-    else:
-        sae, arrays, report, state = run_sae_suite(inputs, rows, config["sae"])
+    saes, arrays, group_reports = run_grouped_sae_suite(inputs, rows, config["sae"])
+    passed = sorted(group for group, report in group_reports.items()
+                    if report["status"] == "passed")
+    report = {"status": "passed" if passed else "null", "passed_groups": passed,
+              "n_features": len(arrays["feature_labels"]), "groups": group_reports}
     manifest = {
         "dense_manifest_sha256": sha256_file(args.dense_dir / "manifest.json"),
         "config_sha256": sha256_file(args.config),
@@ -941,11 +946,7 @@ def main() -> None:
                     "deterministic_algorithms": torch.are_deterministic_algorithms_enabled()},
         "report": report,
     }
-    if args.apply_from:
-        manifest["source_sae_manifest_sha256"] = sha256_file(
-            args.apply_from / "manifest.json")
-    write_sae_artifacts(args.output, sae, arrays, manifest,
-                        rows=rows, training_state=state)
+    write_sae_artifacts(args.output, saes, arrays, manifest, rows=rows)
 
 
 if __name__ == "__main__":

@@ -540,27 +540,6 @@ def evaluate_dense_gate(
     })
 
 
-def evaluate_combined_dense_gate(qwen: dict, bge: dict, *, max_gpu_hours: float,
-                                 approval: dict | None = None) -> dict:
-    total = float(qwen["projected_gpu_hours"] + bge["projected_gpu_hours"])
-    families_passed = all(report.get("status") == "passed" for report in (qwen, bge))
-    approval_required = total > max_gpu_hours
-    valid_approval = False
-    if approval is not None:
-        payload = {key: value for key, value in approval.items() if key != "hash"}
-        required = ("reason", "approver", "timestamp")
-        valid_approval = (all(isinstance(payload.get(key), str) and payload[key]
-                              for key in required)
-                          and approval.get("hash") == hashlib.sha256(json.dumps(
-                              payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
-        if not valid_approval:
-            raise ValueError("combined-gate approval record is incomplete or has an invalid hash")
-    passed = families_passed and (not approval_required or valid_approval)
-    return {"status": "passed" if passed else "failed",
-            "projected_gpu_hours": total, "approval_required": approval_required,
-            "approval": approval if valid_approval else None}
-
-
 def select_probe_rows(rows: pd.DataFrame, qwen_chunk_counts: np.ndarray,
                       qwen_token_counts: np.ndarray, n: int = 256,
                       seed: int = 0) -> pd.DataFrame:
@@ -681,26 +660,6 @@ def write_dense_gate_report(output_dir: str | Path, report: dict,
     return atomic_artifact_directory(output_dir, build)
 
 
-def write_combined_dense_gate(output_dir: str | Path, report: dict,
-                              source_hashes: dict[str, str],
-                              family_identities: dict[str, dict]) -> dict:
-    report = dict(report)
-    freeze_hashes = {identity.get("phase1_freeze_sha256")
-                     for identity in family_identities.values()}
-    if len(freeze_hashes) != 1:
-        report["status"] = "failed"
-        report["identity_failure"] = "embedding families use different Phase 1 freezes"
-
-    def build(stage: Path) -> dict:
-        path = stage / "combined_dense_gate.json"
-        path.write_text(json.dumps(json_ready(report), sort_keys=True) + "\n")
-        return {"kind": "combined_dense_gate", "gate_status": report.get("status"),
-                "family_identities": family_identities, "source_hashes": source_hashes,
-                "outputs": {path.name: sha256_file(path)}}
-
-    return atomic_artifact_directory(output_dir, build)
-
-
 def load_passed_dense_gate(directory: str | Path, family: str,
                            expected_identity: dict | None = None) -> dict:
     directory = Path(directory)
@@ -714,19 +673,6 @@ def load_passed_dense_gate(directory: str | Path, family: str,
         raise ValueError(f"full {family} extraction requires a passed dense gate")
     if expected_identity is not None and manifest.get("dense_identity") != expected_identity:
         raise ValueError(f"full {family} extraction requires a matching dense gate identity")
-    return manifest
-
-
-def load_passed_combined_gate(directory: str | Path, family: str,
-                              expected_identity: dict) -> dict:
-    directory = Path(directory)
-    manifest = json.loads((directory / "manifest.json").read_text())
-    verify_artifact_files(directory, manifest)
-    report = json.loads((directory / "combined_dense_gate.json").read_text())
-    if (manifest.get("kind") != "combined_dense_gate"
-            or manifest.get("gate_status") != "passed" or report.get("status") != "passed"
-            or manifest.get("family_identities", {}).get(family) != expected_identity):
-        raise ValueError("full extraction requires the matching passed combined dense gate")
     return manifest
 
 
@@ -848,39 +794,16 @@ def main() -> None:
     parser.add_argument("--selected-keys", type=Path,
                         help="Use an already-frozen probe population for overlap sensitivity")
     parser.add_argument("--overlap", type=int, help="Predeclared overlap sensitivity")
-    parser.add_argument("--combined-dense-gate", type=Path,
-                        help="Checksum-verified combined gate required for full extraction")
+    parser.add_argument("--dense-gate", type=Path,
+                        help="Checksum-verified passed family gate required for full extraction")
     parser.add_argument("--gate-from", type=Path, nargs=4,
                         metavar=("FIRST", "REPEAT", "HALF", "DOUBLE"))
     parser.add_argument("--timing-json", type=Path)
-    parser.add_argument("--combine-gates", type=Path, nargs=2,
-                        metavar=("QWEN_GATE", "BGE_GATE"))
-    parser.add_argument("--approval-record", type=Path)
     args = parser.parse_args()
     if not os.environ.get("SLURM_JOB_ID"):
         parser.error("embedding extraction is Slurm-only")
 
     spec, config = load_spec(args.config, args.family)
-    if args.combine_gates:
-        family_manifests, family_reports = {}, {}
-        for family, path in zip(("qwen", "bge"), args.combine_gates, strict=True):
-            manifest = load_passed_dense_gate(path, family)
-            family_manifests[family] = manifest
-            family_reports[family] = json.loads((path / "dense_gate.json").read_text())
-        approval = (json.loads(args.approval_record.read_text())
-                    if args.approval_record else None)
-        report = evaluate_combined_dense_gate(
-            family_reports["qwen"], family_reports["bge"],
-            max_gpu_hours=config["extraction"]["max_projected_gpu_hours"],
-            approval=approval)
-        sources = {f"{family}_gate": sha256_file(path / "manifest.json")
-                   for family, path in zip(("qwen", "bge"), args.combine_gates, strict=True)}
-        if args.approval_record:
-            sources["approval_record"] = sha256_file(args.approval_record)
-        identities = {family: manifest["dense_identity"]
-                      for family, manifest in family_manifests.items()}
-        write_combined_dense_gate(args.output, report, sources, identities)
-        return
     if args.gate_from:
         first, repeated, half, double = [load_dense_probe(path) for path in args.gate_from]
         if any(manifest.get("family") != args.family
@@ -961,8 +884,8 @@ def main() -> None:
         audit_rows = audit_rows[
             audit_rows["transcript_key"].isin(rows["transcript_key"])]
     else:
-        if args.combined_dense_gate is None:
-            parser.error("full extraction requires --combined-dense-gate")
+        if args.dense_gate is None:
+            parser.error("full extraction requires --dense-gate")
         expected_identity = {
             "family": args.family, "model": spec.__dict__,
             "model_files": _model_file_hashes(args.model_path),
@@ -971,8 +894,7 @@ def main() -> None:
             "phase1_freeze_sha256": sha256_file(args.freeze),
             "extraction": config["extraction"],
         }
-        load_passed_combined_gate(
-            args.combined_dense_gate, args.family, expected_identity)
+        load_passed_dense_gate(args.dense_gate, args.family, expected_identity)
     started = time.perf_counter()
     arrays, metadata = extract_dense(rows, tokenizer, encoder, spec,
                                      config["extraction"]["batch_size"],

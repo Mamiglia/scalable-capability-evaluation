@@ -14,15 +14,17 @@ from transcript_sae import (TopKSAE, bootstrap_train_indices, decoder_matches,
                             load_dense_artifacts, load_development_inputs,
                             load_sae, random_dictionary,
                             reconstruct_retained, reconstruction_metrics,
-                            retained_features, run_sae_suite, sha256_file,
-                            verify_artifact_files, write_development_report,
-                            write_sae_artifacts, widths)
+                            retained_features, run_grouped_sae_suite, run_sae_suite,
+                            sha256_file, verify_artifact_files,
+                            write_development_report, write_sae_artifacts)
 
 
-def test_widths_obey_fifty_training_rows_per_dictionary_element():
-    assert widths(13_000, 2_560) == (64, 128, 256)
-    assert widths(12_000, 2_560) == (32, 64, 128)
-    assert widths(3_000, 2_560) is None
+SAE_CONFIG = {"width": 32, "sensitivity_widths": [16, 64], "top_k": 4,
+              "learning_rate": 1e-3, "batch_size": 512, "max_epochs": 1, "patience": 1,
+              "min_decoder_cosine": 0.8, "min_noncanonical_matches": 3,
+              "min_training_support": 50, "bootstrap_replicates": 20,
+              "min_explained_variance_gain": 0.1, "min_centered_cosine_gain": 0.1,
+              "min_validation_active_fraction": 0.9}
 
 
 def test_topk_sae_keeps_exactly_two_positive_features():
@@ -98,15 +100,15 @@ def test_fit_sae_can_use_the_frozen_full_training_mean():
 def test_sae_artifacts_are_hashed_and_never_overwritten(tmp_path):
     sae = TopKSAE(4, 4, 2, torch.zeros(4))
     arrays = {"activations": np.ones((2, 4)), "residuals": np.zeros((2, 4))}
-    manifest = write_sae_artifacts(tmp_path / "sae", sae, arrays, {"seed": 0})
+    manifest = write_sae_artifacts(tmp_path / "sae", {"gpqa": sae}, arrays, {"seed": 0})
     assert manifest["outputs"]["activations.npy"] == sha256_file(
         tmp_path / "sae" / "activations.npy")
     assert (tmp_path / "sae" / "manifest.sha256").read_text().strip() == sha256_file(
         tmp_path / "sae" / "manifest.json")
     with pytest.raises(FileExistsError):
-        write_sae_artifacts(tmp_path / "sae", sae, arrays, {})
+        write_sae_artifacts(tmp_path / "sae", {"gpqa": sae}, arrays, {})
 
-    loaded = load_sae(tmp_path / "sae" / "sae_weights.npz")
+    loaded = load_sae(tmp_path / "sae" / "sae_weights__gpqa.npz")
     inputs = torch.tensor([[2.0, 1.0, 0.0, 0.0]])
     assert np.allclose(loaded(inputs).detach().numpy(), sae(inputs).detach().numpy())
 
@@ -118,7 +120,7 @@ def test_sparse_activations_use_canonical_retained_feature_ids(tmp_path):
         "retained_feature_ids": np.array([5, 9]),
     }
     rows = pd.DataFrame({"transcript_key": ["a" * 64, "b" * 64]})
-    write_sae_artifacts(tmp_path / "sae", sae, arrays, {}, rows=rows)
+    write_sae_artifacts(tmp_path / "sae", {"gpqa": sae}, arrays, {}, rows=rows)
     sparse = pd.read_parquet(tmp_path / "sae" / "activations_sparse.parquet")
     assert sparse["feature"].tolist() == [5, 9]
 
@@ -191,25 +193,21 @@ def test_reconstruct_retained_keeps_only_stable_codes_and_exact_residual():
     assert np.array_equal(reconstructions, np.array([[3.0, 0.0, 0.0]], dtype=np.float32))
 
 
-def test_run_sae_suite_builds_all_fits_without_confirmation_rows():
+def suite_rows(benchmark, n_train, n_validation, n_confirmation=0):
+    roles = (["representation_train"] * n_train + ["representation_validation"] * n_validation
+             + ["confirmation"] * n_confirmation)
+    return pd.DataFrame({"benchmark": [benchmark] * len(roles),
+                         "item_group_key": [f"{benchmark}-{i // 8}" for i in range(len(roles))],
+                         "split_role": roles})
+
+
+def test_run_sae_suite_fits_train_rows_and_encodes_confirmation_rows():
     rng = np.random.default_rng(0)
-    train = rng.normal(size=(3_200, 64)).astype(np.float32)
-    validation = rng.normal(size=(64, 64)).astype(np.float32)
-    inputs = np.concatenate([train, validation])
-    rows = pd.DataFrame({
-        "benchmark": ["gpqa"] * len(inputs),
-        "item_group_key": [str(i // 8) for i in range(len(inputs))],
-        "split_role": ["representation_train"] * len(train)
-                      + ["representation_validation"] * len(validation),
-    })
-    config = {"top_k": 8, "learning_rate": 1e-3, "batch_size": 512,
-              "max_epochs": 1, "patience": 1, "min_decoder_cosine": 0.8,
-              "min_noncanonical_matches": 3, "min_training_support": 50,
-              "bootstrap_replicates": 20, "min_explained_variance_gain": 0.1,
-              "min_centered_cosine_gain": 0.1,
-              "min_validation_active_fraction": 0.9}
-    _, arrays, report, _ = run_sae_suite(inputs, rows, config, device="cpu")
+    inputs = rng.normal(size=(3_200 + 64 + 32, 64)).astype(np.float32)
+    rows = suite_rows("gpqa", 3_200, 64, 32)
+    _, arrays, report, _ = run_sae_suite(inputs, rows, SAE_CONFIG, device="cpu")
     assert report["widths"] == {"narrow": 16, "primary": 32, "wide": 64}
+    assert report["n_train"] == 3_200 and report["n_validation"] == 64
     assert arrays["match_cosines"].shape == (32, 4)
     assert arrays["narrow_encoder_weight"].shape == (16, 64)
     assert arrays["wide_encoder_weight"].shape == (64, 64)
@@ -221,29 +219,53 @@ def test_run_sae_suite_builds_all_fits_without_confirmation_rows():
     assert set(("narrow_validation", "wide_validation", "bootstrap")) <= set(report)
 
 
-def test_infeasible_sae_is_a_dense_only_null_not_an_exception(tmp_path):
+def test_too_few_rows_is_a_dense_only_null_not_an_exception(tmp_path):
     inputs = np.ones((20, 8), dtype=np.float32)
-    rows = pd.DataFrame({
-        "benchmark": ["gpqa"] * 20,
-        "item_group_key": [str(index) for index in range(20)],
-        "split_role": ["representation_train"] * 16
-                      + ["representation_validation"] * 4,
-    })
-    model, arrays, report, state = run_sae_suite(inputs, rows, {
-        "top_k": 2, "learning_rate": 1e-3, "batch_size": 8, "max_epochs": 1,
-        "patience": 1, "min_decoder_cosine": 0.8, "min_noncanonical_matches": 3,
-        "min_training_support": 50, "bootstrap_replicates": 10,
-        "min_explained_variance_gain": 0.1, "min_centered_cosine_gain": 0.1,
-        "min_validation_active_fraction": 0.9,
-    }, device="cpu")
+    model, arrays, report, state = run_sae_suite(
+        inputs, suite_rows("gpqa", 16, 4), SAE_CONFIG | {"top_k": 2, "batch_size": 8},
+        device="cpu")
     assert model is None and arrays == {} and state is None
-    assert report == {"status": "null", "reason": "infeasible_width",
+    assert report == {"status": "null", "reason": "too_few_rows",
                       "n_train": 16, "n_validation": 4}
-    manifest = write_sae_artifacts(tmp_path / "null", model, arrays,
-                                   {"report": report}, training_state=state)
+    manifest = write_sae_artifacts(tmp_path / "null", {}, arrays, {"report": report})
     assert manifest["report"]["status"] == "null"
-    assert "sae_weights.npz" not in manifest["outputs"]
+    assert not any(name.startswith("sae_weights") for name in manifest["outputs"])
     verify_artifact_files(tmp_path / "null", manifest)
+
+
+def test_grouped_suite_fits_one_sae_per_group_and_stacks_activations(tmp_path):
+    rng = np.random.default_rng(0)
+    rows = pd.concat([suite_rows("gpqa", 800, 64, 16), suite_rows("aime2024", 400, 32, 8),
+                      suite_rows("aime2025", 400, 32, 8), suite_rows("swe_bench_mini", 4, 4)],
+                     ignore_index=True).sample(frac=1, random_state=0).reset_index(drop=True)
+    inputs = rng.normal(size=(len(rows), 16)).astype(np.float32)
+    config = SAE_CONFIG | {"width": 8, "sensitivity_widths": [4, 16], "top_k": 2,
+                           "min_training_support": 5, "min_noncanonical_matches": 0,
+                           "min_decoder_cosine": 0.0,
+                           "fit_groups": {"gpqa": ["gpqa"], "aime": ["aime2024", "aime2025"],
+                                          "swe_bench_mini": ["swe_bench_mini"]}}
+    saes, arrays, reports = run_grouped_sae_suite(inputs, rows, config, device="cpu")
+    assert set(saes) == {"gpqa", "aime"}
+    assert reports["swe_bench_mini"]["reason"] == "too_few_rows"
+    labels = arrays["feature_labels"]
+    assert len(labels) == 16 and arrays["activations"].shape == (len(rows), 16)
+    groups = np.array([label.split(":")[0] for label in labels])
+    assert list(dict.fromkeys(groups)) == ["gpqa", "aime"]
+    gpqa_rows = rows["benchmark"].eq("gpqa").to_numpy()
+    aime_rows = rows["benchmark"].isin(["aime2024", "aime2025"]).to_numpy()
+    assert not arrays["activations"][np.ix_(gpqa_rows, groups == "aime")].any()
+    assert not arrays["activations"][np.ix_(aime_rows, groups == "gpqa")].any()
+    assert (arrays["activations"][gpqa_rows] > 0).sum(axis=1).max() <= 2
+    assert np.allclose(arrays["reconstructions"] + arrays["residuals"], inputs, atol=1e-6)
+    assert not arrays["reconstructions"][rows["benchmark"].eq("swe_bench_mini")].any()
+    assert arrays["gpqa__match_cosines"].shape == (8, 4)
+    with pytest.raises(ValueError, match="without a fit group"):
+        run_grouped_sae_suite(inputs, rows, config | {"fit_groups": {"gpqa": ["gpqa"]}},
+                              device="cpu")
+    manifest = write_sae_artifacts(tmp_path / "sae", saes, arrays, {"report": reports},
+                                   rows=rows.assign(transcript_key=[f"{i:064d}" for i in range(len(rows))]))
+    assert {"sae_weights__gpqa.npz", "sae_weights__aime.npz", "feature_labels.npy"} <= set(manifest["outputs"])
+    assert np.load(tmp_path / "sae" / "feature_labels.npy").tolist() == labels.tolist()
 
 
 def test_development_report_builds_atlas_shortcut_audits_and_cross_family_matches(tmp_path):
@@ -343,7 +365,7 @@ def test_cli_shaped_development_inputs_verify_source_and_row_order(tmp_path):
         {"family": "qwen"}, report_rows=report_rows, audit_rows=audit_rows)
     sae = TopKSAE(2, 2, 1, torch.zeros(2))
     write_sae_artifacts(
-        tmp_path / "sae", sae,
+        tmp_path / "sae", {"gpqa": sae},
         {"activations": np.eye(2, dtype=np.float32),
          "retained_feature_ids": np.array([4, 9])},
         {"dense_manifest_sha256": sha256_file(tmp_path / "dense" / "manifest.json"),

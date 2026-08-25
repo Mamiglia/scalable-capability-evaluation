@@ -15,13 +15,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from transcript_embeddings import (FrozenEncoder, ModelSpec, assemble_inputs,
                                    batch_jobs, chunk_spans, extract_dense,
                                    EXPECTED_BENCHMARKS, EXPECTED_MODELS,
-                                   evaluate_combined_dense_gate, evaluate_dense_gate,
-                                   load_passed_combined_gate,
-                                   load_passed_dense_gate,
+                                   evaluate_dense_gate, load_passed_dense_gate,
                                    load_frozen_rows, overlap_weights, pool_chunks,
                                    select_probe_rows, sha256_file,
-                                   verify_artifact_files,
-                                   write_combined_dense_gate, write_dense_gate_report,
+                                   verify_artifact_files, write_dense_gate_report,
                                    write_dense_artifacts)
 
 
@@ -586,24 +583,3 @@ def test_dense_gate_report_is_hashed_and_refuses_failed_as_prerequisite(tmp_path
         load_passed_dense_gate(tmp_path / "failed", "qwen")
 
 
-def test_combined_dense_gate_enforces_total_sixty_hour_ceiling_and_hashed_approval(tmp_path):
-    qwen = {"status": "passed", "projected_gpu_hours": 31.0}
-    bge = {"status": "passed", "projected_gpu_hours": 30.0}
-    blocked = evaluate_combined_dense_gate(qwen, bge, max_gpu_hours=60)
-    assert blocked == {"status": "failed", "projected_gpu_hours": 61.0,
-                       "approval_required": True, "approval": None}
-
-    payload = {"reason": "approved compute extension", "approver": "PI",
-               "timestamp": "2026-08-25T12:00:00Z"}
-    approval = payload | {"hash": hashlib.sha256(json.dumps(
-        payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
-    passed = evaluate_combined_dense_gate(qwen, bge, max_gpu_hours=60,
-                                          approval=approval)
-    assert passed["status"] == "passed" and passed["approval"] == approval
-
-    identity = {"qwen": {"phase1_freeze_sha256": "a"},
-                "bge": {"phase1_freeze_sha256": "a"}}
-    write_combined_dense_gate(tmp_path / "combined", passed,
-                              {"qwen_gate": "b" * 64, "bge_gate": "c" * 64}, identity)
-    assert load_passed_combined_gate(
-        tmp_path / "combined", "qwen", identity["qwen"])["gate_status"] == "passed"

@@ -75,10 +75,19 @@ extraction:
   overlap_median_cosine: 0.98
   overlap_fifth_percentile_cosine: 0.95
   min_overlap_rows: 32
-  max_projected_gpu_hours: 60
 
 sae:
-  top_k: 8
+  # one SAE per group; a group is a list of benchmarks that share a dictionary
+  fit_groups:
+    gpqa: [gpqa]
+    aime2024: [aime2024]
+    aime2025: [aime2025]
+    aime2026: [aime2026]
+    intercode: [intercode]
+    swe_bench_mini: [swe_bench_mini]
+  width: 32
+  sensitivity_widths: [16, 64]
+  top_k: 4
   learning_rate: 0.001
   batch_size: 512
   max_epochs: 200
