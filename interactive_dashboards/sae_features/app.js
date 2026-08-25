@@ -43,7 +43,26 @@ function renderSidebar() {
       el("span", { class: "num" }, f.feature),
       el("span", { class: "label" + (g.kept ? "" : " unkept"), title: label }, label),
       el("span", { class: "prev", title: "prevalence: share of this benchmark's transcripts where the feature is nonzero" }, `${(g.prevalence * 100).toFixed(0)}%`));
-  }));
+  }), el("li", { class: "explain" + (state.feature === "explain" ? " active" : ""), onclick: () => { state.feature = "explain"; renderSidebar(); renderExplanation(); } },
+    el("span", { class: "num" }, "?"), el("span", { class: "label" }, "Explanation — what is shown here")));
+}
+
+const EXPLANATION = `
+<h2>What this page shows</h2>
+<p><b>The features.</b> Each of the 17,451 transcripts (canonical, correct rollouts of 26 models on GPQA, AIME 2024–26, InterCode and SWE-bench mini) is embedded once with Qwen3-Embedding-4B (final layer, last-token pooling, transcript only — no question). Each embedding has its question's mean embedding subtracted and is renormalised, so the vector is how this answer differs from the typical answer to the same question (raw embeddings are ~80% question identity). One sparse autoencoder — the WIMHF BatchTopK recipe, width 32, 4 active per transcript, signed activations, Matryoshka prefixes 8/32 — is fitted on a training set balanced across benchmarks and applied to every transcript. These are the 32 <i>shared</i> features; the same direction in embedding space is used in every benchmark. Signs are chosen so each feature's majority direction is positive. Exactly-zero means the feature was not among that transcript's 4 active slots.</p>
+<p><b>Names.</b> A feature is named separately within each benchmark: an LLM is shown firing transcripts and zero-activation answers to the same questions and proposes 5 candidate descriptions. A second LLM, shown 300 transcripts blind, marks whether each candidate applies; the candidate whose yes/no judgments correlate best with the activation is chosen. A name is <b>kept</b> when (1) the feature is nonzero in ≥ 5% of the benchmark's transcripts, (2) at least 10 distinct questions have a firing transcript, and (3) the chosen candidate's fidelity reaches Pearson r &gt; 0 with p ≤ 0.05/32. If every candidate anticorrelates and one does so significantly, it is kept as <i>does NOT: …</i> (the name described the non-firing side). A name not kept in a benchmark says nothing about the feature there — only that no verified sentence exists for it in that domain. The header table lists the four per-benchmark names side by side; a feature whose names describe the same behaviour everywhere is one thing, one whose names disagree is polysemantic across domains.</p>
+<p><b>Sidebar.</b> Feature number, its name in the selected benchmark (italic = not kept), and prevalence (% of that benchmark's transcripts where it is nonzero).</p>
+<p><b>Panels.</b> <i>Activation</i>: histogram of nonzero activations (the zero share is stated, not drawn). <i>Per model</i>: each dot is a model, x = its accuracy on this benchmark, y = its mean activation; Spearman ρ across models — a first look at whether the feature tracks capability. <i>Judged pairs</i>: among judged pairs whose two transcripts differ on the feature, the share where the judge picked the higher-activation side (pooled and per judge) and, in orange, the share where the higher-activation side belongs to the more accurate model; 0.5 = no association; Wilson 95% intervals. Both are pair-level and within question, matching how the verdict data are collected.</p>
+<p><b>Examples.</b> Buckets: the 10 top activations; samples from the 50–90%, 10–50% and 0–10% quantiles of positive activations; same-question contrasts (a zero-activation answer to the same question as a top example); the 5 most negative; and, per model, its top, its most negative and two zero-activation transcripts. Each card shows the model, its accuracy, and the share of judged comparisons that picked this transcript.</p>
+<p><b>Traces.</b> The embedding is the model's state at an end token appended after the transcript, so the feature has one value per transcript. To see where it comes from, the transcript is re-embedded with one extra end token per prefix position, masked to see only that prefix — one forward pass gives the feature's value after every token (thinned to 512 positions for long transcripts). The chart shows that value as the transcript is read left to right; the shading, and the shaded text below, mark where the value rises (green) or falls (red). The final value reproduces the stored activation to about 0.01. Snippets show the regions with the largest sustained change; <i>show full transcript</i> shades everything. Transcripts over 16k tokens are not traced.</p>
+<p><b>Blind mode.</b> Hides the names, shows 4 firing and 4 same-question contrast transcripts shuffled; tick the ones you think fire, then reveal. It is the honest check of whether a name is right.</p>
+<p><b>Reading the GLM with these.</b> Each feature enters the verdict and capability models as one regressor, left − right activation, in every benchmark; slopes are estimated whether or not the name was kept. Attach a name to a slope only where that feature × benchmark cell is kept; pool a slope across benchmarks only if the four names agree.</p>`;
+
+function renderExplanation() {
+  $("#header").innerHTML = EXPLANATION;
+  $("#summary").replaceChildren();
+  $("#examples").replaceChildren();
+  $("#main").scrollTop = 0;
 }
 
 async function selectFeature(i) {
@@ -315,6 +334,7 @@ function renderExamples(group) {
 }
 
 function renderMain() {
+  if (state.feature === "explain") { renderExplanation(); return; }
   if (!state.data) return;
   const group = state.data.groups[state.group];
   renderHeader(group);
