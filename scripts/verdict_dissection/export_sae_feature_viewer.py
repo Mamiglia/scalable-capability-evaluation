@@ -45,20 +45,57 @@ def by_model(rows, column):
              "mean_activation": float(r.mean_activation), "n": int(r.n)} for r in table.itertuples()]
 
 
-def pick_by_bin(rows, column, n_bins=5):
-    """Judges' mean pick rate for transcripts binned by activation: negative, zero, positive quantile bins."""
-    judged = rows[rows.pick_n > 0]
-    out = []
-    for name, mask in [("negative", judged[column] < 0), ("zero", judged[column] == 0)]:
-        part = judged[mask]
-        out.append({"bin": name, "mean_pick": float(part.pick_rate.mean()) if len(part) else None,
-                    "n": int(len(part)), "mean_activation": float(part[column].mean()) if len(part) else None})
-    positive = judged[judged[column] > 0].sort_values(column)
-    for k, index in enumerate(np.array_split(np.arange(len(positive)), n_bins)):
-        part = positive.iloc[index]
-        out.append({"bin": f"positive {k + 1}/{n_bins}", "mean_pick": float(part.pick_rate.mean()) if len(part) else None,
-                    "n": int(len(part)), "mean_activation": float(part[column].mean()) if len(part) else None})
-    return out
+def wilson(k, n, z=1.96):
+    """Wilson 95% interval for a proportion."""
+    if n == 0:
+        return None, None
+    p, denom = k / n, 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return float(centre - half), float(centre + half)
+
+
+def _agreement(mask_pick_higher, label):
+    n = int(len(mask_pick_higher))
+    k = int(mask_pick_higher.sum()) if n else 0
+    lo, hi = wilson(k, n)
+    return {"who": label, "p": k / n if n else None, "n": n, "lo": lo, "hi": hi}
+
+
+def pair_agreement(pairs, column):
+    """Among judged pairs whose two transcripts differ on the feature (left − right ≠ 0): how often the
+    judge picks the higher-activation side (pooled and per judge), and how often that side is the more
+    accurate model (ties on accuracy excluded)."""
+    differ = pairs[pairs[column] != 0]
+    higher_left = differ[column] > 0
+    picked_higher = differ.pick_left.astype(bool) == higher_left
+    rows = [_agreement(picked_higher, "all judges")]
+    rows += [_agreement(picked_higher[differ.judge == judge], judge) for judge in sorted(differ.judge.unique())]
+    gap = differ.accuracy_left - differ.accuracy_right
+    decided = gap != 0
+    stronger_higher = (gap[decided] > 0) == higher_left[decided]
+    return {"judges": rows, "capability": _agreement(stronger_higher, "more accurate model")}
+
+
+BONFERRONI_P = 0.05 / N_FEATURES
+
+
+def describe(described):
+    """The description record for the viewer. A cell that failed only because every candidate anticorrelates
+    with the feature is kept as the negation of the strongest significant candidate."""
+    if described is None:
+        return None
+    text = described.description if isinstance(described.description, str) else None
+    kept, reason = bool(described.kept), described.reason if isinstance(described.reason, str) else None
+    correlation = None if pd.isna(described.correlation) else float(described.correlation)
+    cands = candidates(described.candidates_json) if isinstance(described.candidates_json, str) else []
+    if not kept and reason == "fidelity_not_significant":
+        negative = [c for c in cands if c["correlation"] < 0 and c["p_value"] <= BONFERRONI_P]
+        if negative:
+            best = min(negative, key=lambda c: c["correlation"])
+            text, kept, reason, correlation = "does NOT: " + best["description"], True, "negated_candidate", best["correlation"]
+    return {"text": text, "kept": kept, "reason": reason, "correlation": correlation,
+            "p_value": None if pd.isna(described.p_value) else float(described.p_value), "candidates": cands}
 
 
 def example(row, activation, bucket):
@@ -106,7 +143,7 @@ def by_model_examples(rows, column, n_zero, rng):
     return chosen
 
 
-def feature_payload(feature, frame, descriptions, n_top, n_quantile, n_negative, n_model_zero, seed):
+def feature_payload(feature, frame, pairs, descriptions, n_top, n_quantile, n_negative, n_model_zero, seed):
     """One feature's viewer record: per group, description, histogram and bucketed examples."""
     column = f"sae_shared_{feature}"
     rng = np.random.default_rng(seed)
@@ -114,19 +151,13 @@ def feature_payload(feature, frame, descriptions, n_top, n_quantile, n_negative,
     for group, benches in GROUPS.items():
         rows = frame[frame.bench.isin(benches)]
         values = rows[column].to_numpy()
-        described = descriptions.get(f"shared:{feature}@{group}")
+        described = describe(descriptions.get(f"shared:{feature}@{group}"))
         groups[group] = {
             "n": int(len(rows)), "prevalence": float((values != 0).mean()) if len(rows) else 0.0,
             "histogram": histogram(values) if len(rows) else None,
             "by_model": by_model(rows, column) if len(rows) else [],
-            "pick_by_bin": pick_by_bin(rows, column) if len(rows) else [],
-            "description": None if described is None else {
-                "text": described.description if isinstance(described.description, str) else None,
-                "kept": bool(described.kept), "reason": described.reason if isinstance(described.reason, str) else None,
-                "correlation": None if pd.isna(described.correlation) else float(described.correlation),
-                "p_value": None if pd.isna(described.p_value) else float(described.p_value),
-                "candidates": candidates(described.candidates_json) if isinstance(described.candidates_json, str) else [],
-            },
+            "pair_agreement": pair_agreement(pairs[pairs.bench.isin(benches)], f"d_{column}") if len(pairs) else None,
+            "description": described,
             "examples": [example(r, r[column], bucket)
                          for r, bucket in choose_examples(rows, column, n_top, n_quantile, n_negative, rng)
                          + by_model_examples(rows, column, n_model_zero, rng)],
@@ -148,6 +179,15 @@ def load_frame(tables_dir, freeze_dir, accuracy_path):
     return frame.merge(pick_rates(verdicts), on=KEYS, how="left")
 
 
+def load_pairs(tables_dir, accuracy_path):
+    """Judged pairs with left − right shared-feature differences and both models' accuracies."""
+    columns = ["bench", "judge", "item", "model_left", "model_right", "pick_left"] + [f"d_sae_shared_{i}" for i in range(N_FEATURES)]
+    pairs = pd.read_parquet(tables_dir / "pair_features_qwen.parquet", columns=columns)
+    accuracy = pd.read_parquet(accuracy_path)[["model", "bench", "accuracy"]]
+    pairs = pairs.merge(accuracy.rename(columns={"model": "model_left", "accuracy": "accuracy_left"}), on=["model_left", "bench"], how="left")
+    return pairs.merge(accuracy.rename(columns={"model": "model_right", "accuracy": "accuracy_right"}), on=["model_right", "bench"], how="left")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tables-dir", type=Path, default=ROOT / "judge_results/verdict_dissection/transcript_sae/tables-qwen")
@@ -163,11 +203,12 @@ def main():
     args = parser.parse_args()
 
     frame = load_frame(args.tables_dir, args.freeze_dir, args.accuracy)
+    pairs = load_pairs(args.tables_dir, args.accuracy)
     descriptions = {r.feature: r for r in pd.read_csv(args.descriptions).itertuples()}
     args.output_dir.mkdir(parents=True, exist_ok=True)
     index = []
     for feature in range(N_FEATURES):
-        payload = feature_payload(feature, frame, descriptions, args.n_top, args.n_quantile, args.n_negative,
+        payload = feature_payload(feature, frame, pairs, descriptions, args.n_top, args.n_quantile, args.n_negative,
                                   args.n_model_zero, args.seed + feature)
         (args.output_dir / f"feature_{feature:02d}.json").write_text(json.dumps(payload))
         index.append({"feature": feature, "groups": {

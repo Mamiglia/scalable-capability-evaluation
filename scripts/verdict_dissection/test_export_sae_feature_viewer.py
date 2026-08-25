@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from export_sae_feature_viewer import by_model_examples, choose_examples, feature_payload, pick_rates
+from export_sae_feature_viewer import by_model_examples, choose_examples, describe, feature_payload, pair_agreement, pick_rates
 
 
 def _frame():
@@ -30,13 +30,39 @@ def test_choose_examples_buckets():
 def test_feature_payload_description_and_empty_group():
     described = pd.Series({"description": "does x", "kept": True, "reason": float("nan"), "correlation": 0.3,
                            "p_value": 0.001, "candidates_json": json.dumps([{"description": "does x", "correlation": 0.3, "p_value": 0.001}])})
-    payload = feature_payload(3, _frame(), {"shared:3@gpqa": described}, 2, 2, 5, 1, seed=0)
+    payload = feature_payload(3, _frame(), _pairs(), {"shared:3@gpqa": described}, 2, 2, 5, 1, seed=0)
     gpqa = payload["groups"]["gpqa"]
     assert gpqa["description"]["kept"] and gpqa["description"]["reason"] is None
     assert gpqa["examples"][0]["bucket"] == "top" and gpqa["examples"][0]["log"] == "l0"
     assert payload["groups"]["aime"]["n"] == 0 and payload["groups"]["aime"]["description"] is None
-    assert gpqa["by_model"][0]["n"] >= 1 and len(gpqa["pick_by_bin"]) == 7
-    assert gpqa["pick_by_bin"][0]["bin"] == "negative" and gpqa["pick_by_bin"][0]["n"] == 1
+    assert gpqa["by_model"][0]["n"] >= 1
+    assert gpqa["pair_agreement"]["judges"][0]["who"] == "all judges"
+
+
+def _pairs():
+    return pd.DataFrame({"bench": ["gpqa"] * 4, "judge": ["j1", "j1", "j2", "j2"], "item": ["q1"] * 4,
+                         "model_left": ["a", "b", "a", "a"], "model_right": ["b", "a", "b", "b"],
+                         "pick_left": [True, False, True, False], "d_sae_shared_3": [1.0, -1.0, 1.0, 0.0],
+                         "accuracy_left": [0.9, 0.5, 0.9, 0.9], "accuracy_right": [0.5, 0.9, 0.5, 0.5]})
+
+
+def test_pair_agreement_counts_higher_side_picks():
+    stats = pair_agreement(_pairs(), "d_sae_shared_3")
+    pooled = stats["judges"][0]
+    assert pooled["n"] == 3 and pooled["p"] == 1.0 and pooled["lo"] < 1.0 <= pooled["hi"] + 1e-9
+    assert {r["who"]: r["n"] for r in stats["judges"][1:]} == {"j1": 2, "j2": 1}
+    assert stats["capability"]["n"] == 3 and stats["capability"]["p"] == 1.0
+
+
+def test_describe_negates_significant_negative_candidate():
+    row = pd.Series({"description": "does x", "kept": False, "reason": "fidelity_not_significant", "correlation": -0.01,
+                     "p_value": 0.9, "candidates_json": json.dumps([
+                         {"description": "does x", "correlation": -0.01, "p_value": 0.9},
+                         {"description": "does y", "correlation": -0.2, "p_value": 0.0003}])})
+    d = describe(row)
+    assert d["kept"] and d["text"] == "does NOT: does y" and d["reason"] == "negated_candidate" and d["correlation"] == -0.2
+    row["candidates_json"] = json.dumps([{"description": "does x", "correlation": -0.01, "p_value": 0.9}])
+    assert not describe(row)["kept"]
 
 
 def test_pick_rates_pools_both_sides():
