@@ -65,3 +65,6 @@ table.names td.g { font-weight: 600; white-space: nowrap; }
 table.names td.r { color: #777; white-space: nowrap; }
 table.names td.unkept { color: #999; font-style: italic; }
 table.names tr.current td { background: #f3f6fb; }
+.list-head { display: flex; gap: 6px; padding: 2px 6px; font-size: 10px; color: #777; border-bottom: 1px solid #e5e5e5; margin-bottom: 4px; }
+.list-head .num { min-width: 22px; }
+.list-head .label { flex: 1; }
