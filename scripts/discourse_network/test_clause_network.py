@@ -177,3 +177,52 @@ def test_cap_parents_keeps_structure_first_then_best_cosine():
              {"source_node_id": 3, "target_node_id": 5, "edge_source": "similarity", "cosine": 0.7},
              {"source_node_id": 4, "target_node_id": 5, "edge_source": "tool", "cosine": None}]
     assert sorted(e["source_node_id"] for e in cap_parents(edges, max_parents=3)) == [1, 2, 4]
+
+
+# ---------------------------------------------------------------- features
+
+from discourse_network.features import EdgeSpace, TopKSAE, sae_block, topology_block  # noqa: E402
+
+
+def e(s, t, source, relation=None):
+    return {"source_node_id": s, "target_node_id": t, "edge_source": source, "relation": relation,
+            "nuclearity": None, "cosine": None}
+
+
+def test_typed_topology_shares_and_motifs():
+    nodes = [node(0, "question", None), node(1, "assistant_edu", 0),
+             node(2, "tool_call", 0, call_id="a", tool_type="inspect"),
+             node(3, "tool_output", 1, call_id="a", tool_type="inspect", outcome="ok"),
+             node(4, "tool_call", 2, call_id="b", tool_type="act"),
+             node(5, "tool_output", 3, call_id="b", tool_type="act", outcome="error"),
+             node(6, "assistant_edu", 4, backtracking_marker=True), node(7, "assistant_edu", 4, verification_marker=True),
+             node(8, "answer", 4, is_final_sink=True)]
+    edges = [e(0, 1, "similarity"), e(1, 2, "discourse", "purpose"), e(2, 3, "tool", "tool_result"),
+             e(3, 4, "tool", "tool_response"), e(4, 5, "tool", "tool_result"), e(5, 6, "tool", "tool_response"),
+             e(6, 7, "discourse", "causal"), e(7, 8, "discourse", "restatement")]
+    f = topology_block(nodes, edges)
+    assert f["topo_node_count"] == 9 and f["topo_edge_count"] == 8 and f["topo_longest_path"] == 8
+    assert f["topo_share_tool_inspect"] == 1 / 9 and f["topo_share_tool_act"] == 1 / 9
+    assert f["topo_output_error_share"] == 0.5
+    assert f["topo_relation_causal"] == 1 / 8 and f["topo_edge_source_tool"] == 0.5
+    assert f["topo_error_then_correction"] == 1.0 and f["topo_act_after_inspect"] == 1.0
+    assert f["topo_final_ancestor_share"] == 1.0 and f["topo_ancestry_share_tool_act"] == 1 / 9
+    assert f["topo_restatement_chain_max"] == 1.0 and f["topo_weak_components"] == 1.0
+
+
+def test_sae_is_sparse_and_aggregates_per_transcript():
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(400, 16))
+    sae = TopKSAE.fit(x, width=8, top_k=2, iterations=2, batch_size=64)
+    z = sae.transform(x)
+    assert z.shape == (400, 8) and (z > 0).sum(axis=1).max() <= 2
+    block = sae_block(z, np.repeat(np.arange(4), 100), n_transcripts=4, prefix="node_sae", min_support=10)
+    assert len(block) == 4 and block.filter(like="_active").max().max() <= 1.0
+    assert any(c.endswith("_mean") for c in block.columns)
+
+
+def test_edge_space_is_pca_of_pair_features():
+    emb = np.eye(5, dtype=np.float32)
+    edges = [{"source_node_id": i, "target_node_id": i + 1} for i in range(4)] * 5
+    space = EdgeSpace.fit(emb, edges, components=3)
+    assert space.transform(emb, edges).shape == (20, 3)
