@@ -20,10 +20,12 @@ stage=${1:?usage: sbatch workstream_c.sbatch probe|segment|nodes|embeddings|edge
 
 export PYTHONPATH="$C_PACKAGES:$C_CODE_DIR/scripts"
 export HF_HOME="$C_HF_HOME" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONHASHSEED=0
-export PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
+export PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false
+export OMP_NUM_THREADS="${C_OMP_THREADS:-2}" MKL_NUM_THREADS="${C_OMP_THREADS:-2}"
 cd "$C_CODE_DIR"
 config="${SLURM_TMPDIR:-/tmp}/workstream_c_${SLURM_JOB_ID}.yaml"
-sed_args=(-e 's/device: mps/device: cuda/')
+device=${C_DEVICE:-cuda}
+sed_args=(-e "s/device: mps/device: $device/")
 [[ -n ${C_OUT_DIR:-} ]] && sed_args+=(-e "s#^out_dir:.*#out_dir: $C_OUT_DIR#")
 sed "${sed_args[@]}" configs/workstream_c.yaml > "$config"
 
@@ -46,7 +48,7 @@ case "$stage" in
     (( status == 0 )) || exit "$status"
     ;;
   nodes|embeddings|edges|features)
-    [[ $stage != embeddings || -n ${CUDA_VISIBLE_DEVICES:-} ]] || {
+    [[ $stage != embeddings || $device != cuda || -n ${CUDA_VISIBLE_DEVICES:-} ]] || {
       echo 'embeddings requires a GPU allocation' >&2
       exit 2
     }
