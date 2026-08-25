@@ -98,3 +98,11 @@ sae:
   min_explained_variance_gain: 0.10
   min_centered_cosine_gain: 0.10
   min_validation_active_fraction: 0.90
+
+descriptions:
+  describe_examples: 20
+  contrast_examples: 10
+  fidelity_examples: 20
+  example_chars: 4000
+  min_fidelity: 0.75
+  seed: 0
