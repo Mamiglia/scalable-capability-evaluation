@@ -7,13 +7,14 @@ from pathlib import Path
 import pandas as pd
 
 from features_basic import basic_features
+from llm_multiscale import multiscale_features
 from llm_surprisal import surprisal_features
 
 TRANSCRIPT_KEYS = ["bench", "model", "item", "epoch", "log"]
 KEYS = TRANSCRIPT_KEYS + ["sample_epoch", "content_hash"]
 
 
-def aggregate_features(store, cache_dir):
+def aggregate_features(store, cache_dir, rolling_cache=None):
     store = store[store.is_canonical & store.correct].reset_index(drop=True)
     rows = []
     for index, row in enumerate(store.itertuples(index=False), 1):
@@ -23,6 +24,10 @@ def aggregate_features(store, cache_dir):
         features.update(surprisal_features(
             row.transcript, parts, row.bench, row.model, row.item, row.epoch,
             row.log, row.content_hash, cache_dir))
+        if rolling_cache is not None:
+            features.update(multiscale_features(
+                row.transcript, parts, row.bench, row.model, row.item, row.epoch,
+                row.log, row.content_hash, rolling_cache))
         rows.append({key: getattr(row, key) for key in KEYS} | features)
         if index % 500 == 0:
             print(f"features {index}/{len(store)}", flush=True)
@@ -39,9 +44,15 @@ def build_pairs(verdicts, raw):
                         how="inner", validate="many_to_one")
     pairs = pairs.merge(right, on=["bench", "item", "model_right", "epoch_right", "log_right"],
                         how="inner", suffixes=("_l", "_r"), validate="many_to_one")
-    for feature in features:
-        pairs[f"d_{feature}"] = pairs[f"{feature}_l"] - pairs[f"{feature}_r"]
-    return pairs.drop(columns=[f"{feature}_{side}" for feature in features for side in ("l", "r")])
+    differences = pd.DataFrame({
+        f"d_{feature}": pairs[f"{feature}_l"] - pairs[f"{feature}_r"]
+        for feature in features
+    })
+    return pd.concat([
+        pairs.drop(columns=[f"{feature}_{side}" for feature in features
+                            for side in ("l", "r")]),
+        differences,
+    ], axis=1)
 
 
 def write_parquet(frame, path):
@@ -58,9 +69,11 @@ if __name__ == "__main__":
     parser.add_argument("verdicts", type=Path)
     parser.add_argument("cache_dir", type=Path)
     parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--rolling-cache", type=Path)
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    raw = aggregate_features(pd.read_parquet(args.store), args.cache_dir)
+    raw = aggregate_features(pd.read_parquet(args.store), args.cache_dir,
+                             args.rolling_cache)
     pairs = build_pairs(pd.read_parquet(args.verdicts), raw)
     write_parquet(raw, args.output_dir / "raw_features_with_surprisal.parquet")
     write_parquet(pairs, args.output_dir / "pairs_raw_with_surprisal.parquet")

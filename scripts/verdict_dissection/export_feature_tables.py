@@ -40,6 +40,7 @@ def accuracy_table(identity):
 def normalise(frame, features, scope, within_benchmark=False):
     """Return z-scores and their moments; constants retain a unit denominator."""
     out, rows = frame.copy(), []
+    out[features] = out[features].astype(float)
     groups = frame.groupby("bench", dropna=False, sort=False) if within_benchmark else [(None, frame)]
     for bench, group in groups:
         mean = group[features].mean()
@@ -66,9 +67,11 @@ def paired_features(rounds, transcript_features, features):
                          how="inner", validate="many_to_one")
     numeric = [f for f in features if pd.api.types.is_numeric_dtype(base[f])
                and not pd.api.types.is_bool_dtype(base[f])]
-    for feature in numeric:
-        pairs[f"d_{feature}"] = pairs[f"{feature}_left"] - pairs[f"{feature}_right"]
-    return pairs
+    differences = pd.DataFrame({
+        f"d_{feature}": pairs[f"{feature}_left"] - pairs[f"{feature}_right"]
+        for feature in numeric
+    })
+    return pd.concat([pairs, differences], axis=1)
 
 
 def _write_all(root, tables):

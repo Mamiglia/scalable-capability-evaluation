@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-from export_feature_tables import export_tables
+from export_feature_tables import export_tables, normalise
 
 
 KEYS = ["bench", "model", "item", "epoch", "log", "sample_epoch", "content_hash"]
@@ -71,3 +71,11 @@ def test_export_writes_canonical_tables_with_accuracy_and_local_scaling(tmp_path
     assert pairs.loc[0, "n_words_left"] == 10.0
     assert {"model_left", "model_right", "d_surprisal_full__tiny"} <= set(pairs)
     assert len(pd.read_parquet(tmp_path / "paired" / "judging-rounds.parquet")) == 2
+
+
+def test_normalise_accepts_float32_features():
+    frame = pd.DataFrame({"bench": ["a", "a"],
+                          "feature": pd.Series([1, 3], dtype="float32")})
+    values, _ = normalise(frame, ["feature"], "global")
+    assert values.feature.dtype == "float64"
+    assert values.feature.round(6).tolist() == [-0.707107, 0.707107]

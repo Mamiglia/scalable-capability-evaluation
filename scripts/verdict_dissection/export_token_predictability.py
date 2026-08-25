@@ -12,6 +12,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from llm_surprisal import assistant_token_mask, cache_file
+from llm_multiscale import SETTINGS
 
 
 KEYS = ["bench", "model", "item", "epoch", "log", "sample_epoch", "content_hash"]
@@ -25,6 +26,16 @@ SCHEMA = pa.schema([
     ("question_gain_bits", pa.float64()), ("total_context_gain_bits", pa.float64()),
     ("long_context_gain_bits", pa.float64()),
 ])
+ROLLING_SCHEMA = pa.schema([
+    ("bench", pa.string()), ("model", pa.string()), ("item", pa.string()),
+    ("epoch", pa.int64()), ("log", pa.string()), ("sample_epoch", pa.int64()),
+    ("content_hash", pa.string()), ("scorer", pa.string()),
+    ("token_index", pa.int64()), ("char_start", pa.int64()), ("char_end", pa.int64()),
+    ("assistant", pa.bool_()), ("context_eligible", pa.bool_()),
+    ("tail_eligible", pa.bool_()), ("short_bits", pa.float64()),
+    ("long_bits", pa.float64()), ("long_question_bits", pa.float64()),
+    ("context_gain_bits", pa.float64()), ("question_gain_bits", pa.float64()),
+])
 
 
 def _bits(cache, name, n, path):
@@ -34,7 +45,12 @@ def _bits(cache, name, n, path):
     return values
 
 
-def export_token_predictability(store_path, cache_dir, output_dir, batch_rows=100_000):
+def _number(value):
+    return float(value) if np.isfinite(value) else None
+
+
+def export_token_predictability(store_path, cache_dir, output_dir, batch_rows=100_000,
+                                rolling=False):
     """Write every available cached scorer/token pair for canonical-correct rows."""
     output_dir = Path(output_dir)
     if output_dir.exists():
@@ -51,7 +67,8 @@ def export_token_predictability(store_path, cache_dir, output_dir, batch_rows=10
     def flush():
         nonlocal batch, part
         if batch:
-            pq.write_to_dataset(pa.Table.from_pylist(batch, schema=SCHEMA), root_path=stage,
+            schema = ROLLING_SCHEMA if rolling else SCHEMA
+            pq.write_to_dataset(pa.Table.from_pylist(batch, schema=schema), root_path=stage,
                                 partition_cols=["scorer", "bench"],
                                 basename_template=f"part-{part}-{{i}}.parquet")
             batch, part = [], part + 1
@@ -72,10 +89,38 @@ def export_token_predictability(store_path, cache_dir, output_dir, batch_rows=10
                     if offsets.ndim != 2 or offsets.shape[1] != 2:
                         raise ValueError(f"{path}: offsets must have shape (tokens, 2)")
                     n = len(offsets)
-                    full, noq, local = (_bits(cache, name, n, path)
-                                        for name in ("full", "noq", "local"))
                     assistant = assistant_token_mask(row.transcript, offsets, parts)
+                    if rolling:
+                        if (not np.array_equal(cache["assistant_mask"], assistant)
+                                or any(cache[f"{name}_history"].item() != history
+                                       or cache[f"{name}_block"].item() != block
+                                       for name, (history, block) in SETTINGS.items())):
+                            raise ValueError(f"rolling cache settings mismatch: {path}")
+                        short, long, long_question = (
+                            _bits(cache, name, n, path)
+                            for name in ("short", "long", "long_question"))
+                    else:
+                        full, noq, local = (_bits(cache, name, n, path)
+                                            for name in ("full", "noq", "local"))
                 base = {key: getattr(row, key) for key in KEYS} | {"scorer": scorer}
+                if rolling:
+                    for token_index, ((char_start, char_end), is_assistant, short_bit,
+                                      long_bit, question_bit) in enumerate(zip(
+                                          offsets, assistant, short, long, long_question)):
+                        batch.append(base | {
+                            "token_index": token_index, "char_start": int(char_start),
+                            "char_end": int(char_end), "assistant": bool(is_assistant),
+                            "context_eligible": token_index >= 64,
+                            "tail_eligible": token_index >= 8192,
+                            "short_bits": _number(short_bit), "long_bits": _number(long_bit),
+                            "long_question_bits": _number(question_bit),
+                            "context_gain_bits": _number(short_bit - long_bit),
+                            "question_gain_bits": _number(long_bit - question_bit),
+                        })
+                        written += 1
+                        if len(batch) == batch_rows:
+                            flush()
+                    continue
                 for token_index, ((char_start, char_end), is_assistant, f, q, l) in enumerate(
                         zip(offsets, assistant, full, noq, local)):
                     eligible = token_index >= 64
@@ -108,5 +153,7 @@ if __name__ == "__main__":
     parser.add_argument("store")
     parser.add_argument("cache_dir")
     parser.add_argument("output_dir", nargs="?", default="raw/token-predictability")
+    parser.add_argument("--rolling", action="store_true")
     args = parser.parse_args()
-    print(export_token_predictability(args.store, args.cache_dir, args.output_dir))
+    print(export_token_predictability(args.store, args.cache_dir, args.output_dir,
+                                      rolling=args.rolling))
