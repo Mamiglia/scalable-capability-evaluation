@@ -7,8 +7,9 @@ import pytest
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).parent))
-from llm_surprisal import (assistant_token_mask, score_and_cache,
-                           surprisal_full_context, surprisal_local_window)
+from llm_surprisal import (SCORERS, assistant_token_mask, cache_file, score_and_cache,
+                           surprisal_features, surprisal_full_context,
+                           surprisal_local_window)
 
 TINY = "hf-internal-testing/tiny-random-LlamaForCausalLM"
 TEXT = "The cat sat on the mat. The cat was warm. " * 8
@@ -70,20 +71,50 @@ def test_empty_transcript_scores_nothing(tiny):
 
 def test_assistant_mask_excludes_tool_tokens():
     text = "[Assistant]: fine words here.\n\n[Tool]: garbage garbage"
+    assistant = "fine words here."
+    parts = [
+        {"role": "assistant", "content": assistant, "start": 13, "end": 13 + len(assistant), "bare": False},
+        {"role": "tool", "content": "garbage garbage", "start": 38, "end": len(text), "bare": False},
+    ]
     n = 12
     step = len(text) // n
     offsets = np.array([[i * step, (i + 1) * step] for i in range(n)], dtype=np.int32)
-    keep = assistant_token_mask(text, offsets)
+    keep = assistant_token_mask(text, offsets, parts)
     assert keep[4:7].all() and not keep[-3:].any()   # tokens inside the assistant block, not its marker
+
+    with pytest.raises(ValueError, match="reconcile"):
+        assistant_token_mask(text + "!", offsets, parts)
 
 
 def test_score_and_cache_writes_once(tiny, tmp_path):
     model, tok = tiny
     path = tmp_path / "x.npz"
-    score_and_cache(model, tok, TEXT, "Q?", path)
+    score_and_cache(model, tok, TEXT, "Q?", path, "content-a")
     z = np.load(path)
     assert len(z["full"]) == len(z["noq"]) == len(z["local"]) == len(z["offsets"])
+    assert z["content_hash"].item() == "content-a"
     assert not path.with_suffix(".tmp.npz").exists()
+    with pytest.raises(ValueError, match="content hash"):
+        score_and_cache(model, tok, TEXT, "Q?", path, "content-b")
+
+
+def test_long_context_gain_uses_only_tokens_from_position_64(tmp_path):
+    text = "x" * 80
+    parts = [{"role": "assistant", "content": text, "start": 0, "end": len(text), "bare": True}]
+    offsets = np.array([[i, i + 1] for i in range(80)], dtype=np.int32)
+    content_hash = "a" * 64
+    for scorer in SCORERS:
+        path = cache_file(tmp_path, scorer, "gpqa", "m", "q", 0, "run", content_hash)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(path, full=np.zeros(80), noq=np.ones(80), local=np.full(80, 3.0),
+                 offsets=offsets, content_hash=content_hash)
+
+    features = surprisal_features(text, parts, "gpqa", "m", "q", 0, "run", content_hash, tmp_path)
+    for scorer in SCORERS:
+        assert features[f"surprisal_question_gain_bpc__{scorer}"] == 1.0
+        assert features[f"surprisal_long_context_gain_bpc__{scorer}"] == 2.0
+        assert features[f"surprisal_long_chars__{scorer}"] == 16.0
+        assert features[f"surprisal_long_available__{scorer}"] == 1.0
 
 
 def test_tokenizer_without_bos_uses_eos(tiny):

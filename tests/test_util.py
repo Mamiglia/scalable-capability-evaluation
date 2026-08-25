@@ -15,7 +15,9 @@ from inspect_ai.model import (
 from inspect_ai.tool import ToolCall, ToolCallError
 from inspect_ai.scorer import Score
 
-from util import format_message, extract_transcript, extract_score, format_content, strip_think
+from util import (extract_score, extract_transcript, extract_transcript_parts,
+                  format_content, format_message, render_transcript_parts, strip_think,
+                  transcript_content_hash)
 
 
 class TestFormatMessage:
@@ -151,6 +153,49 @@ class TestExtractTranscript:
         sample = SimpleNamespace()
         assert extract_transcript(sample) == ""
 
+    def test_structured_parts_reconcile_marker_like_content(self):
+        sample = SimpleNamespace(messages=[
+            ChatMessageUser(content="Problem statement"),
+            ChatMessageAssistant(content="Literal marker:\n\n[Tool]: not a role"),
+            ChatMessageTool(content="actual output", tool_call_id="1", function="solve"),
+        ])
+
+        parts = extract_transcript_parts(sample, include_reasoning=False)
+        rendered = render_transcript_parts(parts)
+
+        assert rendered == extract_transcript(sample, include_reasoning=False)
+        assert [part["role"] for part in parts] == ["assistant", "tool"]
+        assert rendered[parts[0]["start"]:parts[0]["end"]] == "Literal marker:\n\n[Tool]: not a role"
+
+    def test_content_hash_covers_question_roles_and_rendering(self):
+        parts = [{"role": "assistant", "content": "answer", "start": 13,
+                  "end": 19, "bare": False}]
+        original = transcript_content_hash("question", "[Assistant]: answer", parts)
+        assert original == transcript_content_hash("question", "[Assistant]: answer", parts)
+        assert original != transcript_content_hash("other", "[Assistant]: answer", parts)
+        assert original != transcript_content_hash("question", "[Assistant]: answer!", parts)
+
+    def test_tool_subparts_keep_spans_and_raw_metadata(self):
+        sample = SimpleNamespace(messages=[
+            ChatMessageUser(content="Problem"),
+            ChatMessageAssistant(content="Checking", tool_calls=[
+                ToolCall(id="call-1", function="bash", arguments={"cmd": "pwd"})]),
+            ChatMessageTool(content=[ContentText(type="text", text="/tmp")],
+                            tool_call_id="call-1", function="bash"),
+        ])
+        parts = extract_transcript_parts(sample, include_reasoning=False)
+        rendered = render_transcript_parts(parts)
+        tool_call = parts[0]["subparts"][1]
+        tool_output = parts[1]["subparts"][0]
+
+        assert (tool_call["kind"], tool_call["call_id"], tool_call["function"],
+                tool_call["raw_payload"]) == ("tool_call", "call-1", "bash", {"cmd": "pwd"})
+        assert (tool_output["kind"], tool_output["call_id"], tool_output["function"],
+                tool_output["raw_payload"]) == (
+                    "tool_output", "call-1", "bash", [{"type": "text", "text": "/tmp"}])
+        assert rendered[tool_call["start"]:tool_call["end"]] == "[Tool Call: bash({'cmd': 'pwd'})]"
+        assert rendered[tool_output["start"]:tool_output["end"]].endswith(": /tmp")
+
 
 class TestExtractScore:
     """Unit tests for extract_score in util.py."""
@@ -164,6 +209,11 @@ class TestExtractScore:
         """Test score extraction when score value is 'I' (Incorrect)."""
         sample = SimpleNamespace(scores={"scorer": Score(value="I")})
         assert extract_score(sample) is False
+
+    def test_extract_score_numeric_and_nested(self):
+        assert extract_score(SimpleNamespace(scores={"scorer": Score(value=1)})) is True
+        assert extract_score(SimpleNamespace(scores={"scorer": Score(value={"score": 1})})) is True
+        assert extract_score(SimpleNamespace(scores={"scorer": Score(value=0)})) is False
 
 
 class TestStripThink:

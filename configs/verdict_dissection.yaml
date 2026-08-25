@@ -11,15 +11,15 @@ data:
     aime2024: 44136fa3
     aime2025: 44136fa3
     aime2026: 44136fa3
-    apex_2025: 44136fa3
-    apex_shortlist: 44136fa3
-    hle: f0ab1992
     intercode: 463eb861
     swe_bench_mini: 477dc96c
   out_dir: judge_results/verdict_dissection
   judging: /Volumes/T7/data/hf-judging               # LASR-G5/judging mirror; <subset>/<judge>/<pair>/*.eval
   judging_subsets: [pilot/gpqa, pilot/intercode, pilot/swe_bench_mini,
                     aime/aime2024, aime/aime2025, aime/aime2026]
+  canonical_log_exclusions:
+    # Five-item repair run partially overlaps the complete 198-item log; no judgment uses it.
+    - 2026-08-13T20-00-34-00-00_gpqa-diamond_G5Ng7zR4HDmpK4DZHV5ivL
 
 surprisal:
   models:                           # base models, one per family; short name -> HF id

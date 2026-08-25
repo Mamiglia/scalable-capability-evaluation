@@ -1,6 +1,9 @@
+import hashlib
+import json
 from typing import Any
 from inspect_ai.model import ChatMessage
 from inspect_ai.dataset import Sample
+from inspect_ai.scorer import value_to_float
 
 # Content the judge cannot read: shown as a marker so the transcript stays coherent.
 PLACEHOLDER_BLOCKS = {
@@ -60,38 +63,46 @@ def format_content(content: Any, include_reasoning: bool = True) -> str:
     return "\n".join(texts)
 
 
-def format_single_message(msg: ChatMessage | str | Any, include_reasoning: bool = True) -> str:
-    """
-    Format a single message (assistant, user, system, or tool).
-    """
+def _jsonable(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json", exclude_none=True)
+    if isinstance(value, list):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _jsonable(item) for key, item in value.items()}
+    return value if value is None or isinstance(value, (str, int, float, bool)) else str(value)
+
+
+def _message_subparts(msg: ChatMessage | str | Any, include_reasoning: bool) -> list[dict[str, Any]]:
+    """Rendered pieces of one message, retaining tool metadata without hidden reasoning."""
     if isinstance(msg, str):
-        return msg
-
-    parts = []
+        return [{"kind": "content", "content": msg, "call_id": None,
+                 "function": None, "raw_payload": None}]
     content_str = format_content(getattr(msg, "content", ""), include_reasoning=include_reasoning)
-
-    # Handle tool output role
     if getattr(msg, "role", None) == "tool":
         func = getattr(msg, "function", "tool")
         err = getattr(msg, "error", None)
         err_msg = getattr(err, "message", str(err)) if err else ""
         err_str = f" (Error: {err_msg})" if err else ""
-        return f"[Tool Output ({func}){err_str}]: {content_str}"
+        return [{"kind": "tool_output", "content": f"[Tool Output ({func}){err_str}]: {content_str}",
+                 "call_id": getattr(msg, "tool_call_id", None), "function": func,
+                 "raw_payload": _jsonable(getattr(msg, "content", ""))}]
 
+    parts = []
     if content_str:
-        parts.append(content_str)
+        parts.append({"kind": "content", "content": content_str, "call_id": None,
+                      "function": None, "raw_payload": None})
+    for call in getattr(msg, "tool_calls", None) or ():
+        func, args = getattr(call, "function", "tool"), getattr(call, "arguments", {})
+        parts.append({"kind": "tool_call", "content": f"[Tool Call: {func}({args})]",
+                      "call_id": getattr(call, "id", None), "function": func,
+                      "raw_payload": _jsonable(args)})
+    return parts
 
-    # Handle tool calls on assistant messages
-    tool_calls = getattr(msg, "tool_calls", None)
-    if tool_calls:
-        tc_strs = []
-        for call in tool_calls:
-            func = getattr(call, "function", "tool")
-            args = getattr(call, "arguments", {})
-            tc_strs.append(f"[Tool Call: {func}({args})]")
-        parts.append("\n".join(tc_strs))
 
-    return "\n".join(parts)
+def format_single_message(msg: ChatMessage | str | Any, include_reasoning: bool = True) -> str:
+    """Format a single assistant, user, system, or tool message."""
+    return "\n".join(part["content"] for part in _message_subparts(msg, include_reasoning))
 
 
 def format_message(msg: ChatMessage | list[ChatMessage] | str | Any, include_reasoning: bool = True) -> str:
@@ -110,11 +121,8 @@ def format_message(msg: ChatMessage | list[ChatMessage] | str | Any, include_rea
     return "\n\n".join(formatted_msgs)
 
 
-def extract_transcript(sample: Sample, include_reasoning: bool = True) -> str:
-    """
-    Extract the complete response transcript from a sample,
-    supporting both single message outputs and multi-turn agent histories with tool calls.
-    """
+def _transcript_messages(sample: Sample) -> tuple[list[Any], bool]:
+    """Messages visible after the prompt, and whether one output is rendered bare."""
     messages = getattr(sample, "messages", None)
     if messages:
         # Filter out system messages and the initial user prompt; later user turns are
@@ -129,14 +137,54 @@ def extract_transcript(sample: Sample, include_reasoning: bool = True) -> str:
                 continue
             turns.append(m)
         if turns:
-            return format_message(turns, include_reasoning=include_reasoning)
-        return format_message(messages, include_reasoning=include_reasoning)
+            return turns, False
+        return list(messages), False
 
     # Fallback to output.choices[0].message
     if hasattr(sample, "output") and sample.output and getattr(sample.output, "choices", None):
-        return format_message(sample.output.choices[0].message, include_reasoning=include_reasoning)
+        return [sample.output.choices[0].message], True
 
-    return ""
+    return [], False
+
+
+def extract_transcript_parts(sample: Sample, include_reasoning: bool = True) -> list[dict[str, Any]]:
+    """Structured visible messages with exact content spans in the rendered transcript."""
+    messages, bare = _transcript_messages(sample)
+    parts, cursor = [], 0
+    for message in messages:
+        role = str(getattr(message, "role", "assistant" if bare else "message")).lower()
+        subparts = _message_subparts(message, include_reasoning)
+        content = "\n".join(subpart["content"] for subpart in subparts)
+        prefix = "" if bare else f"[{role.capitalize()}]: "
+        start = cursor + len(prefix)
+        offset = start
+        for subpart in subparts:
+            subpart["start"], subpart["end"] = offset, offset + len(subpart["content"])
+            offset = subpart["end"] + 1
+        parts.append({"role": role, "content": content, "start": start,
+                      "end": start + len(content), "bare": bare, "subparts": subparts})
+        cursor += len(prefix) + len(content) + 2
+    return parts
+
+
+def render_transcript_parts(parts: list[dict[str, Any]]) -> str:
+    """Render parts returned by :func:`extract_transcript_parts`."""
+    return "\n\n".join(
+        part["content"] if part["bare"] else f"[{part['role'].capitalize()}]: {part['content']}"
+        for part in parts
+    )
+
+
+def transcript_content_hash(question: str, transcript: str, parts: list[dict[str, Any]]) -> str:
+    """Stable identity of every byte that controls scoring or assistant exposure."""
+    payload = json.dumps({"question": question, "transcript": transcript, "parts": parts},
+                         ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def extract_transcript(sample: Sample, include_reasoning: bool = True) -> str:
+    """Extract exactly the transcript visible to the judge."""
+    return render_transcript_parts(extract_transcript_parts(sample, include_reasoning))
 
 
 def extract_score(sample: Sample) -> bool:
@@ -152,4 +200,9 @@ def extract_score(sample: Sample) -> bool:
             f"sample {getattr(sample, 'id', '?')} has several scores ({sorted(scores)}); "
             f"cannot tell which one decides correctness"
         )
-    return any(score.value == "C" for score in scores.values())
+    if not scores:
+        return False
+    value = next(iter(scores.values())).value
+    if isinstance(value, dict):
+        value = value.get("score", 0)
+    return value_to_float()(value) >= 1.0
