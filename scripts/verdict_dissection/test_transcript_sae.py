@@ -112,5 +112,5 @@ def test_dense_identity_covers_model_config_freeze_and_runtime():
 def test_centre_by_item_removes_the_item_mean():
     inputs = np.array([[1.0, 2.0], [3.0, 4.0], [10.0, 10.0]], dtype=np.float32)
     centred = centre_by_item(inputs, np.array(["a", "a", "b"]))
-    assert np.allclose(centred, [[-1.0, -1.0], [1.0, 1.0], [0.0, 0.0]])
+    assert np.allclose(centred, [[-2**-0.5, -2**-0.5], [2**-0.5, 2**-0.5], [0.0, 0.0]])
     assert inputs[0, 0] == 1.0     # input untouched

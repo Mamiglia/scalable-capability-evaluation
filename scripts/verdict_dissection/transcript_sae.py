@@ -56,13 +56,15 @@ def explained_variance(inputs: np.ndarray, reconstructions: np.ndarray) -> float
 
 
 def centre_by_item(inputs: np.ndarray, items: np.ndarray) -> np.ndarray:
-    """Subtract each item's mean embedding, leaving how a transcript differs from the
-    typical answer to its own question (question identity dominates raw embeddings)."""
+    """Subtract each item's mean embedding and renormalise to unit length: the direction in
+    which a transcript differs from the typical answer to its own question (question identity
+    dominates raw embeddings; unequal distances would let a few outliers take every active slot)."""
     centred = np.array(inputs, dtype=np.float32, copy=True)
     for item in np.unique(items):
         mask = items == item
         centred[mask] -= centred[mask].mean(axis=0)
-    return centred
+    norms = np.linalg.norm(centred, axis=1, keepdims=True)
+    return np.where(norms > 0, centred / np.where(norms > 0, norms, 1), 0.0).astype(np.float32)
 
 
 def run_grouped_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict
