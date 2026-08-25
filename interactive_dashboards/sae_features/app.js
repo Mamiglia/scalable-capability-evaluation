@@ -144,7 +144,7 @@ function panelAgreement(group) {
   const a = group.pair_agreement;
   if (!a) return svgEl("svg", { width: 10, height: 10 });
   const rows = [a.capability, ...a.judges].filter((r) => r.p != null);
-  const W = 340, H = 12 + rows.length * 15 + 30, pad = { l: 130, r: 40, t: 10, b: 26 };
+  const W = 320, H = 12 + rows.length * 15 + 30, pad = { l: 125, r: 38, t: 10, b: 26 };
   const x = (v) => pad.l + ((v - 0.2) / 0.6) * (W - pad.l - pad.r);
   const svg = svgEl("svg", { width: W, height: H });
   svg.dataset.caption = "judged pairs whose two transcripts differ on the feature: share where the higher-activation side is picked by the judge / belongs to the more accurate model (95% CI)";
@@ -166,7 +166,7 @@ function panelAgreement(group) {
 function renderSummary(group) {
   if (!group.histogram) { $("#summary").replaceChildren(); return; }
   $("#summary").replaceChildren(...[panelDistribution(group), panelByModel(group), panelAgreement(group)].map((svg) =>
-    el("figure", { class: "panel" }, el("figcaption", {}, svg.dataset.caption || ""), svg)));
+    el("figure", { class: "panel", style: `width:${Number(svg.getAttribute("width")) + 16}px` }, el("figcaption", {}, svg.dataset.caption || ""), svg)));
 }
 
 // ---- traces --------------------------------------------------------------------------------
