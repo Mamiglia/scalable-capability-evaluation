@@ -29,9 +29,6 @@ import yaml
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "src"))
-from judge.util import render_transcript_parts  # noqa: E402
-
 CFG = yaml.safe_load((ROOT / "configs" / "verdict_dissection.yaml").read_text())
 SCORERS = CFG["surprisal"]["models"]          # short name -> HF id, e.g. llama -> meta-llama/Llama-3.2-3B
 WINDOW = CFG["surprisal"]["window_tokens"]    # context length of the local pass
@@ -122,7 +119,10 @@ def surprisal_local_window(model, tokenizer, text, window=WINDOW, max_tokens=MAX
 
 def assistant_token_mask(text, offsets, parts):
     """True for token midpoints inside structured assistant-message spans."""
-    if render_transcript_parts(parts) != text:
+    rendered = "\n\n".join(
+        part["content"] if part["bare"] else f"[{part['role'].capitalize()}]: {part['content']}"
+        for part in parts)
+    if rendered != text:
         raise ValueError("structured transcript parts do not reconcile with rendered text")
     mid = offsets.mean(axis=1)
     mask = np.zeros(len(offsets), dtype=bool)
