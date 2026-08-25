@@ -12,8 +12,8 @@ segmenter:                                  # RST parser, runs in its own venv (
 encoder:                                    # node embeddings
   model: Alibaba-NLP/gte-modernbert-base
   revision: e7f32e3c00f91d699e8c43b53106206bcc72bb22
-  max_tokens: 8192
-  batch_size: 64
+  max_tokens: 2048                          # chunk length; longer nodes are chunked and mean-pooled
+  batch_size: 32
   device: mps
 
 # Tool calls: `inspect` (read-only) vs `act` (changes state). First matching group wins; unmatched = act.
