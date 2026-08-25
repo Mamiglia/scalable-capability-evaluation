@@ -32,28 +32,33 @@ def cluster_features(train_values, names, threshold):
     return fcluster(tree, t=1 - threshold, criterion="distance"), correlation
 
 
-def group_loadings(train_values, correlation):
-    """First principal component of one group, signed so its most central feature loads positively."""
+NAME_PRIORITY = ["surface", "surprisal-position-adjusted"]     # plainest names first when naming a group
+
+
+def group_loadings(train_values, correlation, blocks):
+    """First principal component of one group, signed so its name feature loads positively.
+    The name feature is the most central one, preferring the plainer blocks."""
     if train_values.shape[1] == 1:
-        return np.ones(1)
+        return np.ones(1), 0
     centred = train_values - train_values.mean(axis=0)
     loadings = np.linalg.svd(centred, full_matrices=False)[2][0]
-    central = np.abs(correlation).mean(axis=0).argmax()
-    return loadings * np.sign(loadings[central]), central
+    centrality = np.abs(correlation).mean(axis=0)
+    priority = [NAME_PRIORITY.index(b) if b in NAME_PRIORITY else len(NAME_PRIORITY) for b in blocks]
+    name_feature = min(range(len(blocks)), key=lambda i: (priority[i], -centrality[i]))
+    return loadings * np.sign(loadings[name_feature]), name_feature
 
 
-def build_groups(transcript, names, threshold):
+def build_groups(transcript, names, threshold, block_of=None):
     """Table feature → group name and loading, plus the loading matrix (features × groups)."""
+    block_of = block_of or {}
     train = transcript.loc[transcript.split == "representation_train", names].to_numpy(np.float64)
     labels, correlation = cluster_features(train, names, threshold)
     rows, columns, loading_matrix = [], [], np.zeros((len(names), labels.max()))
     for group_id in range(1, labels.max() + 1):
         members = np.flatnonzero(labels == group_id)
-        if len(members) == 1:
-            loadings, central = np.ones(1), 0
-        else:
-            loadings, central = group_loadings(train[:, members], correlation[np.ix_(members, members)])
-        group_name = names[members[central]]
+        loadings, name_feature = group_loadings(train[:, members], correlation[np.ix_(members, members)],
+                                                [block_of.get(names[m]) for m in members])
+        group_name = names[members[name_feature]]
         columns.append(group_name)
         loading_matrix[members, group_id - 1] = loadings
         rows.extend({"feature": names[m], "group": group_name, "loading": float(w), "group_size": len(members)}
@@ -92,7 +97,7 @@ def main():
     transcript = pd.read_parquet(root / "transcript.parquet")
     pair = pd.read_parquet(root / "pair.parquet")
 
-    groups, group_loading = build_groups(transcript, nameable, args.threshold)
+    groups, group_loading = build_groups(transcript, nameable, args.threshold, dict(zip(dictionary.feature, dictionary.block)))
     dense_loading = dense_components(transcript, dense, args.dense_components)
     print(f"{len(nameable)} nameable features -> {group_loading.shape[1]} groups at |r| >= {args.threshold}; "
           f"dense {len(dense)} -> {args.dense_components} components")

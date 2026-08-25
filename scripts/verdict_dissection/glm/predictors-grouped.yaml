@@ -1,5 +1,5 @@
 # Grouped predictors from feature_groups.py: one column per correlation group (named after its
-# most central feature) plus the dense embedding components. Per-benchmark SAE features left out.
+# most central feature, plain names preferred) plus the dense embedding components. Per-benchmark SAE features left out.
 - sae_shared_10
 - sae_shared_19
 - sae_shared_12
@@ -68,9 +68,9 @@
 - surprisal_long_context_gain_bpc__qwen
 - surprisal_total_context_gain_bpc__llama
 - surprisal_total_context_gain_bpc__qwen
-- surprisal_rolling_context_gain_mean__llama
+- surprisal_rolling_context_gain_position_adjusted_mean__llama
 - surprisal_long_context_gain_variance__qwen
-- surprisal_rolling_context_gain_mean__qwen
+- surprisal_rolling_context_gain_position_adjusted_mean__gemma
 - surprisal_long_context_gain_median__llama
 - surprisal_rolling_context_gain_median__gemma
 - surprisal_total_context_gain_mean__qwen
@@ -114,8 +114,8 @@
 - surprisal_rolling_long_question_position_adjusted_mean__qwen
 - surprisal_rolling_long_mean__gemma
 - surprisal_rolling_short_bpc__gemma
-- surprisal_rolling_short_mean__qwen
-- surprisal_local__llama
+- surprisal_rolling_short_position_adjusted_mean__llama
+- log_chars
 - surprisal_rolling_question_gain_variance__gemma
 - surprisal_question_gain_mean__qwen
 - surprisal_rolling_question_gain_bpc__gemma
