@@ -161,7 +161,7 @@ class CachedAsker:
                                         api_key=os.environ["OPENROUTER_API_KEY"], max_retries=5)
         response = self.client.chat.completions.create(
             model=model, messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=max_tokens,
+            max_tokens=max_tokens,
             extra_body={"reasoning": {"effort": "low"},
                         "provider": {"only": [self.endpoints[model]], "allow_fallbacks": False,
                                      "require_parameters": True, "data_collection": "deny"}})
