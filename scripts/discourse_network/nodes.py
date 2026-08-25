@@ -113,10 +113,16 @@ def tool_type(function, content, lexicon, python_write_markers=()):
     text = f"{function or ''} {content}"
     if function == "python":                          # python reads unless it writes or shells out
         return "act" if any(m in text for m in python_write_markers) else "inspect"
-    for group in ("inspect", "act"):
-        if any(term in text for term in lexicon.get(group, ())):
+    for group in ("act", "inspect"):
+        if any(_has_term(text, term) for term in lexicon.get(group, ())):
             return group
     return "act"
+
+
+def _has_term(text, term):
+    if term and (term[0].isalnum() or term[0] == "_") and (term[-1].isalnum() or term[-1] == "_"):
+        return re.search(rf"(?<![\w-]){re.escape(term)}(?![\w-])", text) is not None
+    return term in text
 
 
 def output_outcome(content, error_markers):

@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from discourse_network.nodes import (build_nodes, leaf_to_clauses, mask_prose, output_outcome,  # noqa: E402
                                      protected_spans, tool_type)
 
-LEXICON = {"inspect": ["ls", "cat", "grep", "sed -n"], "act": ["sed -i", "rm", "submit"]}
+LEXICON = {"inspect": ["ls", "cat", "grep", "sed -n", "echo"], "act": ["sed -i", "rm", "submit", ">"]}
 WRITE = ["'w'", "os.remove"]
 ERRORS = ["Traceback", "command not found"]
 
@@ -61,6 +61,8 @@ def test_tool_type_and_outcome():
     assert tool_type("python", "[Tool Call: python({'code': 'print(open(\"f\").read())'})]", LEXICON, WRITE) == "inspect"
     assert tool_type("python", "[Tool Call: python({'code': \"open('f','w').write(1)\"})]", LEXICON, WRITE) == "act"
     assert tool_type("submit", "[Tool Call: submit({'answer': 'x'})]", LEXICON, WRITE) == "act"
+    assert tool_type("bash", "[Tool Call: bash({'command': 'cat f > out'})]", LEXICON, WRITE) == "act"
+    assert tool_type("bash", "[Tool Call: bash({'command': 'echo format'})]", LEXICON, WRITE) == "inspect"
     assert output_outcome("[Tool Output (bash)]: bash: xxd: command not found", ERRORS) == "error"
     assert output_outcome("[Tool Output (bash)]: total 12", ERRORS) == "ok"
 
@@ -249,6 +251,14 @@ def test_typed_topology_shares_and_motifs():
     assert f["topo_error_then_correction"] == 1.0 and f["topo_act_after_inspect"] == 1.0
     assert f["topo_final_ancestor_share"] == 1.0 and f["topo_ancestry_share_tool_act"] == 1 / 9
     assert f["topo_restatement_chain_max"] == 1.0 and f["topo_weak_components"] == 1.0
+
+
+def test_motifs_only_use_the_next_assistant_part():
+    nodes = [node(0, "question", None),
+             node(1, "tool_output", 1, outcome="error"),
+             node(2, "assistant_edu", 2, backtracking_marker=False),
+             node(3, "assistant_edu", 4, backtracking_marker=True, is_final_sink=True)]
+    assert topology_block(nodes, [])["topo_error_then_correction"] == 0.0
 
 
 def test_sae_is_sparse_and_aggregates_per_transcript():

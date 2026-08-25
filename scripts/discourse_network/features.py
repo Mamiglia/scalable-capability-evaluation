@@ -105,7 +105,8 @@ def _motifs(nodes, edges):
     errors = [x for x in nodes if x["kind"] == "tool_output" and x["outcome"] == "error"]
 
     def response(x):                                 # assistant nodes of the next assistant part (at most 20)
-        return [y for y in nodes[x["node_id"] + 1:] if y["role"] == "assistant" and y["part_id"] != x["part_id"]][:20]
+        later = [y for y in nodes[x["node_id"] + 1:] if y["role"] == "assistant" and y["part_id"] != x["part_id"]]
+        return [y for y in later if y["part_id"] == later[0]["part_id"]][:20] if later else []
 
     def share(events, hit):
         return sum(hit(x) for x in events) / len(events) if events else 0.0
