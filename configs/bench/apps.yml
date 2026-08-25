@@ -1,0 +1,4 @@
+# APPS (interview split). Scorer runs candidate code in a sandbox, needs
+# DOCKER_HOST=unix:///var/run/docker.sock like bigcodebench/mbpp.
+name: apps
+task: inspect_evals/apps

@@ -1,0 +1,10 @@
+# Non-reasoning (instruct) mode of ling-3.0-flash: reasoning disabled so the model
+# answers directly instead of emitting a long thinking trace. Separate shortname ->
+# its own data dir. No provider pin (testing model), like the base config.
+name: inclusionai/ling-3.0-flash-instruct
+slug: openrouter/inclusionai/ling-3.0-flash
+release_date: '2026-08-21'
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: false

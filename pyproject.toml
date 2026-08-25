@@ -11,6 +11,8 @@ dependencies = [
     "ijson>=3.5.1",
     "inspect-ai>=0.3.249",
     "inspect-evals @ git+https://github.com/UKGovernmentBEIS/inspect_evals.git@main",
+    # Terminal-Bench via Harbor. Pulls litellm, which caps openai<3 — see [tool.uv] below.
+    "inspect-harbor>=0.7.4",
     "matharena @ git+https://github.com/Mamiglia/inspect-matharena.git",
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
@@ -33,6 +35,11 @@ dependencies = [
 collect = "collect.cli:main"
 judge = "judge.cli:main"
 irt = "irt.cli:main"
+
+# litellm (via inspect-harbor) caps openai<3; inspect-ai's OpenRouter provider needs >=3.1.
+# We never call litellm, so ignore its cap.
+[tool.uv]
+override-dependencies = ["openai>=3.1.0"]
 
 [build-system]
 requires = ["setuptools>=77"]
