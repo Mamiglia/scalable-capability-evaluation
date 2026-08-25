@@ -58,7 +58,9 @@ def make_nodes(store, clauses, cfg):
 
 
 def embed_nodes(texts, cfg):
-    """Unit-norm embedding per text; texts over max_tokens are split into token chunks and mean-pooled."""
+    """Unit-norm embedding per text with the pinned encoder. Texts over max_tokens are split into
+    token chunks and mean-pooled. Chunk vectors are cached by text hash in cfg["cache_dir"], so a
+    killed run resumes and rebuilt nodes only embed new text."""
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer(cfg["model"], revision=cfg["revision"], device=cfg["device"])
     model.max_seq_length = cfg["max_tokens"]
@@ -68,20 +70,27 @@ def embed_nodes(texts, cfg):
         for j in range(0, max(len(tokens), 1), cfg["max_tokens"]):
             chunks.append(model.tokenizer.decode(tokens[j:j + cfg["max_tokens"]]) or " ")
             owner.append(i)
-    order = np.argsort([len(c) for c in chunks])                      # length-sorted batches run faster
-    vectors = np.empty((len(chunks), model.get_sentence_embedding_dimension()), dtype=np.float32)
-    cache = Path(cfg["cache_dir"])                                     # one file per block, so a killed run resumes
+    cache = Path(cfg["cache_dir"])
     cache.mkdir(parents=True, exist_ok=True)
+    known = {}                                                        # text hash -> vector, from earlier blocks
+    for path in sorted(cache.glob("block-*.npz")):
+        z = np.load(path)
+        known.update(zip(z["hashes"].tolist(), z["vectors"]))
+    digest = [hashlib.sha1(c.encode()).hexdigest() for c in chunks]
+    todo = sorted({d for d in digest if d not in known})
+    text_of = dict(zip(digest, chunks))
+    todo.sort(key=lambda d: len(text_of[d]))                          # length-sorted batches run faster
     block = cfg.get("block_size", 20000)
-    for b, start in enumerate(range(0, len(order), block)):
-        path = cache / f"block-{b:04d}.npy"
-        if not path.exists():
-            np.save(path, model.encode([chunks[i] for i in order[start:start + block]], batch_size=cfg["batch_size"],
-                                       normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False))
-            print(f"embedded chunks {min(start + block, len(order))}/{len(order)}", flush=True)
-        vectors[order[start:start + block]] = np.load(path)
-    out = np.zeros((len(texts), vectors.shape[1]), dtype=np.float32)
-    np.add.at(out, np.asarray(owner), vectors)
+    for b, start in enumerate(range(0, len(todo), block), start=len(list(cache.glob("block-*.npz")))):
+        part = todo[start:start + block]
+        vectors = model.encode([text_of[d] for d in part], batch_size=cfg["batch_size"], normalize_embeddings=True,
+                               convert_to_numpy=True, show_progress_bar=False)
+        np.savez(cache / f"block-{b:04d}.npz", hashes=np.array(part), vectors=vectors.astype(np.float32))
+        known.update(zip(part, vectors))
+        print(f"embedded chunks {min(start + block, len(todo))}/{len(todo)}", flush=True)
+    dim = len(next(iter(known.values())))
+    out = np.zeros((len(texts), dim), dtype=np.float32)
+    np.add.at(out, np.asarray(owner), np.stack([known[d] for d in digest]))
     return out / np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-12)
 
 

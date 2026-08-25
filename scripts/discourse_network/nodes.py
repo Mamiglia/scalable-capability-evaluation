@@ -69,6 +69,35 @@ def sentence_clauses(text):
     return spans
 
 
+def snap_to_words(spans, text):
+    """Move a boundary that falls inside a word back to the word start (the parser sometimes
+    cuts one character into a word). spans: sorted (start, end) in `text` offsets."""
+    spans = [list(s) for s in spans]
+    for prev, cur in zip(spans, spans[1:]):
+        start = cur[0]
+        if start > 0 and text[start - 1].isalnum() and text[start].isalnum():
+            while start > 0 and text[start - 1].isalnum():
+                start -= 1
+            cur[0], prev[1] = start, min(prev[1], start)
+    return [tuple(_trim(text, lo, hi)) for lo, hi in spans if _trim(text, lo, hi)[0] < _trim(text, lo, hi)[1]]
+
+
+def merge_fragments(spans, text, max_words=1):
+    """Join a one-word clause with no sentence-final punctuation ("Now", "However,", "Wait,")
+    onto the following clause when only whitespace separates them."""
+    merged = []
+    for lo, hi in spans:
+        if merged:
+            plo, phi = merged[-1]
+            words = text[plo:phi].split()
+            if (len(words) <= max_words and not text[plo:phi].rstrip().endswith((".", "!", "?", ":", ";"))
+                    and text[phi:lo].strip() == ""):
+                merged[-1] = (plo, hi)
+                continue
+        merged.append((lo, hi))
+    return merged
+
+
 def _trim(text, lo, hi):
     while lo < hi and text[lo].isspace():
         lo += 1
@@ -99,7 +128,8 @@ def build_nodes(question, transcript, parts, clauses=None, tool_lexicon=None,
     """Nodes of one transcript in character order.
     parts: A's transcript_parts_json (list of parts with subparts and exact offsets).
     clauses: {(part_id, subpart_id): [(start, end), ...]} in transcript offsets, from
-    segment.py; subparts without an entry are split at sentence ends.
+    segment.py; subparts without an entry are split at sentence ends. Boundaries are
+    snapped to word starts and fragment clauses merged into their successor.
     Node fields: node_id, part_id, role, kind, start, end, text, call_id, function,
     tool_type, outcome, is_final_sink."""
     lexicon = tool_lexicon or {}
@@ -113,8 +143,10 @@ def build_nodes(question, transcript, parts, clauses=None, tool_lexicon=None,
             if sp["kind"] == "content" and part["role"] == "assistant":
                 pieces = [(base + s, base + e, kind) for s, e, kind in protected_spans(content)]
                 local = (clauses or {}).get((part_id, subpart_id))
-                pieces += ([(s, e, "assistant_edu") for s, e in local] if local is not None
-                           else [(base + s, base + e, "assistant_edu") for s, e in sentence_clauses(content)])
+                if local is None:
+                    local = [(base + s, base + e) for s, e in sentence_clauses(content)]
+                local = merge_fragments(snap_to_words(sorted(local), transcript), transcript)
+                pieces += [(s, e, "assistant_edu") for s, e in local]
             elif sp["kind"] == "content":             # user text after the first assistant message
                 pieces = [(base, base + len(content), "user_feedback")]
             else:                                     # tool_call / tool_output

@@ -89,6 +89,16 @@ def test_nodes_fall_back_to_sentences_and_type_tools():
     assert nodes[4]["tool_type"] == "inspect" and nodes[4]["outcome"] == "error"
 
 
+def test_snap_to_words_and_merge_fragments():
+    from discourse_network.nodes import merge_fragments, snap_to_words
+    text = "We get 7.\n\nTotal for this pattern: 147. Now, however, the count is 6."
+    raw = [(0, 12), (12, 34), (35, 39), (40, 48), (49, 64)]        # parser cut one char into "Total"; "Now," and "however," fragments
+    snapped = snap_to_words(raw, text)
+    assert [text[a:b] for a, b in snapped] == ["We get 7.", "Total for this pattern:", "147.", "Now,", "however, the count"]
+    merged = merge_fragments(snapped, text)
+    assert [text[a:b] for a, b in merged] == ["We get 7.", "Total for this pattern:", "147.", "Now, however, the count"]
+
+
 # ---------------------------------------------------------------- segment
 
 from discourse_network.segment import segment_rows, segment_text  # noqa: E402
