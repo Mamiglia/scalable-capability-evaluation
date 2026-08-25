@@ -245,7 +245,7 @@ function card(example, opts = {}) {
     el("span", {}, `judges pick ${fmt(example.pick_rate)} (n=${example.pick_n})`),
     el("span", { class: "dim" }, `${example.bench} · ${example.item} · ep${example.epoch} · ${example.split.replace("representation_", "")}`),
     el("details", { class: "question" }, el("summary", {}, "question"), el("div", { class: "text" }, example.question)),
-    opts.guess ? el("label", { class: "guess" }, el("input", { type: "checkbox" }), " fires?") : "");
+    opts.guess ? el("label", { class: "guess" }, el("input", { type: "checkbox" }), " my guess: fires") : "");
   const trace = state.traces && state.traces[exampleKey(example)];
   const c = el("div", { class: "card" }, meta, ...(trace ? snippets(example, trace) : plainText(example)));
   if (opts.role) c.dataset.role = opts.role;
@@ -270,7 +270,7 @@ function renderExamples(group) {
     cards.forEach((c) => {
       const guessed = c.querySelector(".guess input").checked, fires = c.dataset.role === "firing";
       c.classList.add(fires ? "revealed-firing" : "revealed-contrast");
-      c.querySelector(".guess").append(fires ? " → fires" : " → contrast");
+      c.querySelector(".guess").append(fires ? " → does fire" : " → does not fire (same-question contrast)");
       if (guessed === fires) right++;
     });
     reveal.replaceWith(el("div", { class: "desc" }, `${right}/${cards.length} correct. Label: ${group.description && group.description.text ? group.description.text : "(none)"}`));
