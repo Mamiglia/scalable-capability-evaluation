@@ -169,20 +169,39 @@ def surprisal_features(text, parts, bench, model, item, epoch, log, content_hash
         offsets = z["offsets"]
         keep = assistant_token_mask(text, offsets, parts)
         chars = float((offsets[keep, 1] - offsets[keep, 0]).sum())
-        totals = {name: float(z[name][keep].sum()) for name in ("full", "noq", "local")}
+        values = {
+            "full": z["full"], "noq": z["noq"], "local": z["local"],
+            "question_gain": z["noq"] - z["full"],
+            "total_context_gain": z["local"] - z["full"],
+            "long_context_gain": z["local"] - z["noq"],
+        }
+        totals = {name: float(values[name][keep].sum()) for name in ("full", "noq", "local")}
         for pass_name in ("full", "noq", "local"):
             out[f"surprisal_{pass_name}__{scorer}"] = totals[pass_name]
         out[f"surprisal_chars__{scorer}"] = chars
         out[f"surprisal_full_bpc__{scorer}"] = totals["full"] / chars if chars else 0.0
-        out[f"surprisal_question_gain_bpc__{scorer}"] = (totals["noq"] - totals["full"]) / chars if chars else 0.0
+        out[f"surprisal_question_gain_bpc__{scorer}"] = values["question_gain"][keep].sum() / chars if chars else 0.0
         out[f"surprisal_total_context_gain_bpc__{scorer}"] = (
-            (totals["local"] - totals["full"]) / chars if chars else 0.0)
+            values["total_context_gain"][keep].sum() / chars if chars else 0.0)
         long_keep = keep & (np.arange(len(offsets)) >= 64)
         long_chars = float((offsets[long_keep, 1] - offsets[long_keep, 0]).sum())
         out[f"surprisal_long_chars__{scorer}"] = long_chars
         out[f"surprisal_long_available__{scorer}"] = float(long_chars > 0)
         out[f"surprisal_long_context_gain_bpc__{scorer}"] = (
-            float((z["local"][long_keep] - z["noq"][long_keep]).sum()) / long_chars if long_chars else 0.0)
+            values["long_context_gain"][long_keep].sum() / long_chars if long_chars else 0.0)
+        for name, values_ in values.items():
+            selected = values_[long_keep if name == "long_context_gain" else keep]
+            prefix = f"surprisal_{name}_"
+            out[f"{prefix}sum__{scorer}"] = float(selected.sum())
+            out[f"{prefix}count__{scorer}"] = float(len(selected))
+            if len(selected):
+                stats = (("mean", selected.mean()), ("median", np.median(selected)),
+                         ("variance", selected.var()), ("min", selected.min()), ("max", selected.max()))
+            else:
+                stats = (("mean", np.nan), ("median", np.nan), ("variance", np.nan),
+                         ("min", np.nan), ("max", np.nan))
+            for stat, value in stats:
+                out[f"{prefix}{stat}__{scorer}"] = float(value)
     return out
 
 

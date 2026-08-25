@@ -115,6 +115,67 @@ def test_long_context_gain_uses_only_tokens_from_position_64(tmp_path):
         assert features[f"surprisal_long_context_gain_bpc__{scorer}"] == 2.0
         assert features[f"surprisal_long_chars__{scorer}"] == 16.0
         assert features[f"surprisal_long_available__{scorer}"] == 1.0
+        assert features[f"surprisal_full_count__{scorer}"] == 80.0
+        assert features[f"surprisal_full_median__{scorer}"] == 0.0
+        assert features[f"surprisal_question_gain_mean__{scorer}"] == 1.0
+        assert features[f"surprisal_question_gain_variance__{scorer}"] == 0.0
+        assert features[f"surprisal_question_gain_min__{scorer}"] == 1.0
+        assert features[f"surprisal_question_gain_max__{scorer}"] == 1.0
+        assert features[f"surprisal_long_context_gain_count__{scorer}"] == 16.0
+        for name, total, value in (
+            ("full", 0.0, 0.0), ("noq", 80.0, 1.0), ("local", 240.0, 3.0),
+            ("question_gain", 80.0, 1.0), ("total_context_gain", 240.0, 3.0),
+            ("long_context_gain", 32.0, 2.0),
+        ):
+            assert features[f"surprisal_{name}_sum__{scorer}"] == total
+            assert features[f"surprisal_{name}_count__{scorer}"] == (16.0 if name.startswith("long_") else 80.0)
+            for stat in ("mean", "median", "variance", "min", "max"):
+                assert features[f"surprisal_{name}_{stat}__{scorer}"] == (0.0 if stat == "variance" else value)
+
+
+def test_summary_stats_are_nan_when_no_assistant_tokens_are_selected(tmp_path):
+    text = "user text"
+    parts = [{"role": "user", "content": text, "start": 0, "end": len(text), "bare": True}]
+    content_hash = "b" * 64
+    for scorer in SCORERS:
+        path = cache_file(tmp_path, scorer, "gpqa", "m", "q", 0, "run", content_hash)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(path, full=np.array([1.0]), noq=np.array([2.0]), local=np.array([3.0]),
+                 offsets=np.array([[0, len(text)]], dtype=np.int32), content_hash=content_hash)
+
+    features = surprisal_features(text, parts, "gpqa", "m", "q", 0, "run", content_hash, tmp_path)
+    for scorer in SCORERS:
+        for name in ("full", "noq", "local", "question_gain", "total_context_gain", "long_context_gain"):
+            assert features[f"surprisal_{name}_sum__{scorer}"] == 0.0
+            assert features[f"surprisal_{name}_count__{scorer}"] == 0.0
+            for stat in ("mean", "median", "variance", "min", "max"):
+                assert np.isnan(features[f"surprisal_{name}_{stat}__{scorer}"])
+
+
+def test_summary_stats_use_population_variance(tmp_path):
+    text = "xy"
+    parts = [{"role": "assistant", "content": text, "start": 0, "end": len(text), "bare": True}]
+    content_hash = "c" * 64
+    for scorer in SCORERS:
+        path = cache_file(tmp_path, scorer, "gpqa", "m", "q", 0, "run", content_hash)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(path, full=np.array([1.0, 3.0]), noq=np.array([4.0, 8.0]), local=np.array([10.0, 14.0]),
+                 offsets=np.array([[0, 1], [1, 2]], dtype=np.int32), content_hash=content_hash)
+
+    features = surprisal_features(text, parts, "gpqa", "m", "q", 0, "run", content_hash, tmp_path)
+    expected = {
+        "full": (4.0, 2.0, 1.0, 1.0, 3.0), "noq": (12.0, 6.0, 4.0, 4.0, 8.0),
+        "local": (24.0, 12.0, 4.0, 10.0, 14.0), "question_gain": (8.0, 4.0, 1.0, 3.0, 5.0),
+        "total_context_gain": (20.0, 10.0, 1.0, 9.0, 11.0),
+    }
+    for scorer in SCORERS:
+        for name, (total, mean, variance, minimum, maximum) in expected.items():
+            assert features[f"surprisal_{name}_sum__{scorer}"] == total
+            assert features[f"surprisal_{name}_count__{scorer}"] == 2.0
+            assert features[f"surprisal_{name}_mean__{scorer}"] == features[f"surprisal_{name}_median__{scorer}"] == mean
+            assert features[f"surprisal_{name}_variance__{scorer}"] == variance
+            assert features[f"surprisal_{name}_min__{scorer}"] == minimum
+            assert features[f"surprisal_{name}_max__{scorer}"] == maximum
 
 
 def test_tokenizer_without_bos_uses_eos(tiny):
