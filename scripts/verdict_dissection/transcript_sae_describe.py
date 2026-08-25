@@ -7,7 +7,7 @@ where the feature is nonzero, the annotator model says whether the description i
 present, and fidelity is the Pearson correlation between that answer and the signed
 activation. The best candidate per feature is kept when p <= p_value_threshold
 (0.05 / width, Bonferroni) and prevalence >= min_prevalence.
-Paid OpenAI calls: run with --dry-run first to see the volume.
+Paid calls via OpenRouter, pinned to the OpenAI endpoints: run with --dry-run first to see the volume.
 """
 import argparse
 import hashlib
@@ -128,10 +128,13 @@ def fidelity(annotations: np.ndarray, activations: np.ndarray) -> tuple[float, f
 
 
 class CachedAsker:
-    """OpenAI chat completions with a jsonl cache keyed by model + prompt."""
+    """OpenRouter chat completions pinned to one endpoint, with a jsonl cache keyed by model + prompt.
 
-    def __init__(self, cache_path: Path, dry_run: bool = False):
-        self.cache_path, self.dry_run = cache_path, dry_run
+    Every cached record keeps the provider and model that actually served the call.
+    """
+
+    def __init__(self, cache_path: Path, endpoints: dict[str, str], dry_run: bool = False):
+        self.cache_path, self.endpoints, self.dry_run = cache_path, endpoints, dry_run
         self.lock = threading.Lock()
         self.cache = {}
         self.chars = 0
@@ -152,16 +155,24 @@ class CachedAsker:
         if self.dry_run:
             return ""
         if self.client is None:
+            import os
             import openai
-            self.client = openai.OpenAI()
-        extra = {"reasoning_effort": "low"} if model.startswith(("gpt-5", "o")) else {}
-        reply = self.client.chat.completions.create(
+            self.client = openai.OpenAI(base_url="https://openrouter.ai/api/v1",
+                                        api_key=os.environ["OPENROUTER_API_KEY"], max_retries=5)
+        response = self.client.chat.completions.create(
             model=model, messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=max_tokens, **extra).choices[0].message.content or ""
+            max_completion_tokens=max_tokens,
+            extra_body={"reasoning": {"effort": "low"},
+                        "provider": {"only": [self.endpoints[model]], "allow_fallbacks": False,
+                                     "require_parameters": True, "data_collection": "deny"}})
+        reply = response.choices[0].message.content or ""
+        served = {"provider": getattr(response, "provider", None) or (response.model_extra or {}).get("provider"),
+                  "served_model": response.model, "id": response.id,
+                  "usage": response.usage.model_dump() if response.usage else None}
         with self.lock:
             self.cache[key] = reply
             with self.cache_path.open("a") as handle:
-                handle.write(json.dumps({"key": key, "model": model, "reply": reply}) + "\n")
+                handle.write(json.dumps({"key": key, "model": model, "reply": reply} | served) + "\n")
         return reply
 
 
@@ -263,7 +274,7 @@ def main():
     if args.max_features:
         labels, activations = labels[:args.max_features], activations[:, :args.max_features]
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    ask = CachedAsker(args.output_dir / "llm_cache.jsonl", dry_run=args.dry_run)
+    ask = CachedAsker(args.output_dir / "llm_cache.jsonl", settings["openrouter_endpoints"], dry_run=args.dry_run)
     table = describe_features(activations, labels, rows, groups, settings, ask, width, workers=args.workers)
     if args.dry_run:
         print(f"features={len(labels)} calls={ask.calls} prompt_chars={ask.chars} (~{ask.chars // 4} tokens)")
