@@ -71,7 +71,7 @@ function renderHeader(group) {
   }
   $("#header").replaceChildren(
     el("h2", {}, `shared:${state.feature} @ ${GROUP_LABELS[state.group]}`,
-      d ? el("span", { class: "badge " + (d.kept ? "kept" : "unkept") }, d.kept ? "kept" : "not kept") : ""),
+      d ? el("span", { class: "badge " + (d.kept ? "kept" : "unkept") }, d.kept ? (d.reason === "negated_candidate" ? "kept (negated label)" : "kept") : "label not kept") : ""),
     el("div", { class: "desc" }, d && d.text ? d.text : "(no description)"),
     stats,
     d && d.candidates.length ? el("details", { class: "candidates" }, el("summary", {}, `${d.candidates.length} candidate descriptions (fidelity r)`),
@@ -140,28 +140,33 @@ function panelByModel(group) {
   return svg;
 }
 
-function panelPickRate(group) {
-  const rows = group.pick_by_bin.filter((b) => b.mean_pick != null);
-  const W = 340, H = 170, pad = { l: 40, r: 8, t: 22, b: 44 };
-  const x = (i) => pad.l + (i + 0.5) * ((W - pad.l - pad.r) / rows.length), y = (v) => H - pad.b - v * (H - pad.t - pad.b);
+function panelAgreement(group) {
+  // among judged pairs whose transcripts differ on the feature: share where the higher-activation side is picked / is the more accurate model
+  const a = group.pair_agreement;
+  if (!a) return svgEl("svg", { width: 10, height: 10 });
+  const rows = [a.capability, ...a.judges].filter((r) => r.p != null);
+  const W = 420, H = 24 + rows.length * 17 + 30, pad = { l: 150, r: 40, t: 22, b: 26 };
+  const x = (v) => pad.l + ((v - 0.2) / 0.6) * (W - pad.l - pad.r);
   const svg = svgEl("svg", { width: W, height: H, class: "panel" });
-  axisText(svg, pad.l, 12, "judges' mean pick rate by activation bin", "start", "title");
-  svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: y(0.5), y2: y(0.5), stroke: "#bbb", "stroke-dasharray": "3 3" }));
-  svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: H - pad.b, y2: H - pad.b, stroke: "#999" }));
-  rows.forEach((b, i) => {
-    const bw = (W - pad.l - pad.r) / rows.length * 0.7;
-    svg.append(svgEl("rect", { x: x(i) - bw / 2, width: bw, y: y(b.mean_pick), height: y(0) - y(b.mean_pick), fill: b.bin === "negative" ? "#a33" : b.bin === "zero" ? "#999" : "#2f7d32" }));
-    axisText(svg, x(i), H - pad.b + 12, b.bin.replace("positive ", "+"), "middle", "axis");
-    axisText(svg, x(i), H - pad.b + 24, `n=${b.n}`, "middle", "axis");
+  axisText(svg, 6, 12, "pairs differing on the feature: share where the higher-activation side wins (95% CI)", "start", "title");
+  for (const v of [0.3, 0.5, 0.7]) {
+    svg.append(svgEl("line", { x1: x(v), x2: x(v), y1: pad.t, y2: H - pad.b, stroke: v === 0.5 ? "#999" : "#eee", "stroke-dasharray": v === 0.5 ? "3 3" : "" }));
+    axisText(svg, x(v), H - pad.b + 12, v, "middle", "axis");
+  }
+  rows.forEach((r, i) => {
+    const y = pad.t + 10 + i * 17, cap = r.who === "more accurate model";
+    axisText(svg, pad.l - 6, y + 4, r.who, "end", cap ? "title" : "");
+    if (r.lo != null) svg.append(svgEl("line", { x1: x(Math.max(0.2, r.lo)), x2: x(Math.min(0.8, r.hi)), y1: y, y2: y, stroke: cap ? "#c77d00" : "#1f4e9c", "stroke-width": 1.5 }));
+    svg.append(svgEl("circle", { cx: x(Math.min(0.8, Math.max(0.2, r.p))), cy: y, r: 3.5, fill: cap ? "#c77d00" : "#1f4e9c" }));
+    axisText(svg, W - pad.r + 4, y + 4, `n=${r.n}`, "start", "axis");
   });
-  for (const v of [0, 0.5, 1]) axisText(svg, pad.l - 4, y(v) + 4, v, "end", "axis");
-  axisText(svg, (pad.l + W - pad.r) / 2, H - 4, "activation bin (positive bins = quintiles)", "middle", "axis");
+  axisText(svg, x(0.5), H - 4, "0.5 = judge indifferent to the feature", "middle", "axis");
   return svg;
 }
 
 function renderSummary(group) {
   if (!group.histogram) { $("#summary").replaceChildren(); return; }
-  $("#summary").replaceChildren(panelDistribution(group), panelByModel(group), panelPickRate(group));
+  $("#summary").replaceChildren(panelDistribution(group), panelByModel(group), panelAgreement(group));
 }
 
 // ---- traces --------------------------------------------------------------------------------
