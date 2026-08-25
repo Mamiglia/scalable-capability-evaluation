@@ -309,7 +309,9 @@ def main():
     parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
     config = yaml.safe_load(args.config.read_text())
-    settings, groups, width = config["descriptions"], config["sae"]["fit_groups"], config["sae"]["width"]
+    settings, groups, width = config["descriptions"], dict(config["sae"]["fit_groups"]), config["sae"]["width"]
+    if config["sae"].get("shared_group"):
+        groups[config["sae"]["shared_group"]["name"]] = sorted({b for bs in groups.values() for b in bs})
     rows = pd.read_parquet(args.dense_dir / "report_rows.parquet")
     if not pd.read_parquet(args.sae_dir / "rows.parquet")["transcript_key"].equals(rows["transcript_key"]):
         raise ValueError("report rows are not in SAE row order")

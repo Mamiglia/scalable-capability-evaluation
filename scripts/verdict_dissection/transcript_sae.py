@@ -67,10 +67,23 @@ def centre_by_item(inputs: np.ndarray, items: np.ndarray) -> np.ndarray:
     return np.where(norms > 0, centred / np.where(norms > 0, norms, 1), 0.0).astype(np.float32)
 
 
+def balance_by_benchmark(mask: np.ndarray, benchmarks: np.ndarray, seed: int) -> np.ndarray:
+    """Keep the same number of masked rows from every benchmark (the smallest benchmark's count)."""
+    rng = np.random.default_rng(seed)
+    counts = {bench: int((mask & (benchmarks == bench)).sum()) for bench in np.unique(benchmarks[mask])}
+    keep = min(counts.values())
+    balanced = np.zeros_like(mask)
+    for bench in counts:
+        candidates = np.flatnonzero(mask & (benchmarks == bench))
+        balanced[rng.choice(candidates, size=keep, replace=False)] = True
+    return balanced
+
+
 def run_grouped_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict
                           ) -> tuple[dict[str, SparseAutoencoder], dict, dict]:
     """One SAE per fit group (config['fit_groups']: group -> benchmarks), on item-centred
-    embeddings when config['centre_by_item'] is set.
+    embeddings when config['centre_by_item'] is set; plus, when config['shared_group'] is set,
+    one SAE over every benchmark with balanced training rows, whose features come last.
 
     Activations are stacked column-wise across groups and are zero for rows
     outside a feature's group; feature_labels gives 'group:feature' per column.
@@ -88,10 +101,18 @@ def run_grouped_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict
         raise ValueError(f"benchmarks without a fit group: {sorted(unknown)}")
     saes, reports, blocks = {}, {}, []
     reconstructions = np.zeros_like(inputs)
-    for group, benches in groups.items():
+    fits = list(groups.items())
+    shared = config.get("shared_group")
+    if shared:
+        fits.append((shared["name"], sorted(member)))
+    for group, benches in fits:
         mask = rows["benchmark"].isin(benches).to_numpy()
         train_mask = mask & rows["split_role"].eq("representation_train").to_numpy()
         validation_mask = mask & rows["split_role"].eq("representation_validation").to_numpy()
+        if shared and group == shared["name"]:
+            # equal training/validation rows per benchmark so no benchmark dominates the dictionary
+            train_mask = balance_by_benchmark(train_mask, rows["benchmark"].to_numpy(), config["seed"])
+            validation_mask = balance_by_benchmark(validation_mask, rows["benchmark"].to_numpy(), config["seed"])
         if not mask.any():
             continue
         report = {"n_rows": int(mask.sum()), "n_train": int(train_mask.sum()),
@@ -105,7 +126,8 @@ def run_grouped_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict
         flipped = (activations < 0).sum(axis=0) > (activations > 0).sum(axis=0)
         activations[:, flipped] *= -1
         saes[group] = sae
-        reconstructions[mask] = group_reconstructions
+        if not (shared and group == shared["name"]):
+            reconstructions[mask] = group_reconstructions
         train_activations = activations[train_mask[mask]]
         reports[group] = report | {
             "status": "fitted", "reason": None,

@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from transcript_sae import (centre_by_item, dense_identity, explained_variance, load_dense_artifacts, load_sae,
+from transcript_sae import (balance_by_benchmark, centre_by_item, dense_identity, explained_variance, load_dense_artifacts, load_sae,
                             run_grouped_sae_suite, sha256_file, verify_artifact_files,
                             write_sae_artifacts)
 
@@ -114,3 +114,18 @@ def test_centre_by_item_removes_the_item_mean():
     centred = centre_by_item(inputs, np.array(["a", "a", "b"]))
     assert np.allclose(centred, [[-2**-0.5, -2**-0.5], [2**-0.5, 2**-0.5], [0.0, 0.0]])
     assert inputs[0, 0] == 1.0     # input untouched
+
+
+def test_shared_group_is_balanced_and_appended_last():
+    rows = pd.concat([suite_rows("gpqa", 120, 16), suite_rows("aime2024", 40, 8)], ignore_index=True)
+    mask = rows["split_role"].eq("representation_train").to_numpy()
+    balanced = balance_by_benchmark(mask, rows["benchmark"].to_numpy(), 0)
+    assert (balanced & rows["benchmark"].eq("gpqa").to_numpy()).sum() == 40
+    assert (balanced & rows["benchmark"].eq("aime2024").to_numpy()).sum() == 40 and balanced.sum() == 80
+    inputs = np.random.default_rng(0).normal(size=(len(rows), 16)).astype(np.float32)
+    config = SAE_CONFIG | {"fit_groups": {"gpqa": ["gpqa"], "aime": ["aime2024"]},
+                           "shared_group": {"name": "shared"}}
+    saes, arrays, reports = run_grouped_sae_suite(inputs, rows, config)
+    labels = arrays["feature_labels"].tolist()
+    assert set(saes) == {"gpqa", "aime", "shared"} and labels[-8:] == [f"shared:{i}" for i in range(8)]
+    assert reports["shared"]["n_train"] == 80 and arrays["activations"][:, -8:].any(axis=1).mean() > 0.5
