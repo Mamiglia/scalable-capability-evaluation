@@ -83,21 +83,17 @@ sae:
     aime2026: [aime2026]
     intercode: [intercode]
     swe_bench_mini: [swe_bench_mini]
+  # BatchTopK SAE, WIMHF recipe (Movva et al. 2025, configs/*.json in rmovva/wimhf)
   width: 32
-  sensitivity_widths: [16, 64]
   top_k: 4
-  learning_rate: 0.001
-  batch_size: 64
-  max_epochs: 2000
-  patience: 50
-  seeds: [0, 1, 2, 3, 4]
-  min_decoder_cosine: 0.8
-  min_noncanonical_matches: 3
-  min_training_support: 50
-  bootstrap_replicates: 1000
-  min_explained_variance_gain: 0.10
-  min_centered_cosine_gain: 0.10
-  min_validation_active_fraction: 0.90
+  matryoshka_prefixes: [8, 32]
+  dead_neuron_threshold_steps: 64
+  batch_size: 256
+  learning_rate: 0.0005
+  max_epochs: 50
+  min_epochs: 10
+  patience: 3
+  seed: 0
 
 descriptions:
   describe_examples: 20

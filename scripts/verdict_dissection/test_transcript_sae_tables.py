@@ -4,11 +4,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-import torch
 
 sys.path.insert(0, str(Path(__file__).parent))
 from transcript_embeddings import write_dense_artifacts
-from transcript_sae import TopKSAE, write_sae_artifacts
+from transcript_sae import SparseAutoencoder, write_sae_artifacts
 from transcript_sae_tables import KEYS, build_pairs, transcript_table
 
 
@@ -25,9 +24,8 @@ def artifacts(tmp_path):
     write_dense_artifacts(tmp_path / "dense", rows, {"transcript_only__final": dense},
                           {"family": "qwen"}, audit_rows=audit)
     activations = np.array([[2.0, 0.0], [0.0, 3.0], [1.0, 0.0]], dtype=np.float32)
-    write_sae_artifacts(tmp_path / "sae", {"gpqa": TopKSAE(2, 2, 1, torch.zeros(2))},
-                        {"activations": activations, "retained_feature_ids": np.array([0, 1]),
-                         "feature_labels": np.array(["gpqa:0", "gpqa:5"])},
+    write_sae_artifacts(tmp_path / "sae", {"gpqa": SparseAutoencoder(2, 2, 1)},
+                        {"activations": activations, "feature_labels": np.array(["gpqa:0", "gpqa:5"])},
                         {"report": {}}, rows=rows)
     return tmp_path / "dense", tmp_path / "sae"
 
