@@ -56,6 +56,8 @@ def test_grouped_suite_fits_one_sae_per_group_and_stacks_signed_activations(tmp_
     assert not arrays["reconstructions"][rows["benchmark"].eq("swe_bench_mini")].any()
     gpqa = reports["gpqa"]
     assert gpqa["status"] == "fitted" and len(gpqa["prevalence"]) == 8 and gpqa["epochs_run"] <= 3
+    gpqa_activations = arrays["activations"][np.ix_(gpqa_rows, groups == "gpqa")]
+    assert all((gpqa_activations > 0).sum(0) >= (gpqa_activations < 0).sum(0)) and len(gpqa["sign_flipped"]) == 8
     assert -1 <= gpqa["validation_explained_variance"] <= 1
     with pytest.raises(ValueError, match="without a fit group"):
         run_grouped_sae_suite(inputs, rows, config | {"fit_groups": {"gpqa": ["gpqa"]}})

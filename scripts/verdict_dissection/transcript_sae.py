@@ -3,7 +3,8 @@
 One BatchTopK SAE (Movva et al., arXiv:2510.26202; code vendored in wimhf_sae.py)
 per fit group, trained on representation_train rows with representation_validation
 rows for early stopping, then applied to every row. All width features are kept
-here with signed activations; feature retention happens later, from description
+here with signed activations (sign chosen so the majority direction is positive); feature
+retention happens later, from description
 fidelity and prevalence (transcript_sae_describe.py).
 """
 
@@ -85,6 +86,9 @@ def run_grouped_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict
             continue
         sae, history = fit_sae(inputs[train_mask], inputs[validation_mask], config)
         activations, group_reconstructions = apply_sae(sae, inputs[mask])
+        # canonical sign: each feature's majority direction is positive (regressors are sign-invariant)
+        flipped = (activations < 0).sum(axis=0) > (activations > 0).sum(axis=0)
+        activations[:, flipped] *= -1
         saes[group] = sae
         reconstructions[mask] = group_reconstructions
         train_activations = activations[train_mask[mask]]
@@ -98,6 +102,7 @@ def run_grouped_sae_suite(inputs: np.ndarray, rows: pd.DataFrame, config: dict
                 inputs[validation_mask], group_reconstructions[validation_mask[mask]]),
             "prevalence": (activations != 0).mean(axis=0).tolist(),
             "train_prevalence": (train_activations != 0).mean(axis=0).tolist(),
+            "sign_flipped": flipped.tolist(),
             "negative_share": [float((column[column != 0] < 0).mean()) if (column != 0).any() else None
                                for column in activations.T],
             "dead_features": int(((activations != 0).sum(axis=0) == 0).sum()),
