@@ -1,5 +1,6 @@
 """Small checks for the clause-network pipeline, one synthetic transcript per module."""
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -39,6 +40,13 @@ def test_mask_prose_replaces_display_and_inline_maths_and_maps_back():
     assert text[cmap[masked.index("Thus")]:].startswith("Thus")
     assert cmap[len(masked)] == len(text)
     assert mask_prose("Check `use_required_attribute` next.")[0] == "Check MATH next."
+
+
+def test_mask_prose_hides_markdown_emphasis_without_moving_offsets():
+    text = "Use **this title:** now."
+    masked, cmap, _ = mask_prose(text)
+    assert masked == "Use   this title:   now."
+    assert len(masked) == len(text) and cmap == list(range(len(text) + 1))
 
 
 def test_leaf_to_clauses_drops_protected_spans_inside_a_leaf():
@@ -89,6 +97,14 @@ def test_nodes_fall_back_to_sentences_and_type_tools():
     assert nodes[4]["tool_type"] == "inspect" and nodes[4]["outcome"] == "error"
 
 
+def test_nodes_use_the_last_nonempty_assistant_part_as_the_sink():
+    text = "Done."
+    parts = [assistant_part(text),
+             {"role": "assistant", "content": "", "start": 30, "end": 30, "bare": False, "subparts": []}]
+    nodes = build_nodes("Q?", "[Assistant]: " + text, parts)
+    assert nodes[-1]["is_final_sink"]
+
+
 def test_snap_to_words_and_merge_fragments():
     from discourse_network.nodes import merge_fragments, snap_to_words
     text = "We get 7.\n\nTotal for this pattern: 147. Now, however, the count is 6."
@@ -128,6 +144,21 @@ def test_segment_text_maps_clauses_and_tree_back_to_the_original():
     clauses, trees = segment_text(FakeParser(), text)
     assert [text[a:b] for a, b in clauses] == ["Let \\(c=1\\),", "so", "holds."]
     assert trees[0]["relation"] == "elaboration" and trees[0]["left"] == {"start": 0, "end": 9}
+
+
+def test_segment_text_repairs_parser_gaps_at_word_boundaries():
+    text = "Every resident owns H, so the ownership continues."
+    so, following = text.index("so"), text.index("the")
+
+    class GapParser:
+        def __call__(self, _):
+            return {"rst": [Tree(Leaf(0, so + 1), Leaf(following, len(text)), "elaboration", "NS")]}
+
+    clauses, trees = segment_text(GapParser(), text)
+    assert [text[a:b] for a, b in clauses] == [
+        "Every resident owns H, so", "the ownership continues."]
+    assert trees[0]["left"] == {"start": 0, "end": so + 2}
+    assert trees[0]["right"] == {"start": following, "end": len(text)}
 
 
 def test_segment_rows_uses_transcript_offsets():
@@ -300,3 +331,31 @@ def test_pipeline_writes_tables(tmp_path):
     assert feats.loc[feats.bench == "gpqa"].filter(like="_sae_").notna().any().any()
     assert len(pairs) == 1 and "d_topo_node_count" in pairs
     assert json.loads((tmp_path / "manifest.json").read_text())["rows"]["transcripts"] == 6
+
+
+def test_pipeline_can_stop_after_nodes(tmp_path):
+    store = fake_store()
+    clauses, trees = fake_segments(store)
+    split = pd.DataFrame({"bench": store.bench, "item": store.item, "split": "representation_train"})
+    cfg = {"edges": {}, "sae": {}, "encoder": {}, "tool_types": {},
+           "python_write_markers": [], "error_markers": []}
+    result = build.run(store, clauses, trees, split, pd.DataFrame(), cfg, tmp_path,
+                       embed=lambda *_: (_ for _ in ()).throw(AssertionError("embedded")), stop_after="nodes")
+    assert len(result) and (tmp_path / "nodes.parquet").exists()
+    assert not (tmp_path / "node_embeddings.npy").exists()
+
+
+def test_build_import_does_not_require_the_pair_builder():
+    code = ("import sys; sys.path.insert(0, 'scripts'); sys.path.insert(0, 'scripts/verdict_dissection'); "
+            "sys.modules['aggregate_surprisal'] = None; import discourse_network.build")
+    subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_make_nodes_keeps_rows_with_the_same_content_hash_separate():
+    store = fake_store(2)
+    for column in ("content_hash", "question", "transcript", "transcript_parts_json"):
+        store.loc[1, column] = store.loc[0, column]
+    clauses, _ = fake_segments(store)
+    cfg = {"tool_types": {}, "python_write_markers": [], "error_markers": []}
+    nodes = build.make_nodes(store, clauses, cfg)
+    assert nodes.groupby("transcript_key").size().tolist() == [5, 5]

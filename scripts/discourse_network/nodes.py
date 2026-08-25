@@ -26,8 +26,8 @@ def protected_spans(text):
 
 def mask_prose(text):
     """Text for the segmenter: protected spans become the word EQUATION, inline maths/code
-    the word MATH. Returns (masked, cmap, protected); cmap[i] is the original offset of
-    masked character i, with one extra entry for the end."""
+    the word MATH, and Markdown bold delimiters become spaces. Returns (masked, cmap,
+    protected); cmap[i] is the original offset of masked character i, with one extra entry."""
     protected = protected_spans(text)
     spans = [(s, e, "EQUATION") for s, e, _ in protected]
     spans += [(m.start(), m.end(), "MATH") for m in INLINE.finditer(text)
@@ -39,7 +39,7 @@ def mask_prose(text):
         cursor = e
     out.append(text[cursor:])
     cmap += list(range(cursor, len(text) + 1))
-    return "".join(out), cmap, protected
+    return "".join(out).replace("**", "  "), cmap, protected
 
 
 def leaf_to_clauses(start, end, cmap, text, protected):
@@ -134,7 +134,6 @@ def build_nodes(question, transcript, parts, clauses=None, tool_lexicon=None,
     tool_type, outcome, is_final_sink."""
     lexicon = tool_lexicon or {}
     nodes = [_node(0, None, "question", "question", None, None, question)]
-    last_assistant = max((i for i, p in enumerate(parts) if p["role"] == "assistant"), default=None)
     call_types = {}                                   # call_id -> inspect/act, inherited by the output
     for part_id, part in enumerate(parts):
         for subpart_id, sp in enumerate(part.get("subparts", [])):
@@ -164,7 +163,7 @@ def build_nodes(question, transcript, parts, clauses=None, tool_lexicon=None,
                     node["tool_type"] = call_types.get(sp.get("call_id"))
                     node["outcome"] = output_outcome(text, error_markers)
                 nodes.append(node)
-    final = [n for n in nodes if n["part_id"] == last_assistant]
+    final = [n for n in nodes if n["role"] == "assistant"]
     if final:
         final[-1]["is_final_sink"] = True
     return nodes

@@ -10,6 +10,7 @@ masked coordinates). A shard whose clauses file exists is skipped.
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from discourse_network.nodes import leaf_to_clauses, mask_prose  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 KEYS = ["bench", "model", "item", "epoch", "log", "sample_epoch", "content_hash"]
+TOKEN = re.compile(r"\w+(?:['’]\w+)*|[^\w\s]", re.UNICODE)
 
 
 def tree_dict(node, shift=0):
@@ -36,6 +38,60 @@ def leaves(node):
     return [node] if node.left is None else leaves(node.left) + leaves(node.right)
 
 
+def normalise_tree_spans(trees, text):
+    """Snap ordered parser leaves to a complete partition of whole text tokens."""
+    leaf_nodes = []
+
+    def collect(node):
+        if "left" not in node:
+            leaf_nodes.append(node)
+        else:
+            collect(node["left"])
+            collect(node["right"])
+
+    for tree in trees:
+        collect(tree)
+    tokens = [(m.start(), m.end()) for m in TOKEN.finditer(text)]
+    if len(leaf_nodes) > len(tokens):
+        raise ValueError(f"parser returned {len(leaf_nodes)} leaves for {len(tokens)} tokens")
+    previous, cuts = 0, []
+    for i, (left, right) in enumerate(zip(leaf_nodes, leaf_nodes[1:]), 1):
+        target = (left["end"] + right["start"]) / 2
+        last = len(tokens) - (len(leaf_nodes) - i)
+        cut = min(range(previous + 1, last + 1),
+                  key=lambda j: abs((tokens[j - 1][1] + tokens[j][0]) / 2 - target))
+        cuts.append(cut)
+        previous = cut
+    for leaf, (start, end) in zip(leaf_nodes, zip([0] + cuts, cuts + [len(tokens)])):
+        leaf["start"], leaf["end"] = tokens[start][0], tokens[end - 1][1]
+
+    def update(node):
+        if "left" in node:
+            update(node["left"])
+            update(node["right"])
+            node["start"], node["end"] = node["left"]["start"], node["right"]["end"]
+
+    for tree in trees:
+        update(tree)
+    return trees
+
+
+def validate_spans(text, clauses, protected):
+    """Require clauses and protected spans to cover source text once, except whitespace."""
+    cursor = 0
+    for start, end in sorted(clauses + [(s, e) for s, e, _ in protected]):
+        if start < cursor:
+            raise ValueError(f"overlapping segment spans at {start}:{cursor}")
+        if text[cursor:start].replace("**", "").strip():
+            raise ValueError(f"uncovered segment text at {cursor}:{start}")
+        if ((start and text[start - 1].isalnum() and text[start].isalnum()) or
+                (end < len(text) and text[end - 1].isalnum() and text[end].isalnum())):
+            raise ValueError(f"segment boundary inside a word at {start}:{end}")
+        cursor = end
+    if text[cursor:].replace("**", "").strip():
+        raise ValueError(f"uncovered segment text at {cursor}:{len(text)}")
+
+
 def segment_text(parser, text):
     """Clause spans (offsets into `text`) and tree dicts for one assistant text part."""
     masked, cmap, protected = mask_prose(text)
@@ -45,10 +101,18 @@ def segment_text(parser, text):
     lead = len(masked) - len(masked.lstrip())     # parser sees the stripped text; shift offsets back
     clauses, trees = [], []
     for tree in parser(stripped)["rst"]:
-        for leaf in leaves(tree):
-            clauses += leaf_to_clauses(leaf.start + lead, leaf.end + lead, cmap, text, protected)
         trees.append(tree_dict(tree, lead))
-    return sorted(set(clauses)), trees
+    normalise_tree_spans(trees, masked)
+    for tree in trees:
+        for leaf in _dict_leaves(tree):
+            clauses += leaf_to_clauses(leaf["start"], leaf["end"], cmap, text, protected)
+    clauses = sorted(set(clauses))
+    validate_spans(text, clauses, protected)
+    return clauses, trees
+
+
+def _dict_leaves(node):
+    return [node] if "left" not in node else _dict_leaves(node["left"]) + _dict_leaves(node["right"])
 
 
 def segment_rows(rows, parser):
