@@ -43,7 +43,7 @@ function renderSidebar() {
     return el("li", { class: f.feature === state.feature ? "active" : "", onclick: () => selectFeature(f.feature) },
       el("span", { class: "num" }, f.feature),
       el("span", { class: "label" + (g.kept ? "" : " unkept"), title: label }, label),
-      el("span", { class: "prev" }, `${(g.prevalence * 100).toFixed(0)}%`));
+      el("span", { class: "prev", title: "prevalence: share of this benchmark's transcripts where the feature is nonzero" }, `${(g.prevalence * 100).toFixed(0)}%`));
   }));
 }
 

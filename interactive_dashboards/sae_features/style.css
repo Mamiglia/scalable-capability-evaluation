@@ -56,3 +56,6 @@ details.candidates li { margin: 2px 0; }
 .model-head:hover { background: #f3f6fb; }
 .model-body { margin: 0 0 8px 12px; }
 .tag { background: #eee; border-radius: 3px; padding: 0 5px; font-size: 10px; color: #555; }
+.list-head { display: flex; gap: 6px; padding: 2px 6px; font-size: 10px; color: #777; border-bottom: 1px solid #e5e5e5; margin-bottom: 4px; }
+.list-head .num { min-width: 22px; }
+.list-head .label { flex: 1; }
