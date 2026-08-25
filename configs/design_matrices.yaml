@@ -1,0 +1,33 @@
+# Design matrices for the verdict-dissection GLMs. One block per feature source; a block is a
+# transcript-level table keyed on the seven transcript keys plus a regex over its columns.
+# Add the clause-network blocks here when its tables land.
+features_root: /Volumes/T7/judge-dissection/transcript-features
+output_root: /Volumes/T7/judge-dissection/design-matrices
+freeze: judge_results/verdict_dissection/freezes/v1-f722885fd822-a979476c1a66
+
+blocks:
+  - name: surface
+    table: "{features_root}/raw/surface-textual.parquet"
+    columns: "^(log_chars|n_words|.*_count|code_chars|latex_chars)$"
+  - name: surprisal-llama
+    table: "{features_root}/raw/context-predictability.parquet"
+    columns: "__llama$"
+  - name: surprisal-gemma
+    table: "{features_root}/raw/context-predictability.parquet"
+    columns: "__gemma$"
+  - name: surprisal-qwen
+    table: "{features_root}/raw/context-predictability.parquet"
+    columns: "__qwen$"
+  - name: surprisal-position-adjusted
+    table: "{features_root}/normalised/rolling-position/transcript-means.parquet"
+    columns: "_position_adjusted_mean__"
+  - name: embedding-dense
+    table: judge_results/verdict_dissection/transcript_sae/tables-qwen/transcript_features_qwen.parquet
+    columns: "^qwen_dim_"
+  - name: embedding-sae-shared
+    table: judge_results/verdict_dissection/transcript_sae/tables-qwen/transcript_features_qwen.parquet
+    columns: "^sae_shared_"
+  - name: embedding-sae-benchmark          # fitted per benchmark; zero outside the feature's benchmark
+    table: judge_results/verdict_dissection/transcript_sae/tables-qwen/transcript_features_qwen.parquet
+    columns: "^sae_(?!shared_)"
+    fill_missing: 0
