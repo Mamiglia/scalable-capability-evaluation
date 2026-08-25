@@ -266,7 +266,7 @@ function plainText(example) {
   if (!rest) return [pre];
   const full = el("div", { class: "text full" }, example.transcript); full.hidden = true;
   const toggle = el("button", { class: "linkish", onclick: () => { full.hidden = !full.hidden; pre.hidden = !pre.hidden; toggle.textContent = full.hidden ? "full transcript" : "show less"; } }, "full transcript");
-  return [el("div", { class: "trace-row" }, el("span", { class: "trace-legend" }, "not traced yet"), toggle), pre, full];
+  return [el("div", { class: "trace-row" }, el("span", { class: "trace-legend" }, "not traced"), toggle), pre, full];
 }
 
 // ---- example cards -------------------------------------------------------------------------
