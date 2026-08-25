@@ -22,6 +22,22 @@ SURFACE_LABELS = {
     "bullets_count": "Bullets", "code_chars": "Code characters",
     "latex_chars": "LaTeX characters",
 }
+SURFACE_RATE_LABELS = {
+    "log_chars": "Log characters", "n_words": "Words",
+    "personal_pronouns_per_1000_words": "Pronouns / 1k words",
+    "hedging_per_1000_words": "Hedges / 1k words",
+    "backtracking_per_1000_words": "Backtracks / 1k words",
+    "uncertainty_per_1000_words": "Uncertainty / 1k words",
+    "confidence_per_1000_words": "Confidence markers / 1k words",
+    "questions_per_1000_words": "Questions / 1k words",
+    "verification_per_1000_words": "Verification / 1k words",
+    "connectives_per_1000_words": "Connectives / 1k words",
+    "contrast_per_1000_words": "Contrast / 1k words",
+    "numbered_steps_per_1000_words": "Steps / 1k words",
+    "bullets_per_1000_words": "Bullets / 1k words",
+    "code_chars_per_1000_chars": "Code chars / 1k chars",
+    "latex_chars_per_1000_chars": "LaTeX chars / 1k chars",
+}
 
 
 def _panel(ax, values, labels, tag, show_x=False):
@@ -49,8 +65,11 @@ def _panel(ax, values, labels, tag, show_x=False):
 
 
 def make_figure(matrix, output_stem):
-    surface = matrix[matrix.group == "surface-textual"].set_index("feature")
-    surface = surface.loc[list(SURFACE_LABELS)]
+    rate_adjusted = set(SURFACE_RATE_LABELS) <= set(matrix.feature)
+    surface_labels = SURFACE_RATE_LABELS if rate_adjusted else SURFACE_LABELS
+    surface_group = "surface-textual-rate" if rate_adjusted else "surface-textual"
+    surface = matrix[matrix.group == surface_group].set_index("feature")
+    surface = surface.loc[list(surface_labels)]
     surprisal_features = [
         f"surprisal_rolling_{context}_position_adjusted_mean__{scorer}"
         for context in ("short", "long") for scorer in SCORERS]
@@ -70,7 +89,7 @@ def make_figure(matrix, output_stem):
     surface_ax = figure.add_subplot(grid[0])
     surprisal_ax = figure.add_subplot(grid[1])
     _panel(surface_ax, surface[BENCHMARKS].to_numpy(),
-           list(SURFACE_LABELS.values()), "Surface features")
+           list(surface_labels.values()), "Surface features")
     image = _panel(surprisal_ax, surprisal[BENCHMARKS].to_numpy(),
                    surprisal_labels, "Position-adjusted surprisal", show_x=True)
     color_ax = figure.add_axes([0.57, 0.045, 0.37, 0.018])
