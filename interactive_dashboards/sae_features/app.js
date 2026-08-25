@@ -75,7 +75,14 @@ function renderHeader(group) {
     el("div", { class: "desc" }, d && d.text ? d.text : "(no description)"),
     stats,
     d && d.candidates.length ? el("details", { class: "candidates" }, el("summary", {}, `${d.candidates.length} candidate descriptions (fidelity r)`),
-      el("ol", {}, ...d.candidates.map((c) => el("li", {}, `${fmt(c.correlation, 3)} — ${c.description}`)))) : "");
+      el("ol", {}, ...d.candidates.map((c) => el("li", {}, `${fmt(c.correlation, 3)} — ${c.description}`)))) : "",
+    el("table", { class: "names" }, ...state.index.groups.map((g) => {
+      const gd = state.data.groups[g].description;
+      return el("tr", { class: g === state.group ? "current" : "" },
+        el("td", { class: "g" }, GROUP_LABELS[g]),
+        el("td", { class: "r" }, gd ? `${(state.data.groups[g].prevalence * 100).toFixed(0)}% · r ${fmt(gd.correlation, 2)}` : "–"),
+        el("td", { class: gd && gd.kept ? "" : "unkept" }, gd && gd.text ? gd.text : "(not named)"));
+    })));
 }
 
 // three summary panels: activation distribution, mean activation per model vs its accuracy, judges' pick rate by activation
