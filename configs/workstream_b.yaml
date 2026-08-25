@@ -1,0 +1,93 @@
+scope:
+  benchmarks: [gpqa, aime2024, aime2025, aime2026, intercode, swe_bench_mini]
+  models:
+    - claude-opus-4.7
+    - claude-sonnet-4.5
+    - deepseek-r1-0528
+    - deepseek-v3.2
+    - gemini-3.5-flash
+    - gemma-3-12b-it
+    - gemma-4-e2b-it
+    - glm-4.6
+    - glm-5.2
+    - glm-5.3
+    - gpt-4.1
+    - gpt-5
+    - granite-4.1-8b
+    - kimi-k2.6
+    - kimi-k3
+    - ling-2.6-flash
+    - mistral-medium-3
+    - muse-glimmer-30b
+    - nvidia-nemotron-3-ultra-550b-a55b-bf16
+    - nvidia-nemotron-3.5-lightning-30b-a3b-bf16
+    - o3
+    - qwen3-32b
+    - qwen3.5-4b
+    - qwen3.5-9b
+    - qwen3.8-2.4t-a95b
+    - qwen3.8-27b
+  split:
+    seed: 0
+    representation_train: 0.64
+    representation_validation: 0.16
+    confirmation: 0.20
+
+models:
+  qwen:
+    model_id: Qwen/Qwen3-Embedding-4B
+    revision: 5cf2132abc99cad020ac570b19d031efec650f2b
+    context: 32768
+    chunk_length: 30720
+    overlap: 1024
+    question_envelope: 2048
+    pool: last
+    hidden_layers: [24, 30]
+    padding_side: left
+    dimension: 2560
+    license: Apache-2.0
+    empty_input: eos
+    overlap_sensitivity: [512, 2048]
+  bge:
+    model_id: BAAI/bge-m3
+    revision: 5617a9f61b028005a4858fdac845db406aefb181
+    context: 8192
+    chunk_length: 6144
+    overlap: 512
+    question_envelope: 2048
+    pool: cls
+    hidden_layers: [16, 20]
+    padding_side: right
+    dimension: 1024
+    license: MIT
+    empty_input: special_tokens_only
+    overlap_sensitivity: [256, 1024]
+
+extraction:
+  batch_size: 8
+  max_batch_tokens: 32768
+  dtype: bfloat16
+  attention_backend: sdpa
+  determinism_sample: 256
+  seed: 0
+  max_abs_difference: 0.000001
+  min_repeat_cosine: 0.999999
+  overlap_median_cosine: 0.98
+  overlap_fifth_percentile_cosine: 0.95
+  min_overlap_rows: 32
+  max_projected_gpu_hours: 60
+
+sae:
+  top_k: 8
+  learning_rate: 0.001
+  batch_size: 512
+  max_epochs: 200
+  patience: 20
+  seeds: [0, 1, 2, 3, 4]
+  min_decoder_cosine: 0.8
+  min_noncanonical_matches: 3
+  min_training_support: 50
+  bootstrap_replicates: 1000
+  min_explained_variance_gain: 0.10
+  min_centered_cosine_gain: 0.10
+  min_validation_active_fraction: 0.90
