@@ -28,6 +28,9 @@ def test_example_sampling_and_parsing():
                                      top_percentile=50, seed=0)
     assert set(chosen["firing"]) <= {0, 1, 2, 3, 4} and len(chosen["firing"]) == 3
     assert all(activations[chosen["zero"]] == 0) and len(chosen["zero"]) == 2
+    short_bin = interpretation_examples(activations, group_rows(20), n_firing=4, n_zero=1,
+                                        top_percentile=99, seed=0)
+    assert sorted(short_bin["firing"]) == [0, 1, 2, 3]      # bin too small -> top-4 by activation
     scored = scoring_examples(activations, 20, 0)
     assert len(scored) == 12 and all(activations[scored] != 0)
     assert parse_description('- "uses numbered steps"') == "uses numbered steps"

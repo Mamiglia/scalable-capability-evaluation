@@ -90,13 +90,16 @@ def truncate_words(text: str, max_words: int) -> str:
 
 def interpretation_examples(activations: np.ndarray, rows: pd.DataFrame, *, n_firing: int,
                             n_zero: int, top_percentile: float, seed: int) -> dict[str, np.ndarray]:
-    """Random n_firing rows from the top percentile of positive activations, plus n_zero zero rows."""
+    """Random n_firing rows from the top percentile of positive activations (or simply the
+    top n_firing rows when that bin is smaller), plus n_zero zero rows."""
     rng = np.random.default_rng(seed)
     positive = np.flatnonzero(activations > 0)
     if not len(positive):
         return {"firing": np.array([], dtype=int), "zero": np.array([], dtype=int)}
     cutoff = np.percentile(activations[positive], top_percentile)
     top = positive[activations[positive] >= cutoff]
+    if len(top) < n_firing:
+        top = positive[np.argsort(-activations[positive], kind="stable")[:n_firing]]
     zero = np.flatnonzero(activations == 0)
     return {"firing": rng.choice(top, size=min(n_firing, len(top)), replace=False),
             "zero": rng.choice(zero, size=min(n_zero, len(zero)), replace=False)}
