@@ -70,8 +70,16 @@ def embed_nodes(texts, cfg):
             owner.append(i)
     order = np.argsort([len(c) for c in chunks])                      # length-sorted batches run faster
     vectors = np.empty((len(chunks), model.get_sentence_embedding_dimension()), dtype=np.float32)
-    vectors[order] = model.encode([chunks[i] for i in order], batch_size=cfg["batch_size"],
-                                  normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=True)
+    cache = Path(cfg["cache_dir"])                                     # one file per block, so a killed run resumes
+    cache.mkdir(parents=True, exist_ok=True)
+    block = cfg.get("block_size", 20000)
+    for b, start in enumerate(range(0, len(order), block)):
+        path = cache / f"block-{b:04d}.npy"
+        if not path.exists():
+            np.save(path, model.encode([chunks[i] for i in order[start:start + block]], batch_size=cfg["batch_size"],
+                                       normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False))
+            print(f"embedded chunks {min(start + block, len(order))}/{len(order)}", flush=True)
+        vectors[order[start:start + block]] = np.load(path)
     out = np.zeros((len(texts), vectors.shape[1]), dtype=np.float32)
     np.add.at(out, np.asarray(owner), vectors)
     return out / np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-12)
@@ -159,7 +167,8 @@ def run(store, clauses, trees, split, verdicts, cfg, out_dir, embed=embed_nodes)
         make_nodes(store, clauses, cfg).to_parquet(out_dir / "nodes.parquet", index=False)
     nodes = pd.read_parquet(out_dir / "nodes.parquet")
     if not (out_dir / "node_embeddings.npy").exists():
-        np.save(out_dir / "node_embeddings.npy", embed(nodes.text.fillna("").tolist(), cfg["encoder"]))
+        encoder_cfg = cfg["encoder"] | {"cache_dir": out_dir / "embed_cache"}
+        np.save(out_dir / "node_embeddings.npy", embed(nodes.text.fillna("").tolist(), encoder_cfg))
     embeddings = np.load(out_dir / "node_embeddings.npy")
     if not (out_dir / "edges.parquet").exists():
         make_edges(store, nodes, embeddings, trees, cfg["edges"]).to_parquet(out_dir / "edges.parquet", index=False)
