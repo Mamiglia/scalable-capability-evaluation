@@ -36,6 +36,31 @@ def histogram(values, bins=40):
     return {"counts": counts.tolist(), "edges": edges.round(4).tolist()}
 
 
+def by_model(rows, column):
+    """Mean activation per model with the model's accuracy on this benchmark group."""
+    table = rows.groupby("model").agg(mean_activation=(column, "mean"), accuracy=("accuracy", "mean"),
+                                      n=(column, "size")).reset_index()
+    table = table.sort_values("accuracy")
+    return [{"model": r.model, "accuracy": None if pd.isna(r.accuracy) else float(r.accuracy),
+             "mean_activation": float(r.mean_activation), "n": int(r.n)} for r in table.itertuples()]
+
+
+def pick_by_bin(rows, column, n_bins=5):
+    """Judges' mean pick rate for transcripts binned by activation: negative, zero, positive quantile bins."""
+    judged = rows[rows.pick_n > 0]
+    out = []
+    for name, mask in [("negative", judged[column] < 0), ("zero", judged[column] == 0)]:
+        part = judged[mask]
+        out.append({"bin": name, "mean_pick": float(part.pick_rate.mean()) if len(part) else None,
+                    "n": int(len(part)), "mean_activation": float(part[column].mean()) if len(part) else None})
+    positive = judged[judged[column] > 0].sort_values(column)
+    for k, index in enumerate(np.array_split(np.arange(len(positive)), n_bins)):
+        part = positive.iloc[index]
+        out.append({"bin": f"positive {k + 1}/{n_bins}", "mean_pick": float(part.pick_rate.mean()) if len(part) else None,
+                    "n": int(len(part)), "mean_activation": float(part[column].mean()) if len(part) else None})
+    return out
+
+
 def example(row, activation, bucket):
     return {"activation": float(activation), "bucket": bucket, "model": row.model, "bench": row.bench,
             "item": row["item"], "epoch": int(row.epoch), "log": row.log,
@@ -79,6 +104,8 @@ def feature_payload(feature, frame, descriptions, n_top, n_quantile, n_negative,
         groups[group] = {
             "n": int(len(rows)), "prevalence": float((values != 0).mean()) if len(rows) else 0.0,
             "histogram": histogram(values) if len(rows) else None,
+            "by_model": by_model(rows, column) if len(rows) else [],
+            "pick_by_bin": pick_by_bin(rows, column) if len(rows) else [],
             "description": None if described is None else {
                 "text": described.description if isinstance(described.description, str) else None,
                 "kept": bool(described.kept), "reason": described.reason if isinstance(described.reason, str) else None,

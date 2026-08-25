@@ -5,8 +5,8 @@ const BUCKETS = [
   ["top", "Top activations"], ["50-90%", "Quantile 50–90% of positive activations"], ["10-50%", "Quantile 10–50%"],
   ["0-10%", "Quantile 0–10%"], ["contrast", "Same-question contrasts (activation 0)"], ["negative", "Most negative"],
 ];
-const WINDOW = 12;          // segments either side of a peak in a snippet
-const SNIPPETS = 2;         // peaks shown per example
+const WINDOW = 15;          // segments either side of a peak in a snippet
+const SNIPPETS = 3;         // peaks shown per example
 const state = { index: null, feature: 0, group: "gpqa", data: null, traces: null, blind: false };
 
 const $ = (sel) => document.querySelector(sel);
@@ -78,22 +78,83 @@ function renderHeader(group) {
       el("ol", {}, ...d.candidates.map((c) => el("li", {}, `${fmt(c.correlation, 3)} — ${c.description}`)))) : "");
 }
 
-function renderHistogram(group) {
-  if (!group.histogram) { $("#histogram").replaceChildren(); return; }
+// three summary panels: activation distribution, mean activation per model vs its accuracy, judges' pick rate by activation
+function axisText(svg, x, y, text, anchor = "middle", cls = "") {
+  const t = svgEl("text", { x, y, "text-anchor": anchor, class: cls }); t.textContent = text; svg.append(t); return t;
+}
+
+function panelDistribution(group) {
   const { counts, edges } = group.histogram;
-  const W = 520, H = 110, pad = 28, maxc = Math.max(...counts, 1);
-  const x = (v) => pad + ((v - edges[0]) / (edges[edges.length - 1] - edges[0] || 1)) * (W - 2 * pad);
-  const svg = svgEl("svg", { width: W, height: H });
-  counts.forEach((c, i) => {
-    const mid = (edges[i] + edges[i + 1]) / 2, h = Math.log1p(c) / Math.log1p(maxc) * (H - 2 * pad);
-    svg.append(svgEl("rect", { x: x(edges[i]), width: Math.max(x(edges[i + 1]) - x(edges[i]) - 0.5, 0.5), y: H - pad - h, height: h,
-      fill: mid > 0 ? "#2f7d32" : mid < 0 ? "#a33" : "#999" }));
+  const W = 300, H = 170, pad = { l: 34, r: 8, t: 22, b: 30 };
+  const nonzero = counts.map((c, i) => (edges[i] <= 0 && edges[i + 1] > 0 ? 0 : c));
+  const zeroShare = 1 - group.prevalence, maxc = Math.max(...nonzero, 1);
+  const x = (v) => pad.l + ((v - edges[0]) / (edges[edges.length - 1] - edges[0] || 1)) * (W - pad.l - pad.r);
+  const svg = svgEl("svg", { width: W, height: H, class: "panel" });
+  axisText(svg, pad.l, 12, `activation, ${group.n} transcripts (${(zeroShare * 100).toFixed(0)}% zero, not drawn)`, "start", "title");
+  nonzero.forEach((c, i) => {
+    const mid = (edges[i] + edges[i + 1]) / 2, h = (c / maxc) * (H - pad.t - pad.b);
+    svg.append(svgEl("rect", { x: x(edges[i]), width: Math.max(x(edges[i + 1]) - x(edges[i]) - 0.5, 0.5), y: H - pad.b - h, height: h, fill: mid > 0 ? "#2f7d32" : "#a33" }));
   });
-  for (const v of [edges[0], 0, edges[edges.length - 1]]) {
-    const t = svgEl("text", { x: x(v), y: H - 8, "text-anchor": "middle" }); t.textContent = fmt(v, 2); svg.append(t);
-  }
-  const label = svgEl("text", { x: pad, y: 12 }); label.textContent = "activation density (log count; zero bin included)"; svg.append(label);
-  $("#histogram").replaceChildren(svg);
+  svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: H - pad.b, y2: H - pad.b, stroke: "#999" }));
+  for (const v of [edges[0], 0, edges[edges.length - 1]]) axisText(svg, x(v), H - pad.b + 14, fmt(v, 2));
+  axisText(svg, (pad.l + W - pad.r) / 2, H - 4, "activation", "middle", "axis");
+  axisText(svg, pad.l - 4, H - pad.b, maxc, "end", "axis"); axisText(svg, pad.l - 4, pad.t + 8, "count", "end", "axis");
+  return svg;
+}
+
+function spearman(xs, ys) {
+  const rank = (a) => { const idx = a.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]); const r = []; idx.forEach(([, i], k) => { r[i] = k; }); return r; };
+  const rx = rank(xs), ry = rank(ys), n = xs.length;
+  if (n < 3) return null;
+  const mx = (n - 1) / 2, my = (n - 1) / 2;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) { num += (rx[i] - mx) * (ry[i] - my); dx += (rx[i] - mx) ** 2; dy += (ry[i] - my) ** 2; }
+  return num / Math.sqrt(dx * dy);
+}
+
+function panelByModel(group) {
+  const rows = group.by_model.filter((m) => m.accuracy != null);
+  const W = 360, H = 170, pad = { l: 40, r: 8, t: 22, b: 30 };
+  const ys = rows.map((m) => m.mean_activation), lo = Math.min(0, ...ys), hi = Math.max(0, ...ys), span = hi - lo || 1;
+  const x = (a) => pad.l + a * (W - pad.l - pad.r), y = (v) => H - pad.b - ((v - lo) / span) * (H - pad.t - pad.b);
+  const svg = svgEl("svg", { width: W, height: H, class: "panel" });
+  const rho = spearman(rows.map((m) => m.accuracy), ys);
+  axisText(svg, pad.l, 12, `mean activation per model vs its accuracy · Spearman ρ = ${rho == null ? "–" : rho.toFixed(2)}`, "start", "title");
+  svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: y(0), y2: y(0), stroke: "#bbb" }));
+  svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: H - pad.b, y2: H - pad.b, stroke: "#999" }));
+  rows.forEach((m) => {
+    const c = svgEl("circle", { cx: x(m.accuracy), cy: y(m.mean_activation), r: 3.5, fill: "#1f4e9c", opacity: 0.8 });
+    const title = svgEl("title"); title.textContent = `${m.model}: accuracy ${fmt(m.accuracy)}, mean activation ${fmt(m.mean_activation, 3)}, n=${m.n}`; c.append(title);
+    svg.append(c);
+  });
+  for (const a of [0, 0.5, 1]) axisText(svg, x(a), H - pad.b + 14, a);
+  axisText(svg, (pad.l + W - pad.r) / 2, H - 4, "model accuracy (within benchmark)", "middle", "axis");
+  axisText(svg, pad.l - 4, y(hi) + 4, fmt(hi, 2), "end", "axis"); axisText(svg, pad.l - 4, y(lo) + 4, fmt(lo, 2), "end", "axis");
+  return svg;
+}
+
+function panelPickRate(group) {
+  const rows = group.pick_by_bin.filter((b) => b.mean_pick != null);
+  const W = 340, H = 170, pad = { l: 40, r: 8, t: 22, b: 44 };
+  const x = (i) => pad.l + (i + 0.5) * ((W - pad.l - pad.r) / rows.length), y = (v) => H - pad.b - v * (H - pad.t - pad.b);
+  const svg = svgEl("svg", { width: W, height: H, class: "panel" });
+  axisText(svg, pad.l, 12, "judges' mean pick rate by activation bin", "start", "title");
+  svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: y(0.5), y2: y(0.5), stroke: "#bbb", "stroke-dasharray": "3 3" }));
+  svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: H - pad.b, y2: H - pad.b, stroke: "#999" }));
+  rows.forEach((b, i) => {
+    const bw = (W - pad.l - pad.r) / rows.length * 0.7;
+    svg.append(svgEl("rect", { x: x(i) - bw / 2, width: bw, y: y(b.mean_pick), height: y(0) - y(b.mean_pick), fill: b.bin === "negative" ? "#a33" : b.bin === "zero" ? "#999" : "#2f7d32" }));
+    axisText(svg, x(i), H - pad.b + 12, b.bin.replace("positive ", "+"), "middle", "axis");
+    axisText(svg, x(i), H - pad.b + 24, `n=${b.n}`, "middle", "axis");
+  });
+  for (const v of [0, 0.5, 1]) axisText(svg, pad.l - 4, y(v) + 4, v, "end", "axis");
+  axisText(svg, (pad.l + W - pad.r) / 2, H - 4, "activation bin (positive bins = quintiles)", "middle", "axis");
+  return svg;
+}
+
+function renderSummary(group) {
+  if (!group.histogram) { $("#summary").replaceChildren(); return; }
+  $("#summary").replaceChildren(panelDistribution(group), panelByModel(group), panelPickRate(group));
 }
 
 // ---- traces --------------------------------------------------------------------------------
@@ -124,13 +185,20 @@ function segmentSpans(example, trace, from, to, inc, scale) {
   return out;
 }
 
-function sparkline(trace) {
-  const W = 220, H = 36, vals = trace.values, n = vals.length;
+function traceChart(trace, inc, scale) {
+  // full-width chart of the prefix value along the transcript; the area is shaded by the local contribution
+  const W = 1000, H = 90, pad = { l: 36, r: 6, t: 8, b: 16 }, vals = trace.values, n = vals.length;
   const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), span = hi - lo || 1;
-  const px = (i) => (i / Math.max(n - 1, 1)) * W, py = (v) => H - ((v - lo) / span) * (H - 4) - 2;
-  const svg = svgEl("svg", { width: W, height: H, class: "spark" });
-  svg.append(svgEl("line", { x1: 0, x2: W, y1: py(0), y2: py(0), stroke: "#bbb", "stroke-width": 1 }));
-  svg.append(svgEl("polyline", { points: vals.map((v, i) => `${px(i)},${py(v)}`).join(" "), fill: "none", stroke: "#1f4e9c", "stroke-width": 1.2 }));
+  const px = (i) => pad.l + (i / Math.max(n - 1, 1)) * (W - pad.l - pad.r), py = (v) => H - pad.b - ((v - lo) / span) * (H - pad.t - pad.b);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "trace-chart", preserveAspectRatio: "none" });
+  vals.forEach((v, i) => {
+    if (i === 0) return;
+    svg.append(svgEl("rect", { x: px(i - 1), width: Math.max(px(i) - px(i - 1), 0.5), y: pad.t, height: H - pad.t - pad.b, fill: shade(inc[i], scale) }));
+  });
+  svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: py(0), y2: py(0), stroke: "#999" }));
+  svg.append(svgEl("polyline", { points: vals.map((v, i) => `${px(i)},${py(v)}`).join(" "), fill: "none", stroke: "#1f4e9c", "stroke-width": 1.6, "vector-effect": "non-scaling-stroke" }));
+  axisText(svg, pad.l - 4, py(hi) + 4, fmt(hi, 2), "end", "axis"); axisText(svg, pad.l - 4, py(lo) + 4, fmt(lo, 2), "end", "axis");
+  axisText(svg, pad.l, H - 3, "start of transcript", "start", "axis"); axisText(svg, W - pad.r, H - 3, "end", "end", "axis");
   return svg;
 }
 
@@ -155,7 +223,7 @@ function snippets(example, trace) {
   const full = el("div", { class: "text full" }, ...segmentSpans(example, trace, 0, inc.length, inc, scale));
   full.hidden = true;
   const toggle = el("button", { class: "linkish", onclick: () => { full.hidden = !full.hidden; pre.hidden = !pre.hidden; toggle.textContent = full.hidden ? "show full transcript" : "show snippets"; } }, "show full transcript");
-  return [el("div", { class: "trace-row" }, sparkline(trace), el("span", { class: "trace-legend" }, `prefix value along the transcript · final ${fmt(trace.final, 3)} (stored ${fmt(example.activation, 3)})`), toggle), pre, full];
+  return [el("div", { class: "trace-row" }, el("span", { class: "trace-legend" }, `feature value as the transcript is read left to right (final ${fmt(trace.final, 3)}, stored ${fmt(example.activation, 3)}); green/red = text that raises/lowers it`), toggle), traceChart(trace, inc, scale), pre, full];
 }
 
 function plainText(example) {
@@ -214,7 +282,7 @@ function renderMain() {
   if (!state.data) return;
   const group = state.data.groups[state.group];
   renderHeader(group);
-  renderHistogram(group);
+  renderSummary(group);
   renderExamples(group);
 }
 

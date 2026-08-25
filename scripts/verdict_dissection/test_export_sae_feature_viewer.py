@@ -35,6 +35,8 @@ def test_feature_payload_description_and_empty_group():
     assert gpqa["description"]["kept"] and gpqa["description"]["reason"] is None
     assert gpqa["examples"][0]["bucket"] == "top" and gpqa["examples"][0]["log"] == "l0"
     assert payload["groups"]["aime"]["n"] == 0 and payload["groups"]["aime"]["description"] is None
+    assert gpqa["by_model"][0]["n"] >= 1 and len(gpqa["pick_by_bin"]) == 7
+    assert gpqa["pick_by_bin"][0]["bin"] == "negative" and gpqa["pick_by_bin"][0]["n"] == 1
 
 
 def test_pick_rates_pools_both_sides():
