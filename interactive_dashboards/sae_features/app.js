@@ -91,7 +91,7 @@ function axisText(svg, x, y, text, anchor = "middle", cls = "") {
 
 function panelDistribution(group) {
   const { counts, edges } = group.histogram;
-  const W = 300, H = 160, pad = { l: 34, r: 22, t: 10, b: 30 };
+  const W = 230, H = 140, pad = { l: 34, r: 18, t: 10, b: 30 };
   const nonzero = counts.map((c, i) => (edges[i] <= 0 && edges[i + 1] > 0 ? 0 : c));
   const zeroShare = 1 - group.prevalence, maxc = Math.max(...nonzero, 1);
   const x = (v) => pad.l + ((v - edges[0]) / (edges[edges.length - 1] - edges[0] || 1)) * (W - pad.l - pad.r);
@@ -120,7 +120,7 @@ function spearman(xs, ys) {
 
 function panelByModel(group) {
   const rows = group.by_model.filter((m) => m.accuracy != null);
-  const W = 360, H = 160, pad = { l: 40, r: 8, t: 10, b: 30 };
+  const W = 270, H = 140, pad = { l: 40, r: 8, t: 10, b: 30 };
   const ys = rows.map((m) => m.mean_activation), lo = Math.min(0, ...ys), hi = Math.max(0, ...ys), span = hi - lo || 1;
   const x = (a) => pad.l + a * (W - pad.l - pad.r), y = (v) => H - pad.b - ((v - lo) / span) * (H - pad.t - pad.b);
   const svg = svgEl("svg", { width: W, height: H });
@@ -144,7 +144,7 @@ function panelAgreement(group) {
   const a = group.pair_agreement;
   if (!a) return svgEl("svg", { width: 10, height: 10 });
   const rows = [a.capability, ...a.judges].filter((r) => r.p != null);
-  const W = 420, H = 12 + rows.length * 17 + 30, pad = { l: 150, r: 40, t: 10, b: 26 };
+  const W = 340, H = 12 + rows.length * 15 + 30, pad = { l: 130, r: 40, t: 10, b: 26 };
   const x = (v) => pad.l + ((v - 0.2) / 0.6) * (W - pad.l - pad.r);
   const svg = svgEl("svg", { width: W, height: H });
   svg.dataset.caption = "judged pairs whose two transcripts differ on the feature: share where the higher-activation side is picked by the judge / belongs to the more accurate model (95% CI)";
@@ -153,7 +153,7 @@ function panelAgreement(group) {
     axisText(svg, x(v), H - pad.b + 12, v, "middle", "axis");
   }
   rows.forEach((r, i) => {
-    const y = pad.t + 10 + i * 17, cap = r.who === "more accurate model";
+    const y = pad.t + 10 + i * 15, cap = r.who === "more accurate model";
     axisText(svg, pad.l - 6, y + 4, r.who, "end", cap ? "title" : "");
     if (r.lo != null) svg.append(svgEl("line", { x1: x(Math.max(0.2, r.lo)), x2: x(Math.min(0.8, r.hi)), y1: y, y2: y, stroke: cap ? "#c77d00" : "#1f4e9c", "stroke-width": 1.5 }));
     svg.append(svgEl("circle", { cx: x(Math.min(0.8, Math.max(0.2, r.p))), cy: y, r: 3.5, fill: cap ? "#c77d00" : "#1f4e9c" }));

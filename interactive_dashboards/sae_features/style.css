@@ -24,11 +24,11 @@ details.candidates { margin-top: 6px; font-size: 12px; }
 details.candidates li { margin: 2px 0; }
 #summary { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 6px; }
 figure.panel { margin: 0; background: #fff; border: 1px solid #eee; border-radius: 4px; padding: 6px 8px 2px; }
-figure.panel figcaption { font-size: 11px; font-weight: 600; color: #222; margin-bottom: 4px; max-width: 420px; line-height: 1.3; }
+figure.panel figcaption { font-size: 11px; font-weight: 600; color: #222; margin-bottom: 4px; max-width: 340px; line-height: 1.3; }
 .panel text { font-size: 10px; fill: #333; }
 .panel text.title { font-weight: 600; }
 .panel text.axis { fill: #777; }
-.trace-chart { display: block; width: 100%; height: 90px; margin: 2px 0 6px; }
+.trace-chart { display: block; width: 100%; max-width: 640px; height: 70px; margin: 2px 0 6px; }
 .trace-chart text { font-size: 10px; fill: #777; }
 .bucket h3 { font-size: 13px; margin: 18px 0 8px; color: #333; border-bottom: 1px solid #e5e5e5; padding-bottom: 3px; }
 .card { border: 1px solid #e2e2e2; border-radius: 5px; padding: 8px 10px; margin-bottom: 10px; background: #fff; }
