@@ -1,0 +1,149 @@
+data_loader:
+  paths:
+    extracted_data:
+    - judge_results/verdict_dissection/glm_inputs/stronger_model_from_pair.parquet
+data_process:
+  processors:
+  - extract_observed_feature:
+      feature_name: left_stronger
+      test: test
+  - extract_features:
+      categorical_features:
+      - bench
+      continuous_features:
+      - log_chars
+      - n_words
+      - personal_pronouns_count
+      - hedging_count
+      - backtracking_count
+      - uncertainty_count
+      - confidence_count
+      - questions_count
+      - verification_count
+      - connectives_count
+      - contrast_count
+      - numbered_steps_count
+      - bullets_count
+      - code_chars
+      - latex_chars
+      - surprisal_full_bpc__llama
+      - surprisal_question_gain_bpc__llama
+      - surprisal_total_context_gain_bpc__llama
+      - surprisal_long_context_gain_bpc__llama
+      - surprisal_rolling_short_position_adjusted_mean__llama
+      - surprisal_rolling_long_position_adjusted_mean__llama
+      - surprisal_rolling_long_question_position_adjusted_mean__llama
+      - surprisal_rolling_context_gain_position_adjusted_mean__llama
+      - surprisal_rolling_question_gain_position_adjusted_mean__llama
+      - sae_shared_0
+      - sae_shared_1
+      - sae_shared_2
+      - sae_shared_3
+      - sae_shared_4
+      - sae_shared_5
+      - sae_shared_6
+      - sae_shared_7
+      - sae_shared_8
+      - sae_shared_9
+      - sae_shared_10
+      - sae_shared_11
+      - sae_shared_12
+      - sae_shared_13
+      - sae_shared_14
+      - sae_shared_15
+      - sae_shared_16
+      - sae_shared_17
+      - sae_shared_18
+      - sae_shared_19
+      - sae_shared_20
+      - sae_shared_21
+      - sae_shared_22
+      - sae_shared_23
+      - sae_shared_24
+      - sae_shared_25
+      - sae_shared_26
+      - sae_shared_27
+      - sae_shared_28
+      - sae_shared_29
+      - sae_shared_30
+      - sae_shared_31
+      test: test
+model:
+  path: scripts/verdict_dissection/glm/model.py
+  models:
+  - name: stronger_model_from_pair
+    config:
+      predictors:
+      - log_chars
+      - n_words
+      - personal_pronouns_count
+      - hedging_count
+      - backtracking_count
+      - uncertainty_count
+      - confidence_count
+      - questions_count
+      - verification_count
+      - connectives_count
+      - contrast_count
+      - numbered_steps_count
+      - bullets_count
+      - code_chars
+      - latex_chars
+      - surprisal_full_bpc__llama
+      - surprisal_question_gain_bpc__llama
+      - surprisal_total_context_gain_bpc__llama
+      - surprisal_long_context_gain_bpc__llama
+      - surprisal_rolling_short_position_adjusted_mean__llama
+      - surprisal_rolling_long_position_adjusted_mean__llama
+      - surprisal_rolling_long_question_position_adjusted_mean__llama
+      - surprisal_rolling_context_gain_position_adjusted_mean__llama
+      - surprisal_rolling_question_gain_position_adjusted_mean__llama
+      - sae_shared_0
+      - sae_shared_1
+      - sae_shared_2
+      - sae_shared_3
+      - sae_shared_4
+      - sae_shared_5
+      - sae_shared_6
+      - sae_shared_7
+      - sae_shared_8
+      - sae_shared_9
+      - sae_shared_10
+      - sae_shared_11
+      - sae_shared_12
+      - sae_shared_13
+      - sae_shared_14
+      - sae_shared_15
+      - sae_shared_16
+      - sae_shared_17
+      - sae_shared_18
+      - sae_shared_19
+      - sae_shared_20
+      - sae_shared_21
+      - sae_shared_22
+      - sae_shared_23
+      - sae_shared_24
+      - sae_shared_25
+      - sae_shared_26
+      - sae_shared_27
+      - sae_shared_28
+      - sae_shared_29
+      - sae_shared_30
+      - sae_shared_31
+      fit:
+        samples: 1000
+        warmup: 1000
+        chains: 4
+        seed: 0
+        target_accept: 0.9
+check:
+  checkers:
+  - divergences
+  - r_hat
+  - ess_bulk
+  - ess_tail
+  - bfmi
+  - loo
+platform:
+  device_type: cpu
+  chain_method: parallel
