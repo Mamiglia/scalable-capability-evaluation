@@ -50,6 +50,7 @@ def config(model, predictors, input_path):
         "model": {"path": "scripts/verdict_dissection/glm/model.py",
                   "models": [{"name": model, "config": {"predictors": predictors, "fit": FIT}}]},
         "check": {"checkers": ["divergences", "r_hat", "ess_bulk"]},
+        "communicate": {"communicators": ["summary_table"]},     # the default plots are slow with 150 predictors
         "platform": {"device_type": "cpu", "chain_method": "parallel"},
     }
 
