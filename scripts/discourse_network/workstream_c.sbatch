@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-stage=${1:?usage: sbatch workstream_c.sbatch probe|segment|nodes|embeddings|edges|features|finish}
+stage=${1:?usage: sbatch workstream_c.sbatch probe|segment|nodes|embed-shard|embeddings|edges|features|finish}
 : "${C_CODE_DIR:?set C_CODE_DIR to the staged repository}"
 : "${C_PYTHON:?set C_PYTHON to the Linux compute-node Python}"
 : "${C_PACKAGES:?set C_PACKAGES to the staged Python packages}"
@@ -46,6 +46,12 @@ case "$stage" in
       wait "$pid" || status=1
     done
     (( status == 0 )) || exit "$status"
+    ;;
+  embed-shard)
+    : "${C_EMBED_SHARDS:?set C_EMBED_SHARDS for embed-shard}"
+    : "${SLURM_ARRAY_TASK_ID:?embed-shard requires a Slurm array}"
+    "$C_PYTHON" scripts/discourse_network/build.py --config "$config" --stop-after embeddings \
+      --cache-shard "$SLURM_ARRAY_TASK_ID" --cache-shards "$C_EMBED_SHARDS"
     ;;
   nodes|embeddings|edges|features)
     [[ $stage != embeddings || $device != cuda || -n ${CUDA_VISIBLE_DEVICES:-} ]] || {

@@ -376,6 +376,25 @@ def test_pipeline_can_stop_after_nodes(tmp_path):
     assert not (tmp_path / "node_embeddings.npy").exists()
 
 
+def test_embedding_cache_shards_partition_pending_hashes():
+    text_of = {"a": "x", "b": "xxxx", "c": "xx", "d": "xxx"}
+    whole = build._pending_hashes(text_of, {"a"})
+    left = build._pending_hashes(text_of, {"a"}, shard=0, n_shards=2)
+    right = build._pending_hashes(text_of, {"a"}, shard=1, n_shards=2)
+    assert set(left).isdisjoint(right) and set(left + right) == set(whole)
+
+
+def test_embedding_cache_only_does_not_write_matrix(tmp_path):
+    store = fake_store()
+    clauses, trees = fake_segments(store)
+    split = pd.DataFrame({"bench": store.bench, "item": store.item, "split": "representation_train"})
+    cfg = {"edges": {}, "sae": {}, "encoder": {}, "tool_types": {},
+           "python_write_markers": [], "error_markers": []}
+    result = build.run(store, clauses, trees, split, pd.DataFrame(), cfg, tmp_path,
+                       embed=lambda *_: None, stop_after="embeddings")
+    assert len(result) and not (tmp_path / "node_embeddings.npy").exists()
+
+
 def test_build_import_does_not_require_the_pair_builder():
     code = ("import sys; sys.path.insert(0, 'scripts'); sys.path.insert(0, 'scripts/verdict_dissection'); "
             "sys.modules['aggregate_surprisal'] = None; import discourse_network.build")

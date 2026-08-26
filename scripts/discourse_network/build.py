@@ -55,6 +55,15 @@ def _save_npz(path, **arrays):
         np.savez(handle, **arrays)
 
 
+def _pending_hashes(text_of, known, shard=None, n_shards=None):
+    ordered = sorted(text_of, key=lambda digest: (len(text_of[digest]), digest))
+    if shard is None:
+        return [digest for digest in ordered if digest not in known]
+    if not n_shards or not 0 <= shard < n_shards:
+        raise ValueError(f"invalid cache shard {shard}/{n_shards}")
+    return [digest for i, digest in enumerate(ordered) if i % n_shards == shard and digest not in known]
+
+
 # ---------------------------------------------------------------- steps
 
 def make_nodes(store, clauses, cfg):
@@ -93,22 +102,27 @@ def embed_nodes(texts, cfg):
     cache = Path(cfg["cache_dir"])
     cache.mkdir(parents=True, exist_ok=True)
     known = {}                                                        # text hash -> vector, from earlier blocks
-    for path in sorted(cache.glob("block-*.npz")):
+    for path in sorted(cache.rglob("block-*.npz")):
         z = np.load(path)
         known.update(zip(z["hashes"].tolist(), z["vectors"]))
     digest = [hashlib.sha1(c.encode()).hexdigest() for c in chunks]
-    todo = sorted({d for d in digest if d not in known})
     text_of = dict(zip(digest, chunks))
-    todo.sort(key=lambda d: len(text_of[d]))                          # length-sorted batches run faster
+    shard, n_shards = cfg.get("cache_shard"), cfg.get("cache_shards")
+    todo = _pending_hashes(text_of, known, shard, n_shards)
+    write_cache = cache if shard is None else cache / f"shard-{shard:02d}"
+    write_cache.mkdir(exist_ok=True)
     block = cfg.get("block_size", 20000)
-    for b, start in enumerate(range(0, len(todo), block), start=len(list(cache.glob("block-*.npz")))):
+    for b, start in enumerate(range(0, len(todo), block), start=len(list(write_cache.glob("block-*.npz")))):
         part = todo[start:start + block]
         vectors = model.encode([text_of[d] for d in part], batch_size=cfg["batch_size"], normalize_embeddings=True,
                                convert_to_numpy=True, show_progress_bar=False)
-        _atomic(cache / f"block-{b:04d}.npz",
+        _atomic(write_cache / f"block-{b:04d}.npz",
                 lambda path: _save_npz(path, hashes=np.array(part), vectors=vectors.astype(np.float32)))
         known.update(zip(part, vectors))
-        print(f"embedded chunks {min(start + block, len(todo))}/{len(todo)}", flush=True)
+        label = "" if shard is None else f" shard {shard}/{n_shards}"
+        print(f"embedded{label} chunks {min(start + block, len(todo))}/{len(todo)}", flush=True)
+    if cfg.get("cache_only"):
+        return None
     dim = len(next(iter(known.values())))
     out = np.zeros((len(texts), dim), dtype=np.float32)
     np.add.at(out, np.asarray(owner), np.stack([known[d] for d in digest]))
@@ -205,6 +219,8 @@ def run(store, clauses, trees, split, verdicts, cfg, out_dir, embed=embed_nodes,
     if not (out_dir / "node_embeddings.npy").exists():
         encoder_cfg = cfg["encoder"] | {"cache_dir": out_dir / "embed_cache"}
         values = embed(nodes.text.fillna("").tolist(), encoder_cfg)
+        if values is None:
+            return nodes
         _atomic(out_dir / "node_embeddings.npy", lambda path: _save_npy(path, values))
     embeddings = np.load(out_dir / "node_embeddings.npy")
     if stop_after == "embeddings":
@@ -245,8 +261,16 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", type=Path, default=ROOT / "configs" / "workstream_c.yaml")
     ap.add_argument("--stop-after", choices=["nodes", "embeddings", "edges", "features"])
+    ap.add_argument("--cache-shard", type=int)
+    ap.add_argument("--cache-shards", type=int)
     args = ap.parse_args()
+    if (args.cache_shard is None) != (args.cache_shards is None):
+        ap.error("--cache-shard and --cache-shards must be used together")
+    if args.cache_shard is not None and args.stop_after != "embeddings":
+        ap.error("cache shards require --stop-after embeddings")
     cfg = yaml.safe_load(args.config.read_text())
+    if args.cache_shard is not None:
+        cfg["encoder"] |= {"cache_shard": args.cache_shard, "cache_shards": args.cache_shards, "cache_only": True}
     out_dir, freeze = ROOT / cfg["out_dir"], ROOT / cfg["freeze"]
     segments, shards = out_dir / "segments", cfg["segmenter"]["shards"]
     missing = [i for i in range(shards) if not (segments / f"shard-{i}.clauses.parquet").exists()]
