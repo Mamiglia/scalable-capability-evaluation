@@ -11,7 +11,7 @@
 # GLM_GRID picks the grid directory (jobs.txt, configs/, fits/); default is the ablation grid:
 #   sbatch --array=1-9 --export=ALL,GLM_GRID=judge_results/verdict_dissection/glm_waves repo/scripts/verdict_dissection/glm/cluster.sbatch grid
 set -euo pipefail
-stage=${1:?usage: cluster.sbatch setup|grid}
+stage=${1:?usage: cluster.sbatch setup|grid|rescore}
 staging=$SLURM_SUBMIT_DIR
 venv=$staging/venv
 export MPLCONFIGDIR=${SLURM_TMPDIR:-/tmp}/matplotlib-$SLURM_JOB_ID XDG_CACHE_HOME=${SLURM_TMPDIR:-/tmp}/cache-$SLURM_JOB_ID
@@ -38,6 +38,17 @@ case "$stage" in
     if [ -f "$out/held_out_$model.csv" ]; then echo "already done: $job"; exit 0; fi
     [ -f "$out/models/$model/inference_data.nc" ] || "$venv/bin/hibayes-full" --config "$config" --out "$out" --no-tui
     "$venv/bin/python" scripts/verdict_dissection/glm/evaluate.py "$config" "$out"
+    ;;
+  rescore)
+    # re-run the held-out scoring for every finished fit in the grid (after an evaluate.py change)
+    grid_dir=${GLM_GRID:-judge_results/verdict_dissection/glm_ablations}
+    cd "$staging/repo"
+    while read -r job; do
+      model=${job%%/*}; ablation=${job#*/}
+      out=$grid_dir/fits/$model/$ablation
+      [ -f "$out/models/$model/inference_data.nc" ] || continue
+      "$venv/bin/python" scripts/verdict_dissection/glm/evaluate.py "$grid_dir/configs/$model/$ablation.yaml" "$out"
+    done < "$staging/repo/$grid_dir/jobs.txt"
     ;;
   *) echo "unknown stage: $stage" >&2; exit 2 ;;
 esac

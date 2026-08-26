@@ -4,7 +4,10 @@
 
 Draws posterior-predictive outcomes for the test rows (hibayes stores them but never scores
 them), averages over draws, and reports accuracy and log loss for the Bernoulli models or
-RMSE and Spearman correlation for the Gaussian one, overall and per benchmark or judge.
+RMSE and Spearman correlation for the Gaussian one, overall and per benchmark or judge. For
+the capability model it also scores at model level: predictions averaged over each held-out
+model's transcripts, Spearman against true accuracy across models within each benchmark (rows
+"models: <benchmark>") and across all (model, benchmark) pairs after centring by benchmark.
 """
 import argparse
 import pickle
@@ -52,6 +55,21 @@ def report(observed, predicted, groups, gaussian):
     return pd.DataFrame(rows)
 
 
+def model_level(observed, predicted, test_rows):
+    """Spearman between per-model mean prediction and truth, within benchmark and benchmark-centred overall."""
+    frame = pd.DataFrame({"bench": test_rows.bench.to_numpy(), "model": test_rows.model.to_numpy(),
+                          "observed": observed, "predicted": predicted})
+    means = frame.groupby(["bench", "model"], as_index=False)[["observed", "predicted"]].mean()
+    rows = []
+    for bench, group in means.groupby("bench"):
+        rows.append({"group": f"models: {bench}", "n": len(group),
+                     "spearman": float(spearmanr(group.observed, group.predicted).statistic) if len(group) > 2 else np.nan})
+    centred = means[["observed", "predicted"]] - means.groupby("bench")[["observed", "predicted"]].transform("mean")
+    rows.append({"group": "models: all benchmarks, centred", "n": len(means),
+                 "spearman": float(spearmanr(centred.observed, centred.predicted).statistic)})
+    return pd.DataFrame(rows)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", type=Path)
@@ -66,6 +84,12 @@ def main():
     group_index = np.asarray(test_features[f"{group_column}_index"])
     groups = {label: group_index == i for i, label in enumerate(coords[group_column])}
     table = report(observed, predicted, groups, gaussian=model_name == "capability_from_transcript")
+    if model_name == "capability_from_transcript":
+        input_path = Path(yaml.safe_load(args.config.read_text())["data_loader"]["paths"]["extracted_data"][0])
+        test_rows = pd.read_parquet(input_path, columns=["bench", "model", "test"]).query("test")   # hibayes keeps this order
+        if len(test_rows) != len(observed):
+            raise ValueError(f"{len(test_rows)} test rows in the input but {len(observed)} test outcomes")
+        table = pd.concat([table, model_level(observed, predicted, test_rows)], ignore_index=True)
     table.to_csv(args.out_dir / f"held_out_{model_name}.csv", index=False)
     print(table.to_string(index=False))
 
