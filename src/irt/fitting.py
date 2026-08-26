@@ -17,20 +17,28 @@ from numpyro.infer import MCMC, NUTS
 from irt.data import IRTData, encode, pick_epoch
 
 
-def one_pl(model_idx, item_idx, n_models, n_items, y=None):
+def one_pl(model_idx, item_idx, n_models, n_items, y=None, guess=None):
     """
     Rasch (1PL): one ability per model, one difficulty per item.
 
     P(correct) = sigmoid(theta[model] - b[item])
+    or, with a known guessing floor c per item (1/n_choices on MCQ, 0 on free-form):
+    P(correct) = c[item] + (1 - c[item]) * sigmoid(theta[model] - b[item])
 
     theta: model ability, higher is stronger.
     b: item difficulty, higher is harder.
     model_idx, item_idx: the model and item behind each response.
     n_models, n_items: how many of each. y: observed 0/1, None to sample.
+    guess: fixed per-item floor (array of n_items), None for plain Rasch.
     """
     theta = numpyro.sample("theta", dist.Normal(0, 1).expand([n_models]))
     b = numpyro.sample("b", dist.Normal(0, 1).expand([n_items]))
-    numpyro.sample("y", dist.Bernoulli(logits=theta[model_idx] - b[item_idx]), obs=y)
+    logit = theta[model_idx] - b[item_idx]
+    if guess is None:
+        numpyro.sample("y", dist.Bernoulli(logits=logit), obs=y)
+    else:
+        c = guess[item_idx]
+        numpyro.sample("y", dist.Bernoulli(probs=c + (1 - c) * jax.nn.sigmoid(logit)), obs=y)
 
 
 def two_pl(model_idx, item_idx, n_models, n_items, y=None):

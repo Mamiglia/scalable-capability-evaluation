@@ -4,7 +4,7 @@ from inspect_ai import Task
 from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
-from configs.experiment import ExperimentConfig
+from configs.experiment import ExperimentConfig, successful_evals
 from configs.logs import logger
 from judge.dataset import MAX_LENGTH, build_dataset
 from judge.scorer import judge_scorer
@@ -25,6 +25,8 @@ def judge_task(
     truncate_frac: float | None = None,
     experiment_name: str | None = None,
     task_name: str | None = None,
+    items: set[str] | None = None,
+    metadata: dict | None = None,
 ) -> Task | None:
     """Build the judging task that compares one major eval log against one minor log.
 
@@ -58,6 +60,7 @@ def judge_task(
         include_reverse=include_reverse,
         include_reasoning=include_reasoning,
         truncate_frac=truncate_frac,
+        items=items,
     )
     if len(dataset) == 0:
         logger.warning("%s: no samples after filtering (%s vs %s), skipping", name, major_path, minor_path)
@@ -82,31 +85,46 @@ def judge_task(
             "truncate_frac": truncate_frac,
             "max_length": max_length,
             "experiment_name": experiment_name,
+            **(metadata or {}),
         },
     )
 
 
-def build_judge_tasks(experiment: ExperimentConfig) -> list[Task]:
-    """One judging task per <major log, minor log> pair the experiment resolves to."""
-    pairs = experiment.resolve_pairs()
+def build_tasks(experiment: ExperimentConfig) -> list[Task]:
+    """One judging task per <bench of the domain, pair of models>, on the q_src items."""
+    exp = experiment
+    items = exp.items(exp.q_src)
+    acc = exp.accuracy(exp.q_dst)
     tasks = []
-    for index, (major, minor) in enumerate(pairs):
-        # Several pairs in one eval_set need distinct names, or their logs collide.
-        # Inspect builds file:// URLs from log paths, so "#" in the filename truncates the path
-        # at urlparse() time and breaks header reads.
-        task_name = experiment.task_name if len(pairs) == 1 else f"{experiment.task_name}+{index}"
-        task = judge_task(
-            major_path=major,
-            minor_path=minor,
-            system_prompt=experiment.system_prompt,
-            max_length=experiment.max_length,
-            require_both_correct=experiment.require_both_correct,
-            include_reverse=experiment.include_reverse,
-            include_reasoning=experiment.include_reasoning,
-            truncate_frac=experiment.truncate_frac or None,
-            experiment_name=experiment.name,
-            task_name=task_name,
-        )
-        if task is not None:
-            tasks.append(task)
+    for bench in exp.domain.benches:
+        task_cfg = exp.domain.task(bench)
+        if task_cfg.name not in items:
+            logger.warning("%s: no Q%d items on %s", exp.name, exp.q_src, task_cfg.name)
+            continue
+        logs = {m.shortname.lower(): successful_evals(task_cfg, m) for m in exp.models}
+        for major, minor in exp.ordered_pairs():
+            names = major.shortname.lower(), minor.shortname.lower()
+            if not all(logs[n] for n in names):
+                logger.warning("%s: no logs on %s for %s, skipping pair", exp.name, task_cfg.name,
+                               [n for n in names if not logs[n]])
+                continue
+            task = judge_task(
+                logs[names[0]][0], logs[names[1]][0],
+                system_prompt=bench.system_prompt or exp.system_prompt,
+                max_length=exp.max_length,
+                include_reverse=exp.include_reverse,
+                include_reasoning=exp.include_reasoning,
+                truncate_frac=exp.truncate_frac or None,
+                experiment_name=exp.name,
+                task_name=f"{task_cfg.name}/{names[0]}|{names[1]}",
+                items=items[task_cfg.name],
+                # Data-dir model names and the ground truth, so ranking.verdicts reads logs alone.
+                metadata={"domain": exp.domain.name, "bench": task_cfg.name, "major": names[0],
+                          "minor": names[1], "q_src": exp.q_src, "q_dst": exp.q_dst,
+                          "acc_major": float(acc[names[0]]), "acc_minor": float(acc[names[1]])},
+            )
+            if task is not None:
+                tasks.append(task)
+    if not tasks:
+        raise ValueError(f"{exp.name}: nothing to judge")
     return tasks

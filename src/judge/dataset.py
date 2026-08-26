@@ -174,6 +174,7 @@ def build_dataset(
     include_reverse: bool = True,
     include_reasoning: bool = True,
     truncate_frac: float | None = None,
+    items: set[str] | None = None,
 ) -> MemoryDataset:
     """Build the judging dataset comparing a major and a minor model's eval log.
 
@@ -187,13 +188,17 @@ def build_dataset(
         include_reverse: also add each pair with the transcripts swapped.
         include_reasoning: include CoT reasoning blocks in the transcripts.
         truncate_frac: length-control fraction, see ``responses_to_sample``.
+        items: question ids to keep (e.g. one difficulty quartile); None = all.
     """
     self_pair = Path(major_path) == Path(minor_path)
     major = read_transcripts(major_path, require_both_correct, include_reasoning)
     minor = major if self_pair else read_transcripts(minor_path, require_both_correct, include_reasoning)
 
+    ids = major.keys() & minor.keys()
+    if items is not None:
+        ids &= {str(item) for item in items}
     samples = []
-    for sample_id in sorted(major.keys() & minor.keys()):
+    for sample_id in sorted(ids):
         if self_pair:
             # Self-pair control: two distinct correct epochs of the same model.
             if len(major[sample_id]) < 2:
