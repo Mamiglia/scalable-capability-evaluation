@@ -31,7 +31,7 @@ error_markers: [Traceback, "command not found", "No such file", "Error:", "error
 edges:
   max_parents: 3
   k_similar: 2                              # long-range parents by embedding cosine, per target
-  similarity_threshold: 0.60
+  similarity_threshold: 0.70
 
 sae:                                        # Top-K SAEs on node embeddings and edge vectors, fitted per group
   width: 32
