@@ -52,7 +52,7 @@ def main():
     table["mean"] = table.mean(axis=1)
     table = table.sort_values("mean", ascending=False)
     if args.output:
-        table.to_csv(args.output)
+        table.round(3).to_csv(args.output)
     print(table.round(3).to_string())
 
 
