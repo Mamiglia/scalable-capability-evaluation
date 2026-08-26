@@ -87,7 +87,7 @@ sae:
   centre_by_item: true   # subtract the item mean embedding: raw embeddings are ~80% question identity
   # BatchTopK SAE, WIMHF recipe (Movva et al. 2025, configs/*.json in rmovva/wimhf)
   width: 32
-  top_k: 4
+  top_k: 8
   matryoshka_prefixes: [8, 32]
   dead_neuron_threshold_steps: 64
   batch_size: 256

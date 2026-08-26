@@ -3,8 +3,10 @@ item-centred embeddings, then score the activations as pair regressors.
 
 Per fit: held-out reconstruction, how many features fire on >= 5% of rows, mean active features
 per transcript, and the accuracy of a logistic regression on left - right activations predicting
-pick_left, cross-validated with items grouped, per benchmark group. The same regression on the
-2,560 centred embedding dimensions is the dense reference. Development rows only.
+pick_left, cross-validated with items grouped, per benchmark group; optionally the same for
+left_stronger (which side's model has the higher development solve rate; one row per transcript
+pair, ties dropped) read from the pair design matrix. The same regression on the 2,560 centred
+embedding dimensions is the dense reference. Development rows only.
 """
 import argparse
 import json
@@ -21,6 +23,7 @@ from transcript_sae import (apply_sae, balance_by_benchmark, centre_by_item, exp
 from transcript_sae_tables import KEYS, build_pairs
 
 DEVELOPMENT = ("representation_train", "representation_validation")
+PAIR_KEYS = ["bench", "item", "model_left", "model_right", "epoch_left", "epoch_right", "log_left", "log_right"]
 C_GRID = (0.01, 0.1, 1.0)
 
 
@@ -46,14 +49,15 @@ def grouped_accuracy(features: np.ndarray, target: np.ndarray, groups: np.ndarra
     return float((predictions == target).mean())
 
 
-def score_block(pairs: pd.DataFrame, columns: list[str], group_of: dict[str, str]) -> dict[str, float]:
+def score_block(pairs: pd.DataFrame, columns: list[str], group_of: dict[str, str],
+                target: str = "pick_left") -> dict[str, float]:
     """Accuracy per benchmark group (fit groups from the config) and pooled over their rows."""
     out, correct, total = {}, 0, 0
     for group in sorted(set(group_of.values())):
         rows = pairs[pairs["bench"].map(group_of) == group]
         if not len(rows):
             continue
-        accuracy = grouped_accuracy(rows[columns].to_numpy(np.float32), rows["pick_left"].to_numpy(bool),
+        accuracy = grouped_accuracy(rows[columns].to_numpy(np.float32), rows[target].to_numpy(bool),
                                     rows["item"].to_numpy())
         out[group] = accuracy
         correct += accuracy * len(rows)
@@ -75,6 +79,21 @@ def development_pairs(verdicts: pd.DataFrame, frame: pd.DataFrame) -> pd.DataFra
     return pairs[pairs["split_role"].isin(DEVELOPMENT)].reset_index(drop=True)
 
 
+def stronger_pairs(pairs: pd.DataFrame, labels: pd.DataFrame) -> pd.DataFrame:
+    """One row per transcript pair with a stronger-side label (left_stronger = +1 / -1)."""
+    unique = pairs.drop_duplicates(PAIR_KEYS).merge(labels, on=PAIR_KEYS, how="inner", validate="one_to_one")
+    unique = unique[unique["left_stronger"].notna()].reset_index(drop=True)
+    return unique.assign(left_stronger=unique["left_stronger"] > 0)
+
+
+def scores(pairs: pd.DataFrame, columns: list[str], group_of: dict[str, str], labels: pd.DataFrame | None) -> dict:
+    out = {f"acc_{k}": v for k, v in score_block(pairs, columns, group_of).items()}
+    if labels is not None:
+        out |= {f"stronger_{k}": v for k, v in
+                score_block(stronger_pairs(pairs, labels), columns, group_of, "left_stronger").items()}
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dense-dir", type=Path, required=True)
@@ -82,6 +101,8 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("configs/workstream_b.yaml"))
     parser.add_argument("--output", type=Path, required=True, help="results table (csv)")
     parser.add_argument("--skip-dense", action="store_true", help="skip the 2,560-dim reference (slow)")
+    parser.add_argument("--stronger-pairs", type=Path,
+                        help="pair design matrix (build_design_matrices.py) with a left_stronger column")
     args = parser.parse_args()
     config = yaml.safe_load(args.config.read_text())["sae"]
     group_of = {bench: group for group, benches in config["fit_groups"].items() for bench in benches}
@@ -89,6 +110,8 @@ def main() -> None:
     rows, inputs, _ = load_dense_artifacts(args.dense_dir)
     audit = pd.read_parquet(args.dense_dir / "audit_rows.parquet")
     verdicts = pd.read_parquet(args.verdicts)
+    labels = (pd.read_parquet(args.stronger_pairs, columns=PAIR_KEYS + ["left_stronger"]).drop_duplicates(PAIR_KEYS)
+              if args.stronger_pairs else None)
     inputs = centre_by_item(np.asarray(inputs, dtype=np.float32), rows["item_group_key"].to_numpy())
     benchmarks = rows["benchmark"].to_numpy()
     train_mask = balance_by_benchmark(rows["split_role"].eq("representation_train").to_numpy(), benchmarks, config["seed"])
@@ -99,7 +122,7 @@ def main() -> None:
         pairs = development_pairs(verdicts, transcript_frame(audit, rows, inputs, "dim_"))
         columns = [c for c in pairs if c.startswith("d_dim_")]
         results.append({"width": "dense", "top_k": "", "validation_ev": 1.0, "features_over_5pct": inputs.shape[1],
-                        "mean_active": inputs.shape[1]} | {f"acc_{k}": v for k, v in score_block(pairs, columns, group_of).items()})
+                        "mean_active": inputs.shape[1]} | scores(pairs, columns, group_of, labels))
         print(json.dumps(results[-1]), flush=True)
     for entry in config["sweep"]:
         fit_config = config | entry
@@ -115,7 +138,7 @@ def main() -> None:
             "features_over_5pct": int(((activations != 0).mean(axis=0) >= 0.05).sum()),
             "mean_active": float((activations != 0).sum(axis=1).mean()),
             "epochs_run": len(history["train_loss"]),
-        } | {f"acc_{k}": v for k, v in score_block(pairs, columns, group_of).items()})
+        } | scores(pairs, columns, group_of, labels))
         print(json.dumps(results[-1]), flush=True)
     table = pd.DataFrame(results)
     args.output.parent.mkdir(parents=True, exist_ok=True)
