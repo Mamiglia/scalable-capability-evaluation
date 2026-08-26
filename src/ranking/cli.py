@@ -1,4 +1,4 @@
-"""Rank models per benchmark from a verdict table, score against accuracy, optionally bootstrap."""
+"""Rank models from a verdict table, score against accuracy on the validation items, optionally bootstrap."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,23 +50,17 @@ def main() -> int:
     out = Path(cfg.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    scores, intervals = [], []
-    for bench, judged in verdicts.groupby("bench"):
-        ranking = rank(judged, drop_ties=cfg.drop_ties, ridge=cfg.ridge)
-        ranking.to_csv(out / f"ranking_{bench}.csv", index=False)
-        bench_validation = validation[validation.bench == bench]
-        result = score(ranking, bench_validation, correlation=cfg.correlation)
-        scores.append({"bench": bench, **result})
-        print(f"{bench}: {result['n_models']} models, {result['n_items']} items, "
-              f"{cfg.correlation} {result['correlation']:.3f}")
-        if cfg.n_resamples:
-            draws = bootstrap(judged, bench_validation, n_resamples=cfg.n_resamples, seed=cfg.seed, drop_ties=cfg.drop_ties,
-                              ridge=cfg.ridge, correlation=cfg.correlation)
-            intervals.append(draws["ability"].assign(bench=bench))
-            scores[-1].update({f"correlation_{q}": v for q, v in draws["correlation"].items()})
-    pd.DataFrame(scores).to_csv(out / "scores.csv", index=False)
-    if intervals:
-        pd.concat(intervals).to_csv(out / "bootstrap.csv", index=False)
+    ranking = rank(verdicts, drop_ties=cfg.drop_ties, ridge=cfg.ridge)
+    ranking.to_csv(out / "ranking.csv", index=False)
+    result = score(ranking, validation, correlation=cfg.correlation)
+    print(f"{result['n_models']} models, {result['n_items']} validation items, "
+          f"{cfg.correlation} {result['correlation']:.3f}")
+    if cfg.n_resamples:
+        draws = bootstrap(verdicts, validation, n_resamples=cfg.n_resamples, seed=cfg.seed,
+                          drop_ties=cfg.drop_ties, ridge=cfg.ridge, correlation=cfg.correlation)
+        draws["ability"].to_csv(out / "bootstrap.csv", index=False)
+        result.update({f"correlation_{q}": v for q, v in draws["correlation"].items()})
+    pd.DataFrame([result]).to_csv(out / "scores.csv", index=False)
     print(f"wrote {out}")
     return 0
 

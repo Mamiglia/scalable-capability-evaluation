@@ -117,7 +117,7 @@ def test_bootstrap_brackets_point_estimate_and_is_seeded():
     assert not bootstrap(judged, table, n_resamples=20, seed=1)["ability"].equals(result["ability"])
 
 
-def test_cli_filters_and_writes_per_benchmark(monkeypatch, tmp_path):
+def test_cli_filters_ranks_and_scores(monkeypatch, tmp_path):
     abilities = {"strong": 2.0, "middle": 0.5, "weak": -1.0}
     judged = pd.concat([simulated_verdicts(abilities, n_items=30).assign(bench=b, judge=j)
                         for b in ("gpqa", "aime") for j in ("judge-1", "judge-2")])
@@ -134,8 +134,8 @@ def test_cli_filters_and_writes_per_benchmark(monkeypatch, tmp_path):
                                      "--models", "[strong,weak]", "--n_resamples", "5"])
     assert cli_main() == 0
     scores = pd.read_csv(tmp_path / "out" / "scores.csv")
-    assert sorted(scores.bench) == ["aime", "gpqa"] and (scores.n_models == 2).all() and (scores.n_items == 10).all()
-    ranking = pd.read_csv(tmp_path / "out" / "ranking_gpqa.csv")
+    assert len(scores) == 1 and scores.n_models[0] == 2 and scores.n_items[0] == 2 * 10  # 10 validation items per bench
+    ranking = pd.read_csv(tmp_path / "out" / "ranking.csv")
     assert list(ranking.model) == ["strong", "weak"]
-    assert ranking.n_comparisons.sum() == 2 * 20 * 2  # one judge, one pair, both orders, 20 judged items, two sides
-    assert set(pd.read_csv(tmp_path / "out" / "bootstrap.csv").bench) == {"aime", "gpqa"}
+    assert ranking.n_comparisons.sum() == 2 * 2 * 20 * 2  # two benches, one judge, one pair, both orders, 20 items, two sides
+    assert set(pd.read_csv(tmp_path / "out" / "bootstrap.csv").model) == {"strong", "weak"}

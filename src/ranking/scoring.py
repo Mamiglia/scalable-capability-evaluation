@@ -1,9 +1,10 @@
 """
 How good a ranking is: rank correlation between fitted ability and benchmark accuracy.
 
-Accuracy is taken over every item in the validation table passed in, so pass the whole benchmark, a hard subset, or the items the
-judges never saw. bootstrap() resamples the judged items to put intervals on
-the abilities and the correlation; the validation set stays fixed.
+Accuracy is taken over every item in the validation table passed in, so pass
+the whole benchmark, a hard subset, or the items the judges never saw.
+bootstrap() resamples the judged items to put intervals on the abilities and
+the correlation; the validation set stays fixed.
 """
 
 import numpy as np
