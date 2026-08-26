@@ -53,6 +53,18 @@ def design(table, predictors, model, group_levels, item_levels, deviation_ratio,
     return sp.hstack(blocks).tocsr()
 
 
+def coefficients(estimator, predictors, group_levels, deviation_ratio):
+    """Population slope and each group's slope (population + deviation) per predictor, on the predictors' scale."""
+    coef = np.asarray(estimator.coef_).ravel()
+    n = len(predictors)
+    population = coef[:n]
+    deviations = coef[n:n + n * len(group_levels)].reshape(len(group_levels), n) / np.sqrt(deviation_ratio)
+    table = pd.DataFrame({"population": population}, index=pd.Index(predictors, name="feature"))
+    for g, level in enumerate(group_levels):
+        table[level] = population + deviations[g]
+    return table
+
+
 def fit(x, y, gaussian, penalty):
     if gaussian:
         return Ridge(alpha=penalty, fit_intercept=True).fit(x, y)
@@ -107,6 +119,7 @@ def run(table, predictors, model, use_accuracy_gap, out_dir, inner_group_column)
             placement(train_predicted, predicted, rows).to_csv(out_dir / f"placement_{model}.csv", index=False)
     scores.to_csv(out_dir / f"held_out_{model}.csv", index=False)
     pd.Series({"population_penalty": penalty, "deviation_ratio": ratio}).to_csv(out_dir / "penalties.csv")
+    coefficients(estimator, predictors, levels[0], ratio).to_csv(out_dir / f"coefficients_{model}.csv")
     return scores.loc[0, "spearman" if gaussian else "accuracy"]
 
 
@@ -117,20 +130,25 @@ def main():
     parser.add_argument("--models", nargs="+", default=list(MODELS), choices=list(MODELS))
     parser.add_argument("--waves", nargs="+", help="feature sets to fit (default: all in waves.py)")
     parser.add_argument("--predictors", type=Path, default=HERE / "predictors.yaml", help="predictor list (predictors-dense.yaml for the embedding set)")
+    parser.add_argument("--designs", nargs="+", help="held-out designs to fit (default: every directory in inputs_dir)")
+    parser.add_argument("--drop-one", action="store_true", help="also fit each feature set with one predictor removed at a time")
     args = parser.parse_args()
     predictors = yaml.safe_load(args.predictors.read_text())
     feature_sets = {name: kept for name, kept in waves(predictors).items() if not args.waves or name in args.waves}
     for model in args.models:
-        for design_dir in sorted(p for p in args.inputs_dir.iterdir() if p.is_dir()):
+        for design_dir in sorted(p for p in args.inputs_dir.iterdir() if p.is_dir() and (not args.designs or p.name in args.designs)):
             table = pd.read_parquet(design_dir / f"{model}.parquet")
             inner_group = "model" if model == "capability_from_transcript" else "model_left"   # inner CV groups by model
             for wave, kept in feature_sets.items():
                 specs = {wave: False, f"{wave}+accuracy-gap": True} if model == "judge_verdict_from_pair" else {wave: False}
-                for wave_name, use_gap in specs.items():
+                variants = {name: (kept, gap) for name, gap in specs.items()}
+                if args.drop_one:                                # the set minus one predictor, for every predictor
+                    variants |= {f"{wave}-drop-{feature}": ([p for p in kept if p != feature], False) for feature in kept}
+                for wave_name, (features, use_gap) in variants.items():
                     out_dir = args.fits_dir / model / wave_name / design_dir.name
                     if (out_dir / f"held_out_{model}.csv").exists():
                         continue                                # already fitted; delete the folder to redo
-                    score = run(table, kept, model, use_gap, out_dir, inner_group)
+                    score = run(table, features, model, use_gap, out_dir, inner_group)
                     print(f"{model} {wave_name} {design_dir.name}: {score:.3f}", flush=True)
 
 
