@@ -110,12 +110,19 @@ def with_accuracy(transcript, pair, accuracy):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--models", nargs="+", default=["capability_from_transcript", "stronger_model_from_pair", "judge_verdict_from_pair"])
+    parser.add_argument("--dense", action="store_true", help="add the 2,560 dense embedding columns (qwen_dim_*) as predictors")
     args = parser.parse_args()
     config = yaml.safe_load((ROOT / "configs/design_matrices.yaml").read_text())
     design_matrices = Path(config["output_root"])
     predictors = yaml.safe_load((HERE / "predictors.yaml").read_text())
 
     transcript = pd.read_parquet(design_matrices / "transcript.parquet")
+    if args.dense:
+        dense = [c for c in transcript.columns if c.startswith("qwen_dim_")]
+        predictors = predictors + dense
+        (HERE / "predictors-dense.yaml").write_text("# predictors.yaml plus the dense embedding columns (written by prepare.py --dense)\n"
+                                                    + "".join(f"- {name}\n" for name in predictors))
     missing = [name for name in predictors if name not in transcript]
     if missing:
         raise ValueError(f"predictors not in the transcript design matrix: {missing}")
@@ -129,7 +136,8 @@ def main():
     for design in designs():
         design_dir = args.output_dir / design
         design_dir.mkdir(parents=True, exist_ok=True)
-        for build in (capability_from_transcript, stronger_model_from_pair, judge_verdict_from_pair):
+        builders = {b.__name__: b for b in (capability_from_transcript, stronger_model_from_pair, judge_verdict_from_pair)}
+        for build in (builders[name] for name in args.models):
             table = build(transcript if build is capability_from_transcript else pair, predictors, design)
             table = table[table.role != "drop"].assign(test=lambda t: t.role == "test").drop(columns="role")
             table.to_parquet(design_dir / f"{build.__name__}.parquet", index=False)

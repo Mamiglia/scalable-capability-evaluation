@@ -28,11 +28,12 @@ SURPRISAL_LOCAL = ["surprisal_local_mean__llama", "surprisal_rolling_short_posit
 def waves(predictors):
     """Feature sets to fit, each an explicit list. Surprisal "local" needs only the 32-64 token window;
     "global" needs the full transcript and question context."""
-    surface = [p for p in predictors if not p.startswith("sae_") and "surprisal" not in p and p != "n_words"]
+    surface = [p for p in predictors if not p.startswith(("sae_", "qwen_dim_")) and "surprisal" not in p and p != "n_words"]
     sae = [p for p in predictors if p.startswith("sae_shared_")]
     surprisal_local = [p for p in predictors if p in SURPRISAL_LOCAL]
     surprisal_global = [p for p in predictors if "surprisal" in p and p not in SURPRISAL_LOCAL]
-    return {
+    embedding = [p for p in predictors if p.startswith("qwen_dim_")]     # only present with prepare.py --dense
+    return {**({"embedding": embedding} if embedding else {}),
         "length": ["log_chars"],
         "surface": surface,
         "sae": sae,

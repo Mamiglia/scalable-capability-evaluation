@@ -113,8 +113,9 @@ def main():
     parser.add_argument("fits_dir", type=Path)
     parser.add_argument("--models", nargs="+", default=list(MODELS), choices=list(MODELS))
     parser.add_argument("--waves", nargs="+", help="feature sets to fit (default: all in waves.py)")
+    parser.add_argument("--predictors", type=Path, default=HERE / "predictors.yaml", help="predictor list (predictors-dense.yaml for the embedding set)")
     args = parser.parse_args()
-    predictors = yaml.safe_load((HERE / "predictors.yaml").read_text())
+    predictors = yaml.safe_load(args.predictors.read_text())
     feature_sets = {name: kept for name, kept in waves(predictors).items() if not args.waves or name in args.waves}
     for model in args.models:
         for design_dir in sorted(p for p in args.inputs_dir.iterdir() if p.is_dir()):
