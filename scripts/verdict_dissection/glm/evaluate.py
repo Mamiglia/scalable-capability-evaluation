@@ -11,6 +11,8 @@ model's transcripts, Spearman against true accuracy across models within each be
 When whole models are held out it also writes placement_<model>.csv: per benchmark, the
 Spearman over all models' mean predictions (held-out models predicted, seen models fitted)
 and the held-out models' mean true and predicted rank among them (1 = most accurate).
+Every fit also writes predictions_<model>.csv: the held-out rows' identifiers, outcome and
+mean prediction, so folds can be stitched into out-of-sample predictions for every model.
 """
 import argparse
 import pickle
@@ -91,6 +93,11 @@ def model_level(observed, predicted, test_rows):
     return pd.DataFrame(rows)
 
 
+IDENTIFIERS = {"capability_from_transcript": ["bench", "item", "model"],
+               "stronger_model_from_pair": ["bench", "item", "model_left", "model_right"],
+               "judge_verdict_from_pair": ["bench", "item", "judge", "model_left", "model_right"]}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", type=Path)
@@ -114,8 +121,14 @@ def main():
     groups = {label: group_index == i for i, label in enumerate(coords[group_column])}
     table = report(observed, predicted, groups, gaussian=model_name == "capability_from_transcript")
 
+    input_path = Path(config["data_loader"]["paths"]["extracted_data"][0])
+    held_out_rows = pd.read_parquet(input_path, columns=IDENTIFIERS[model_name] + ["test"]).query("test")
+    if len(held_out_rows) != len(observed):
+        raise ValueError(f"{len(held_out_rows)} test rows in the input but {len(observed)} test outcomes")
+    held_out_rows.drop(columns="test").assign(observed=observed, predicted=predicted).to_csv(
+        args.out_dir / f"predictions_{model_name}.csv", index=False)
+
     if model_name == "capability_from_transcript":
-        input_path = Path(config["data_loader"]["paths"]["extracted_data"][0])
         rows = pd.read_parquet(input_path, columns=["bench", "model", "test", "logit_model_accuracy"])
         rows = pd.concat([rows[~rows.test], rows[rows.test]]).rename(columns={"logit_model_accuracy": "observed"})
         test_rows = rows[rows.test]     # hibayes keeps the input order within train and test
