@@ -96,6 +96,14 @@ sae:
   min_epochs: 10
   patience: 3
   seed: 0
+  # shared-dictionary size sweep (transcript_sae_sweep.py): each entry overrides width / top_k / prefixes
+  sweep:
+    - {width: 32, top_k: 4, matryoshka_prefixes: [8, 32]}
+    - {width: 32, top_k: 8, matryoshka_prefixes: [8, 32]}
+    - {width: 32, top_k: 16, matryoshka_prefixes: [8, 32]}
+    - {width: 64, top_k: 4, matryoshka_prefixes: [8, 32, 64]}
+    - {width: 64, top_k: 8, matryoshka_prefixes: [8, 32, 64]}
+    - {width: 64, top_k: 16, matryoshka_prefixes: [8, 32, 64]}
 
 descriptions:
   # WIMHF interpretation + fidelity (configs/*.json in rmovva/wimhf), adapted to single transcripts
