@@ -13,13 +13,13 @@ from ranking.scoring import bootstrap, score
 @dataclass
 class RankConfig:
     verdicts: str  # parquet: bench, judge, item, model_left, model_right, pick_left
-    correctness: str  # parquet: bench, model, item, correct
+    validation: str  # parquet: bench, model, item, correct
     out_dir: str
     benches: list[str] = field(default_factory=list)  # empty list = keep all
     judges: list[str] = field(default_factory=list)
     models: list[str] = field(default_factory=list)  # both models of a verdict must be listed
     items_csv: str = ""  # file with an item column: items to rank on; empty = all
-    truth_items_csv: str = ""  # file with an item column: items to validate on; empty = whole benchmark
+    validation_items_csv: str = ""  # file with an item column: items to validate on; empty = whole benchmark
     drop_ties: bool = False
     ridge: float = RIDGE
     correlation: str = "kendall"  # or spearman
@@ -44,9 +44,9 @@ def select(verdicts: pd.DataFrame, cfg: RankConfig) -> pd.DataFrame:
 def main() -> int:
     cfg = draccus.parse(RankConfig)
     verdicts = select(pd.read_parquet(cfg.verdicts), cfg)
-    correctness = pd.read_parquet(cfg.correctness)
-    if cfg.truth_items_csv:
-        correctness = correctness[correctness.item.isin(pd.read_csv(cfg.truth_items_csv).item)]
+    validation = pd.read_parquet(cfg.validation)
+    if cfg.validation_items_csv:
+        validation = validation[validation.item.isin(pd.read_csv(cfg.validation_items_csv).item)]
     out = Path(cfg.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -54,13 +54,13 @@ def main() -> int:
     for bench, judged in verdicts.groupby("bench"):
         ranking = rank(judged, drop_ties=cfg.drop_ties, ridge=cfg.ridge)
         ranking.to_csv(out / f"ranking_{bench}.csv", index=False)
-        truth = correctness[correctness.bench == bench]
-        result = score(ranking, truth, correlation=cfg.correlation)
+        bench_validation = validation[validation.bench == bench]
+        result = score(ranking, bench_validation, correlation=cfg.correlation)
         scores.append({"bench": bench, **result})
         print(f"{bench}: {result['n_models']} models, {result['n_items']} items, "
               f"{cfg.correlation} {result['correlation']:.3f}")
         if cfg.n_resamples:
-            draws = bootstrap(judged, truth, n_resamples=cfg.n_resamples, seed=cfg.seed, drop_ties=cfg.drop_ties,
+            draws = bootstrap(judged, bench_validation, n_resamples=cfg.n_resamples, seed=cfg.seed, drop_ties=cfg.drop_ties,
                               ridge=cfg.ridge, correlation=cfg.correlation)
             intervals.append(draws["ability"].assign(bench=bench))
             scores[-1].update({f"correlation_{q}": v for q, v in draws["correlation"].items()})
