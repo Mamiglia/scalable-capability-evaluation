@@ -2,7 +2,8 @@
 
     uv run python scripts/verdict_dissection/glm/compare_to_judges.py <capability_fits> <pair_fits> [<pair_fits> ...] --output <csv>
 
-Stitches the four model folds so every model is predicted while unseen, then per benchmark scores
+Stitches the four folds named by --folds (default the model folds; the new-models-and-items folds give
+every model unseen on unseen items) so every model is predicted while unseen, then per benchmark scores
 each ranking by Spearman against the models' benchmark accuracy (src/ranking.score):
 - capability GLM: each model's mean predicted logit accuracy over its transcripts;
 - stronger-model GLM, and any baseline written in the same layout (scripts/baselines/): Bradley-Terry
@@ -24,11 +25,11 @@ from build_design_matrices import pool_aime  # noqa: E402
 MODEL_FOLDS = ["model-fold-0", "model-fold-1", "model-fold-2", "model-fold-3"]
 
 
-def stitched(fits_dir, model):
-    """Held-out predictions from the four model folds, concatenated (every model held out once)."""
+def stitched(fits_dir, model, folds=MODEL_FOLDS):
+    """Held-out predictions from the given folds, concatenated (every model held out once)."""
     frames = []
     for wave_dir in sorted(p for p in (fits_dir / model).glob("*") if p.is_dir()):
-        for fold in MODEL_FOLDS:
+        for fold in folds:
             path = wave_dir / fold / f"predictions_{model}.csv"
             if path.exists():
                 frames.append(pd.read_csv(path).assign(wave=wave_dir.name))
@@ -46,6 +47,7 @@ def main():
     parser.add_argument("capability_fits", type=Path)
     parser.add_argument("pair_fits", type=Path, nargs="+")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--folds", nargs="+", default=MODEL_FOLDS, help="designs to stitch")
     args = parser.parse_args()
     config = yaml.safe_load((ROOT / "configs/design_matrices.yaml").read_text())
     identity = pool_aime(pd.read_parquet(Path(config["features_root"]) / "raw/identity.parquet",
@@ -53,12 +55,12 @@ def main():
     validation = identity[identity.is_canonical].drop(columns="is_canonical")   # every canonical rollout
     rows = []
 
-    capability = stitched(args.capability_fits, "capability_from_transcript")
+    capability = stitched(args.capability_fits, "capability_from_transcript", args.folds)
     for wave, frame in capability.groupby("wave"):
         means = frame.groupby(["bench", "model"], as_index=False).predicted.mean().rename(columns={"predicted": "ability"})
         rows += score_by_bench({b: g for b, g in means.groupby("bench")}, validation, f"capability GLM, {wave}")
 
-    stronger = pd.concat([stitched(fits, "stronger_model_from_pair") for fits in args.pair_fits])
+    stronger = pd.concat([stitched(fits, "stronger_model_from_pair", args.folds) for fits in args.pair_fits])
     for wave, frame in stronger.groupby("wave"):
         verdicts = frame.rename(columns={"predicted": "pick_left"}).assign(judge=wave)
         rows += score_by_bench({b: rank(g) for b, g in verdicts.groupby("bench")}, validation,
