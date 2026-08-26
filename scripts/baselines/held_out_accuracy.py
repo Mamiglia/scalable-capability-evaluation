@@ -41,6 +41,15 @@ def fitted(fits_dirs, folds):
     return table.groupby(["wave", "bench"]).correct.mean().unstack("bench")
 
 
+def display_name(wave):
+    """Row names matching the rankings table: GLM waves, GBM waves, deterministic rules."""
+    if wave.startswith("gbm-"):
+        return "GBM, " + wave[4:]
+    if wave in ("tfidf", "pick-shorter", "pick-longer"):
+        return wave
+    return "length GLM" if wave == "length" else "GLM, " + wave
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs_dir", type=Path)
@@ -48,7 +57,8 @@ def main():
     parser.add_argument("--folds", nargs="+", required=True)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    table = pd.concat([judges(args.inputs_dir, args.folds), fitted(args.fits_dirs, args.folds)])
+    table = pd.concat([judges(args.inputs_dir, args.folds), fitted(args.fits_dirs, args.folds).rename(index=display_name)])
+    table.index.name = "ranking"
     table["mean"] = table.mean(axis=1)
     table = table.sort_values("mean", ascending=False)
     if args.output:
