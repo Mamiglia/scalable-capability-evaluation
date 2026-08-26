@@ -33,6 +33,7 @@ def waves(predictors):
     surprisal_local = [p for p in predictors if p in SURPRISAL_LOCAL]
     surprisal_global = [p for p in predictors if "surprisal" in p and p not in SURPRISAL_LOCAL]
     return {
+        "length": ["log_chars"],
         "surface": surface,
         "sae": sae,
         "surface+sae": surface + sae,

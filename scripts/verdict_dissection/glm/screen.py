@@ -112,13 +112,15 @@ def main():
     parser.add_argument("inputs_dir", type=Path)
     parser.add_argument("fits_dir", type=Path)
     parser.add_argument("--models", nargs="+", default=list(MODELS), choices=list(MODELS))
+    parser.add_argument("--waves", nargs="+", help="feature sets to fit (default: all in waves.py)")
     args = parser.parse_args()
     predictors = yaml.safe_load((HERE / "predictors.yaml").read_text())
+    feature_sets = {name: kept for name, kept in waves(predictors).items() if not args.waves or name in args.waves}
     for model in args.models:
         for design_dir in sorted(p for p in args.inputs_dir.iterdir() if p.is_dir()):
             table = pd.read_parquet(design_dir / f"{model}.parquet")
             inner_group = "item" if design_dir.name.startswith("item-fold") else ("model" if model == "capability_from_transcript" else "model_left")
-            for wave, kept in waves(predictors).items():
+            for wave, kept in feature_sets.items():
                 specs = {wave: False, f"{wave}+accuracy-gap": True} if model == "judge_verdict_from_pair" else {wave: False}
                 for wave_name, use_gap in specs.items():
                     score = run(table, kept, model, use_gap, args.fits_dir / model / wave_name / design_dir.name, inner_group)
