@@ -1,12 +1,12 @@
 """Rank models from the feature GLMs' out-of-sample predictions and compare with judge-derived ranks.
 
-    uv run python scripts/verdict_dissection/glm/compare_to_judges.py <capability_fits> <pair_fits> <output_csv>
+    uv run python scripts/verdict_dissection/glm/compare_to_judges.py <capability_fits> <pair_fits> [<pair_fits> ...] --output <csv>
 
 Stitches the four model folds so every model is predicted while unseen, then per benchmark scores
 each ranking by Spearman against the models' benchmark accuracy (src/ranking.score):
 - capability GLM: each model's mean predicted logit accuracy over its transcripts;
-- stronger-model GLM: Bradley-Terry ability (src/ranking.rank) fitted to the GLM's held-out pair
-  predictions, i.e. the GLM treated as a judge;
+- stronger-model GLM, and any baseline written in the same layout (scripts/baselines/): Bradley-Terry
+  ability (src/ranking.rank) fitted to the held-out pair predictions, i.e. the model treated as a judge;
 - each LLM judge, and all judges pooled: Bradley-Terry ability from their verdicts.
 """
 import argparse
@@ -41,8 +41,8 @@ def score_by_bench(ranking_by_bench, validation, label):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("capability_fits", type=Path)
-    parser.add_argument("pair_fits", type=Path)
-    parser.add_argument("output_csv", type=Path)
+    parser.add_argument("pair_fits", type=Path, nargs="+")
+    parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     config = yaml.safe_load((ROOT / "configs/design_matrices.yaml").read_text())
     identity = pd.read_parquet(Path(config["features_root"]) / "raw/identity.parquet",
@@ -55,11 +55,11 @@ def main():
         means = frame.groupby(["bench", "model"], as_index=False).predicted.mean().rename(columns={"predicted": "ability"})
         rows += score_by_bench({b: g for b, g in means.groupby("bench")}, validation, f"capability GLM, {wave}")
 
-    stronger = stitched(args.pair_fits, "stronger_model_from_pair")
+    stronger = pd.concat([stitched(fits, "stronger_model_from_pair") for fits in args.pair_fits])
     for wave, frame in stronger.groupby("wave"):
-        verdicts = frame.rename(columns={"predicted": "pick_left"}).assign(judge="stronger-model GLM")
+        verdicts = frame.rename(columns={"predicted": "pick_left"}).assign(judge=wave)
         rows += score_by_bench({b: rank(g) for b, g in verdicts.groupby("bench")}, validation,
-                               f"stronger-model GLM as judge, {wave}")
+                               f"stronger-model {wave} as judge")
 
     verdicts = pd.read_parquet(Path(config["output_root"]) / "pair.parquet",
                                columns=["bench", "judge", "item", "model_left", "model_right", "pick_left"])
@@ -67,7 +67,7 @@ def main():
         rows += score_by_bench({b: rank(g) for b, g in frame.groupby("bench")}, validation, f"judge {judge}")
 
     table = pd.DataFrame(rows)
-    table.to_csv(args.output_csv, index=False)
+    table.to_csv(args.output, index=False)
     wide = table.pivot(index="ranking", columns="bench", values="correlation")
     wide["mean"] = wide.mean(axis=1)
     print(wide.sort_values("mean", ascending=False).round(2).to_string())

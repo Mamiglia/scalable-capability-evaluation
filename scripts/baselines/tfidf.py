@@ -90,7 +90,7 @@ def run_design(design, pairs, transcripts, left, right):
     out = []
     for bench, block in pairs.groupby("bench"):
         docs = (transcripts.bench == bench).to_numpy()
-        if not test[block.index].any():
+        if not test[block.index].any() or test[block.index].all():     # nothing to predict, or nothing to fit on
             continue
         vectoriser = TfidfVectorizer(**VECTORISER).fit(transcripts.text[docs & seen])
         local = pd.Series(np.arange(docs.sum()), index=transcripts.index[docs])
