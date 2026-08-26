@@ -27,12 +27,12 @@ MODEL_FOLDS = ["model-fold-0", "model-fold-1", "model-fold-2", "model-fold-3"]
 def stitched(fits_dir, model):
     """Held-out predictions from the four model folds, concatenated (every model held out once)."""
     frames = []
-    for wave_dir in sorted(p for p in (fits_dir / model).iterdir() if p.is_dir()):
+    for wave_dir in sorted(p for p in (fits_dir / model).glob("*") if p.is_dir()):
         for fold in MODEL_FOLDS:
             path = wave_dir / fold / f"predictions_{model}.csv"
             if path.exists():
                 frames.append(pd.read_csv(path).assign(wave=wave_dir.name))
-    return pd.concat(frames) if frames else pd.DataFrame()
+    return pd.concat(frames) if frames else pd.DataFrame(columns=["wave"])
 
 
 def score_by_bench(ranking_by_bench, validation, label):

@@ -4,7 +4,7 @@
 
 Same rows and held-out designs as the stronger-model GLM (scripts/verdict_dissection/glm/prepare.py):
 one row per distinct transcript pair, ties in benchmark accuracy dropped, a pair held out when
-either transcript is. The vectoriser is fitted on the training transcripts only (so a held-out
+either transcript is; AIME years pooled. The vectoriser is fitted on the training transcripts only (so a held-out
 model's vocabulary is never seen); one logistic regression per benchmark with no intercept, since
 the differences are antisymmetric; C chosen on inner folds grouped by item. Text is the assistant
 spans of the rendered transcript, as for the surface features.
@@ -27,6 +27,7 @@ from sklearn.model_selection import GroupKFold
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/verdict_dissection"))
 sys.path.insert(0, str(ROOT / "scripts/verdict_dissection/glm"))
+from build_design_matrices import pool_aime          # noqa: E402
 from features_basic import _assistant_text          # noqa: E402
 from prepare import PAIR_IDENTITY, designs, held_out  # noqa: E402
 
@@ -36,11 +37,17 @@ C_GRID = (0.01, 0.1, 1.0, 10.0, 100.0)
 VECTORISER = dict(ngram_range=(1, 2), min_df=5, max_features=50_000, sublinear_tf=True, dtype=np.float32)
 
 
+def load_identity(config, columns):
+    """Canonical rollouts with the AIME years pooled, as in the design matrices."""
+    identity = pd.read_parquet(Path(config["features_root"]) / "raw/identity.parquet", columns=columns + ["is_canonical"])
+    return pool_aime(identity[identity.is_canonical].drop(columns="is_canonical"))
+
+
 def load_pairs(config):
-    """One row per distinct transcript pair; left_stronger by the models' accuracy over all rollouts."""
+    """One row per distinct transcript pair; left_stronger by the models' accuracy over all canonical rollouts."""
     pairs = pd.read_parquet(Path(config["output_root"]) / "pair.parquet", columns=PAIR_IDENTITY).drop_duplicates()
-    accuracy = pd.read_parquet(Path(config["features_root"]) / "raw/model-benchmark-accuracy.parquet",
-                               columns=["bench", "model", "accuracy"])
+    accuracy = (load_identity(config, ["bench", "model", "item", "correct"]).groupby(["bench", "model"], as_index=False)
+                .correct.mean().rename(columns={"correct": "accuracy"}))
     for side in ("left", "right"):
         pairs = pairs.merge(accuracy.rename(columns={"model": f"model_{side}", "accuracy": f"accuracy_{side}"}),
                             on=["bench", f"model_{side}"], how="left", validate="many_to_one")
@@ -52,9 +59,8 @@ def load_pairs(config):
 
 def load_transcripts(config):
     """Assistant text of every canonical transcript, one per transcript key."""
-    identity = pd.read_parquet(Path(config["features_root"]) / "raw/identity.parquet",
-                               columns=TRANSCRIPT_KEYS + ["sample_epoch", "transcript", "is_canonical"])
-    identity = identity[identity.is_canonical].sort_values("sample_epoch").drop_duplicates(TRANSCRIPT_KEYS)
+    identity = load_identity(config, TRANSCRIPT_KEYS + ["sample_epoch", "transcript"])
+    identity = identity.sort_values("sample_epoch").drop_duplicates(TRANSCRIPT_KEYS)
     return (identity[TRANSCRIPT_KEYS].assign(text=identity.transcript.map(_assistant_text))
             .reset_index(drop=True))
 
