@@ -8,6 +8,8 @@
 # Run from the staging directory on the cluster (it holds wheels/, repo/, logs/):
 #   sbatch repo/scripts/verdict_dissection/glm/cluster.sbatch setup
 #   sbatch --array=1-492%24 --dependency=afterok:<setup job id> repo/scripts/verdict_dissection/glm/cluster.sbatch grid
+# GLM_GRID picks the grid directory (jobs.txt, configs/, fits/); default is the ablation grid:
+#   sbatch --array=1-9 --export=ALL,GLM_GRID=judge_results/verdict_dissection/glm_waves repo/scripts/verdict_dissection/glm/cluster.sbatch grid
 set -euo pipefail
 stage=${1:?usage: cluster.sbatch setup|grid}
 staging=$SLURM_SUBMIT_DIR
@@ -26,12 +28,13 @@ case "$stage" in
     "$venv/bin/python" -c 'import hibayes.cli.full, numpyro, arviz; print("venv ok")'
     ;;
   grid)
-    job=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$staging/repo/judge_results/verdict_dissection/glm_ablations/jobs.txt")
+    grid_dir=${GLM_GRID:-judge_results/verdict_dissection/glm_ablations}
+    job=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$staging/repo/$grid_dir/jobs.txt")
     model=${job%%/*}
     ablation=${job#*/}
     cd "$staging/repo"
-    config=judge_results/verdict_dissection/glm_ablations/configs/$model/$ablation.yaml
-    out=judge_results/verdict_dissection/glm_ablations/fits/$model/$ablation
+    config=$grid_dir/configs/$model/$ablation.yaml
+    out=$grid_dir/fits/$model/$ablation
     if [ -f "$out/held_out_$model.csv" ]; then echo "already done: $job"; exit 0; fi
     [ -f "$out/models/$model/inference_data.nc" ] || "$venv/bin/hibayes-full" --config "$config" --out "$out" --no-tui
     "$venv/bin/python" scripts/verdict_dissection/glm/evaluate.py "$config" "$out"
