@@ -19,7 +19,7 @@ MODELS = {
     "stronger_model_from_pair": dict(target="left_stronger", categorical=["bench"]),
     "judge_verdict_from_pair": dict(target="pick_left", categorical=["judge"]),
 }
-FIT = {"samples": 1000, "warmup": 1000, "chains": 4, "seed": 0, "target_accept": 0.9}
+FIT = {"samples": 500, "warmup": 500, "chains": 4, "seed": 0, "target_accept": 0.85}   # screening settings; ESS ~300-500
 
 
 def waves(predictors):
