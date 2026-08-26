@@ -1,0 +1,9 @@
+# CYBER domain, the 50 default pairs, gemma4-31b judge. q_src is the quartile judged (1 = easiest),
+# q_dst the quartile whose accuracy is the ground truth. Any field is a CLI override:
+#   uv run judge --cfg configs/experiments/cyber.yml --q_src 2 [--include_reasoning false --limit 2]
+name: cyber
+domain: configs/domain/cyber.yml
+judge: configs/models/google/gemma4-31b.yml
+q_src: 1
+q_dst: 4
+pairs: !include pairs.yml

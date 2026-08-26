@@ -1,5 +1,4 @@
 # Quantization: unquantized bf16 on Novita. CoreWeave dropped its bf16 endpoint on
-# 2026-08-24 (fp4 only now); OpenInference bf16 silently drops the second transcript on
 # long prompts, so it is never used.
 name: google/gemma-4-31b-it
 slug: openrouter/google/gemma-4-31b-it
@@ -7,7 +6,7 @@ release_date: '2026-03-31'
 generate_args:
   # Novita rejects requests without an output cap ("input is longer than the model's
   # context length"); the longest verdict incl. reasoning seen is ~4k tokens.
-  max_tokens: 16384
+  max_tokens: 65536
   extra_body:
     reasoning:
       enabled: true

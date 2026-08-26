@@ -1,9 +1,0 @@
-name: ibm-vs-llama-custom
-judge: !include ../models/inclusionai/ling-2.6-flash.yml
-major: ibm-granite/granite-4.0-h-micro
-minor: meta-llama/llama-3.1-8b-instruct
-benchmark: !include ../bench/gsm8k.yml
-pairs:
-  - [0, 0]
-  - [0, 1]
-mode: custom

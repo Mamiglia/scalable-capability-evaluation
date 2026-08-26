@@ -1,150 +1,116 @@
-"""Judge experiment configuration dataclass."""
+"""Judge experiment: every pair of a model set, judged on one difficulty quartile of a domain."""
 
 import hashlib
 from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Tuple
+from typing import Any, Dict, List, Tuple
 
-from configs.task import TaskConfig
-from configs.model import ModelConfig
+import pandas as pd
+
 from configs.base import DraccusConfig
-from configs.logs import logger
+from configs.domain import DomainConfig
+from configs.model import ModelConfig
 from configs.paths import get_eval_path, is_successful_eval
+from configs.task import TaskConfig
 
 
-def condition_hash(
-    system_prompt: str,
-    include_reasoning: bool,
-    truncate_frac: float,
-    max_length: int,
-    require_both_correct: bool,
-    include_reverse: bool,
-) -> str:
-    """8-char hash of everything that changes what the judge sees, besides the pair."""
-    condition = (
-        str(system_prompt), bool(include_reasoning), float(truncate_frac or 0.0), int(max_length),
-        bool(require_both_correct), bool(include_reverse),
-    )
-    return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
+def successful_evals(task: TaskConfig, model: ModelConfig) -> List[Path]:
+    """Successful eval logs for <task, model>, ordered by repeat number."""
+    eval_path = get_eval_path(task=task, model=model)
+    by_repeat: Dict[int, Path] = {}
+    for eval_file in eval_path.rglob("*.eval"):
+        if not eval_file.parent.name.isdigit():
+            raise ValueError(
+                f"Evaluation file {eval_file} is not in a numbered repeat directory. The data "
+                f"layout is <benchmark>/<task_args_hash>/<model>/<repeat>/<eval_file>.eval"
+            )
+        if not is_successful_eval(eval_file):
+            continue
+        repeat = int(eval_file.parent.name)
+        if repeat in by_repeat:
+            raise ValueError(
+                f"Multiple successful evaluation files found for repeat {repeat} in {eval_path}."
+            )
+        by_repeat[repeat] = eval_file
+    return [by_repeat[repeat] for repeat in sorted(by_repeat)]
 
 
 @dataclass(kw_only=True)
 class ExperimentConfig(DraccusConfig):
+    domain: DomainConfig | str
     judge: ModelConfig | str
-    major: ModelConfig | str
-    minor: ModelConfig | str
-    benchmark: TaskConfig | str
+    # Which pairs to judge: ``pairs`` explicitly (model config paths), else every unordered
+    # pair of ``models``. The default pair set is configs/experiments/pairs.yml.
+    pairs: List[List[Any]] = field(default_factory=list)
+    models: List[Any] = field(default_factory=list)
+    q_src: int  # quartile whose items the judge sees (1 = easiest)
+    q_dst: int = 4  # quartile whose accuracy is the ground truth for major/minor
 
-    mode: Literal["paired", "combinatorial", "custom"] = "paired"
-    # Optional[...] breaks draccus on py3.14; 0 / empty / None-default plain types mean unset.
-    pairs: List[Tuple[int, int]] = field(default_factory=list)
-
-    require_both_correct: bool = True
     include_reverse: bool = True
     include_reasoning: bool = True
     max_length: int = 262144
-    system_prompt: str = 'assets/system_prompt/default.txt'
-    # Length control: cut both transcripts to this fraction of the shorter one. 0 = off.
-    truncate_frac: float = 0.0
+    system_prompt: str = "assets/system_prompt/default.txt"
+    truncate_frac: float = 0.0  # 0 = off
+    temperature: float = 0.0
+    cache: bool = True  # inspect generate cache, never expires: repeated pairs are free
 
-    # Optional[...] breaks draccus on py3.14; empty / zero means unset.
-    log_dir: Path = Path('logs/judge/')
-    epochs: int = 0
+    log_dir: Path = Path("logs/rank/")
     limit: int = 0
 
-    def model_evals(self, model: ModelConfig) -> List[Path]:
-        """Successful eval logs for <benchmark, model>, ordered by repeat number."""
-        eval_path = get_eval_path(
-            task=self.benchmark,
-            model=model,
-        )
-        by_repeat: Dict[int, Path] = {}
-        for eval_file in eval_path.rglob("*.eval"):
-            if not eval_file.parent.name.isdigit():
-                raise ValueError(
-                    f"Evaluation file {eval_file} is not in a numbered repeat directory. The data "
-                    f"layout is <benchmark>/<task_args_hash>/<model>/<repeat>/<eval_file>.eval"
-                )
-            if not is_successful_eval(eval_file):
-                continue
-            repeat = int(eval_file.parent.name)
-            if repeat in by_repeat:
-                raise ValueError(
-                    f"Multiple successful evaluation files found for repeat {repeat} in {eval_path}."
-                )
-            by_repeat[repeat] = eval_file
-
-        return [by_repeat[repeat] for repeat in sorted(by_repeat)]
-
-    @property
-    def task_name(self) -> str:
-        """Return a name for the task based on the benchmark and model names."""
-        return f"{self.benchmark.name}/{self.major.shortname}|{self.minor.shortname}"
-
-    def resolve_pairs(self) -> List[Tuple[Path, Path]]:
-        """Pair up the major and minor eval logs to compare, according to ``mode``."""
-        major_evals = self.model_evals(self.major)
-        minor_evals = self.model_evals(self.minor)
-        if not major_evals or not minor_evals:
-            missing = [
-                model.shortname
-                for model, evals in ((self.major, major_evals), (self.minor, minor_evals))
-                if not evals
-            ]
-            raise ValueError(
-                f"No successful eval logs for {', '.join(missing)} on "
-                f"{self.benchmark.name} — collect them first."
-            )
-
-        if self.major.name == self.minor.name:
-            # Self-pair control: with one epoch per log, two distinct repeats is the only
-            # way to get two transcripts of the same model for a question.
-            if len(major_evals) < 2:
-                raise ValueError(f"{self.task_name}: self-pair needs at least two repeats")
-            return list(combinations(major_evals, 2))
-        if self.mode == "paired":
-            n = min(len(major_evals), len(minor_evals))
-            if n != len(major_evals) or n != len(minor_evals):
-                logger.warning("%s: trimming paired evals from major=%d, minor=%d to %d",
-                               self.task_name, len(major_evals), len(minor_evals), n)
-            return list(zip(major_evals[:n], minor_evals[:n]))
-        if self.mode == "combinatorial":
-            return [(m, n) for m in major_evals for n in minor_evals]
-        if self.mode == "custom":
-            if not self.pairs:
-                raise ValueError("Custom mode requires 'pairs' to be specified as a list of (major_index, minor_index) tuples.")
-            return [(major_evals[i], minor_evals[j]) for i, j in self.pairs]
-        raise ValueError(f"Unknown mode {self.mode!r}")
-
     def __post_init__(self):
+        if isinstance(self.domain, (str, Path)):
+            self.domain = DomainConfig.from_cli(self.domain)
         if isinstance(self.judge, (str, Path)):
             self.judge = ModelConfig.from_cli(self.judge)
-        if isinstance(self.major, (str, Path)):
-            self.major = ModelConfig.from_cli(self.major)
-        if isinstance(self.minor, (str, Path)):
-            self.minor = ModelConfig.from_cli(self.minor)
-        if isinstance(self.benchmark, (str, Path)):
-            self.benchmark = TaskConfig.from_cli(self.benchmark)
-        # <root>/<bench>/<judge>/<condition hash>: inspect can't tell two conditions apart
-        # on its own (same task names, same judge model), so the condition is in the path.
-        # All pairs of a condition share the directory; task names keep them apart.
-        self.log_dir = (
-            self.log_dir / self.benchmark.name / self.judge.shortname.lower() / self.condition_hash
-        )
+        as_model = lambda m: m if isinstance(m, ModelConfig) else ModelConfig.from_cli(m)
+        if self.pairs:
+            if self.models:
+                raise ValueError("give either pairs or models, not both")
+            self.pairs = [[as_model(a), as_model(b)] for a, b in self.pairs]
+            self.models = list({m.shortname.lower(): m for pair in self.pairs for m in pair}.values())
+        else:
+            self.models = [as_model(m) for m in self.models]
+            if len(self.models) < 2:
+                raise ValueError("an experiment needs at least two models")
+            self.pairs = [list(pair) for pair in combinations(self.models, 2)]
+        for q in (self.q_src, self.q_dst):
+            if q not in (1, 2, 3, 4):
+                raise ValueError(f"quartiles are 1..4, got {q}")
+        self.log_dir = self.log_dir / self.domain.name / self.judge.shortname.lower() / self.condition_hash
 
     @property
     def condition_hash(self) -> str:
-        return condition_hash(
-            self.system_prompt, self.include_reasoning, self.truncate_frac, self.max_length,
-            self.require_both_correct, self.include_reverse,
+        condition = (
+            int(self.q_src), int(self.q_dst), str(self.system_prompt), bool(self.include_reasoning),
+            float(self.truncate_frac or 0.0), int(self.max_length), bool(self.include_reverse),
+            float(self.temperature),
         )
+        return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
+
+    def items(self, quartile: int) -> Dict[str, set]:
+        """bench -> item ids in that quartile."""
+        table = self.domain.load_items()
+        table = table[table.quartile == quartile]
+        return {bench: set(group.item) for bench, group in table.groupby("bench")}
+
+    def accuracy(self, quartile: int) -> pd.Series:
+        """Per model: mean correctness over the domain's items in that quartile (repeats averaged)."""
+        resp = self.domain.load_responses().merge(self.domain.load_items()[["bench", "item", "quartile"]])
+        resp = resp[resp.quartile == quartile]
+        return resp.groupby(["model", "bench", "item"]).correct.mean().groupby("model").mean()
+
+    def ordered_pairs(self) -> List[Tuple[ModelConfig, ModelConfig]]:
+        """The pairs as (major, minor): major has the higher q_dst accuracy (ties by name)."""
+        acc = self.accuracy(self.q_dst)
+        missing = [m.shortname for m in self.models if m.shortname.lower() not in acc.index]
+        if missing:
+            raise ValueError(f"no responses in domain {self.domain.name} Q{self.q_dst} for {missing}")
+        key = lambda m: (-acc[m.shortname.lower()], m.shortname.lower())
+        return [tuple(sorted(pair, key=key)) for pair in self.pairs]
 
     def eval_kwargs(self) -> Dict[str, Any]:
-        """Return keyword arguments for inspect_ai.eval."""
         kwargs = dict(self._kwargs)
         if self.limit:
             kwargs["limit"] = self.limit
-        if self.epochs:
-            kwargs["epochs"] = self.epochs
         return kwargs

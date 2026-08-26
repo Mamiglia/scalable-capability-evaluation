@@ -1,6 +1,0 @@
-name: test
-judge: !include ../models/inclusionai/ling-2.6-flash.yml
-major: google/gemma-4-31b-it
-minor: google/gemma-4-26b-it
-benchmark: !include ../bench/core-bench/medium.yml
-mode: paired

@@ -1,6 +1,0 @@
-name: gemma-v-qwen
-judge: openrouter/moonshotai/kimi-k2.6
-major: google/gemma-4-31b-it
-minor: qwen/qwen3.5-9b
-benchmark: !include ../../bench/core-bench/medium.yml
-mode: paired
