@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 
 from ranking import bootstrap, rank, score
+from ranking.cli import main as cli_main
 
 
 def verdicts(rows):
@@ -112,3 +113,23 @@ def test_bootstrap_brackets_point_estimate_and_is_seeded():
     again = bootstrap(judged, table, n_resamples=20, seed=0)
     assert again["ability"].equals(result["ability"])
     assert not bootstrap(judged, table, n_resamples=20, seed=1)["ability"].equals(result["ability"])
+
+
+def test_cli_filters_and_writes_per_benchmark(monkeypatch, tmp_path):
+    abilities = {"strong": 2.0, "middle": 0.5, "weak": -1.0}
+    judged = pd.concat([simulated_verdicts(abilities, n_items=30).assign(bench=b, judge=j)
+                        for b in ("gpqa", "aime") for j in ("judge-1", "judge-2")])
+    table = pd.concat([simulated_correctness(abilities, n_items=30).assign(bench=b) for b in ("gpqa", "aime")])
+    judged.to_parquet(tmp_path / "verdicts.parquet")
+    table.to_parquet(tmp_path / "correctness.parquet")
+    monkeypatch.setattr("sys.argv", ["rank", "--verdicts", str(tmp_path / "verdicts.parquet"),
+                                     "--correctness", str(tmp_path / "correctness.parquet"),
+                                     "--out_dir", str(tmp_path / "out"), "--judges", "[judge-1]",
+                                     "--models", "[strong,weak]", "--n_resamples", "5"])
+    assert cli_main() == 0
+    scores = pd.read_csv(tmp_path / "out" / "scores.csv")
+    assert sorted(scores.bench) == ["aime", "gpqa"] and (scores.n_models == 2).all()
+    ranking = pd.read_csv(tmp_path / "out" / "ranking_gpqa.csv")
+    assert list(ranking.model) == ["strong", "weak"]
+    assert ranking.n_comparisons.sum() == 2 * 30 * 2  # one judge, one pair, both orders, 30 items, two sides
+    assert set(pd.read_csv(tmp_path / "out" / "bootstrap.csv").bench) == {"aime", "gpqa"}
