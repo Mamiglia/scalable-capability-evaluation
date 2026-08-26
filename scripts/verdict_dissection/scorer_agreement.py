@@ -203,7 +203,30 @@ def figure_all_quantities(pair_table):
         fig.savefig(OUT / f"all_quantities.{ext}", dpi=300, bbox_inches="tight")
 
 
+def figure_local_full_heatmaps(transcript):
+    """Per benchmark: Spearman between the six columns {local, full} mean surprisal × three scorers."""
+    plt = style()
+    columns = [f"surprisal_{pass_}_mean__{s}" for pass_ in ("local", "full") for s in SCORERS]
+    labels = [f"{pass_} {s}" for pass_ in ("local", "full") for s in SCORERS]
+    fig, axes = plt.subplots(1, 4, figsize=(7.2, 2.1))
+    for ax, bench in zip(axes, BENCHES):
+        corr = transcript.loc[transcript.bench == bench, columns].corr(method="spearman").to_numpy()
+        image = ax.imshow(corr, vmin=0, vmax=1, cmap="Blues")
+        for i in range(6):
+            for j in range(6):
+                ax.text(j, i, f"{corr[i, j]:.2f}", ha="center", va="center", fontsize=5.5,
+                        color="white" if corr[i, j] > 0.7 else "black")
+        ax.set_xticks(range(6)); ax.set_yticks(range(6))
+        ax.set_xticklabels(labels, rotation=90); ax.set_yticklabels(labels if ax is axes[0] else [])
+        ax.tick_params(length=0); ax.spines[["left", "bottom"]].set_visible(False)
+        ax.set_title(BENCH_LABEL[bench], loc="left", fontsize=7, color="grey")
+    fig.colorbar(image, ax=axes, shrink=0.6, pad=0.02, label="Spearman")
+    for ext in ("png", "svg"):
+        fig.savefig(OUT / f"local_full_heatmaps.{ext}", dpi=300, bbox_inches="tight")
+
+
 if __name__ == "__main__":
+    figure_local_full_heatmaps(load()[0])
     pair_table = pd.read_csv(OUT / "pairwise.csv")
     target_table = pd.read_csv(OUT / "target.csv")
     figure_glm_quantities(pair_table, target_table)
