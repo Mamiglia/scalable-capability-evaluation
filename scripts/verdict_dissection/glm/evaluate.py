@@ -4,7 +4,7 @@
 
 Draws posterior-predictive outcomes for the test rows (hibayes stores them but never scores
 them), averages over draws, and reports accuracy and log loss for the Bernoulli models or
-RMSE and Spearman correlation for the Gaussian one, overall and per group.
+RMSE and Spearman correlation for the Gaussian one, overall and per benchmark or judge.
 """
 import argparse
 import pickle

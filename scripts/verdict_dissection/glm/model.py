@@ -60,19 +60,23 @@ def stronger_model_from_pair(predictors: Sequence[str], prior_scale: float = 0.5
 
 
 @model
-def judge_verdict_from_pair(predictors: Sequence[str], prior_scale: float = 0.5) -> Model:
-    """P(judge picks left) ~ judge position bias + judge slope · accuracy difference
-    + judge slopes · (left − right features). The population slopes are the headline."""
+def judge_verdict_from_pair(predictors: Sequence[str], use_accuracy_gap: bool = False,
+                            prior_scale: float = 0.5) -> Model:
+    """P(judge picks left) ~ judge position bias + judge slopes · (left − right features).
+    The base specification sees only the transcripts; with use_accuracy_gap the true accuracy
+    difference enters as one more per-judge regressor, to test whether judges detect more."""
 
     def statistical_model(features: Features) -> None:
-        check_features(features, ["obs", "judge_index", "num_judge", "accuracy_difference", *predictors])
+        required = ["obs", "judge_index", "num_judge", *predictors]
+        check_features(features, required + (["accuracy_difference"] if use_accuracy_gap else []))
         judge, num_judges = features["judge_index"], features["num_judge"]
         position_bias = numpyro.sample("judge_position_bias", dist.Normal(0, 1).expand([num_judges]).to_event(1))
-        capability_slopes = numpyro.sample("judge_capability_slopes",
-                                           dist.Normal(0, 2).expand([num_judges]).to_event(1))
         slopes = partially_pooled_slopes("judge_slopes", num_judges, len(predictors), prior_scale)
-        logits = (position_bias[judge] + capability_slopes[judge] * features["accuracy_difference"]
-                  + jnp.sum(slopes[judge] * design_matrix(features, predictors), axis=1))
+        logits = position_bias[judge] + jnp.sum(slopes[judge] * design_matrix(features, predictors), axis=1)
+        if use_accuracy_gap:
+            gap_slopes = numpyro.sample("judge_accuracy_gap_slopes",
+                                        dist.Normal(0, 2).expand([num_judges]).to_event(1))
+            logits = logits + gap_slopes[judge] * features["accuracy_difference"]
         numpyro.sample("obs", dist.Bernoulli(logits=logits), obs=features["obs"])
 
     return statistical_model
