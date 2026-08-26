@@ -10,6 +10,7 @@ each ranking by Spearman against the models' benchmark accuracy (src/ranking.sco
 - each LLM judge, and all judges pooled: Bradley-Terry ability from their verdicts.
 """
 import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -18,6 +19,8 @@ import yaml
 from ranking import rank, score
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "scripts/verdict_dissection"))
+from build_design_matrices import pool_aime  # noqa: E402
 MODEL_FOLDS = ["model-fold-0", "model-fold-1", "model-fold-2", "model-fold-3"]
 
 
@@ -45,8 +48,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     config = yaml.safe_load((ROOT / "configs/design_matrices.yaml").read_text())
-    identity = pd.read_parquet(Path(config["features_root"]) / "raw/identity.parquet",
-                               columns=["bench", "model", "item", "correct", "is_canonical"])
+    identity = pool_aime(pd.read_parquet(Path(config["features_root"]) / "raw/identity.parquet",
+                                         columns=["bench", "model", "item", "correct", "is_canonical"]))
     validation = identity[identity.is_canonical].drop(columns="is_canonical")   # every canonical rollout
     rows = []
 

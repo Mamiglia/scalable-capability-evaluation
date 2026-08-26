@@ -7,9 +7,11 @@ the target, the grouping columns and a boolean `test` column. Designs come from 
 model designs hold out whole models, item folds hold out items within each benchmark; a pair
 is held out when either transcript is. Pair inputs rename the left-minus-right `d_` columns to
 the bare feature names so all three models share one predictor list. Targets use the model's
-accuracy on the benchmark over all its rollouts; the regressors are transcript features only.
+accuracy on the benchmark over all its canonical rollouts (AIME years pooled, as in the design
+matrices); the regressors are transcript features only.
 """
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +19,8 @@ import pandas as pd
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "scripts/verdict_dissection"))
+from build_design_matrices import pool_aime  # noqa: E402
 HERE = Path(__file__).resolve().parent
 SPLITS = yaml.safe_load((HERE / "splits.yaml").read_text())
 PAIR_IDENTITY = ["bench", "item", "model_left", "model_right", "epoch_left", "epoch_right",
@@ -109,8 +113,10 @@ def main():
     if missing:
         raise ValueError(f"predictors not in the transcript design matrix: {missing}")
     pair = pd.read_parquet(design_matrices / "pair.parquet")
-    accuracy = pd.read_parquet(Path(config["features_root"]) / "raw/model-benchmark-accuracy.parquet",
-                               columns=["bench", "model", "accuracy"])
+    identity = pool_aime(pd.read_parquet(Path(config["features_root"]) / "raw/identity.parquet",
+                                         columns=["bench", "model", "item", "correct", "is_canonical"]))
+    accuracy = (identity[identity.is_canonical].groupby(["bench", "model"], as_index=False).correct.mean()
+                .rename(columns={"correct": "accuracy"}))
     transcript, pair = with_accuracy(transcript, pair, accuracy)
 
     for design in designs():

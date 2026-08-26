@@ -2,7 +2,8 @@
 
 Feature blocks come from configs/design_matrices.yaml. Extensive (size-like) non-negative
 features are log(1 + x) transformed, so their pair differences are log ratios; everything
-else is differenced as is. Columns are z-scaled per benchmark on representation_train items
+else is differenced as is. The three AIME years are one benchmark, "aime", with items
+prefixed by their year. Columns are z-scaled per benchmark on representation_train items
 (pairs: scaled by the difference SD, not centred, so reversed pairs stay negated). Missing
 values become 0 after scaling. Targets: model_accuracy (transcript rows) and pick_left,
 accuracy_difference, left_stronger (pair rows), with model accuracies computed on
@@ -23,6 +24,15 @@ PAIR_KEYS = ["bench", "judge", "item", "model_left", "model_right", "epoch_left"
              "log_left", "log_right", "judge_log", "judge_sample", "judge_epoch", "pick_left"]
 EXTENSIVE = re.compile(r"^(?!.*gain)(n_words|.*_count|.*_chars|.*_sum|surprisal_(full|noq|local))(__\w+)?$")
 DEVELOPMENT = {"representation_train", "representation_validation"}
+
+
+def pool_aime(frame):
+    """One benchmark for the AIME years: bench "aime", item "<year>/<item>" so ids stay unique."""
+    frame = frame.copy()
+    aime = frame.bench.str.startswith("aime")
+    frame.loc[aime, "item"] = frame.bench[aime] + "/" + frame.item[aime].astype(str)
+    frame.loc[aime, "bench"] = "aime"
+    return frame
 
 
 def block_columns(frame, pattern):
@@ -111,26 +121,27 @@ def load_blocks(cfg):
 def build(cfg):
     freeze = ROOT / cfg["freeze"]
     features_root = Path(cfg["features_root"])
-    split = pd.read_csv(freeze / "item_split.csv")
-    identity = pd.read_parquet(features_root / "raw/identity.parquet",
-                               columns=["bench", "model", "item", "correct", "is_canonical"])
-    frame, dictionary = load_blocks(cfg)
+    split = pool_aime(pd.read_csv(freeze / "item_split.csv"))
+    identity = pool_aime(pd.read_parquet(features_root / "raw/identity.parquet",
+                                         columns=["bench", "model", "item", "correct", "is_canonical"]))
+    frame, dictionary = load_blocks(cfg)          # blocks join on the original keys, then AIME is pooled
     features = dictionary.feature.tolist()
-    frame = frame.merge(split, on=["bench", "item"], how="left", validate="many_to_one")
-    accuracy = leave_item_out_accuracy(identity, split)
-    frame = frame.merge(accuracy, on=["bench", "model", "item"], how="left", validate="many_to_one")
     frame, transforms = transform(frame, features)
     dictionary = dictionary.merge(transforms, on="feature")
     dictionary["n_missing"] = frame[features].isna().sum().to_numpy()
 
     pairs = pd.read_parquet(features_root / "paired/raw-features.parquet", columns=PAIR_KEYS)
+    pairs = pd.concat([pairs, pair_differences(pairs, frame, features)], axis=1)     # matched on original keys
+    frame, pairs = pool_aime(frame), pool_aime(pairs)
+    accuracy = leave_item_out_accuracy(identity, split)
+    frame = frame.merge(split, on=["bench", "item"], how="left", validate="many_to_one")
+    frame = frame.merge(accuracy, on=["bench", "model", "item"], how="left", validate="many_to_one")
     pairs = pairs.merge(split, on=["bench", "item"], how="left", validate="many_to_one")
     for side in ("left", "right"):
         acc = accuracy.rename(columns={"model": f"model_{side}", "model_accuracy": f"accuracy_{side}"})
         pairs = pairs.merge(acc, on=["bench", "item", f"model_{side}"], how="left", validate="many_to_one")
     pairs["accuracy_difference"] = pairs.accuracy_left - pairs.accuracy_right
     pairs["left_stronger"] = np.sign(pairs.accuracy_difference).replace(0, np.nan)
-    pairs = pd.concat([pairs, pair_differences(pairs, frame, features)], axis=1)
 
     transcript, transcript_scaling = scale(frame, features, centre=True)
     pair, pair_scaling = scale(pairs, [f"d_{f}" for f in features], centre=False)

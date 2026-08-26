@@ -72,3 +72,11 @@ def test_block_columns_match_regex_and_drop_keys():
     assert block_columns(frame, "__llama$") == ["surprisal_full_mean__llama",
                                                  "surprisal_question_gain_sum__llama"]
     assert KEYS[0] == "bench"
+
+
+def test_pool_aime_merges_years_and_keeps_items_unique():
+    from build_design_matrices import pool_aime
+    frame = pd.DataFrame({"bench": ["aime2024", "aime2025", "gpqa"], "item": [0, 0, "x"]})
+    pooled = pool_aime(frame)
+    assert pooled.bench.tolist() == ["aime", "aime", "gpqa"]
+    assert pooled.item.tolist() == ["aime2024/0", "aime2025/0", "x"]
