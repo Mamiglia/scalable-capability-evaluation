@@ -18,11 +18,11 @@ class RankConfig:
     benches: list[str] = field(default_factory=list)  # empty list = keep all
     judges: list[str] = field(default_factory=list)
     models: list[str] = field(default_factory=list)  # both models of a verdict must be listed
-    items_csv: str = ""  # file with an item column; empty = keep all
+    items_csv: str = ""  # file with an item column: items to rank on; empty = all
+    truth_items_csv: str = ""  # file with an item column: items to validate on; empty = whole benchmark
     drop_ties: bool = False
     ridge: float = RIDGE
     correlation: str = "kendall"  # or spearman
-    items: str = "all"  # items the accuracy is over: all, judged, held_out
     n_resamples: int = 0  # bootstrap draws; 0 = skip
     seed: int = 0
 
@@ -45,6 +45,8 @@ def main() -> int:
     cfg = draccus.parse(RankConfig)
     verdicts = select(pd.read_parquet(cfg.verdicts), cfg)
     correctness = pd.read_parquet(cfg.correctness)
+    if cfg.truth_items_csv:
+        correctness = correctness[correctness.item.isin(pd.read_csv(cfg.truth_items_csv).item)]
     out = Path(cfg.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -53,13 +55,13 @@ def main() -> int:
         ranking = rank(judged, drop_ties=cfg.drop_ties, ridge=cfg.ridge)
         ranking.to_csv(out / f"ranking_{bench}.csv", index=False)
         truth = correctness[correctness.bench == bench]
-        result = score(ranking, truth, judged, correlation=cfg.correlation, items=cfg.items)
+        result = score(ranking, truth, correlation=cfg.correlation)
         scores.append({"bench": bench, **result})
         print(f"{bench}: {result['n_models']} models, {result['n_items']} items, "
               f"{cfg.correlation} {result['correlation']:.3f}")
         if cfg.n_resamples:
             draws = bootstrap(judged, truth, n_resamples=cfg.n_resamples, seed=cfg.seed, drop_ties=cfg.drop_ties,
-                              ridge=cfg.ridge, correlation=cfg.correlation, items=cfg.items)
+                              ridge=cfg.ridge, correlation=cfg.correlation)
             intervals.append(draws["ability"].assign(bench=bench))
             scores[-1].update({f"correlation_{q}": v for q, v in draws["correlation"].items()})
     pd.DataFrame(scores).to_csv(out / "scores.csv", index=False)
