@@ -5,7 +5,9 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-from tfidf import fit_predict, report, run_design  # noqa: E402
+from length import pick_longer  # noqa: E402
+from pairs import report, transcript_rows  # noqa: E402
+from tfidf import fit_predict, run_design  # noqa: E402
 
 
 def synthetic(seed=0, n_items=40):
@@ -29,7 +31,6 @@ def synthetic(seed=0, n_items=40):
 
 def test_antisymmetric_and_learns_the_cue():
     pairs, transcripts = synthetic()
-    from tfidf import transcript_rows
     left, right = transcript_rows(pairs, transcripts, "left"), transcript_rows(pairs, transcripts, "right")
     predictions = run_design("item-fold-0", pairs, transcripts, left, right)
     assert report(predictions).accuracy.iloc[0] > 0.9
@@ -45,3 +46,12 @@ def test_fit_predict_is_odd_in_the_features():
     p_plus, _ = fit_predict(x, y, np.arange(200) // 4, x[:10])
     p_minus, _ = fit_predict(x, y, np.arange(200) // 4, -x[:10])
     assert np.allclose(p_plus + p_minus, 1, atol=1e-6)
+
+
+def test_pick_longer_is_antisymmetric_and_follows_length():
+    pairs, transcripts = synthetic()
+    transcripts["text"] = transcripts.model.map(lambda m: "x" * (int(m[1:]) + 1))   # m0 shortest, m5 longest
+    left, right = transcript_rows(pairs, transcripts, "left"), transcript_rows(pairs, transcripts, "right")
+    p = pick_longer(pairs, transcripts, left, right)
+    assert (p == pairs.left_stronger).all()
+    assert np.allclose(p + pick_longer(pairs, transcripts, right, left), 1)
