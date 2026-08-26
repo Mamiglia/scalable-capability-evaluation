@@ -343,6 +343,7 @@ def fake_embed(texts, cfg):
 
 def test_pipeline_writes_tables_without_surprisal_modules(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "aggregate_surprisal", None)
+    monkeypatch.setenv("C_CODE_COMMIT", "test-commit")
     store = fake_store()
     clauses, trees = fake_segments(store)
     split = pd.DataFrame({"bench": store.bench, "item": store.item, "split": "representation_train"})
@@ -370,7 +371,9 @@ def test_pipeline_writes_tables_without_surprisal_modules(tmp_path, monkeypatch)
     assert feats.loc[feats.bench == "intercode"].filter(like="node_sae_gpqa_").isna().all().all()
     assert feats.loc[feats.bench == "gpqa"].filter(like="_sae_").notna().any().any()
     assert len(pairs) == 1 and "d_topo_struct_node_count" in pairs and "d_topo_aug_edge_count" in pairs
-    assert json.loads((tmp_path / "manifest.json").read_text())["rows"]["transcripts"] == 6
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["rows"]["transcripts"] == 6 and manifest["code_commit"] == "test-commit"
+    assert manifest["edges"] == cfg["edges"] and manifest["relations"] == ["causal", "within_leaf"]
     assert not list(tmp_path.rglob("*.partial"))
 
 

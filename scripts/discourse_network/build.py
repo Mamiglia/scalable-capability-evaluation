@@ -11,6 +11,7 @@ below, skipping a step whose output file already exists (delete the file to redo
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -272,7 +273,9 @@ def run(store, clauses, trees, split, verdicts, cfg, out_dir, embed=embed_nodes,
     manifest_path = out_dir / "manifest.json"
     if not manifest_path.exists():
         manifest = json.dumps({
+            "code_commit": os.environ.get("C_CODE_COMMIT"),
             "freeze": cfg.get("freeze"), "segmenter": cfg.get("segmenter"), "encoder": cfg.get("encoder"),
+            "edges": cfg.get("edges"), "relations": sorted(edges.relation.dropna().unique().tolist()),
             "config_hash": hashlib.sha256(json.dumps(cfg, sort_keys=True, default=str).encode()).hexdigest(),
             "rows": {"transcripts": len(features), "nodes": len(nodes), "edges": len(edges), "pairs": len(pairs)},
             "columns": {"topology": sum(c.startswith("topo_") for c in features),
