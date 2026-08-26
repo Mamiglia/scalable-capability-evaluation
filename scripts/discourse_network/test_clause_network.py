@@ -353,14 +353,16 @@ def test_pipeline_writes_tables_without_surprisal_modules(tmp_path, monkeypatch)
     pairs = pd.read_parquet(tmp_path / "pair_features.parquet")
     assert nodes.kind.value_counts()["equation"] == 6 and nodes.kind.value_counts()["answer"] == 6
     assert set(edges.edge_source) >= {"discourse", "similarity"} and (edges.relation == "causal").sum() == 6
-    assert len(feats) == 6 and feats.topo_relation_causal.gt(0).all()
+    assert len(feats) == 6 and feats.topo_struct_relation_causal.gt(0).all()
+    assert feats.topo_struct_node_count.equals(feats.topo_aug_node_count)
+    assert feats.topo_struct_edge_count.lt(feats.topo_aug_edge_count).all()
     assert any(c.startswith("node_sae_") for c in feats) and any(c.startswith("edge_sae_") for c in feats)
     for group in ("gpqa", "intercode"):
         assert any(c.startswith(f"node_sae_{group}_") for c in feats)
         assert any(c.startswith(f"edge_sae_{group}_") for c in feats)
     assert feats.loc[feats.bench == "intercode"].filter(like="node_sae_gpqa_").isna().all().all()
     assert feats.loc[feats.bench == "gpqa"].filter(like="_sae_").notna().any().any()
-    assert len(pairs) == 1 and "d_topo_node_count" in pairs
+    assert len(pairs) == 1 and "d_topo_struct_node_count" in pairs and "d_topo_aug_edge_count" in pairs
     assert json.loads((tmp_path / "manifest.json").read_text())["rows"]["transcripts"] == 6
     assert not list(tmp_path.rglob("*.partial"))
 

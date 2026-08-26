@@ -174,7 +174,14 @@ def make_features(store, nodes, edges, embeddings, split, cfg, out_dir):
     position = {k: i for i, k in enumerate(keys.transcript_key)}
     node_groups = {k: g.to_dict("records") for k, g in nodes.groupby("transcript_key")}
     edge_groups = {k: g.to_dict("records") for k, g in edges.groupby("transcript_key")}
-    topo = pd.DataFrame([topology_block(node_groups[k], edge_groups.get(k, [])) for k in keys.transcript_key])
+    topo_rows = []
+    for key in keys.transcript_key:
+        local_edges = edge_groups.get(key, [])
+        structural = topology_block(node_groups[key], [e for e in local_edges if e["edge_source"] in {"discourse", "tool"}])
+        augmented = topology_block(node_groups[key], local_edges)
+        topo_rows.append({f"topo_struct_{name.removeprefix('topo_')}": value for name, value in structural.items()} |
+                         {f"topo_aug_{name.removeprefix('topo_')}": value for name, value in augmented.items()})
+    topo = pd.DataFrame(topo_rows)
     sae_blocks = pd.DataFrame(index=keys.index)                       # SAE columns, NaN outside each group
     dev = set(map(tuple, split.loc[split.split != "confirmation", ["bench", "item"]].itertuples(index=False)))
     nodes["row"] = np.arange(len(nodes))                              # row into the embedding matrix
