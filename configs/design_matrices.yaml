@@ -22,12 +22,12 @@ blocks:
     table: "{features_root}/normalised/rolling-position/transcript-means.parquet"
     columns: "_position_adjusted_mean__"
   - name: embedding-dense
-    table: judge_results/verdict_dissection/transcript_sae/tables-qwen/transcript_features_qwen.parquet
+    table: judge_results/verdict_dissection/transcript_sae/tables-qwen-k8/transcript_features_qwen.parquet
     columns: "^qwen_dim_"
   - name: embedding-sae-shared
-    table: judge_results/verdict_dissection/transcript_sae/tables-qwen/transcript_features_qwen.parquet
+    table: judge_results/verdict_dissection/transcript_sae/tables-qwen-k8/transcript_features_qwen.parquet
     columns: "^sae_shared_"
   - name: embedding-sae-benchmark          # fitted per benchmark; zero outside the feature's benchmark
-    table: judge_results/verdict_dissection/transcript_sae/tables-qwen/transcript_features_qwen.parquet
+    table: judge_results/verdict_dissection/transcript_sae/tables-qwen-k8/transcript_features_qwen.parquet
     columns: "^sae_(?!shared_)"
     fill_missing: 0
