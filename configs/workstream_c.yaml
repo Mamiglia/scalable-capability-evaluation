@@ -14,6 +14,7 @@ encoder:                                    # node embeddings
   revision: e7f32e3c00f91d699e8c43b53106206bcc72bb22
   max_tokens: 2048                          # chunk length; longer nodes are chunked and mean-pooled
   batch_size: 32
+  block_size: 2000                          # frequent resumable checkpoints for long-tail chunks
   device: mps
 
 # Tool calls: `inspect` (read-only) vs `act` (changes state). First matching group wins; unmatched = act.
