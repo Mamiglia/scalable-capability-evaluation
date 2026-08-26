@@ -119,7 +119,7 @@ def main():
     for model in args.models:
         for design_dir in sorted(p for p in args.inputs_dir.iterdir() if p.is_dir()):
             table = pd.read_parquet(design_dir / f"{model}.parquet")
-            inner_group = "item" if design_dir.name.startswith("item-fold") else ("model" if model == "capability_from_transcript" else "model_left")
+            inner_group = "model" if model == "capability_from_transcript" else "model_left"   # inner CV groups by model
             for wave, kept in feature_sets.items():
                 specs = {wave: False, f"{wave}+accuracy-gap": True} if model == "judge_verdict_from_pair" else {wave: False}
                 for wave_name, use_gap in specs.items():

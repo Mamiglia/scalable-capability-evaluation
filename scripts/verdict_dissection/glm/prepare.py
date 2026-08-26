@@ -3,9 +3,10 @@
     uv run python scripts/verdict_dissection/glm/prepare.py <output_dir>
 
 Tables go to <output_dir>/<design>/<model>.parquet with the predictors from predictors.yaml,
-the target, the grouping columns and a boolean `test` column. Designs come from splits.yaml:
-model designs hold out whole models, item folds hold out items within each benchmark; a pair
-is held out when either transcript is. Pair inputs rename the left-minus-right `d_` columns to
+the target, the grouping columns and a boolean `test` column. Designs come from splits.yaml: model folds
+hold out whole models on all items; the strict "new models and items" folds hold out unseen
+models on unseen items and train only on seen models × seen items. A pair is held out when
+either transcript is. Pair inputs rename the left-minus-right `d_` columns to
 the bare feature names so all three models share one predictor list. Targets use the model's
 accuracy on the benchmark over all its canonical rollouts (AIME years pooled, as in the design
 matrices); the regressors are transcript features only.
@@ -29,9 +30,12 @@ ACCURACY_CLIP = 0.01          # logit needs accuracies strictly inside (0, 1)
 
 
 def designs():
-    """Design name -> (held-out models, held-out item fold)."""
-    out = {name: (models, None) for name, models in SPLITS["model_designs"].items()}
-    out |= {f"item-fold-{fold}": ([], fold) for fold in range(SPLITS["item_folds"])}
+    """Design name -> (held-out models, held-out item fold, strict). Model designs hold out whole models
+    on all items. Strict designs ("new models and items") pair model fold r with item fold r: test rows
+    have an unseen model on an unseen item, training rows a seen model on a seen item, the rest dropped."""
+    out = {name: (models, None, False) for name, models in SPLITS["model_designs"].items()}
+    folds = [name for name in SPLITS["model_designs"] if name.startswith("model-fold-")]
+    out |= {f"new-models-and-items-{r}": (SPLITS["model_designs"][fold], r, True) for r, fold in enumerate(folds)}
     return out
 
 
@@ -43,12 +47,15 @@ def item_fold(bench, item):
 
 
 def held_out(design, bench, item, *models):
-    """Boolean test mask for one design: the row's item is in the held-out fold or any of its models is held out."""
-    models_out, fold = designs()[design]
-    mask = np.zeros(len(bench), bool) if fold is None else item_fold(bench, item) == fold
+    """Per row: 'test', 'train' or 'drop' for one design."""
+    models_out, fold, strict = designs()[design]
+    model_out = np.zeros(len(bench), bool)
     for column in models:
-        mask |= column.isin(models_out).to_numpy()
-    return mask
+        model_out |= column.isin(models_out).to_numpy()
+    if not strict:
+        return np.where(model_out, "test", "train")
+    item_out = item_fold(bench, item) == fold
+    return np.select([model_out & item_out, ~model_out & ~item_out], ["test", "train"], "drop")
 
 
 def capability_from_transcript(transcript, predictors, design):
@@ -57,7 +64,7 @@ def capability_from_transcript(transcript, predictors, design):
     return pd.DataFrame({
         "bench": transcript.bench, "item": transcript.item, "model": transcript.model,
         "logit_model_accuracy": np.log(accuracy / (1 - accuracy)),
-        "test": held_out(design, transcript.bench, transcript.item, transcript.model),
+        "role": held_out(design, transcript.bench, transcript.item, transcript.model),
     }).join(transcript[predictors])
 
 
@@ -69,7 +76,7 @@ def stronger_model_from_pair(pair, predictors, design):
         "bench": distinct.bench, "item": distinct.item,
         "model_left": distinct.model_left, "model_right": distinct.model_right,
         "left_stronger": (distinct.accuracy_left > distinct.accuracy_right).astype(int),
-        "test": held_out(design, distinct.bench, distinct.item, distinct.model_left, distinct.model_right),
+        "role": held_out(design, distinct.bench, distinct.item, distinct.model_left, distinct.model_right),
     }).join(_bare_names(distinct, predictors))
 
 
@@ -79,7 +86,7 @@ def judge_verdict_from_pair(pair, predictors, design):
         "bench": pair.bench, "item": pair.item, "judge": pair.judge,
         "model_left": pair.model_left, "model_right": pair.model_right,
         "pick_left": pair.pick_left, "accuracy_difference": pair.accuracy_left - pair.accuracy_right,
-        "test": held_out(design, pair.bench, pair.item, pair.model_left, pair.model_right),
+        "role": held_out(design, pair.bench, pair.item, pair.model_left, pair.model_right),
     }).join(_bare_names(pair, predictors))
 
 
@@ -124,6 +131,7 @@ def main():
         design_dir.mkdir(parents=True, exist_ok=True)
         for build in (capability_from_transcript, stronger_model_from_pair, judge_verdict_from_pair):
             table = build(transcript if build is capability_from_transcript else pair, predictors, design)
+            table = table[table.role != "drop"].assign(test=lambda t: t.role == "test").drop(columns="role")
             table.to_parquet(design_dir / f"{build.__name__}.parquet", index=False)
             print(f"{design} {build.__name__}: train {int((~table.test).sum())}, test {int(table.test.sum())}")
 
