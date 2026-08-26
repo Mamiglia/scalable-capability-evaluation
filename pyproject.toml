@@ -35,6 +35,7 @@ dependencies = [
 collect = "collect.cli:main"
 judge = "judge.cli:main"
 irt = "irt.cli:main"
+rank = "ranking.cli:main"
 
 # litellm (via inspect-harbor) caps openai<3; inspect-ai's OpenRouter provider needs >=3.1.
 # We never call litellm, so ignore its cap.
