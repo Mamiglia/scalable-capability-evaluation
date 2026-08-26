@@ -17,6 +17,7 @@
 - bullets_count
 - code_chars
 - latex_chars
+- surprisal_local_mean__llama
 - surprisal_full_bpc__llama
 - surprisal_question_gain_bpc__llama
 - surprisal_total_context_gain_bpc__llama
