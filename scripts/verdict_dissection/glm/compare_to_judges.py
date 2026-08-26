@@ -8,7 +8,8 @@ each ranking by Spearman against the models' benchmark accuracy (src/ranking.sco
 - capability GLM: each model's mean predicted logit accuracy over its transcripts;
 - stronger-model GLM, and any baseline written in the same layout (scripts/baselines/): Bradley-Terry
   ability (src/ranking.rank) fitted to the held-out pair predictions, i.e. the model treated as a judge;
-- each LLM judge, and all judges pooled: Bradley-Terry ability from their verdicts.
+- each LLM judge, and all judges pooled: Bradley-Terry ability from their verdicts on the same
+  pairs the GLM was scored on.
 """
 import argparse
 import sys
@@ -66,8 +67,13 @@ def main():
         rows += score_by_bench({b: rank(g) for b, g in verdicts.groupby("bench")}, validation,
                                f"stronger-model {wave} as judge")
 
+    # judges are ranked from the same pairs the GLM was scored on (both shown orders of each stitched pair)
     verdicts = pd.read_parquet(Path(config["output_root"]) / "pair.parquet",
                                columns=["bench", "judge", "item", "model_left", "model_right", "pick_left"])
+    pair_keys = ["bench", "item", "model_left", "model_right"]
+    stitched_pairs = pd.concat([stronger[pair_keys], stronger[pair_keys].rename(
+        columns={"model_left": "model_right", "model_right": "model_left"})]).drop_duplicates()
+    verdicts = verdicts.merge(stitched_pairs, on=pair_keys)
     for judge, frame in list(verdicts.groupby("judge")) + [("all judges pooled", verdicts)]:
         rows += score_by_bench({b: rank(g) for b, g in frame.groupby("bench")}, validation, f"judge {judge}")
 
