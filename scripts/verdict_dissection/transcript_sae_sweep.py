@@ -112,7 +112,8 @@ def main() -> None:
     verdicts = pd.read_parquet(args.verdicts)
     labels = (pd.read_parquet(args.stronger_pairs, columns=PAIR_KEYS + ["left_stronger"]).drop_duplicates(PAIR_KEYS)
               if args.stronger_pairs else None)
-    inputs = centre_by_item(np.asarray(inputs, dtype=np.float32), rows["item_group_key"].to_numpy())
+    raw = np.asarray(inputs, dtype=np.float32)
+    inputs = centre_by_item(raw, rows["item_group_key"].to_numpy())
     benchmarks = rows["benchmark"].to_numpy()
     train_mask = balance_by_benchmark(rows["split_role"].eq("representation_train").to_numpy(), benchmarks, config["seed"])
     validation_mask = balance_by_benchmark(rows["split_role"].eq("representation_validation").to_numpy(), benchmarks, config["seed"])
@@ -126,15 +127,16 @@ def main() -> None:
         print(json.dumps(results[-1]), flush=True)
     for entry in config["sweep"]:
         fit_config = config | entry
-        sae, history = fit_sae(inputs[train_mask], inputs[validation_mask], fit_config)
-        activations, reconstructions = apply_sae(sae, inputs)
+        fit_inputs = inputs if fit_config.get("centre_by_item") else raw   # entries may switch centring off
+        sae, history = fit_sae(fit_inputs[train_mask], fit_inputs[validation_mask], fit_config)
+        activations, reconstructions = apply_sae(sae, fit_inputs)
         flipped = (activations < 0).sum(axis=0) > (activations > 0).sum(axis=0)
         activations[:, flipped] *= -1
         pairs = development_pairs(verdicts, transcript_frame(audit, rows, activations, "sae_"))
         columns = [c for c in pairs if c.startswith("d_sae_")]
         results.append({
-            "width": entry["width"], "top_k": entry["top_k"],
-            "validation_ev": explained_variance(inputs[validation_mask], reconstructions[validation_mask]),
+            "width": entry["width"], "top_k": entry["top_k"], "centre_by_item": bool(fit_config.get("centre_by_item")),
+            "validation_ev": explained_variance(fit_inputs[validation_mask], reconstructions[validation_mask]),
             "features_over_5pct": int(((activations != 0).mean(axis=0) >= 0.05).sum()),
             "mean_active": float((activations != 0).sum(axis=1).mean()),
             "epochs_run": len(history["train_loss"]),
