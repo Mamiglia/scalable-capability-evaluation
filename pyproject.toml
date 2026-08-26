@@ -33,6 +33,7 @@ dependencies = [
 collect = "collect.cli:main"
 judge = "judge.cli:main"
 irt = "irt.cli:main"
+rank = "ranking.cli:main"
 
 [build-system]
 requires = ["setuptools>=77"]
