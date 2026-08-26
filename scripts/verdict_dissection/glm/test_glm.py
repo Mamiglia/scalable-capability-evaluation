@@ -65,6 +65,7 @@ def test_models_trace_on_fake_features():
         assert trace["obs"]["value"].shape == (n,)
     trace = handlers.trace(handlers.seed(glm_models.judge_verdict_from_pair(predictors=PREDICTORS, use_accuracy_gap=True), 0)).get_trace(features)
     assert trace["judge_accuracy_gap_slopes"]["value"].shape == (2,)
+    assert trace["judge_position_bias"]["value"].shape == (2, 3)          # judge x benchmark
     trace = handlers.trace(handlers.seed(glm_models.capability_from_transcript(predictors=PREDICTORS), 0)).get_trace(
         features | {"obs": jnp.linspace(-2, 2, n)})
     assert trace["benchmark_slopes"]["value"].shape == (3, 2)

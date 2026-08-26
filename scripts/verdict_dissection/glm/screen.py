@@ -4,8 +4,8 @@
 
 Same partial pooling as model.py, fitted as one ridge-penalised regression: population slopes
 plus per-group deviations (benchmark, or judge for the verdict model) with the deviations
-penalised harder, item intercepts penalised (zero for an unseen item), per-judge position
-intercepts free. Linear for the capability model, logistic for the pair models. The two
+penalised harder, item intercepts penalised (zero for an unseen item), position intercepts per
+judge x benchmark free. Linear for the capability model, logistic for the pair models. The two
 penalties are chosen by grouped cross-validation on the training rows. Writes the same
 held_out_/predictions_/placement_ files as evaluate.py under <fits_dir>/<model>/<wave>/<design>/.
 """
@@ -43,8 +43,11 @@ def design(table, predictors, model, group_levels, item_levels, deviation_ratio,
         item = pd.Categorical(table.item, categories=item_levels).codes
         blocks.append(sp.csr_matrix((np.ones(len(table)), (np.arange(len(table)), item)), shape=(len(table), len(item_levels))))
     if model == "judge_verdict_from_pair":
-        blocks.append(sp.csr_matrix((np.full(len(table), 30.0), (np.arange(len(table)), group)),
-                                    shape=(len(table), len(group_levels))))   # large scale = effectively unpenalised
+        # position bias per judge x benchmark (it ranges 0.39-0.84 across cells); large scale = effectively unpenalised
+        bench = pd.Categorical(table.bench, categories=sorted(table.bench.unique())).codes
+        cell = group * len(set(bench)) + bench
+        blocks.append(sp.csr_matrix((np.full(len(table), 30.0), (np.arange(len(table)), cell)),
+                                    shape=(len(table), len(group_levels) * len(set(bench)))))
         if use_accuracy_gap:
             blocks.append(sp.csr_matrix(table.accuracy_difference.to_numpy(np.float32)[:, None] * 30.0))
     return sp.hstack(blocks).tocsr()

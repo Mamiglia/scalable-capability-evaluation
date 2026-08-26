@@ -17,7 +17,7 @@ HERE = Path(__file__).resolve().parent
 MODELS = {
     "capability_from_transcript": dict(target="logit_model_accuracy", categorical=["bench", "item"]),
     "stronger_model_from_pair": dict(target="left_stronger", categorical=["bench"]),
-    "judge_verdict_from_pair": dict(target="pick_left", categorical=["judge"]),
+    "judge_verdict_from_pair": dict(target="pick_left", categorical=["judge", "bench"]),
 }
 FIT = {"samples": 500, "warmup": 500, "chains": 4, "seed": 0, "target_accept": 0.85}   # screening settings; ESS ~300-500
 
