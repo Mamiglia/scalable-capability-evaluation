@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 import pandas as pd
 
-from ranking import rank, score
+from ranking import bootstrap, rank, score
 
 
 def verdicts(rows):
@@ -90,3 +90,25 @@ def test_score_truth_uses_only_judged_items():
     # a beats b on item 0, but loses badly on the unjudged items 1 and 2
     table = correctness([("a", 0, 1), ("b", 0, 0), ("a", 1, 0), ("b", 1, 1), ("a", 2, 0), ("b", 2, 1)])
     assert score(ranking, table, judged)["correlation"] == 1.0
+
+
+def simulated_correctness(abilities, n_items=200, seed=0):
+    """Each model correct on an item with probability sigmoid(ability)."""
+    rng = np.random.default_rng(seed)
+    return correctness([(model, item, int(rng.random() < 1 / (1 + np.exp(-ability))))
+                        for model, ability in abilities.items() for item in range(n_items)])
+
+
+def test_bootstrap_brackets_point_estimate_and_is_seeded():
+    abilities = {"strong": 2.0, "middle": 0.5, "weak": -1.0, "weakest": -2.5}
+    judged, table = simulated_verdicts(abilities), simulated_correctness(abilities)
+    point = rank(judged)
+    result = bootstrap(judged, table, n_resamples=20, seed=0)
+    ability = result["ability"].set_index("model")
+    assert list(ability.columns) == ["p5", "p50", "p95"]
+    assert (ability.p5 <= point.set_index("model").ability[ability.index] + 1e-9).all()
+    assert (ability.p95 >= point.set_index("model").ability[ability.index] - 1e-9).all()
+    assert result["correlation"].p5 <= score(point, table, judged)["correlation"] <= result["correlation"].p95
+    again = bootstrap(judged, table, n_resamples=20, seed=0)
+    assert again["ability"].equals(result["ability"])
+    assert not bootstrap(judged, table, n_resamples=20, seed=1)["ability"].equals(result["ability"])

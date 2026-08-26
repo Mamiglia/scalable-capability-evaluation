@@ -1,4 +1,4 @@
 from ranking.bradley_terry import rank
-from ranking.scoring import score
+from ranking.scoring import bootstrap, score
 
-__all__ = ["rank", "score"]
+__all__ = ["bootstrap", "rank", "score"]
