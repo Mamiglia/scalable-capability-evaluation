@@ -32,7 +32,10 @@ def synthetic(seed=0, n_items=40):
 def test_antisymmetric_and_learns_the_cue():
     pairs, transcripts = synthetic()
     left, right = transcript_rows(pairs, transcripts, "left"), transcript_rows(pairs, transcripts, "right")
-    predictions = run_design("item-fold-0", pairs, transcripts, left, right)
+    held_out_models = {"m1", "m4"}
+    status = np.where(pairs.model_left.isin(held_out_models) | pairs.model_right.isin(held_out_models), "test", "train")
+    seen = ~transcripts.model.isin(held_out_models).to_numpy()
+    predictions = run_design(status, seen, pairs, transcripts, left, right)
     assert report(predictions).accuracy.iloc[0] > 0.9
     flipped = predictions.merge(predictions, left_on=["bench", "item", "model_left", "model_right"],
                                 right_on=["bench", "item", "model_right", "model_left"])

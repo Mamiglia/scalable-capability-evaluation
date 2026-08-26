@@ -30,7 +30,7 @@ def main():
     left, right = transcript_rows(pairs, transcripts, "left"), transcript_rows(pairs, transcripts, "right")
     longer = pick_longer(pairs, transcripts, left, right)
     for design in designs():
-        test = held_out(design, pairs.bench, pairs.item, pairs.model_left, pairs.model_right)
+        test = held_out(design, pairs.bench, pairs.item, pairs.model_left, pairs.model_right) == "test"
         rows = pairs.loc[test, ["bench", "item", "model_left", "model_right"]].assign(observed=pairs.left_stronger[test])
         for name, predicted in (("pick-longer", longer[test]), ("pick-shorter", 1 - longer[test])):
             scores = write_design(args.output_dir, name, design, rows.assign(predicted=predicted))

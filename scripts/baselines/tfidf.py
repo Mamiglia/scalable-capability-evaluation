@@ -4,7 +4,7 @@
 
 Same rows and held-out designs as the stronger-model GLM (scripts/verdict_dissection/glm/prepare.py):
 one row per distinct transcript pair, ties in benchmark accuracy dropped, a pair held out when
-either transcript is; AIME years pooled. The vectoriser is fitted on the training transcripts only (so a held-out
+either transcript is, dropped when only one side is unseen; AIME years pooled. The vectoriser is fitted on the training transcripts only (so a held-out
 model's vocabulary is never seen); one logistic regression per benchmark with no intercept, since
 the differences are antisymmetric; C chosen on inner folds grouped by item. Text is the assistant
 spans of the rendered transcript, as for the surface features.
@@ -40,20 +40,20 @@ def fit_predict(x_train, y_train, groups_train, x_test, inner_folds=3, seed=0):
     return model.predict_proba(x_test)[:, 1], best
 
 
-def run_design(design, pairs, transcripts, left, right):
-    """Held-out predictions for one design, fitted per benchmark."""
-    test = held_out(design, pairs.bench, pairs.item, pairs.model_left, pairs.model_right)
-    seen = ~held_out(design, transcripts.bench, transcripts.item, transcripts.model)
+def run_design(status, seen, pairs, transcripts, left, right):
+    """Held-out predictions for one design, fitted per benchmark. `status` is each pair's train / test /
+    drop, `seen` marks the transcripts the vectoriser may see."""
     out = []
-    for bench, block in pairs.groupby("bench"):
+    for bench, block in pairs[status != "drop"].groupby("bench"):
+        test = status[block.index] == "test"
         docs = (transcripts.bench == bench).to_numpy()
-        if not test[block.index].any() or test[block.index].all():     # nothing to predict, or nothing to fit on
+        if not test.any() or test.all():                    # nothing to predict, or nothing to fit on
             continue
         vectoriser = TfidfVectorizer(**VECTORISER).fit(transcripts.text[docs & seen])
         local = pd.Series(np.arange(docs.sum()), index=transcripts.index[docs])
         x = vectoriser.transform(transcripts.text[docs])
         diff = x[local[left[block.index]].to_numpy()] - x[local[right[block.index]].to_numpy()]
-        train, y = ~test[block.index], block.left_stronger.to_numpy()
+        train, y = ~test, block.left_stronger.to_numpy()
         predicted, c = fit_predict(diff[train], y[train], block.item.to_numpy()[train], diff[~train])
         print(f"  {bench}: vocabulary {len(vectoriser.vocabulary_)}, C {c}, "
               f"accuracy {((predicted > 0.5) == y[~train]).mean():.3f} on {int((~train).sum())} held-out pairs", flush=True)
@@ -73,7 +73,9 @@ def main():
     print(f"{len(pairs)} pairs, {len(transcripts)} transcripts")
     for design in args.designs:
         print(design, flush=True)
-        scores = write_design(args.output_dir, "tfidf", design, run_design(design, pairs, transcripts, left, right))
+        status = held_out(design, pairs.bench, pairs.item, pairs.model_left, pairs.model_right)
+        seen = held_out(design, transcripts.bench, transcripts.item, transcripts.model) == "train"
+        scores = write_design(args.output_dir, "tfidf", design, run_design(status, seen, pairs, transcripts, left, right))
         print(f"  all: accuracy {scores.accuracy.iloc[0]:.3f}, log loss {scores.log_loss.iloc[0]:.3f}")
 
 
