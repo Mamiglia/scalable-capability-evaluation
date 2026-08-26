@@ -2,9 +2,12 @@
 
 Items of each benchmark are split into an easy and a hard half by their mean accuracy over all
 canonical rollouts. One judge's pairwise verdicts on the easy half give Bradley-Terry abilities
-(src/ranking.rank). A model's predicted hard-half accuracy is a straight line from ability to
-observed hard-half accuracy fitted on the other models (leave-one-out). 95% intervals from an
-easy-item bootstrap, abilities and line refitted per draw. AIME years are pooled.
+(src/ranking.rank). True capability is the ability a perfect judge would give on the same pairs:
+one that always picks the model with the higher hard-half accuracy. A model's predicted capability
+is a straight line from judge ability to perfect-judge ability fitted on the other models
+(leave-one-out). The perfect judge's tournament is separable, so its abilities are only bounded by
+the ridge; they are standardised per benchmark (mean 0, SD 1). 95% intervals from an easy-item
+bootstrap, abilities and line refitted per draw. AIME years are pooled.
 
     uv run python scripts/judge/judged_capability_over_time.py --judge o4-mini
 """
@@ -54,8 +57,14 @@ def split_items(rollouts):
     return difficulty.set_index(["bench", "item"]).easy
 
 
+def perfect_judge(verdicts, accuracy):
+    """The same pairs judged by accuracy on the held-out items: the higher-accuracy model wins, equal is a tie."""
+    left, right = accuracy[verdicts.model_left].to_numpy(), accuracy[verdicts.model_right].to_numpy()
+    return verdicts.assign(pick_left=np.where(left > right, 1.0, np.where(left < right, 0.0, 0.5)))
+
+
 def predict(verdicts, observed, judge):
-    """Leave-one-out predicted accuracy per model from a line through (ability, observed accuracy)."""
+    """Leave-one-out predicted capability per model from a line through (judge ability, perfect-judge ability)."""
     ability = rank(verdicts).set_index("model").ability
     models = ability.index.intersection(observed.index).drop(judge, errors="ignore")
     x, y = ability[models].to_numpy(), observed[models].to_numpy()
@@ -89,16 +98,19 @@ def plot(table, judge, judge_date, judge_accuracy, bench, path):
     ax.plot(table.release, table.observed, "o", ms=3, color=OBSERVED, label="observed")
     if judge_accuracy is not None:
         ax.plot([judge_date], [judge_accuracy], "o", ms=5, color="k", label="judge itself")
-    ax.set_ylim(-0.03, 1.03)
-    ax.set_yticks([0, 0.5, 1])
-    ax.set_ylabel("Hard-half accuracy")
+    ax.set_ylabel("Capability (SD units)")
+    low, high = min(table.low.min(), table.observed.min()), max(table.high.max(), table.observed.max())
+    ax.set_ylim(low - 0.05 * (high - low), high + 0.05 * (high - low))
+    ax.yaxis.set_major_locator(plt.MaxNLocator(4))
+    ticks = [t for t in ax.get_yticks() if ax.get_ylim()[0] <= t <= ax.get_ylim()[1]]
+    ax.set_yticks(ticks)
+    ax.spines["left"].set_bounds(ticks[0], ticks[-1])
     ax.text(0, 1.02, bench, transform=ax.transAxes, color="grey", fontsize=7, va="bottom")
     first, last = min(table.release.min(), judge_date), max(table.release.max(), judge_date)
     ticks = pd.date_range(first.replace(month=1, day=1), last + pd.DateOffset(months=6), freq="6MS")
     ax.set_xticks(ticks)
     ax.set_xticklabels([t.strftime("%b %Y") for t in ticks])
     ax.set_xlim(ticks[0] - pd.Timedelta(days=30), ticks[-1] + pd.Timedelta(days=30))
-    ax.spines["left"].set_bounds(0, 1)
     ax.spines["bottom"].set_bounds(*plt.matplotlib.dates.date2num([ticks[0], ticks[-1]]))
     for side in ("left", "bottom"):
         ax.spines[side].set_position(("outward", 3))
@@ -127,7 +139,9 @@ def main():
     dates = release_dates()
     OUT.mkdir(parents=True, exist_ok=True)
     for bench, bench_verdicts in easy_verdicts.groupby("bench"):
-        observed = hard_rollouts[hard_rollouts.bench == bench].groupby("model").correct.mean()
+        hard_accuracy = hard_rollouts[hard_rollouts.bench == bench].groupby("model").correct.mean()
+        observed = rank(perfect_judge(bench_verdicts, hard_accuracy)).set_index("model").ability
+        observed = (observed - observed.mean()) / observed.std()
         table = predictions_with_intervals(bench_verdicts, observed, args.judge, args.resamples, args.seed)
         table["release"] = [dates[slug(m)] for m in table.index]
         table.sort_values("release").to_csv(OUT / f"{args.judge}_{bench}.csv", index_label="model")
