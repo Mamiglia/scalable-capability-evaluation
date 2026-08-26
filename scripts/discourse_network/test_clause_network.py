@@ -334,7 +334,8 @@ def fake_embed(texts, cfg):
     return v / np.linalg.norm(v, axis=1, keepdims=True)
 
 
-def test_pipeline_writes_tables(tmp_path):
+def test_pipeline_writes_tables_without_surprisal_modules(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "aggregate_surprisal", None)
     store = fake_store()
     clauses, trees = fake_segments(store)
     split = pd.DataFrame({"bench": store.bench, "item": store.item, "split": "representation_train"})

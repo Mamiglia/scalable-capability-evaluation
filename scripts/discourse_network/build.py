@@ -35,6 +35,22 @@ def transcript_key(row):
     return hashlib.sha256("|".join(str(row[k]) for k in KEYS).encode()).hexdigest()[:16]
 
 
+def build_pairs(verdicts, raw):
+    """Join transcript features onto verdict pairs and return left-minus-right columns."""
+    raw = raw.sort_values("sample_epoch").drop_duplicates(KEYS[:5])
+    feature_columns = [column for column in raw if column not in KEYS]
+    left = raw.rename(columns={"model": "model_left", "epoch": "epoch_left", "log": "log_left"})
+    right = raw.rename(columns={"model": "model_right", "epoch": "epoch_right", "log": "log_right"})
+    pairs = verdicts.drop(columns=["judge_input", "judge_sample_metadata_json"], errors="ignore")
+    pairs = pairs.merge(left, on=["bench", "item", "model_left", "epoch_left", "log_left"],
+                        how="inner", validate="many_to_one")
+    pairs = pairs.merge(right, on=["bench", "item", "model_right", "epoch_right", "log_right"],
+                        how="inner", suffixes=("_l", "_r"), validate="many_to_one")
+    differences = {f"d_{column}": pairs[f"{column}_l"] - pairs[f"{column}_r"] for column in feature_columns}
+    return pd.concat([pairs.drop(columns=[f"{column}_{side}" for column in feature_columns for side in ("l", "r")]),
+                      pd.DataFrame(differences)], axis=1)
+
+
 def _atomic(path, writer):
     """Write beside the final path, then rename; never reuse a partial file."""
     path = Path(path)
@@ -237,7 +253,6 @@ def run(store, clauses, trees, split, verdicts, cfg, out_dir, embed=embed_nodes,
     features = pd.read_parquet(out_dir / "transcript_features.parquet")
     if stop_after == "features":
         return features
-    from aggregate_surprisal import build_pairs
     pair_path = out_dir / "pair_features.parquet"
     if not pair_path.exists():
         pairs = build_pairs(verdicts, features.drop(columns=["transcript_key"]))
