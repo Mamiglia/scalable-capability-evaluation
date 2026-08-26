@@ -1,0 +1,11 @@
+# MATH: AIME 24/25/26 + APEX + APEX shortlist + HLE-Verified gold, Math category.
+name: math
+benches:
+  - bench: configs/bench/aime24.yml
+  - bench: configs/bench/aime25.yml
+  - bench: configs/bench/aime26.yml
+  - bench: configs/bench/apex.yml
+  - bench: configs/bench/apex_shortlist.yml
+  - bench: configs/bench/hle.yml
+    hle_gold: true
+    metadata: {category: [Math]}

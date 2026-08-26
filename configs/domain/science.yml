@@ -1,0 +1,8 @@
+# SCIENCE: GPQA-diamond + HLE-Verified gold, science categories only.
+name: science
+benches:
+  - bench: configs/bench/gpqa.yml
+    system_prompt: assets/system_prompt/mcq.txt
+  - bench: configs/bench/hle.yml
+    hle_gold: true
+    metadata: {category: [Physics, Chemistry, Biology/Medicine, Computer Science/AI, Engineering]}

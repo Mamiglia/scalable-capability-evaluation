@@ -1,0 +1,7 @@
+# CODING: SWE-bench mini + Terminal-Bench 2.1 (+ 3.0, once collected — uncomment).
+# TBD
+name: coding
+benches:
+  - bench: configs/bench/swe-bench-mini.yml
+  - bench: configs/bench/terminal_bench_2_1.yml
+  # - bench: configs/bench/terminal_bench_3.yml
