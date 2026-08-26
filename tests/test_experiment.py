@@ -1,97 +1,73 @@
+import pandas as pd
+import pytest
+
+from configs.domain import DomainBench, DomainConfig
+from configs.experiment import ExperimentConfig
 from configs.model import ModelConfig
-from configs.paths import get_eval_path
-from configs.task import TaskConfig
 
 
-def test_model_evals_orders_successful_repeats(tmp_path, monkeypatch):
-    from configs.experiment import ExperimentConfig
+def domain(items, responses):
+    d = DomainConfig(name="dom", benches=[DomainBench(bench="b1")])
+    d.load_items = lambda: items
+    d.load_responses = lambda: responses
+    return d
 
-    bench = TaskConfig(name="bench1")
-    model = ModelConfig(name="model1", slug="model1")
 
-    exp = ExperimentConfig(
-        name="test_exp",
-        benchmark=bench,
-        major=model,
-        minor=model,
-        judge=model,
-    )
+ITEMS = pd.DataFrame({"bench": "b1", "item": ["1", "2", "3", "4"], "quartile": [1, 2, 3, 4]})
+# Q4 (item 4): a > b > c. Q1 (item 1): b = c > a. Two repeats of b on item 4 average to 0.5.
+RESPONSES = pd.DataFrame(
+    [("a", "4", 0, 1), ("b", "4", 0, 1), ("b", "4", 1, 0), ("c", "4", 0, 0),
+     ("a", "1", 0, 0), ("b", "1", 0, 1), ("c", "1", 0, 1)],
+    columns=["model", "item", "repeat", "correct"]).assign(bench="b1")
+MODELS = [ModelConfig(name=n, slug=n) for n in "abc"]
 
-    eval_dir = tmp_path / "bench1" / "hash" / "model1"
-    files = {}
-    for repeat, filename in enumerate(["run1.eval", "run2.eval", "failed_run3.eval"]):
-        repeat_dir = eval_dir / str(repeat)
-        repeat_dir.mkdir(parents=True)
-        files[filename] = repeat_dir / filename
-        files[filename].write_text("dummy")
 
-    monkeypatch.setattr(
-        "configs.experiment.is_successful_eval", lambda path: "failed" not in str(path)
-    )
-    monkeypatch.setattr("configs.experiment.get_eval_path", lambda **kw: eval_dir)
+def experiment(**kwargs):
+    kwargs = dict(name="exp", domain=domain(ITEMS, RESPONSES), judge=ModelConfig(name="j", slug="j"),
+                  models=list(MODELS), q_src=1) | kwargs
+    return ExperimentConfig(**kwargs)
 
-    assert exp.model_evals(model) == [files["run1.eval"], files["run2.eval"]]
-    # Same model on both sides: the control compares distinct repeats, never a log to itself.
-    assert exp.resolve_pairs() == [(files["run1.eval"], files["run2.eval"])]
+
+def test_pairs_are_ordered_by_q_dst_accuracy():
+    names = lambda pairs: [(M.name, m.name) for M, m in pairs]
+    assert names(experiment().ordered_pairs()) == [("a", "b"), ("a", "c"), ("b", "c")]
+    # Ground truth moves with q_dst; a tie is broken by name.
+    assert names(experiment(q_dst=1).ordered_pairs()) == [("b", "a"), ("c", "a"), ("b", "c")]
+
+
+def test_explicit_pairs_replace_the_combinations():
+    exp = experiment(models=[], pairs=[[MODELS[2], MODELS[0]]])
+    assert [(M.name, m.name) for M, m in exp.ordered_pairs()] == [("a", "c")]
+    assert [m.name for m in exp.models] == ["c", "a"]
+    with pytest.raises(ValueError, match="not both"):
+        experiment(pairs=[[MODELS[0], MODELS[1]]])
+
+
+def test_items_are_the_quartile_per_bench():
+    assert experiment().items(1) == {"b1": {"1"}}
+    assert experiment().items(4) == {"b1": {"4"}}
+
+
+def test_model_without_responses_raises():
+    exp = experiment(models=MODELS[:2] + [ModelConfig(name="zzz", slug="zzz")])
+    with pytest.raises(ValueError, match="zzz"):
+        exp.ordered_pairs()
 
 
 def test_log_dir_separates_conditions():
-    from configs.experiment import ExperimentConfig
-
-    model = ModelConfig(name="model1", slug="model1")
-    kwargs = dict(name="pair", benchmark=TaskConfig(name="bench1"), major=model, minor=model, judge=model)
-    plain = ExperimentConfig(**kwargs)
-    stripped = ExperimentConfig(**kwargs, include_reasoning=False)
-    assert plain.log_dir.parent == stripped.log_dir.parent
-    assert plain.log_dir != stripped.log_dir
+    plain, other = experiment(), experiment(q_src=2)
+    assert plain.log_dir.parent == other.log_dir.parent
+    assert plain.log_dir != other.log_dir
+    assert experiment(include_reasoning=False).log_dir != plain.log_dir
 
 
-def test_resolve_pairs_without_logs_raises(tmp_path, monkeypatch):
-    import pytest
-
-    from configs.experiment import ExperimentConfig
-
-    model = ModelConfig(name="model1", slug="model1")
-    exp = ExperimentConfig(
-        name="test_exp",
-        benchmark=TaskConfig(name="bench1"),
-        major=model,
-        minor=model,
-        judge=model,
-    )
-    monkeypatch.setattr("configs.experiment.get_eval_path", lambda **kw: tmp_path / "empty")
-
-    with pytest.raises(ValueError, match="No successful eval logs"):
-        exp.resolve_pairs()
+def test_bad_quartile_and_model_count_raise():
+    with pytest.raises(ValueError):
+        experiment(q_src=5)
+    with pytest.raises(ValueError):
+        experiment(models=MODELS[:1])
 
 
-def test_eval_kwargs_does_not_mutate_config():
-    from configs.experiment import ExperimentConfig
-
-    model = ModelConfig(name="model1", slug="model1")
-    exp = ExperimentConfig(
-        name="test_exp",
-        benchmark=TaskConfig(name="bench1"),
-        major=model,
-        minor=model,
-        judge=model,
-        limit=5,
-    )
-    assert exp.eval_kwargs() == {"limit": 5}
-    assert exp.eval_kwargs() == {"limit": 5}
-    assert exp._kwargs == {}
-
-
-def test_task_eval_kwargs_does_not_mutate_config():
-    task = TaskConfig(name="bench1", limit=3)
-    first = task.eval_kwargs()
-    assert first["limit"] == 3
-    assert task.eval_kwargs() == first
-    assert task._kwargs == {}
-
-
-def test_get_eval_path_is_lowercased():
-    task = TaskConfig(name="Bench1", task="mock_bench_no_args")
-    model = ModelConfig(name="Org/Model-1", slug="org/model-1")
-    assert get_eval_path(task, model, base_dir="data").parts[1] == "bench1"
-    assert get_eval_path(task, model, base_dir="data").parts[-1] == "model-1"
+def test_eval_kwargs_only_carry_limit():
+    assert experiment(limit=5).eval_kwargs() == {"limit": 5}
+    assert experiment().eval_kwargs() == {}

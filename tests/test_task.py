@@ -7,7 +7,7 @@ from inspect_ai import Task
 from inspect_ai.dataset import MemoryDataset, Sample
 from judge.task import (
     judge_task,
-    build_judge_tasks,
+    build_tasks,
 )
 
 
@@ -55,65 +55,40 @@ class TestJudgeTask:
             include_reverse=True,
             include_reasoning=True,
             truncate_frac=None,
+            items=None,
         )
 
 
 @patch("judge.task.read_eval_log")
 @patch("judge.task.build_dataset")
-def test_build_judge_tasks_multi_pair(mock_build_dataset, mock_read_log):
-    log_major = MagicMock()
-    log_major.eval.model = "ibm"
-    log_major.eval.task = "gpqa"
+def test_build_tasks_one_per_bench_and_pair(mock_build_dataset, mock_read_log, monkeypatch):
+    import pandas as pd
+    from configs.domain import DomainBench
+    from configs.model import ModelConfig
+    from configs.task import TaskConfig
 
-    log_minor = MagicMock()
-    log_minor.eval.model = "llama"
-    log_minor.eval.task = "gpqa"
-
-    mock_read_log.side_effect = [log_major, log_minor, log_major, log_minor]
-
-    mock_build_dataset.return_value = MemoryDataset(samples=[Sample(input="test")])
-
-    mock_exp = MagicMock()
-    mock_exp.resolve_pairs.return_value = [
-        (Path("major/0.eval"), Path("minor/0.eval")),
-        (Path("major/0.eval"), Path("minor/1.eval")),
-    ]
-    mock_exp.system_prompt = "test prompt"
-    mock_exp.max_length = 65536
-    mock_exp.require_both_correct = True
-    mock_exp.include_reverse = True
-    mock_exp.include_reasoning = True
-    mock_exp.truncate_frac = 0.0
-    mock_exp.name = "test_exp"
-    mock_exp.task_name = "test_task"
-
-    tasks = build_judge_tasks(experiment=mock_exp)
-
-    assert len(tasks) == 2
-    # Distinct names: same-named tasks in one eval_set write over each other's logs.
-    assert tasks[0].name == "test_task+0"
-    assert tasks[1].name == "test_task+1"
-    assert tasks[0].metadata["truncate_frac"] is None
-
-
-@patch("judge.task.read_eval_log")
-@patch("judge.task.build_dataset")
-def test_build_judge_tasks_single_pair_keeps_plain_name(mock_build_dataset, mock_read_log):
     log = MagicMock()
     log.eval.model = "ibm"
     log.eval.task = "gpqa"
-    mock_read_log.side_effect = [log, log]
+    mock_read_log.return_value = log
     mock_build_dataset.return_value = MemoryDataset(samples=[Sample(input="test")])
+    monkeypatch.setattr("judge.task.successful_evals", lambda task, model: [Path(f"{model.name}/0.eval")])
 
-    mock_exp = MagicMock()
-    mock_exp.resolve_pairs.return_value = [(Path("major/0.eval"), Path("minor/0.eval"))]
-    mock_exp.system_prompt = "test prompt"
-    mock_exp.max_length = 65536
-    mock_exp.truncate_frac = 0.0
-    mock_exp.task_name = "test_task"
+    a, b = ModelConfig(name="A", slug="A"), ModelConfig(name="B", slug="B")
+    exp = MagicMock()
+    exp.models, exp.q_src, exp.q_dst, exp.name = [a, b], 1, 4, "exp"
+    exp.system_prompt, exp.max_length, exp.truncate_frac = "prompt", 65536, 0.0
+    exp.domain.name, exp.domain.benches = "dom", [DomainBench(bench="gpqa", system_prompt="mcq")]
+    exp.domain.task.return_value = TaskConfig(name="gpqa")
+    exp.items.return_value = {"gpqa": {"1", "2"}}
+    exp.accuracy.return_value = pd.Series({"a": 0.9, "b": 0.4})
+    exp.ordered_pairs.return_value = [(a, b)]
 
-    tasks = build_judge_tasks(experiment=mock_exp)
-    assert [t.name for t in tasks] == ["test_task"]
+    tasks = build_tasks(exp)
+    assert [t.name for t in tasks] == ["gpqa/a|b"]
+    assert tasks[0].metadata["major"] == "a" and tasks[0].metadata["acc_minor"] == 0.4
+    assert tasks[0].metadata["system_prompt"] == "mcq"  # the bench's own prompt wins
+    assert mock_build_dataset.call_args.kwargs["items"] == {"1", "2"}
 
 
 @patch("judge.task.read_eval_log")

@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
@@ -117,25 +118,18 @@ def test_bootstrap_brackets_point_estimate_and_is_seeded():
     assert not bootstrap(judged, table, n_resamples=20, seed=1)["ability"].equals(result["ability"])
 
 
-def test_cli_filters_ranks_and_scores(monkeypatch, tmp_path):
+def test_cli_ranks_logs_and_scores_every_quartile(monkeypatch, tmp_path):
     abilities = {"strong": 2.0, "middle": 0.5, "weak": -1.0}
-    judged = pd.concat([simulated_verdicts(abilities, n_items=30).assign(bench=b, judge=j)
-                        for b in ("gpqa", "aime") for j in ("judge-1", "judge-2")])
-    table = pd.concat([simulated_validation(abilities, n_items=30).assign(bench=b) for b in ("gpqa", "aime")])
-    judged.to_parquet(tmp_path / "verdicts.parquet")
-    table.to_parquet(tmp_path / "validation.parquet")
-    pd.DataFrame({"item": range(20)}).to_csv(tmp_path / "judged_items.csv", index=False)
-    pd.DataFrame({"item": range(20, 30)}).to_csv(tmp_path / "validation_items.csv", index=False)
-    monkeypatch.setattr("sys.argv", ["rank", "--verdicts", str(tmp_path / "verdicts.parquet"),
-                                     "--validation", str(tmp_path / "validation.parquet"),
-                                     "--out_dir", str(tmp_path / "out"), "--judges", "[judge-1]",
-                                     "--items_csv", str(tmp_path / "judged_items.csv"),
-                                     "--validation_items_csv", str(tmp_path / "validation_items.csv"),
-                                     "--models", "[strong,weak]", "--n_resamples", "5"])
+    judged = simulated_verdicts(abilities, n_items=30).assign(bench="gpqa", judge="judge-1")
+    table = simulated_validation(abilities, n_items=30).assign(bench="gpqa")
+    items = pd.DataFrame({"bench": "gpqa", "item": range(30), "quartile": [1 + i // 8 for i in range(30)]})
+    domain = SimpleNamespace(load_responses=lambda: table, load_items=lambda: items)
+    monkeypatch.setattr("ranking.cli.from_logs", lambda log_dir: judged)
+    monkeypatch.setattr("ranking.cli.DomainConfig.from_cli", lambda spec: domain)
+    monkeypatch.setattr("sys.argv", ["rank", "--logs", str(tmp_path), "--domain", "dom.yml", "--n_resamples", "5"])
     assert cli_main() == 0
-    scores = pd.read_csv(tmp_path / "out" / "scores.csv")
-    assert len(scores) == 1 and scores.n_models[0] == 2 and scores.n_items[0] == 2 * 10  # 10 validation items per bench
-    ranking = pd.read_csv(tmp_path / "out" / "ranking.csv")
-    assert list(ranking.model) == ["strong", "weak"]
-    assert ranking.n_comparisons.sum() == 2 * 2 * 20 * 2  # two benches, one judge, one pair, both orders, 20 items, two sides
-    assert set(pd.read_csv(tmp_path / "out" / "bootstrap.csv").model) == {"strong", "weak"}
+    scores = pd.read_csv(tmp_path / "scores.csv")
+    assert list(scores.quartile) == ["Q1", "Q2", "Q3", "Q4", "all"]
+    assert scores.n_items.tolist() == [8, 8, 8, 6, 30] and "correlation_p50" in scores
+    assert list(pd.read_csv(tmp_path / "ranking.csv").model) == ["strong", "middle", "weak"]
+    assert set(pd.read_csv(tmp_path / "bootstrap.csv").model) == set(abilities)
