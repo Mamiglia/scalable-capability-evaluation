@@ -16,10 +16,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from transcript_embeddings import special_token_frame  # noqa: E402
+from transcript_embeddings import chunk_spans, pool_chunks, special_token_frame  # noqa: E402
 
 KEY = ["bench", "item", "model", "epoch", "log"]
 
@@ -75,21 +76,48 @@ def query_mask(n_tokens, bounds):
     return mask
 
 
-def prefix_embeddings(model, tokenizer, ids, bounds, device):
+def prefix_embeddings(model, tokenizer, ids, bounds, device, chunk_tokens=8192):
     """Unit-norm embedding of every prefix, in the order of bounds: one causal pass over the transcript with a
-    KV cache, then one pass of end-token queries against the cache, each masked to its own prefix."""
+    KV cache, then one pass of end-token queries against the cache, each masked to its own prefix.
+    The causal pass is fed in chunks so attention is chunk x n rather than n x n (40k+ tokens paged out on MPS)."""
     prefix, suffix = special_token_frame(tokenizer)
     if prefix:
         raise ValueError("a non-empty special-token prefix is not handled")
     end = suffix[0]
     n = len(ids)
     with torch.inference_mode():
-        cache = model(input_ids=torch.tensor([ids], device=device), use_cache=True).past_key_values
+        cache = None
+        for start in range(0, n, chunk_tokens):
+            chunk = ids[start:start + chunk_tokens]
+            cache = model(input_ids=torch.tensor([chunk], device=device),
+                          position_ids=torch.tensor([list(range(start, start + len(chunk)))], device=device),
+                          past_key_values=cache, use_cache=True).past_key_values
         hidden = model(input_ids=torch.tensor([[end] * len(bounds)], device=device),
                        position_ids=torch.tensor([list(bounds)], device=device),
                        attention_mask=query_mask(n, bounds)[None, None].to(device),
                        past_key_values=cache, use_cache=True).last_hidden_state[0]
     return torch.nn.functional.normalize(hidden.float(), dim=1).cpu().numpy()
+
+
+def pooled_prefix_embeddings(model, tokenizer, ids, bounds, args, chunking):
+    """Prefix embeddings pooled the way the stored embeddings were: the transcript is cut into
+    overlapping chunks, each chunk embedded on its own, and the chunks averaged with overlap
+    weights. A prefix [0, t) is the same recipe applied to the first t tokens, so the last
+    boundary reproduces the stored embedding. Transcripts within one chunk need one pass."""
+    length, overlap = chunking["chunk_length"], chunking["overlap"]
+    prefix_spans = {t: chunk_spans(t, length, overlap) for t in bounds}
+    ends_by_chunk = {}                                       # chunk start -> prefix ends needed within it
+    for spans in prefix_spans.values():
+        for start, end in spans:
+            ends_by_chunk.setdefault(start, set()).add(end)
+    chunk_vectors = {}                                       # (chunk start, prefix end) -> embedding
+    for start, ends in ends_by_chunk.items():
+        ends = sorted(ends)
+        vectors = prefix_embeddings(model, tokenizer, ids[start:ends[-1]], [e - start for e in ends],
+                                    args.device, args.chunk_tokens)
+        chunk_vectors.update({(start, e): v for e, v in zip(ends, vectors)})
+    return np.stack([pool_chunks(np.stack([chunk_vectors[span] for span in prefix_spans[t]]), prefix_spans[t], t)
+                     for t in bounds])
 
 
 def collect_examples(viewer_data):
@@ -111,7 +139,8 @@ def main():
     parser.add_argument("--sae-dir", type=Path, default=ROOT / "judge_results/verdict_dissection/transcript_sae/sae-qwen")
     parser.add_argument("--model-path", type=Path, default=Path("/Volumes/T7/models/Qwen3-Embedding-4B-5cf2132a"))
     parser.add_argument("--device", default="mps")
-    parser.add_argument("--max-tokens", type=int, default=40000, help="skip longer transcripts")
+    parser.add_argument("--max-tokens", type=int, default=65536, help="skip longer transcripts")
+    parser.add_argument("--chunk-tokens", type=int, default=8192, help="prefill chunk length")
     parser.add_argument("--max-boundaries", type=int, default=512)
     parser.add_argument("--limit", type=int, default=None, help="trace only the first N transcripts (smoke)")
     args = parser.parse_args()
@@ -121,6 +150,7 @@ def main():
     model = AutoModel.from_pretrained(args.model_path, local_files_only=True, dtype=torch.bfloat16,
                                       attn_implementation="sdpa").to(args.device).eval()
     means, key_to_item = item_means(args.dense_dir)
+    chunking = yaml.safe_load((ROOT / "configs/workstream_b.yaml").read_text())["models"]["qwen"]   # same chunks as the stored embeddings
     encoder = SharedEncoder(args.sae_dir)
     n_features = encoder.weight.shape[0]
 
@@ -144,7 +174,7 @@ def main():
             skipped += 1
             continue
         bounds = boundaries(len(ids), args.max_boundaries)
-        embeddings = prefix_embeddings(model, tokenizer, ids, bounds, args.device)
+        embeddings = pooled_prefix_embeddings(model, tokenizer, ids, bounds, args, chunking)
         item = key_to_item[tuple(key.split("|")[:3] + [int(key.split("|")[3])] + key.split("|")[4:])]
         pre = encoder(centre(embeddings, means[item]))  # (boundaries, features)
         spans = [[offsets[previous][0], offsets[t - 1][1]] for previous, t in zip([0] + bounds[:-1], bounds)]
