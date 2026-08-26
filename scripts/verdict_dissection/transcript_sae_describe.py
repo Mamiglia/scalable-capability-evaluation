@@ -342,9 +342,12 @@ def main():
     parser.add_argument("--max-features", type=int, help="describe only the first N features (smoke)")
     parser.add_argument("--groups", nargs="+", help="describe only features of these fit groups (e.g. shared)")
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--annotator-model", help="override descriptions.annotator_model (a second, independent scorer)")
     args = parser.parse_args()
     config = yaml.safe_load(args.config.read_text())
     settings, groups, width = config["descriptions"], dict(config["sae"]["fit_groups"]), config["sae"]["width"]
+    if args.annotator_model:
+        settings = settings | {"annotator_model": args.annotator_model}
     rows = pd.read_parquet(args.dense_dir / "report_rows.parquet")
     if not pd.read_parquet(args.sae_dir / "rows.parquet")["transcript_key"].equals(rows["transcript_key"]):
         raise ValueError("report rows are not in SAE row order")

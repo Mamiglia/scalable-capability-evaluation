@@ -1,7 +1,8 @@
-"""Answer pending description prompts with the Codex CLI (subscription), appending replies to the cache.
+"""Answer pending description prompts with the Codex or Claude Code CLI (subscription), appending
+replies to the cache.
 
-Reads pending.jsonl written by transcript_sae_describe.py --offline, runs `codex exec` per
-prompt with N workers, and appends {key, model, reply, provider} lines to llm_cache.jsonl.
+Reads pending.jsonl written by transcript_sae_describe.py --offline, runs `codex exec` (or
+`claude -p`) per prompt with N workers, and appends {key, model, reply, provider} lines to llm_cache.jsonl.
 Re-running transcript_sae_describe.py --offline then picks the replies up from the cache.
 """
 import argparse
@@ -27,11 +28,19 @@ def codex_reply(prompt: str, model: str, effort: str) -> str:
     return reply
 
 
+def claude_reply(prompt: str, model: str) -> str:
+    result = subprocess.run(["claude", "-p", "--model", model], input=prompt, capture_output=True, text=True, timeout=600)
+    if result.returncode or not result.stdout.strip():
+        raise RuntimeError(f"claude returned nothing (exit {result.returncode}): {result.stderr[-300:]}")
+    return result.stdout
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True, help="dir holding pending.jsonl and llm_cache.jsonl")
     parser.add_argument("--only-model", help="answer only prompts addressed to this model name (as in pending.jsonl)")
-    parser.add_argument("--codex-model", default="gpt-5.6-luna")
+    parser.add_argument("--backend", choices=("codex", "claude"), default="codex")
+    parser.add_argument("--codex-model", default="gpt-5.6-luna", help="codex backend model, or claude model alias (haiku, sonnet)")
     parser.add_argument("--effort", default="low")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--limit", type=int)
@@ -50,7 +59,8 @@ def main():
 
     def answer(item):
         try:
-            reply = codex_reply(item["prompt"], args.codex_model, args.effort)
+            reply = (claude_reply(item["prompt"], args.codex_model) if args.backend == "claude"
+                     else codex_reply(item["prompt"], args.codex_model, args.effort))
         except Exception as error:
             with lock:
                 counts["failed"] += 1
@@ -59,12 +69,13 @@ def main():
         with lock:
             with cache_path.open("a") as handle:
                 handle.write(json.dumps({"key": item["key"], "model": item["model"], "reply": reply,
-                                         "provider": f"codex:{args.codex_model}:{args.effort}"}) + "\n")
+                                         "provider": (f"claude-code:{args.codex_model}" if args.backend == "claude"
+                                                      else f"codex:{args.codex_model}:{args.effort}")}) + "\n")
             counts["ok"] += 1
             if counts["ok"] % 25 == 0:
                 print(f"answered {counts['ok']}/{len(pending)}", flush=True)
 
-    print(f"answering {len(pending)} pending prompts with codex {args.codex_model} ({args.effort})", flush=True)
+    print(f"answering {len(pending)} pending prompts with {args.backend} {args.codex_model} ({args.effort})", flush=True)
     with ThreadPoolExecutor(args.workers) as pool:
         list(pool.map(answer, pending))
     print(counts)

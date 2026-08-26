@@ -107,8 +107,8 @@ sae:
 
 descriptions:
   # WIMHF interpretation + fidelity (configs/*.json in rmovva/wimhf), adapted to single transcripts
-  interpreter_model: openai/gpt-5
-  annotator_model: openai/gpt-5-mini
+  interpreter_model: codex/gpt-5.6-luna-medium   # names are answered offline (answer_pending.py); OpenRouter fallback needs openai/* names
+  annotator_model: codex/gpt-5.6-luna-low        # second pass: --annotator-model claude/haiku-4.5
   # OpenRouter endpoint tags to pin (from /api/v1/models/<slug>/endpoints); fallbacks are refused
   openrouter_endpoints:
     openai/gpt-5: openai/default
@@ -116,12 +116,12 @@ descriptions:
   interpreter_max_tokens: 20000
   annotator_max_tokens: 2000
   n_candidates: 5
-  interpret_examples: 10
-  contrast_examples: 10
+  interpret_examples: 8
+  contrast_examples: 8
   top_percentile: 95
-  scoring_examples: 300
+  scoring_examples: 200
   annotation_batch_size: 20   # transcripts per fidelity call; all of a feature's candidates are judged together
-  max_words: 256
+  max_words: 2000   # head + tail words shown per transcript; 256 hid everything but openings and endings
   min_correlation: 0.0
   p_value_threshold: null   # null = 0.05 / width (Bonferroni over the dictionary)
   min_prevalence: 0.05
