@@ -4,7 +4,7 @@
 
 Reads <fits_dir>/<model>/<wave>/<design>/held_out_<model>.csv. Writes <output_dir>/<model>.csv
 with one row per (wave, design) holding the overall and per-group scores, and prints a summary
-per wave: model folds and item folds as mean ± sd over their four fits, the rank bands alone.
+per wave: each held-out family as mean ± sd over its four folds.
 """
 import argparse
 from pathlib import Path
@@ -25,7 +25,7 @@ def collate(fits_dir, model):
 def summary(table):
     """Overall score per wave: folds averaged with their sd, bands as they are."""
     table = table.copy()
-    table["family"] = table.design.str.replace(r"-\d+$", "s", regex=True)      # model-fold-2 -> model-folds
+    table["family"] = table.design.str.replace(r"-\d+$", "", regex=True)       # model-fold-2 -> model-fold
     grouped = table.groupby(["wave", "family"])["all"].agg(["mean", "std", "size"])
     grouped["score"] = grouped.apply(lambda r: f"{r['mean']:.3f}" + (f" ± {r['std']:.3f}" if r["size"] > 1 else ""), axis=1)
     return grouped.score.unstack("family")
