@@ -16,9 +16,6 @@ from sklearn.preprocessing import StandardScaler
 
 NODE_TYPES = ["assistant_edu", "equation", "code", "heading", "answer", "tool_inspect", "tool_act",
               "output_inspect", "output_act", "user_feedback"]
-RELATIONS = ["attribution", "background", "causal", "condition", "contrast", "elaboration", "evaluation",
-             "explanation", "joint", "organization", "purpose", "restatement", "same-unit", "topic-change",
-             "topic-comment", "within_leaf", "tool_result", "tool_response"]
 EDGE_SOURCES = ["discourse", "tool", "similarity", "identifier"]
 LONG_RANGE = 8                                     # parent more than this many nodes back
 
@@ -50,7 +47,7 @@ def _ancestors(sink, incoming):
     return seen
 
 
-def topology_block(nodes, edges):
+def topology_block(nodes, edges, relation_names=None):
     """Block 1 for one transcript (nodes in node_id order, edges chronological)."""
     n, m = len(nodes), len(edges)
     outgoing, incoming = _graph(n, edges)
@@ -72,7 +69,8 @@ def topology_block(nodes, edges):
     types = Counter(node_type(x) for x in nodes)
     ancestry_types = Counter(node_type(nodes[i]) for i in ancestry)
     outputs = [x for x in nodes if x["kind"] == "tool_output"]
-    relations = Counter(e["relation"] for e in edges)
+    relation_counts = Counter(e["relation"] for e in edges)
+    relation_names = relation_names or sorted(r for r in relation_counts if r is not None)
     sources = Counter(e["edge_source"] for e in edges)
     distances = [e["target_node_id"] - e["source_node_id"] for e in edges]
     f = {"node_count": n, "edge_count": m,
@@ -91,7 +89,7 @@ def topology_block(nodes, edges):
          "marker_verification": sum(bool(x.get("verification_marker")) for x in nodes)}
     f |= {f"share_{t}": types[t] / n for t in NODE_TYPES}
     f |= {f"ancestry_share_{t}": ancestry_types[t] / n for t in NODE_TYPES}
-    f |= {f"relation_{r}": relations[r] / max(m, 1) for r in RELATIONS}
+    f |= {f"relation_{r}": relation_counts[r] / max(m, 1) for r in relation_names}
     f |= {f"edge_source_{s}": sources[s] / max(m, 1) for s in EDGE_SOURCES}
     f |= _motifs(nodes, edges)
     return {f"topo_{k}": float(v) for k, v in f.items()}

@@ -262,6 +262,13 @@ def test_typed_topology_shares_and_motifs():
     assert f["topo_restatement_chain_max"] == 1.0 and f["topo_weak_components"] == 1.0
 
 
+@pytest.mark.parametrize("relation", ["adversative", "context", "contingency", "mode", "topic"])
+def test_topology_uses_the_supplied_relation_vocabulary(relation):
+    nodes = [node(0, "question", None), node(1, "answer", 0, is_final_sink=True)]
+    assert topology_block(nodes, [e(0, 1, "discourse", relation)], [relation])[f"topo_relation_{relation}"] == 1.0
+    assert topology_block(nodes, [], [relation])[f"topo_relation_{relation}"] == 0.0
+
+
 def test_motifs_only_use_the_next_assistant_part():
     nodes = [node(0, "question", None),
              node(1, "tool_output", 1, outcome="error"),

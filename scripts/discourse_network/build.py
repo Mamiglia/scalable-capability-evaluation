@@ -174,11 +174,14 @@ def make_features(store, nodes, edges, embeddings, split, cfg, out_dir):
     position = {k: i for i, k in enumerate(keys.transcript_key)}
     node_groups = {k: g.to_dict("records") for k, g in nodes.groupby("transcript_key")}
     edge_groups = {k: g.to_dict("records") for k, g in edges.groupby("transcript_key")}
+    relation_names = sorted(edges.relation.dropna().unique().tolist())
     topo_rows = []
     for key in keys.transcript_key:
         local_edges = edge_groups.get(key, [])
-        structural = topology_block(node_groups[key], [e for e in local_edges if e["edge_source"] in {"discourse", "tool"}])
-        augmented = topology_block(node_groups[key], local_edges)
+        structural = topology_block(node_groups[key],
+                                    [e for e in local_edges if e["edge_source"] in {"discourse", "tool"}],
+                                    relation_names)
+        augmented = topology_block(node_groups[key], local_edges, relation_names)
         topo_rows.append({f"topo_struct_{name.removeprefix('topo_')}": value for name, value in structural.items()} |
                          {f"topo_aug_{name.removeprefix('topo_')}": value for name, value in augmented.items()})
     topo = pd.DataFrame(topo_rows)
