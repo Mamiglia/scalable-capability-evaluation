@@ -61,7 +61,7 @@ def model_fold_accuracy(features: np.ndarray, target: np.ndarray, model_left: np
         left, right = np.vectorize(fold_of.get)(model_left), np.vectorize(fold_of.get)(model_right)
         for k in range(folds):
             train, test = (left != k) & (right != k), (left == k) & (right == k)
-            if not test.any():
+            if not test.any() or len(set(target[train])) < 2:   # a benchmark may have few models
                 continue
             scale = features[train].std(axis=0) + 1e-8
             model = LogisticRegression(C=0.1, max_iter=500).fit(features[train] / scale, target[train])
