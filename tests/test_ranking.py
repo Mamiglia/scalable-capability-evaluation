@@ -1,3 +1,4 @@
+import pytest
 import numpy as np
 import pandas as pd
 
@@ -69,8 +70,18 @@ def test_score_is_kendall_tau_against_accuracy():
     judged = verdicts([("j", 0, "a", "b", 1), ("j", 1, "b", "c", 1), ("j", 1, "a", "c", 1)])
     agreeing = correctness([("a", 0, 1), ("b", 0, 1), ("c", 0, 0), ("a", 1, 1), ("b", 1, 0), ("c", 1, 0)])  # a 1, b .5, c 0
     reversed_ = agreeing.assign(correct=1 - agreeing.correct)
-    assert score(ranking, agreeing, judged) == {"kendall_tau": 1.0, "n_models": 3, "n_items": 2}
-    assert score(ranking, reversed_, judged)["kendall_tau"] == -1.0
+    assert score(ranking, agreeing, judged) == {"correlation": 1.0, "method": "kendall", "n_models": 3, "n_items": 2}
+    assert score(ranking, reversed_, judged)["correlation"] == -1.0
+
+
+def test_score_can_use_spearman():
+    ranking = pd.DataFrame({"model": ["a", "b", "c", "d"], "ability": [3.0, 2.0, 1.0, 0.0]})
+    judged = verdicts([("j", 0, "a", "b", 1), ("j", 1, "c", "d", 1), ("j", 2, "a", "d", 1)])
+    # accuracy over items 0-2: b 1, a 2/3, c 1/3, d 0 -> one adjacent swap against the ability order
+    table = correctness([(m, item, int(item < n_right)) for m, n_right in [("a", 2), ("b", 3), ("c", 1), ("d", 0)]
+                         for item in range(3)])
+    assert score(ranking, table, judged, correlation="kendall")["correlation"] == pytest.approx(2 / 3)
+    assert score(ranking, table, judged, correlation="spearman")["correlation"] == pytest.approx(0.8)
 
 
 def test_score_truth_uses_only_judged_items():
@@ -78,4 +89,4 @@ def test_score_truth_uses_only_judged_items():
     judged = verdicts([("j", 0, "a", "b", 1)])
     # a beats b on item 0, but loses badly on the unjudged items 1 and 2
     table = correctness([("a", 0, 1), ("b", 0, 0), ("a", 1, 0), ("b", 1, 1), ("a", 2, 0), ("b", 2, 1)])
-    assert score(ranking, table, judged)["kendall_tau"] == 1.0
+    assert score(ranking, table, judged)["correlation"] == 1.0
