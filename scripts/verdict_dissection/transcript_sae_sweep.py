@@ -49,16 +49,38 @@ def grouped_accuracy(features: np.ndarray, target: np.ndarray, groups: np.ndarra
     return float((predictions == target).mean())
 
 
+def model_fold_accuracy(features: np.ndarray, target: np.ndarray, model_left: np.ndarray,
+                        model_right: np.ndarray, folds: int = 5, seed: int = 0) -> float:
+    """Held-out accuracy with models held out: fold k tests pairs whose two models are both in
+    fold k and trains on pairs with neither. Guards against learning model fingerprints."""
+    models = np.array(sorted(set(model_left) | set(model_right)))
+    fold_of = dict(zip(models, np.random.default_rng(seed).permutation(len(models)) % folds))
+    left, right = np.vectorize(fold_of.get)(model_left), np.vectorize(fold_of.get)(model_right)
+    predictions, tested = np.zeros(len(target), dtype=bool), np.zeros(len(target), dtype=bool)
+    for k in range(folds):
+        train, test = (left != k) & (right != k), (left == k) & (right == k)
+        if not test.any():
+            continue
+        scale = features[train].std(axis=0) + 1e-8
+        model = LogisticRegression(C=0.1, max_iter=500).fit(features[train] / scale, target[train])
+        predictions[test], tested[test] = model.predict(features[test] / scale), True
+    return float((predictions[tested] == target[tested]).mean())
+
+
 def score_block(pairs: pd.DataFrame, columns: list[str], group_of: dict[str, str],
-                target: str = "pick_left") -> dict[str, float]:
+                target: str = "pick_left", folds_by: str = "item") -> dict[str, float]:
     """Accuracy per benchmark group (fit groups from the config) and pooled over their rows."""
     out, correct, total = {}, 0, 0
     for group in sorted(set(group_of.values())):
         rows = pairs[pairs["bench"].map(group_of) == group]
         if not len(rows):
             continue
-        accuracy = grouped_accuracy(rows[columns].to_numpy(np.float32), rows[target].to_numpy(bool),
-                                    rows["item"].to_numpy())
+        if folds_by == "model":
+            accuracy = model_fold_accuracy(rows[columns].to_numpy(np.float32), rows[target].to_numpy(bool),
+                                           rows["model_left"].to_numpy(), rows["model_right"].to_numpy())
+        else:
+            accuracy = grouped_accuracy(rows[columns].to_numpy(np.float32), rows[target].to_numpy(bool),
+                                        rows["item"].to_numpy())
         out[group] = accuracy
         correct += accuracy * len(rows)
         total += len(rows)
@@ -86,11 +108,12 @@ def stronger_pairs(pairs: pd.DataFrame, labels: pd.DataFrame) -> pd.DataFrame:
     return unique.assign(left_stronger=unique["left_stronger"] > 0)
 
 
-def scores(pairs: pd.DataFrame, columns: list[str], group_of: dict[str, str], labels: pd.DataFrame | None) -> dict:
-    out = {f"acc_{k}": v for k, v in score_block(pairs, columns, group_of).items()}
+def scores(pairs: pd.DataFrame, columns: list[str], group_of: dict[str, str], labels: pd.DataFrame | None,
+           folds_by: str = "item") -> dict:
+    out = {f"acc_{k}": v for k, v in score_block(pairs, columns, group_of, folds_by=folds_by).items()}
     if labels is not None:
         out |= {f"stronger_{k}": v for k, v in
-                score_block(stronger_pairs(pairs, labels), columns, group_of, "left_stronger").items()}
+                score_block(stronger_pairs(pairs, labels), columns, group_of, "left_stronger", folds_by).items()}
     return out
 
 
@@ -101,6 +124,8 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("configs/workstream_b.yaml"))
     parser.add_argument("--output", type=Path, required=True, help="results table (csv)")
     parser.add_argument("--skip-dense", action="store_true", help="skip the 2,560-dim reference (slow)")
+    parser.add_argument("--folds-by", choices=("item", "model"), default="item",
+                        help="item: folds grouped by item; model: test pairs have both models held out")
     parser.add_argument("--stronger-pairs", type=Path,
                         help="pair design matrix (build_design_matrices.py) with a left_stronger column")
     args = parser.parse_args()
@@ -123,7 +148,7 @@ def main() -> None:
         pairs = development_pairs(verdicts, transcript_frame(audit, rows, inputs, "dim_"))
         columns = [c for c in pairs if c.startswith("d_dim_")]
         results.append({"width": "dense", "top_k": "", "validation_ev": 1.0, "features_over_5pct": inputs.shape[1],
-                        "mean_active": inputs.shape[1]} | scores(pairs, columns, group_of, labels))
+                        "mean_active": inputs.shape[1]} | scores(pairs, columns, group_of, labels, args.folds_by))
         print(json.dumps(results[-1]), flush=True)
     for entry in config["sweep"]:
         fit_config = config | entry
@@ -140,7 +165,7 @@ def main() -> None:
             "features_over_5pct": int(((activations != 0).mean(axis=0) >= 0.05).sum()),
             "mean_active": float((activations != 0).sum(axis=1).mean()),
             "epochs_run": len(history["train_loss"]),
-        } | scores(pairs, columns, group_of, labels))
+        } | scores(pairs, columns, group_of, labels, args.folds_by))
         print(json.dumps(results[-1]), flush=True)
     table = pd.DataFrame(results)
     args.output.parent.mkdir(parents=True, exist_ok=True)
