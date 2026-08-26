@@ -1,9 +1,9 @@
 """
 How good a ranking is: rank correlation between fitted ability and benchmark accuracy.
 
-Accuracy is computed on the items that were actually judged, so ranking a subset
-of items is scored against accuracy on that subset. bootstrap() resamples items
-to put intervals on the abilities and the correlation.
+Accuracy can be taken over every item in the correctness table, over the judged
+items only, or over the held-out items the judges never saw. bootstrap()
+resamples the judged items to put intervals on the abilities and the correlation.
 """
 
 import numpy as np
@@ -16,35 +16,39 @@ ITEM = ["bench", "item"]
 CORRELATIONS = {"kendall": kendalltau, "spearman": spearmanr}  # kendall is tau-b (tie-corrected)
 
 
-def accuracy_on_judged_items(correctness: pd.DataFrame, verdicts: pd.DataFrame) -> pd.Series:
-    """Per model, mean correctness over the (bench, item) pairs that appear in the verdicts."""
-    judged = verdicts[ITEM].drop_duplicates()
-    return correctness.merge(judged, on=ITEM).groupby("model").correct.mean()
+def accuracy(correctness: pd.DataFrame, verdicts: pd.DataFrame, items: str = "all") -> pd.Series:
+    """
+    Per model, mean correctness over the chosen items.
+
+    items: "all" = every item in the correctness table; "judged" = items that appear in the
+    verdicts; "held_out" = items that do not.
+    """
+    judged = correctness[ITEM].apply(tuple, axis=1).isin(verdicts[ITEM].drop_duplicates().apply(tuple, axis=1))
+    keep = {"all": pd.Series(True, index=correctness.index), "judged": judged, "held_out": ~judged}[items]
+    return correctness[keep].groupby("model").correct.mean()
 
 
 def score(ranking: pd.DataFrame, correctness: pd.DataFrame, verdicts: pd.DataFrame,
-          correlation: str = "kendall") -> dict:
+          correlation: str = "kendall", items: str = "all") -> dict:
     """
     Rank correlation between ability and accuracy, over the models present in both.
 
     ranking: output of rank(). correctness: bench, model, item, correct. verdicts: the table rank() was given.
-    correlation: "kendall" (tau-b) or "spearman".
-    Returns correlation, method, n_models, n_items (judged items the accuracy was computed on).
+    correlation: "kendall" (tau-b) or "spearman". items: which items the accuracy is over, see accuracy().
+    Returns correlation, method, n_models, n_items (items the accuracy was computed on).
     """
-    accuracy = accuracy_on_judged_items(correctness, verdicts)
+    truth = accuracy(correctness, verdicts, items)
     ability = ranking.set_index("model").ability
-    models = ability.index.intersection(accuracy.index)
-    value = CORRELATIONS[correlation](ability[models], accuracy[models]).statistic
-    return {"correlation": float(value), "method": correlation,
-            "n_models": len(models), "n_items": len(verdicts[ITEM].drop_duplicates())}
+    models = ability.index.intersection(truth.index)
+    value = CORRELATIONS[correlation](ability[models], truth[models]).statistic
+    n_items = {"all": len(correctness[ITEM].drop_duplicates()), "judged": len(verdicts[ITEM].drop_duplicates())}
+    n_items["held_out"] = n_items["all"] - n_items["judged"]
+    return {"correlation": float(value), "method": correlation, "n_models": len(models), "n_items": n_items[items]}
 
 
 def resample_items(verdicts: pd.DataFrame, correctness: pd.DataFrame, rng: np.random.Generator):
     """
     One bootstrap draw: judged items sampled with replacement, in both tables.
-
-    Each draw gets its own item id, so an item drawn twice counts twice in the fit,
-    in tie detection and in accuracy.
     """
     items = verdicts[ITEM].drop_duplicates()
     draws = items.iloc[rng.integers(len(items), size=len(items))].assign(draw=lambda d: np.arange(len(d)).astype(str))
@@ -54,9 +58,8 @@ def resample_items(verdicts: pd.DataFrame, correctness: pd.DataFrame, rng: np.ra
 
     return relabel(verdicts), relabel(correctness)
 
-
 def bootstrap(verdicts: pd.DataFrame, correctness: pd.DataFrame, n_resamples: int = 200, seed: int = 0,
-              drop_ties: bool = False, ridge: float = RIDGE, correlation: str = "kendall") -> dict:
+              drop_ties: bool = False, ridge: float = RIDGE, correlation: str = "kendall", items: str = "all") -> dict:
     """
     Item-bootstrap intervals for the abilities and the ranking's correlation with accuracy.
 
@@ -68,7 +71,7 @@ def bootstrap(verdicts: pd.DataFrame, correctness: pd.DataFrame, n_resamples: in
         judged, table = resample_items(verdicts, correctness, rng)
         ranking = rank(judged, drop_ties=drop_ties, ridge=ridge)
         abilities.append(ranking.set_index("model").ability)
-        correlations.append(score(ranking, table, judged, correlation=correlation)["correlation"])
+        correlations.append(score(ranking, table, judged, correlation=correlation, items=items)["correlation"])
 
     quantiles = {"p5": 0.05, "p50": 0.5, "p95": 0.95}
     ability = pd.concat(abilities, axis=1)  # models x resamples

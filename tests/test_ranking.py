@@ -85,12 +85,14 @@ def test_score_can_use_spearman():
     assert score(ranking, table, judged, correlation="spearman")["correlation"] == pytest.approx(0.8)
 
 
-def test_score_truth_uses_only_judged_items():
+@pytest.mark.parametrize("items, expected, n_items", [("all", -1.0, 3), ("judged", 1.0, 1), ("held_out", -1.0, 2)])
+def test_score_truth_items(items, expected, n_items):
     ranking = pd.DataFrame({"model": ["a", "b"], "ability": [1.0, 0.0]})
     judged = verdicts([("j", 0, "a", "b", 1)])
-    # a beats b on item 0, but loses badly on the unjudged items 1 and 2
+    # a beats b on item 0, but loses on the unjudged items 1 and 2
     table = correctness([("a", 0, 1), ("b", 0, 0), ("a", 1, 0), ("b", 1, 1), ("a", 2, 0), ("b", 2, 1)])
-    assert score(ranking, table, judged)["correlation"] == 1.0
+    result = score(ranking, table, judged, items=items)
+    assert (result["correlation"], result["n_items"]) == (expected, n_items)
 
 
 def simulated_correctness(abilities, n_items=200, seed=0):

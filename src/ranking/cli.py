@@ -22,6 +22,7 @@ class RankConfig:
     drop_ties: bool = False
     ridge: float = RIDGE
     correlation: str = "kendall"  # or spearman
+    items: str = "all"  # items the accuracy is over: all, judged, held_out
     n_resamples: int = 0  # bootstrap draws; 0 = skip
     seed: int = 0
 
@@ -51,13 +52,14 @@ def main() -> int:
     for bench, judged in verdicts.groupby("bench"):
         ranking = rank(judged, drop_ties=cfg.drop_ties, ridge=cfg.ridge)
         ranking.to_csv(out / f"ranking_{bench}.csv", index=False)
-        result = score(ranking, correctness, judged, correlation=cfg.correlation)
+        truth = correctness[correctness.bench == bench]
+        result = score(ranking, truth, judged, correlation=cfg.correlation, items=cfg.items)
         scores.append({"bench": bench, **result})
         print(f"{bench}: {result['n_models']} models, {result['n_items']} items, "
               f"{cfg.correlation} {result['correlation']:.3f}")
         if cfg.n_resamples:
-            draws = bootstrap(judged, correctness, n_resamples=cfg.n_resamples, seed=cfg.seed,
-                              drop_ties=cfg.drop_ties, ridge=cfg.ridge, correlation=cfg.correlation)
+            draws = bootstrap(judged, truth, n_resamples=cfg.n_resamples, seed=cfg.seed, drop_ties=cfg.drop_ties,
+                              ridge=cfg.ridge, correlation=cfg.correlation, items=cfg.items)
             intervals.append(draws["ability"].assign(bench=bench))
             scores[-1].update({f"correlation_{q}": v for q, v in draws["correlation"].items()})
     pd.DataFrame(scores).to_csv(out / "scores.csv", index=False)
