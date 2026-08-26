@@ -4,8 +4,9 @@
 
 Judges are scored from <inputs_dir>/<design>/judge_verdict_from_pair.parquet (test rows: pick_left against
 the sign of accuracy_difference); fitted models from <fits_dir>/stronger_model_from_pair/<wave>/<design>/
-predictions_stronger_model_from_pair.csv. Accuracy is over the union of the given designs' test pairs, so
-with the four folds of one family every model is scored while unseen. Prints benchmarks + unweighted mean.
+predictions_stronger_model_from_pair.csv. Accuracy is the micro-average over the union of the given designs'
+held-out pairs (so with the four folds of one family every model is scored while unseen); ties in benchmark
+accuracy are excluded; the mean column is unweighted over benchmarks.
 """
 import argparse
 from pathlib import Path
