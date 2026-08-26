@@ -1,13 +1,9 @@
 # Held-out designs, one fit each. Model designs hold out whole models (all items seen); item folds
-# hold out every 4th item in sorted order within each benchmark (all models seen). Rankings are by
-# mean accuracy across the four benchmarks (AIME years pooled); model folds take every 4th model down
-# that ranking, the bands take the top, middle (ranks 11-16) and bottom six.
+# hold out every 4th item in sorted order within each benchmark (all models seen). Model folds take every
+# 4th model down the ranking by mean accuracy across the four benchmarks (AIME years pooled).
 item_folds: 4
 model_designs:
   model-fold-0: [qwen3.8-2.4t-a95b, qwen3.8-27b, gpt-5, glm-4.6, ling-2.6-flash, gpt-4.1, granite-4.1-8b]
   model-fold-1: [glm-5.3, gemini-3.5-flash, deepseek-v3.2, muse-glimmer-30b, qwen3.5-4b, mistral-medium-3, gemma-3-12b-it]
   model-fold-2: [kimi-k3, kimi-k2.6, nvidia-nemotron-3-ultra-550b-a55b-bf16, deepseek-r1-0528, nvidia-nemotron-3.5-lightning-30b-a3b-bf16, qwen3-32b]
   model-fold-3: [claude-opus-4.7, glm-5.2, o3, claude-sonnet-4.5, qwen3.5-9b, gemma-4-e2b-it]
-  top-6-models: [qwen3.8-2.4t-a95b, glm-5.3, kimi-k3, claude-opus-4.7, qwen3.8-27b, gemini-3.5-flash]
-  middle-6-models: [nvidia-nemotron-3-ultra-550b-a55b-bf16, o3, glm-4.6, muse-glimmer-30b, deepseek-r1-0528, claude-sonnet-4.5]
-  bottom-6-models: [gpt-4.1, mistral-medium-3, qwen3-32b, gemma-4-e2b-it, granite-4.1-8b, gemma-3-12b-it]

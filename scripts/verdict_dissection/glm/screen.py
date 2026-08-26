@@ -123,7 +123,10 @@ def main():
             for wave, kept in feature_sets.items():
                 specs = {wave: False, f"{wave}+accuracy-gap": True} if model == "judge_verdict_from_pair" else {wave: False}
                 for wave_name, use_gap in specs.items():
-                    score = run(table, kept, model, use_gap, args.fits_dir / model / wave_name / design_dir.name, inner_group)
+                    out_dir = args.fits_dir / model / wave_name / design_dir.name
+                    if (out_dir / f"held_out_{model}.csv").exists():
+                        continue                                # already fitted; delete the folder to redo
+                    score = run(table, kept, model, use_gap, out_dir, inner_group)
                     print(f"{model} {wave_name} {design_dir.name}: {score:.3f}", flush=True)
 
 
