@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from ranking import rank
+from ranking import rank, score
 
 
 def verdicts(rows):
@@ -57,3 +57,25 @@ def test_drop_ties_removes_only_disagreeing_groups():
     assert kept.loc["a", "n_comparisons"] == 5 and kept.loc["a", "n_ties"] == 1
     assert dropped.loc["a", "n_comparisons"] == 3 and dropped.loc["a", "n_ties"] == 0
     assert kept.loc["a", "n_wins"] == 3 and dropped.loc["a", "n_wins"] == 2
+
+
+def correctness(rows):
+    """rows of (model, item, correct), one benchmark."""
+    return pd.DataFrame(rows, columns=["model", "item", "correct"]).assign(bench="synthetic")
+
+
+def test_score_is_kendall_tau_against_accuracy():
+    ranking = pd.DataFrame({"model": ["a", "b", "c"], "ability": [1.0, 0.0, -1.0]})
+    judged = verdicts([("j", 0, "a", "b", 1), ("j", 1, "b", "c", 1), ("j", 1, "a", "c", 1)])
+    agreeing = correctness([("a", 0, 1), ("b", 0, 1), ("c", 0, 0), ("a", 1, 1), ("b", 1, 0), ("c", 1, 0)])  # a 1, b .5, c 0
+    reversed_ = agreeing.assign(correct=1 - agreeing.correct)
+    assert score(ranking, agreeing, judged) == {"kendall_tau": 1.0, "n_models": 3, "n_items": 2}
+    assert score(ranking, reversed_, judged)["kendall_tau"] == -1.0
+
+
+def test_score_truth_uses_only_judged_items():
+    ranking = pd.DataFrame({"model": ["a", "b"], "ability": [1.0, 0.0]})
+    judged = verdicts([("j", 0, "a", "b", 1)])
+    # a beats b on item 0, but loses badly on the unjudged items 1 and 2
+    table = correctness([("a", 0, 1), ("b", 0, 0), ("a", 1, 0), ("b", 1, 1), ("a", 2, 0), ("b", 2, 1)])
+    assert score(ranking, table, judged)["kendall_tau"] == 1.0
