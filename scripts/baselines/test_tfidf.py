@@ -55,3 +55,16 @@ def test_pick_longer_is_antisymmetric_and_follows_length():
     p = pick_longer(pairs, transcripts, left, right)
     assert (p == pairs.left_stronger).all()
     assert np.allclose(p + pick_longer(pairs, transcripts, right, left), 1)
+
+
+def test_gbm_is_antisymmetric_and_learns_a_nonlinear_rule():
+    from gbm import features, fit_predict as gbm_fit_predict
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(600, 3))
+    y = (x[:, 0] * (x[:, 1] ** 2 - 0.5) > 0).astype(int)          # flips under swapping sides, but not linear
+    table = pd.DataFrame(x, columns=["a", "b", "c"]).assign(bench="gpqa")
+    x = features(table, ["a", "b", "c"])
+    p, _ = gbm_fit_predict(x[:500], y[:500], np.arange(500) // 5, x[500:])
+    assert np.mean((p > 0.5) == y[500:]) > 0.8
+    p_flipped, _ = gbm_fit_predict(x[:500], y[:500], np.arange(500) // 5, -x[500:] * [1, 1, 1, -1])
+    assert np.allclose(p + p_flipped, 1, atol=1e-6)
