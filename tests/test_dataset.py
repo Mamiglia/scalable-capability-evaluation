@@ -33,6 +33,47 @@ def eval_sample(sample_id, content, correct=True, question=None, choices=None, e
     )
 
 
+def test_read_transcripts_with_items_reads_only_those_samples(monkeypatch):
+    import dataset as module
+
+    read = []
+    monkeypatch.setattr(module, "_read_samples",
+                        lambda path, ids: (read.append(i) or eval_sample(i, f"ANSWER: {i}", correct=i != "q3") for i in ids))
+    monkeypatch.setattr(module, "read_eval_log_samples", lambda *a, **k: pytest.fail("streamed"))
+
+    got = read_transcripts("log.eval", items={"q1", "q3"})
+    assert read == ["q1", "q3"] and list(got) == ["q1"]  # q3 read but wrong
+    # Cached per log and filled incrementally: another pair's subset reads only what is new.
+    assert sorted(read_transcripts("log.eval", items={"q3", "q1", "q2"})) == ["q1", "q2"]
+    assert read == ["q1", "q3", "q2"]
+
+
+def test_build_dataset_refuses_reasoning_on_one_side_only(monkeypatch):
+    import dataset as module
+
+    with_cot = "<THOUGHT_START>\n think\n<THOUGHT_END>\nANSWER: 1"
+    logs = {"a.eval": {"q1": [transcript(with_cot)]}, "b.eval": {"q1": [transcript("ANSWER: 1")]}}
+    monkeypatch.setattr(module, "read_transcripts", lambda path, *a, **k: logs[str(path)])
+    monkeypatch.setattr(module, "read_header", lambda path: MagicMock())
+    assert len(build_dataset(Path("a.eval"), Path("b.eval"), include_reasoning=True)) == 0
+    assert len(build_dataset(Path("a.eval"), Path("b.eval"), include_reasoning=False)) == 2  # both hidden: fine
+    logs["b.eval"] = {"q1": [transcript(with_cot)]}
+    assert len(build_dataset(Path("a.eval"), Path("b.eval"), include_reasoning=True)) == 2
+
+
+def test_question_text_takes_user_text_of_chat_inputs():
+    from inspect_ai.model import ChatMessageSystem, ChatMessageUser
+
+    from dataset import question_text
+
+    chat = [ChatMessageSystem(content="format"), ChatMessageUser(content="What is 2+2?")]
+    assert question_text(chat) == "What is 2+2?"
+    assert question_text("plain") == "plain"
+    # Message ids differ per run; the same question must still compare equal across logs.
+    again = [ChatMessageSystem(content="format"), ChatMessageUser(content="What is 2+2?")]
+    assert chat[1].id != again[1].id and question_text(chat) == question_text(again)
+
+
 class TestResponsesToSample:
     """Unit tests for responses_to_sample in dataset.py."""
 

@@ -58,7 +58,7 @@ def test_log_dir_separates_conditions():
     plain, other = experiment(), experiment(q_src=2)
     assert plain.log_dir.parent == other.log_dir.parent
     assert plain.log_dir != other.log_dir
-    assert experiment(include_reasoning=False).log_dir != plain.log_dir
+    assert experiment(include_reasoning=True).log_dir != plain.log_dir
 
 
 def test_bad_quartile_and_model_count_raise():

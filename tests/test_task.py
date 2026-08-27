@@ -14,7 +14,7 @@ from judge.task import (
 class TestJudgeTask:
     """Unit tests for judge_task function in task.py."""
 
-    @patch("judge.task.read_eval_log")
+    @patch("judge.task.read_header")
     @patch("judge.task.build_dataset")
     def test_judge_task_creation(self, mock_build_dataset, mock_read_log):
         """Test judge_task constructs Task object with correct parameters and metadata."""
@@ -59,7 +59,7 @@ class TestJudgeTask:
         )
 
 
-@patch("judge.task.read_eval_log")
+@patch("judge.task.read_header")
 @patch("judge.task.build_dataset")
 def test_build_tasks_one_per_bench_and_pair(mock_build_dataset, mock_read_log, monkeypatch):
     import pandas as pd
@@ -72,7 +72,7 @@ def test_build_tasks_one_per_bench_and_pair(mock_build_dataset, mock_read_log, m
     log.eval.task = "gpqa"
     mock_read_log.return_value = log
     mock_build_dataset.return_value = MemoryDataset(samples=[Sample(input="test")])
-    monkeypatch.setattr("judge.task.successful_evals", lambda task, model: [Path(f"{model.name}/0.eval")])
+    monkeypatch.setattr("judge.task.successful_evals", lambda task, model: [Path(f"{model.name}/0/run.eval")])
 
     a, b = ModelConfig(name="A", slug="A"), ModelConfig(name="B", slug="B")
     exp = MagicMock()
@@ -80,7 +80,10 @@ def test_build_tasks_one_per_bench_and_pair(mock_build_dataset, mock_read_log, m
     exp.system_prompt, exp.max_length, exp.truncate_frac = "prompt", 65536, 0.0
     exp.domain.name, exp.domain.benches = "dom", [DomainBench(bench="gpqa", system_prompt="mcq")]
     exp.domain.task.return_value = TaskConfig(name="gpqa")
-    exp.items.return_value = {"gpqa": {"1", "2"}}
+    exp.items.return_value = {"gpqa": {"1", "2", "3"}}
+    exp.domain.load_responses.return_value = pd.DataFrame(  # B never solved item 2; item 3 is Q1 but A failed it
+        [("a", "1", True), ("a", "2", True), ("a", "3", False), ("b", "1", True), ("b", "2", False), ("b", "3", True)],
+        columns=["model", "item", "correct"]).assign(bench="gpqa", repeat=0)
     exp.accuracy.return_value = pd.Series({"a": 0.9, "b": 0.4})
     exp.ordered_pairs.return_value = [(a, b)]
 
@@ -88,10 +91,10 @@ def test_build_tasks_one_per_bench_and_pair(mock_build_dataset, mock_read_log, m
     assert [t.name for t in tasks] == ["gpqa/a|b"]
     assert tasks[0].metadata["major"] == "a" and tasks[0].metadata["acc_minor"] == 0.4
     assert tasks[0].metadata["system_prompt"] == "mcq"  # the bench's own prompt wins
-    assert mock_build_dataset.call_args.kwargs["items"] == {"1", "2"}
+    assert mock_build_dataset.call_args.kwargs["items"] == {"1"}  # both-correct Q1 items only
 
 
-@patch("judge.task.read_eval_log")
+@patch("judge.task.read_header")
 @patch("judge.task.build_dataset")
 def test_truncation_switches_to_truncated_prompt(mock_build_dataset, mock_read_log):
     """Truncated runs must tell the judge the transcripts were cut, or it penalises them."""
@@ -110,7 +113,7 @@ def test_truncation_switches_to_truncated_prompt(mock_build_dataset, mock_read_l
     assert task.metadata["system_prompt"] == TRUNCATED_SYSTEM_PROMPT
 
 
-@patch("judge.task.read_eval_log")
+@patch("judge.task.read_header")
 def test_mismatched_benchmarks_raise(mock_read_log):
     log_major = MagicMock()
     log_major.eval.task = "inspect_evals/gpqa_diamond"
