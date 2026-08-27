@@ -14,3 +14,9 @@ def test_codex_parse_repairs_latex_escapes():
     reply = '{"annotations":[{"id":1,"errors":[{"quote":"\\(15^2 = 225\\)","kind":"arithmetic","why":"\\frac{1}{2}"}]},{"id":2,"errors":[]}]}'
     out = parse(reply, 2)
     assert out[1][0]["quote"] == "\\(15^2 = 225\\)" and out[2] == []
+
+
+def test_codex_parse_treats_omitted_numbers_as_clean():
+    from intermediate_errors_codex import parse
+    out = parse('{"annotations":[{"id":2,"errors":[{"quote":"x","kind":"other","why":"y"}]}]}', 3)
+    assert out == {1: [], 2: [{"quote": "x", "kind": "other", "why": "y"}], 3: []}

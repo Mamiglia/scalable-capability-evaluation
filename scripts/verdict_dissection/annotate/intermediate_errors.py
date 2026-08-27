@@ -32,15 +32,23 @@ JSON_BLOCK = re.compile(r"\{.*\}", re.S)
 
 
 def ask(base_url, model, question, transcript, max_tokens, timeout):
-    body = {"model": model, "temperature": 0.0, "max_tokens": max_tokens,
+    """One chat completion, streamed so a proxy with an idle timeout keeps the connection open."""
+    body = {"model": model, "temperature": 0.0, "max_tokens": max_tokens, "stream": True,
             "messages": [{"role": "system", "content": SYSTEM},
                          {"role": "user", "content": f"PROBLEM:\n{question}\n\nSOLUTION:\n{transcript}"}],
             "chat_template_kwargs": {"enable_thinking": True}}
     request = urllib.request.Request(f"{base_url}/chat/completions", data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json", "User-Agent": "intermediate-errors/1.0"})   # the RunPod proxy rejects urllib's default agent
+                                     headers={"Content-Type": "application/json", "User-Agent": "intermediate-errors/1.0"})
+    pieces = []
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        reply = json.load(response)
-    return reply["choices"][0]["message"]["content"] or ""
+        for line in response:
+            line = line.decode().strip()
+            if not line.startswith("data:") or line == "data: [DONE]":
+                continue
+            delta = json.loads(line[5:])["choices"][0].get("delta", {})
+            if delta.get("content"):
+                pieces.append(delta["content"])
+    return "".join(pieces)
 
 
 def parse(text):

@@ -78,6 +78,9 @@ def parse(reply, n):
     for entry in entries:
         if isinstance(entry, dict) and isinstance(entry.get("id"), int) and 1 <= entry["id"] <= n:
             out[entry["id"]] = [e for e in entry.get("errors", []) if isinstance(e, dict) and e.get("quote")]
+    if isinstance(entries, list):                 # a number left out of a well-formed reply means no errors found
+        for number in range(1, n + 1):
+            out.setdefault(number, [])
     return out
 
 
