@@ -1,4 +1,5 @@
-"""Plain logistic regression for judge verdicts from feature-table differences, with and without extra blocks.
+"""Plain logistic regression for judge verdicts (or the stronger model, --target stronger) from feature-table
+differences, with and without extra blocks.
 
     uv run python scripts/verdict_dissection/judge_verdict_logistic.py --base raw/surface-textual.parquet --extra raw/clause-network.parquet:^topo_ ...
 
@@ -30,7 +31,7 @@ KEYS = ["bench", "model", "item", "epoch", "log", "sample_epoch", "content_hash"
 STRICT = [f"new-models-and-items-{r}" for r in range(SPLITS["item_folds"])]
 
 
-def load_pairs():
+def load_pairs(target="judge"):
     pairs = pd.read_parquet(FREEZE / "pairs.parquet",
                             columns=["bench", "judge", "item", "model_left", "model_right", "pick_left",
                                      "content_hash_l", "content_hash_r"])
@@ -39,7 +40,17 @@ def load_pairs():
     pairs = pairs[~pairs.content_hash_l.isin(answer_only) & ~pairs.content_hash_r.isin(answer_only)].reset_index(drop=True)
     pairs["item"] = np.where(pairs.bench.str.startswith("aime"), pairs.bench.str[4:] + "/" + pairs.item, pairs.item)
     pairs["bench"] = pairs.bench.str.replace(r"aime\d+", "aime", regex=True)
-    return pairs
+    if target == "judge":
+        return pairs.assign(y=pairs.pick_left)
+    # stronger model: benchmark accuracy over canonical rollouts (AIME pooled), one row per distinct shown pair, ties dropped
+    identity = pd.read_parquet(FEATURES_ROOT / "raw/identity.parquet", columns=["bench", "model", "correct", "is_canonical"])
+    identity["bench"] = identity.bench.str.replace(r"aime\d+", "aime", regex=True)
+    accuracy = identity[identity.is_canonical].groupby(["bench", "model"]).correct.mean()
+    pairs = pairs.drop(columns=["judge", "pick_left"]).drop_duplicates(["bench", "item", "model_left", "model_right", "content_hash_l", "content_hash_r"])
+    gap = accuracy.reindex(pd.MultiIndex.from_arrays([pairs.bench, pairs.model_left])).to_numpy() \
+        - accuracy.reindex(pd.MultiIndex.from_arrays([pairs.bench, pairs.model_right])).to_numpy()
+    pairs = pairs.assign(judge="stronger", y=(gap > 0).astype(int))[gap != 0]
+    return pairs.reset_index(drop=True)
 
 
 def block(spec, pairs):
@@ -63,7 +74,7 @@ def evaluate(pairs, X, design):
     hits = pd.Series(np.nan, index=pairs.index)
     for (bench, judge), group in pairs.groupby(["bench", "judge"]):
         idx = group.index.to_numpy()
-        y = group.pick_left.to_numpy()
+        y = group.y.to_numpy()
         if design == "item-folds":
             for train, test in GroupKFold(SPLITS["item_folds"]).split(idx, y, group.item.to_numpy()):
                 hits.iloc[idx[test]] = fit_predict(X[idx], y, train, test)
@@ -81,8 +92,9 @@ def main():
     parser.add_argument("--base", nargs="+", default=["raw/surface-textual.parquet"])
     parser.add_argument("--extra", nargs="+", default=[], help="blocks added one at a time on top of the base, then all together")
     parser.add_argument("--designs", nargs="+", default=["item-folds", "strict"])
+    parser.add_argument("--target", choices=["judge", "stronger"], default="judge")
     args = parser.parse_args()
-    pairs = load_pairs()
+    pairs = load_pairs(args.target)
     base = pd.concat([block(s, pairs) for s in args.base], axis=1)
     extras = {s: block(s, pairs) for s in args.extra}
     sets = {"base": base} | {f"base + {s}": pd.concat([base, x], axis=1) for s, x in extras.items()}
