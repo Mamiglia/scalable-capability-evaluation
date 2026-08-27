@@ -90,6 +90,17 @@ def judge_verdict_from_pair(pair, predictors, design):
     }).join(_bare_names(pair, predictors))
 
 
+def with_sides(pair, transcript, predictors):
+    """Each transcript's own (scaled) features attached to its side of the pair, as <feature>_left / _right."""
+    keys = ["bench", "item", "model", "epoch", "log"]
+    for side in ("left", "right"):
+        side_table = transcript[keys + predictors].rename(
+            columns={**{k: f"{k}_{side}" for k in ("model", "epoch", "log")}, **{f: f"{f}_{side}" for f in predictors}})
+        pair = pair.merge(side_table, on=["bench", "item", f"model_{side}", f"epoch_{side}", f"log_{side}"],
+                          how="left", validate="many_to_one")
+    return pair
+
+
 def _bare_names(pair, predictors):
     return pair[[f"d_{name}" for name in predictors]].set_axis(predictors, axis=1)
 
@@ -112,6 +123,7 @@ def main():
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--models", nargs="+", default=["capability_from_transcript", "stronger_model_from_pair", "judge_verdict_from_pair"])
     parser.add_argument("--dense", action="store_true", help="add the 2,560 dense embedding columns (qwen_dim_*) as predictors")
+    parser.add_argument("--sides", action="store_true", help="judge tables also carry each side's own features as <feature>_left / _right")
     args = parser.parse_args()
     config = yaml.safe_load((ROOT / "configs/design_matrices.yaml").read_text())
     design_matrices = Path(config["output_root"])
@@ -133,12 +145,17 @@ def main():
                 .rename(columns={"correct": "accuracy"}))
     transcript, pair = with_accuracy(transcript, pair, accuracy)
 
+    if args.sides:
+        pair = with_sides(pair, transcript, predictors)
     for design in designs():
         design_dir = args.output_dir / design
         design_dir.mkdir(parents=True, exist_ok=True)
         builders = {b.__name__: b for b in (capability_from_transcript, stronger_model_from_pair, judge_verdict_from_pair)}
         for build in (builders[name] for name in args.models):
             table = build(transcript if build is capability_from_transcript else pair, predictors, design)
+            if args.sides and build is judge_verdict_from_pair:
+                side_columns = [f"{name}_{side}" for side in ("left", "right") for name in predictors]
+                table = table.join(pair.loc[table.index, side_columns])
             table = table[table.role != "drop"].assign(test=lambda t: t.role == "test").drop(columns="role")
             table.to_parquet(design_dir / f"{build.__name__}.parquet", index=False)
             print(f"{design} {build.__name__}: train {int((~table.test).sum())}, test {int(table.test.sum())}")

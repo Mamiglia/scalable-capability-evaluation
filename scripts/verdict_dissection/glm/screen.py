@@ -132,6 +132,7 @@ def main():
     parser.add_argument("--predictors", type=Path, default=HERE / "predictors.yaml", help="predictor list (predictors-dense.yaml for the embedding set)")
     parser.add_argument("--designs", nargs="+", help="held-out designs to fit (default: every directory in inputs_dir)")
     parser.add_argument("--drop-one", action="store_true", help="also fit each feature set with one predictor removed at a time")
+    parser.add_argument("--sides", action="store_true", help="judge model on each side's own features (<feature>_left + _right) instead of the difference")
     args = parser.parse_args()
     predictors = yaml.safe_load(args.predictors.read_text())
     feature_sets = {name: kept for name, kept in waves(predictors).items() if not args.waves or name in args.waves}
@@ -144,6 +145,9 @@ def main():
                 variants = {name: (kept, gap) for name, gap in specs.items()}
                 if args.drop_one:                                # the set minus one predictor, for every predictor
                     variants |= {f"{wave}-drop-{feature}": ([p for p in kept if p != feature], False) for feature in kept}
+                if args.sides and model == "judge_verdict_from_pair":       # left and right blocks: difference + sum
+                    variants = {f"{name}+sides": ([f"{f}_{side}" for side in ("left", "right") for f in feats], gap)
+                                for name, (feats, gap) in variants.items()}
                 for wave_name, (features, use_gap) in variants.items():
                     out_dir = args.fits_dir / model / wave_name / design_dir.name
                     if (out_dir / f"held_out_{model}.csv").exists():
