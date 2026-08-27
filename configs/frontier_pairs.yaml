@@ -14,7 +14,8 @@ judge_release: '2025-04-16'
 epoch_logs:
   gpqa: configs/epoch_logs_gpqa_frontier.yaml
   swe_bench_mini: configs/epoch_logs_swe.yaml
-epoch_trimmed_root:            # trimmed Epoch logs in the pool layout (trim_epoch_swe_logs.py)
+epoch_pool_root:               # Epoch logs in the pool layout: import_epoch_evals.py (gpqa), trim_epoch_swe_logs.py (swe)
+  gpqa: data/gpqa/a288e1a9
   swe_bench_mini: data/swe_bench_mini/epoch-bash-agent
 pool:
   gpqa: data/gpqa/b0a0d9c9

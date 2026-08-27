@@ -11,6 +11,8 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
+import yaml
+
 
 TASK_ARGS_HASH = "a288e1a9"  # sha256 of normalized task arguments: {"cot": true}
 TAGS = {"epoch_ai", "imported"}
@@ -169,13 +171,19 @@ def import_log(source: Path, destination: Path, benchmark: str) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
-    parser.add_argument("metadata", type=Path)
+    parser.add_argument("metadata", type=Path, nargs="?")
     parser.add_argument("benchmark")
     parser.add_argument("--target", type=Path, default=Path("data"))
+    parser.add_argument("--names", type=Path, help="epoch-logs config (configs/epoch_logs_*.yaml): import only its "
+                        "models, filed under their short names; logs on disk are named by Epoch model version")
     args = parser.parse_args()
 
-    names = model_names(args.metadata)
-    sources = sorted(args.source.glob("*.eval"))
+    if args.names:
+        names = yaml.safe_load(args.names.read_text())["models"]
+        sources = [path for path in sorted(args.source.glob("*.eval")) if path.stem in names]
+    else:
+        names = model_names(args.metadata)
+        sources = sorted(args.source.glob("*.eval"))
     missing = [path.stem for path in sources if path.stem not in names]
     if missing:
         raise ValueError(f"run IDs missing from metadata: {missing}")

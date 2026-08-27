@@ -30,7 +30,7 @@ def fake_log(path: Path) -> None:
 
 def test_trim_keeps_pool_items_and_cuts_messages(tmp_path):
     fake_log(tmp_path / "x.eval")
-    log = trim_log(tmp_path / "x.eval", {"django__django-1", "django__django-2"}, message_limit=6)
+    log = trim_log(tmp_path / "x.eval", {"django__django-1", "django__django-2"}, message_limit=6, task="inspect_evals/swe_bench_verified_mini")
     write_eval_log(log, str(tmp_path / "trimmed.eval"))
     back = read_eval_log(str(tmp_path / "trimmed.eval"))
 
@@ -40,3 +40,4 @@ def test_trim_keeps_pool_items_and_cuts_messages(tmp_path):
     assert back.results.completed_samples == 2
     assert back.results.scores[0].metrics["accuracy"].value == 0.5
     assert "epoch_ai" in back.eval.tags
+    assert back.eval.task == "inspect_evals/swe_bench_verified_mini"

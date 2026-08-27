@@ -3,8 +3,8 @@
 
 Epoch runs all 484 items with no turn cap; our swe-mini runs stop at message_limit=100.
 Each Epoch log becomes one log holding the swe-mini items only, every sample cut to its
-first --message-limit messages, Epoch's scores kept, written in the pool layout
-<target>/<model>/0/<model>.eval.
+first --message-limit messages, Epoch's scores kept, the pool's task name (judging pairs
+logs of one task only), written in the pool layout <target>/<model>/0/<model>.eval.
 
 Usage:
   uv run python scripts/judge/trim_epoch_swe_logs.py --config configs/epoch_logs_swe.yaml \\
@@ -19,15 +19,10 @@ from pathlib import Path
 import yaml
 from inspect_ai.log import EvalLog, read_eval_log, read_eval_log_samples, write_eval_log
 
-CORRECT_VALUES = ("C", 1, 1.0)
+from judge.util import extract_score
 
 
-def is_correct(sample) -> bool:
-    score = next(iter(sample.scores.values()))
-    return score.value in CORRECT_VALUES
-
-
-def trim_log(source: Path, item_ids: set[str], message_limit: int) -> EvalLog:
+def trim_log(source: Path, item_ids: set[str], message_limit: int, task: str) -> EvalLog:
     header = read_eval_log(str(source), header_only=True)
     samples = []
     for sample in read_eval_log_samples(str(source), all_samples_required=False, resolve_attachments=True):
@@ -37,9 +32,10 @@ def trim_log(source: Path, item_ids: set[str], message_limit: int) -> EvalLog:
         sample.events, sample.attachments = [], {}
         samples.append(sample)
     samples.sort(key=lambda sample: str(sample.id))
-    correct = [is_correct(sample) for sample in samples]
+    correct = [extract_score(sample) for sample in samples]
 
     spec = header.eval.model_copy(deep=True)
+    spec.task = task   # judging pairs logs of the same task only
     spec.dataset.samples = len(samples)
     spec.dataset.sample_ids = [sample.id for sample in samples]
     spec.tags = sorted(set(spec.tags or []) | {"epoch_ai", "imported"})
@@ -66,17 +62,15 @@ def main() -> None:
     config = yaml.safe_load(args.config.read_text())
     pool_log = read_eval_log(glob.glob(args.items_from)[0], header_only=True)
     item_ids = set(pool_log.eval.dataset.sample_ids)
+    task = pool_log.eval.task
 
     for epoch_name, model in config["models"].items():
         source = Path(config["out_dir"]) / f"{epoch_name}.eval"
         output = args.target / model / "0" / f"{model}.eval"
-        if output.exists():
-            print(f"present {output}")
-            continue
         if not source.exists():
             print(f"missing {source}")
             continue
-        log = trim_log(source, item_ids, args.message_limit)
+        log = trim_log(source, item_ids, args.message_limit, task)
         output.parent.mkdir(parents=True, exist_ok=True)
         write_eval_log(log, str(output))
         print(f"{model}: {len(log.samples)}/{len(item_ids)} items, "

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn configs/frontier_pairs.yaml into run_judging.py configs, one per benchmark.
 
-Resolves each model's transcript log (our pool, or the Epoch log / its trimmed copy),
+Resolves each model's transcript log (our pool, or the Epoch log imported into the pool layout),
 checks the release-date rule (a model released after the judge only meets models released
 before itself) and puts the more accurate model first in every comparison.
 
@@ -17,6 +17,8 @@ from pathlib import Path
 import pandas as pd
 import yaml
 from inspect_ai.log import read_eval_log
+
+from configs.paths import is_successful_eval
 
 MODELS_DIR = Path("configs/models")
 
@@ -34,17 +36,18 @@ def transcript_paths(cfg: dict, bench: str) -> dict[str, str]:
     """Short name -> eval log for every model that has one on this benchmark."""
     paths = {}
     for directory in sorted(glob.glob(f"{cfg['pool'][bench]}/*")):
-        logs = sorted(glob.glob(f"{directory}/0/*.eval"))
+        logs = [log for log in sorted(glob.glob(f"{directory}/0/*.eval")) if is_successful_eval(Path(log))]
         if logs:
             paths[Path(directory).name] = logs[0]
     for short, directory in cfg["pool_dirs"].items():
         if directory in paths:
             paths[short] = paths.pop(directory)
     epoch = yaml.safe_load(Path(cfg["epoch_logs"][bench]).read_text())
-    trimmed = cfg["epoch_trimmed_root"].get(bench)
-    for epoch_name, short in epoch["models"].items():
-        paths[short] = (f"{trimmed}/{short}/0/{short}.eval" if trimmed
-                        else f"{epoch['out_dir']}/{epoch_name}.eval")
+    for short in epoch["models"].values():
+        logs = [log for log in sorted(glob.glob(f"{cfg['epoch_pool_root'][bench]}/{short}/0/*.eval"))
+                if is_successful_eval(Path(log))]
+        if logs:
+            paths[short] = logs[0]
     return paths
 
 

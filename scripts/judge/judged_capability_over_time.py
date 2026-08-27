@@ -223,13 +223,15 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--x", choices=["release", "capability", "frontier"], default="release", help="what orders the models along x")
     parser.add_argument("--min-opponents", type=int, default=2, help="frontier plot: only models judged against at least this many others")
+    parser.add_argument("--tables", type=Path, help="directory with verdicts.parquet and rollouts.parquet from "
+                        "verdict_tables.py; default is the verdict-dissection store")
     args = parser.parse_args()
     config = yaml.safe_load(CONFIG.read_text())
-    rollouts = pool_aime(pd.read_parquet(Path(config["features_root"]) / "raw/identity.parquet",
-                                         columns=["bench", "model", "item", "correct", "is_canonical"]))
+    rollouts_path = args.tables / "rollouts.parquet" if args.tables else Path(config["features_root"]) / "raw/identity.parquet"
+    verdicts_path = args.tables / "verdicts.parquet" if args.tables else Path(config["output_root"]) / "pair.parquet"
+    rollouts = pool_aime(pd.read_parquet(rollouts_path, columns=["bench", "model", "item", "correct", "is_canonical"]))
     rollouts = rollouts[rollouts.is_canonical]
-    verdicts = pd.read_parquet(Path(config["output_root"]) / "pair.parquet",
-                               columns=["bench", "judge", "item", "model_left", "model_right", "pick_left"])
+    verdicts = pd.read_parquet(verdicts_path, columns=["bench", "judge", "item", "model_left", "model_right", "pick_left"])
     verdicts = verdicts[verdicts.judge == args.judge]
     easy = split_items(rollouts)
     rollout_is_easy = easy.reindex(pd.MultiIndex.from_frame(rollouts[["bench", "item"]])).to_numpy()
