@@ -1,12 +1,11 @@
 from pathlib import Path
 
 from inspect_ai import Task
-from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
 from configs.experiment import ExperimentConfig, successful_evals
 from configs.logs import logger
-from judge.dataset import MAX_LENGTH, build_dataset
+from judge.dataset import MAX_LENGTH, build_dataset, read_header
 from judge.scorer import judge_scorer
 
 DEFAULT_SYSTEM_PROMPT = "assets/system_prompt/default.txt"
@@ -35,8 +34,8 @@ def judge_task(
     major_path = Path(major_path)
     minor_path = Path(minor_path)
 
-    log_major = read_eval_log(major_path, header_only=True)
-    log_minor = read_eval_log(minor_path, header_only=True)
+    log_major = read_header(major_path)
+    log_minor = read_header(minor_path)
 
     if log_major.eval.task.rsplit("/", 1)[-1] != log_minor.eval.task.rsplit("/", 1)[-1]:
         raise ValueError(
@@ -95,6 +94,9 @@ def build_tasks(experiment: ExperimentConfig) -> list[Task]:
     exp = experiment
     items = exp.items(exp.q_src)
     acc = exp.accuracy(exp.q_dst)
+    # Which items each log got right is already in the domain's response table; asking the
+    # logs again would mean streaming every one of them (minutes each for HLE).
+    correct = exp.domain.load_responses().query("correct")
     tasks = []
     for bench in exp.domain.benches:
         task_cfg = exp.domain.task(bench)
@@ -102,11 +104,19 @@ def build_tasks(experiment: ExperimentConfig) -> list[Task]:
             logger.warning("%s: no Q%d items on %s", exp.name, exp.q_src, task_cfg.name)
             continue
         logs = {m.shortname.lower(): successful_evals(task_cfg, m) for m in exp.models}
+        solved = correct[correct.bench == task_cfg.name].groupby(["model", "repeat"]).item.agg(set)
         for major, minor in exp.ordered_pairs():
             names = major.shortname.lower(), minor.shortname.lower()
             if not all(logs[n] for n in names):
                 logger.warning("%s: no logs on %s for %s, skipping pair", exp.name, task_cfg.name,
                                [n for n in names if not logs[n]])
+                continue
+            # Q_src items both models solved in the (first) repeat being judged.
+            both = items[task_cfg.name].intersection(
+                *(solved.get((n, int(logs[n][0].parent.name)), set()) for n in names))
+            if not both:
+                logger.warning("%s: %s|%s share no correct Q%d item on %s, skipping", exp.name,
+                               *names, exp.q_src, task_cfg.name)
                 continue
             task = judge_task(
                 logs[names[0]][0], logs[names[1]][0],
@@ -117,7 +127,7 @@ def build_tasks(experiment: ExperimentConfig) -> list[Task]:
                 truncate_frac=exp.truncate_frac or None,
                 experiment_name=exp.name,
                 task_name=f"{task_cfg.name}/{names[0]}|{names[1]}",
-                items=items[task_cfg.name],
+                items=both,
                 # Data-dir model names and the ground truth, so ranking.verdicts reads logs alone.
                 metadata={"domain": exp.domain.name, "bench": task_cfg.name, "major": names[0],
                           "minor": names[1], "q_src": exp.q_src, "q_dst": exp.q_dst,
