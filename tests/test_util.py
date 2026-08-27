@@ -48,24 +48,13 @@ class TestFormatMessage:
         assert "THOUGHT" not in result and "SUMMARY" not in result
         assert result.strip().endswith("Final Answer")
 
-    def test_format_message_inline_think_becomes_a_reasoning_block(self):
-        """DeepSeek inline CoT is the same evidence as a reasoning block: render it the same."""
+    def test_format_message_inline_think_is_dropped_with_a_warning(self, caplog):
+        """An un-normalized log must warn and drop the CoT, never leak it as answer text."""
         msg = ChatMessageAssistant(content=[ContentText(type="text", text="<think>Step 1</think>Final Answer")])
         result = format_message(msg)
-        assert "<THOUGHT_START>" in result and "Step 1" in result
-        assert "<think>" not in result
+        assert "Step 1" not in result and "<think>" not in result
         assert result.strip().endswith("Final Answer")
-
-    def test_format_message_inline_think_matches_native_block(self):
-        """Same CoT, two transports -> identical rendering, so the judge cannot tell them apart."""
-        inline = ChatMessageAssistant(content=[ContentText(type="text", text="<think>Step 1</think>Final Answer")])
-        native = ChatMessageAssistant(
-            content=[
-                ContentReasoning(type="reasoning", reasoning="Step 1"),
-                ContentText(type="text", text="Final Answer"),
-            ]
-        )
-        assert format_message(inline) == format_message(native)
+        assert any("not normalized" in r.getMessage() for r in caplog.records)
 
     def test_format_message_empty_summary_renders_nothing(self):
         """Redacted with an empty summary (opus-5, fable-5) must not look like reasoning."""
@@ -237,10 +226,11 @@ class TestStripThink:
     def test_no_think_unchanged(self):
         assert strip_think("Just a plain answer.") == "Just a plain answer."
 
-    def test_format_content_strips_inline_think_only_when_excluded(self):
+    def test_format_content_drops_inline_think_in_both_conditions(self):
+        """Un-normalized inline CoT is dropped either way -- never shown, never leaked."""
         block = [ContentText(type="text", text="<think>secret CoT</think>Answer")]
         assert format_content(block, include_reasoning=False) == "Answer"
-        assert "secret CoT" in format_content(block, include_reasoning=True)
+        assert format_content(block, include_reasoning=True) == "Answer"
 
     def test_format_content_str_content_stripped(self):
         assert format_content("<think>x</think>Y", include_reasoning=False) == "Y"

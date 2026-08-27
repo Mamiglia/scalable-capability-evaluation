@@ -3,6 +3,8 @@ from inspect_ai.model import ChatMessage
 from inspect_ai.dataset import Sample
 from inspect_ai.scorer import value_to_float
 
+from configs.logs import logger
+
 # CORRECT/"C" -> 1, INCORRECT/"I" -> 0, numbers -> themselves, unparseable -> 0.
 _score_to_float = value_to_float()
 
@@ -18,20 +20,55 @@ PLACEHOLDER_BLOCKS = {
 
 
 def strip_think(text: str) -> str:
-    """
-    Drop DeepSeek-style inline chain-of-thought from a text block.
+    """Drop inline `<think>…</think>` chain-of-thought from a text block.
 
-    DeepSeek emits reasoning as `<think> ... </think>` then the answer. When the
-    provider returns it as plain text (not a separate reasoning block) it reaches
-    the judge verbatim. Keep only what follows the last `</think>`; if `<think>`
-    is never closed (the model spent its whole budget reasoning) there is no
-    answer, so drop everything from the first `<think>` on.
+    A normalized log never has any: ``scripts/audit/logs/normalize_reasoning.py`` moves it
+    into a real reasoning block, where ``format_reasoning`` decides whether it is shown.
+    This is the fallback for a log that missed that migration -- the CoT is dropped rather
+    than promoted, so it can never leak into the answer text of the no-reasoning condition.
+    Dropping it also leaves the transcript with no reasoning mark, so ``build_dataset``
+    refuses to pair the model against one that has CoT, rather than judging CoT vs nothing.
     """
     if "</think>" in text:
         return text.rsplit("</think>", 1)[1].lstrip()
     if "<think>" in text:
         return text.split("<think>", 1)[0].rstrip()
     return text
+
+
+def format_reasoning(block: Any) -> str:
+    """Render one reasoning block, or nothing when it holds no raw chain-of-thought.
+
+    Only genuine CoT ever reaches the judge. ``redacted`` marks the blocks whose real CoT
+    never left the provider: ``reasoning`` is then an encrypted blob (o3, gpt-5 arrive as
+    ``gAAAAAB...``) and ``summary`` is a short paraphrase written by the provider, 3-5x
+    shorter than the CoT it stands for and in a different register.
+
+    Neither is shown. A blob is not evidence, and a summary is not comparable to a CoT --
+    judging one against the other measures the provider's disclosure policy, not the model.
+    Dropping it here is what makes ``build_dataset`` refuse such a pair: the transcript
+    carries no reasoning mark, so the one-side-only guard catches it.
+
+    Not read via ``ContentReasoning.text``: that property silently swaps in the summary on
+    redacted blocks and wraps everything in ``<think>``.
+    """
+    if getattr(block, "redacted", False):
+        return ""
+    reasoning = getattr(block, "reasoning", "") or ""
+    # ponytail: a provider that returns a summary and nothing else arrives indistinguishable
+    # from raw CoT (OpenRouter collapses it into `reasoning`); nothing in the log to tell.
+    return f"<THOUGHT_START>\n {reasoning}\n<THOUGHT_END>" if reasoning.strip() else ""
+
+
+def format_text(text: str) -> str:
+    """Render one text block. Inline `<think>` means the log was never normalized."""
+    if "<think>" not in text:
+        return text
+    logger.warning(
+        "inline <think> in a text block (%r...): log not normalized, dropping the CoT -- "
+        "run scripts/audit/logs/normalize_reasoning.py", text[:60],
+    )
+    return strip_think(text)
 
 
 def format_content(content: Any, include_reasoning: bool = True) -> str:
@@ -41,7 +78,7 @@ def format_content(content: Any, include_reasoning: bool = True) -> str:
     Non-text modalities become a placeholder: the judge only ever sees text.
     """
     if isinstance(content, str):
-        return content if include_reasoning else strip_think(content)
+        return format_text(content)
     if not isinstance(content, list):
         return str(content)
 
@@ -50,12 +87,10 @@ def format_content(content: Any, include_reasoning: bool = True) -> str:
         b_type = getattr(block, "type", None)
         if b_type == "text":
             text_val = getattr(block, "text", "")
-            text_val = str(text_val) if text_val is not None else ""
-            texts.append(text_val if include_reasoning else strip_think(text_val))
+            texts.append(format_text(str(text_val) if text_val is not None else ""))
         elif b_type == "reasoning":
-            if include_reasoning:
-                text_val = getattr(block, "text", "")
-                texts.append(f"<THOUGHT_START>\n {text_val}\n<THOUGHT_END>")
+            if include_reasoning and (rendered := format_reasoning(block)):
+                texts.append(rendered)
         elif b_type in PLACEHOLDER_BLOCKS:
             # No way to show media to the judge, so just record that it was there. TODO
             texts.append(PLACEHOLDER_BLOCKS[b_type])
