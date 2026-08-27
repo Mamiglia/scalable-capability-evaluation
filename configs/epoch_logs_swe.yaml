@@ -1,17 +1,18 @@
-# Epoch SWE-bench Verified logs to download (src/irt/fetch.py).
-# Best plain-scaffold model per quarter around the o4-mini release; only models
-# absent from our own swe-mini pool. "Model version" names from the Epoch CSV.
-# claude-opus-4-6 appears twice in the CSV (Claude Code run 0.787, plain bash_agent
-# run 0.756); the plain one (log id aQiAg6mt8HPHXjKcJvax2d) is the file on disk.
+# Epoch SWE-bench Verified logs (src/irt/fetch.py downloads; scripts/judge/trim_epoch_swe_logs.py
+# cuts them to the swe-mini items). Best plain-scaffold model per quarter around the o4-mini
+# release, only models absent from our own swe-mini pool. Keys are Epoch "Model version"
+# names, values our short model names (configs/models).
+# claude-opus-4-6 appears twice in the CSV (Claude Code run 0.787, plain bash_agent run
+# 0.756); the plain one (log id aQiAg6mt8HPHXjKcJvax2d) is the file on disk.
 
 csv: external_data/epoch-swe/swe_bench_verified.csv
 out_dir: external_data/epoch-swe
 
 models:
-  - gpt-4o-2024-11-20            # 2024Q4
-  - claude-3-7-sonnet-20250219   # 2025Q1
-  - claude-opus-4-20250514       # 2025Q2
-  - gpt-5-2025-08-07_high        # 2025Q3
-  - claude-opus-4-5-20251101     # 2025Q4
-  - claude-opus-4-6              # 2026Q1 candidate
-  - gpt-5.4-2026-03-05_high      # 2026Q1 candidate (scaffold to be checked)
+  gpt-4o-2024-11-20: gpt-4o-1120                 # 2024Q4
+  claude-3-7-sonnet-20250219: claude-3.7-sonnet   # 2025Q1
+  claude-opus-4-20250514: claude-opus-4           # 2025Q2
+  gpt-5-2025-08-07_high: gpt-5-high              # 2025Q3
+  claude-opus-4-5-20251101: claude-opus-4.5       # 2025Q4
+  claude-opus-4-6: claude-opus-4.6                # 2026Q1 candidate
+  gpt-5.4-2026-03-05_high: gpt-5.4-high          # 2026Q1 candidate (scaffold to be checked)
