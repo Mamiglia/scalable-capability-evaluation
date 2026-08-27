@@ -17,6 +17,8 @@ from inspect_ai.log import EvalSample, read_eval_log, read_eval_log_samples
 from configs.logs import logger
 from judge.util import extract_score, extract_transcript
 
+REASONING_MARK = "<THOUGHT_START>"  # how extract_transcript renders a reasoning block
+
 # Characters kept per transcript; must match the ExperimentConfig default.
 MAX_LENGTH = 262144
 
@@ -245,8 +247,12 @@ def build_dataset(
     minor = major if self_pair else read_transcripts(minor_path, require_both_correct, include_reasoning, items)
 
     ids = major.keys() & minor.keys()
-    if items is not None:
-        ids &= {str(item) for item in items}
+    if include_reasoning and ids and not self_pair:
+        # Reasoning shown on one side only is not a comparison of models: refuse the pair.
+        shown = [any(REASONING_MARK in t.text for i in ids for t in side[i]) for side in (major, minor)]
+        if shown[0] != shown[1]:
+            logger.warning("%s vs %s: reasoning present on one side only, refusing the pair", major_path, minor_path)
+            ids = set()
     samples = []
     for sample_id in sorted(ids):
         if self_pair:
