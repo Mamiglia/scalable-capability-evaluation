@@ -181,6 +181,14 @@ def frontier(table, min_opponents):
     return table.loc[best].sort_values("release")
 
 
+def earlier_opponents_only(verdicts, dates, reference_date):
+    """Drop verdicts where a model released after the reference judge meets a model not released before it."""
+    left = verdicts.model_left.map(lambda m: dates[slug(m)])
+    right = verdicts.model_right.map(lambda m: dates[slug(m)])
+    later_opponent = ((left > reference_date) & (right >= left)) | ((right > reference_date) & (left >= right))
+    return verdicts[~later_opponent.to_numpy()]
+
+
 def opponents_per_model(verdicts):
     """Distinct models each model was judged against."""
     pairs = pd.concat([verdicts[["model_left", "model_right"]],
@@ -223,6 +231,9 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--x", choices=["release", "capability", "frontier"], default="release", help="what orders the models along x")
     parser.add_argument("--min-opponents", type=int, default=2, help="frontier plot: only models judged against at least this many others")
+    parser.add_argument("--earlier-opponents-only", action="store_true",
+                        help="models released after the reference judge keep only verdicts against models released before themselves")
+    parser.add_argument("--reference-judge", help="judge whose release date the pairing rule refers to (default: --judge)")
     parser.add_argument("--tables", type=Path, help="directory with verdicts.parquet and rollouts.parquet from "
                         "verdict_tables.py; default is the verdict-dissection store")
     args = parser.parse_args()
@@ -233,11 +244,13 @@ def main():
     rollouts = rollouts[rollouts.is_canonical]
     verdicts = pd.read_parquet(verdicts_path, columns=["bench", "judge", "item", "model_left", "model_right", "pick_left"])
     verdicts = verdicts[verdicts.judge == args.judge]
+    dates = release_dates()
+    if args.earlier_opponents_only:
+        verdicts = earlier_opponents_only(verdicts, dates, dates[slug(args.reference_judge or args.judge)])
     easy = split_items(rollouts)
     rollout_is_easy = easy.reindex(pd.MultiIndex.from_frame(rollouts[["bench", "item"]])).to_numpy()
     easy_rollouts, hard_rollouts = rollouts[rollout_is_easy], rollouts[~rollout_is_easy]
     easy_verdicts = verdicts[easy.reindex(pd.MultiIndex.from_frame(verdicts[["bench", "item"]])).to_numpy()]
-    dates = release_dates()
     OUT.mkdir(parents=True, exist_ok=True)
     for bench, bench_verdicts in easy_verdicts.groupby("bench"):
         easy_accuracy = easy_rollouts[easy_rollouts.bench == bench].groupby("model").correct.mean()
