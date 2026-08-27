@@ -37,7 +37,7 @@ def ask(base_url, model, question, transcript, max_tokens, timeout):
                          {"role": "user", "content": f"PROBLEM:\n{question}\n\nSOLUTION:\n{transcript}"}],
             "chat_template_kwargs": {"enable_thinking": True}}
     request = urllib.request.Request(f"{base_url}/chat/completions", data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"})
+                                     headers={"Content-Type": "application/json", "User-Agent": "intermediate-errors/1.0"})   # the RunPod proxy rejects urllib's default agent
     with urllib.request.urlopen(request, timeout=timeout) as response:
         reply = json.load(response)
     return reply["choices"][0]["message"]["content"] or ""
