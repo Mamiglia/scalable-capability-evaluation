@@ -58,6 +58,18 @@ def held_out(design, bench, item, *models):
     return np.select([model_out & item_out, ~model_out & ~item_out], ["test", "train"], "drop")
 
 
+def difficulty_bands(identity, design, n_bands=3):
+    """Per (bench, item): easy / medium / hard by the solve rate of this design's training models
+    (held-out models excluded, so the band exists for unseen items without using unseen models)."""
+    models_out = designs()[design][0]
+    rows = identity[identity.is_canonical & ~identity.model.isin(models_out)]
+    rate = rows.groupby(["bench", "item"], as_index=False).correct.mean()
+    labels = ["hard", "medium", "easy"][:n_bands]
+    rate["difficulty"] = rate.groupby("bench").correct.transform(
+        lambda r: pd.qcut(r.rank(method="first"), n_bands, labels=labels).astype(str))
+    return rate[["bench", "item", "difficulty"]]
+
+
 def capability_from_transcript(transcript, predictors, design):
     """One row per transcript; target is the logit of the model's accuracy on the benchmark."""
     accuracy = transcript.accuracy.clip(ACCURACY_CLIP, 1 - ACCURACY_CLIP)
@@ -151,11 +163,13 @@ def main():
         design_dir = args.output_dir / design
         design_dir.mkdir(parents=True, exist_ok=True)
         builders = {b.__name__: b for b in (capability_from_transcript, stronger_model_from_pair, judge_verdict_from_pair)}
+        bands = difficulty_bands(identity, design)
         for build in (builders[name] for name in args.models):
             table = build(transcript if build is capability_from_transcript else pair, predictors, design)
             if args.sides and build is judge_verdict_from_pair:
                 side_columns = [f"{name}_{side}" for side in ("left", "right") for name in predictors]
                 table = table.join(pair.loc[table.index, side_columns])
+            table = table.merge(bands, on=["bench", "item"], how="left", validate="many_to_one")
             table = table[table.role != "drop"].assign(test=lambda t: t.role == "test").drop(columns="role")
             table.to_parquet(design_dir / f"{build.__name__}.parquet", index=False)
             print(f"{design} {build.__name__}: train {int((~table.test).sum())}, test {int(table.test.sum())}")

@@ -30,15 +30,22 @@ GROUP_COLUMN = {"capability_from_transcript": "bench", "stronger_model_from_pair
 POPULATION_PENALTIES = [0.1, 1.0, 10.0]      # ridge strength on the population slopes
 DEVIATION_RATIOS = [3.0, 10.0, 30.0]         # how much harder the per-group deviations are penalised
 INNER_FOLDS = 3
+BY_DIFFICULTY = False        # set by --difficulty-deviations
 
 
-def design(table, predictors, model, group_levels, item_levels, deviation_ratio, use_accuracy_gap):
-    """Sparse design: [population slopes | group deviations | item intercepts | judge intercepts | gap]."""
+DIFFICULTY_LEVELS = ["hard", "medium", "easy"]
+
+
+def design(table, predictors, model, group_levels, item_levels, deviation_ratio, use_accuracy_gap, by_difficulty=None):
+    """Sparse design: [population slopes | group deviations | (difficulty deviations) | item intercepts | judge intercepts | gap]."""
     x = table[predictors].to_numpy(np.float32)
     group = pd.Categorical(table[GROUP_COLUMN[model]], categories=group_levels).codes
     blocks = [sp.csr_matrix(x)]
     deviations = sp.hstack([sp.csr_matrix(x * (group == g)[:, None]) for g in range(len(group_levels))])
     blocks.append(deviations / np.sqrt(deviation_ratio))          # scaling a column raises its effective penalty
+    if BY_DIFFICULTY if by_difficulty is None else by_difficulty:   # slopes may also differ by the item's difficulty band
+        band = pd.Categorical(table.difficulty, categories=DIFFICULTY_LEVELS).codes
+        blocks.append(sp.hstack([sp.csr_matrix(x * (band == b)[:, None]) for b in range(len(DIFFICULTY_LEVELS))]) / np.sqrt(deviation_ratio))
     if model == "capability_from_transcript":
         item = pd.Categorical(table.item, categories=item_levels).codes
         blocks.append(sp.csr_matrix((np.ones(len(table)), (np.arange(len(table)), item)), shape=(len(table), len(item_levels))))
@@ -134,8 +141,11 @@ def main():
     parser.add_argument("--drop-one", action="store_true", help="also fit each feature set with one predictor removed at a time")
     parser.add_argument("--sides", action="store_true", help="judge model on each side's own features (<feature>_left + _right) instead of the difference")
     parser.add_argument("--judge-bench-deviations", action="store_true", help="judge model: feature deviations per judge x benchmark cell instead of per judge")
+    parser.add_argument("--difficulty-deviations", action="store_true", help="extra feature deviations per item difficulty band (easy / medium / hard)")
     args = parser.parse_args()
     predictors = yaml.safe_load(args.predictors.read_text())
+    global BY_DIFFICULTY
+    BY_DIFFICULTY = args.difficulty_deviations
     feature_sets = {name: kept for name, kept in waves(predictors).items() if not args.waves or name in args.waves}
     for model in args.models:
         for design_dir in sorted(p for p in args.inputs_dir.iterdir() if p.is_dir() and (not args.designs or p.name in args.designs)):
@@ -153,6 +163,8 @@ def main():
                                 for name, (feats, gap) in variants.items()}
                 if args.judge_bench_deviations and model == "judge_verdict_from_pair":
                     variants = {f"{name}+judge-bench": v for name, v in variants.items()}
+                if args.difficulty_deviations:
+                    variants = {f"{name}+difficulty": v for name, v in variants.items()}
                 for wave_name, (features, use_gap) in variants.items():
                     out_dir = args.fits_dir / model / wave_name / design_dir.name
                     if (out_dir / f"held_out_{model}.csv").exists():
