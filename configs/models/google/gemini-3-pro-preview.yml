@@ -1,0 +1,3 @@
+# Transcripts from Epoch AI's benchmark logs only (external_data/); we never run this model.
+name: google/gemini-3-pro-preview
+release_date: '2025-11-18'

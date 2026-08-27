@@ -1,0 +1,3 @@
+# Transcripts from Epoch AI's benchmark logs only (external_data/); we never run this model.
+name: anthropic/claude-3.7-sonnet
+release_date: '2025-02-24'

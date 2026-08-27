@@ -1,9 +1,20 @@
-# Epoch GPQA Diamond logs still missing for the best-model-per-quarter roster
-# (src/irt/fetch.py; the rest are already in external_data/epoch-gpqa).
+# Epoch GPQA Diamond logs for the best-model-per-quarter roster around the o4-mini release
+# (src/irt/fetch.py; most were already in external_data/epoch-gpqa). Keys are Epoch
+# "Model version" names, values our short model names (configs/models).
 
 csv: external_data/epoch-gpqa/gpqa_diamond.csv
 out_dir: external_data/epoch-gpqa
 
 models:
-  - gemini-3.1-pro-preview_high  # 2026Q1
-  - claude-opus-5                # 2026Q3
+  gpt-4-1106-preview: gpt-4-1106                     # 2023Q4
+  claude-3-opus-20240229: claude-3-opus              # 2024Q1
+  claude-3-5-sonnet-20240620: claude-3.5-sonnet-0620 # 2024Q2
+  o1-mini-2024-09-12_high: o1-mini-high              # 2024Q3
+  o1-2024-12-17_high: o1-high                        # 2024Q4
+  gemini-2.5-pro-exp-03-25: gemini-2.5-pro-exp-0325  # 2025Q1
+  gemini-2.5-pro: gemini-2.5-pro                     # 2025Q2
+  gpt-5-2025-08-07_high: gpt-5-high                  # 2025Q3
+  gemini-3-pro-preview: gemini-3-pro-preview         # 2025Q4
+  gemini-3.1-pro-preview_high: gemini-3.1-pro-high   # 2026Q1
+  gpt-5.5-pre-release_xhigh: gpt-5.5-xhigh           # 2026Q2
+  claude-opus-5: claude-opus-5                       # 2026Q3
