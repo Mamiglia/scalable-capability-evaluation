@@ -133,12 +133,15 @@ def main():
     parser.add_argument("--designs", nargs="+", help="held-out designs to fit (default: every directory in inputs_dir)")
     parser.add_argument("--drop-one", action="store_true", help="also fit each feature set with one predictor removed at a time")
     parser.add_argument("--sides", action="store_true", help="judge model on each side's own features (<feature>_left + _right) instead of the difference")
+    parser.add_argument("--judge-bench-deviations", action="store_true", help="judge model: feature deviations per judge x benchmark cell instead of per judge")
     args = parser.parse_args()
     predictors = yaml.safe_load(args.predictors.read_text())
     feature_sets = {name: kept for name, kept in waves(predictors).items() if not args.waves or name in args.waves}
     for model in args.models:
         for design_dir in sorted(p for p in args.inputs_dir.iterdir() if p.is_dir() and (not args.designs or p.name in args.designs)):
             table = pd.read_parquet(design_dir / f"{model}.parquet")
+            if args.judge_bench_deviations and model == "judge_verdict_from_pair":
+                table["judge"] = table.judge + "|" + table.bench          # each judge x benchmark cell gets its own slopes
             inner_group = "model" if model == "capability_from_transcript" else "model_left"   # inner CV groups by model
             for wave, kept in feature_sets.items():
                 specs = {wave: False, f"{wave}+accuracy-gap": True} if model == "judge_verdict_from_pair" else {wave: False}
@@ -148,6 +151,8 @@ def main():
                 if args.sides and model == "judge_verdict_from_pair":       # left and right blocks: difference + sum
                     variants = {f"{name}+sides": ([f"{f}_{side}" for side in ("left", "right") for f in feats], gap)
                                 for name, (feats, gap) in variants.items()}
+                if args.judge_bench_deviations and model == "judge_verdict_from_pair":
+                    variants = {f"{name}+judge-bench": v for name, v in variants.items()}
                 for wave_name, (features, use_gap) in variants.items():
                     out_dir = args.fits_dir / model / wave_name / design_dir.name
                     if (out_dir / f"held_out_{model}.csv").exists():
