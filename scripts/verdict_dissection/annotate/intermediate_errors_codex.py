@@ -32,7 +32,12 @@ INSTRUCTIONS = (
     'solution>", "kind": "<' + KINDS + '>", "why": "<one sentence>"}]}, ...]} with one entry per numbered solution.'
 )
 JSON_BLOCK = re.compile(r"\{.*\}", re.S)
-BAD_ESCAPE = re.compile(r'\\(?![\\"/bfnrtu])')          # LaTeX like \( or \frac inside a JSON string
+ESCAPE = re.compile(r'\\\\|\\(?![\\"/bfnrtu])')        # a backslash pair (valid) or a lone LaTeX backslash like \( or \frac
+
+
+def repair_escapes(text):
+    """Double every lone backslash that is not a JSON escape, leaving valid pairs alone."""
+    return ESCAPE.sub(lambda m: m.group(0) if m.group(0) == "\\\\" else "\\\\", text)
 
 
 def build_prompt(rows):
@@ -66,7 +71,7 @@ def parse(reply, n):
         entries = json.loads(text).get("annotations", [])
     except json.JSONDecodeError:
         try:
-            entries = json.loads(BAD_ESCAPE.sub(r"\\\\", text)).get("annotations", [])
+            entries = json.loads(repair_escapes(text)).get("annotations", [])
         except json.JSONDecodeError:
             return None
     out = {}
