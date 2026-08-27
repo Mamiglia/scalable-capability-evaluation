@@ -107,3 +107,24 @@ def test_shared_features_split_into_one_column_per_group():
     assert labels == ["gpqa:0", "shared:0@gpqa", "shared:0@aime"]
     assert split[:, 1].tolist() == split[:, 2].tolist() == [2.0, 4.0]
     assert feature_group("shared:0@aime") == "aime" and feature_group("gpqa:3") == "gpqa"
+
+
+def test_group_overrides_change_window_and_batch_for_that_group_only():
+    rows = pd.concat([group_rows(40), group_rows(40).assign(benchmark="swe", transcript_key=lambda f: "s" + f.transcript_key)],
+                     ignore_index=True)
+    activations = np.zeros((80, 2))
+    activations[:10, 0] = np.arange(10, 0, -1)          # gpqa feature
+    activations[40:50, 1] = np.arange(10, 0, -1)        # swe feature
+    seen = {"gpqa": [], "swe": []}
+
+    def ask(model, prompt, max_tokens):
+        if prompt.startswith("# Task Overview"):
+            return '- "thing"'
+        group = "swe" if "transcript 0 " not in prompt and "TRANSCRIPT" in prompt and "x x x x x x x x x x x x" not in prompt else "gpqa"
+        seen[group].append(prompt.count("TRANSCRIPT "))
+        return json.dumps({"1": [1], "2": [1]})
+
+    settings = SETTINGS | {"annotation_batch_size": 10, "max_words": 200,
+                           "group_overrides": {"swe": {"annotation_batch_size": 3, "max_words": 4}}}
+    describe_features(activations, ["gpqa:0", "swe:0"], rows, {"gpqa": ["gpqa"], "swe": ["swe"]}, settings, ask, width=2, workers=1)
+    assert max(seen["gpqa"]) == 10 and max(seen["swe"]) == 3     # swe batches of 3 (truncated to 4 words), gpqa batches of 10

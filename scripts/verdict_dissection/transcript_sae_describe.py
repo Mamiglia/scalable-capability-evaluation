@@ -240,27 +240,34 @@ def describe_features(activations: np.ndarray, labels: list[str], rows: pd.DataF
                       *, workers: int = 8) -> pd.DataFrame | None:
     """Returns the feature table, or None while replies are still pending (offline mode)."""
     threshold = settings["p_value_threshold"] if settings.get("p_value_threshold") else 0.05 / width
-    texts = [truncate_words(text, settings["max_words"]) for text in rows["transcript"]]
-    batch = settings["annotation_batch_size"]
+    text_cache = {}
+
+    def text(row: int, max_words: int) -> str:
+        if (row, max_words) not in text_cache:
+            text_cache[(row, max_words)] = truncate_words(rows["transcript"].iat[row], max_words)
+        return text_cache[(row, max_words)]
+
     candidate_tasks, scoring = [], {}
     for column, label in enumerate(labels):
         group = feature_group(label)
+        gs = settings | settings.get("group_overrides", {}).get(group, {})   # a group may need a wider window
         mask = rows["benchmark"].isin(groups[group]).to_numpy()
         group_index = np.flatnonzero(mask)
         values = activations[mask, column]
         scoring[label] = {"group": group, "prevalence": float((values != 0).mean()),
-                          "score_rows": group_index[scoring_examples(values, settings["scoring_examples"],
-                                                                     settings["seed"] + column)]}
-        for candidate in range(settings["n_candidates"]):
+                          "batch": gs["annotation_batch_size"], "max_words": gs["max_words"],
+                          "score_rows": group_index[scoring_examples(values, gs["scoring_examples"],
+                                                                     gs["seed"] + column)]}
+        for candidate in range(gs["n_candidates"]):
             chosen = interpretation_examples(
-                values, rows.iloc[group_index], n_firing=settings["interpret_examples"],
-                n_zero=settings["contrast_examples"], top_percentile=settings["top_percentile"],
-                seed=settings["seed"] + candidate)
-            if len(chosen["firing"]) < settings["interpret_examples"]:
+                values, rows.iloc[group_index], n_firing=gs["interpret_examples"],
+                n_zero=gs["contrast_examples"], top_percentile=gs["top_percentile"],
+                seed=gs["seed"] + candidate)
+            if len(chosen["firing"]) < gs["interpret_examples"]:
                 continue
             prompt = INTERPRET_PROMPT.format(
-                firing="\n----------------\n".join(texts[i] for i in group_index[chosen["firing"]]),
-                non_firing="\n----------------\n".join(texts[i] for i in group_index[chosen["zero"]]))
+                firing="\n----------------\n".join(text(i, gs["max_words"]) for i in group_index[chosen["firing"]]),
+                non_firing="\n----------------\n".join(text(i, gs["max_words"]) for i in group_index[chosen["zero"]]))
             candidate_tasks.append((label, candidate, prompt))
 
     def interpret(task):
@@ -278,7 +285,7 @@ def describe_features(activations: np.ndarray, labels: list[str], rows: pd.DataF
 
     annotate_tasks = []
     for label, items in candidates.items():
-        score_rows = scoring[label]["score_rows"]
+        score_rows, batch = scoring[label]["score_rows"], scoring[label]["batch"]
         for start in range(0, len(score_rows), batch):
             annotate_tasks.append((label, score_rows[start:start + batch]))
 
@@ -287,7 +294,8 @@ def describe_features(activations: np.ndarray, labels: list[str], rows: pd.DataF
         items = candidates[label]
         prompt = ANNOTATE_PROMPT.format(
             concepts="\n".join(f'{number}. "{description}"' for number, (_, description) in enumerate(items, 1)),
-            transcripts="\n\n".join(f"TRANSCRIPT {number}:\n{texts[row]}" for number, row in enumerate(batch_rows, 1)))
+            transcripts="\n\n".join(f"TRANSCRIPT {number}:\n{text(row, scoring[label]['max_words'])}"
+                                    for number, row in enumerate(batch_rows, 1)))
         reply = ask(settings["annotator_model"], prompt, settings["annotator_max_tokens"])
         return label, batch_rows, None if reply is None else parse_presence(reply, len(items), len(batch_rows))
 

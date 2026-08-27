@@ -122,6 +122,9 @@ descriptions:
   scoring_examples: 200
   annotation_batch_size: 20   # transcripts per fidelity call; all of a feature's candidates are judged together
   max_words: 2000   # head + tail words shown per transcript; 256 hid everything but openings and endings
+  # SWE-bench traces are 6-16k words (p90 9.8k): a wider window, fewer transcripts per prompt
+  group_overrides:
+    swe_bench_mini: {max_words: 10000, interpret_examples: 5, contrast_examples: 5, annotation_batch_size: 4}
   min_correlation: 0.0
   p_value_threshold: null   # null = 0.05 / width (Bonferroni over the dictionary)
   min_prevalence: 0.05
