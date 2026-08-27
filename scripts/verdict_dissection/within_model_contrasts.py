@@ -53,13 +53,16 @@ def load_transcripts():
     return store.drop_duplicates("content_hash").set_index("content_hash")
 
 
-def choose_cases(rows, transcripts, per_bench):
-    """Shortest cases per benchmark by total transcript characters."""
+def choose_cases(rows, transcripts, per_bench, seed=None):
+    """Shortest cases per benchmark by total transcript characters, or a random draw with a seed."""
     length = transcripts.transcript.str.len()
     case_rows = rows.drop_duplicates(GROUP + ["rollout"])
     case_rows = case_rows.assign(chars=length.loc[case_rows.content_hash_l].values + length.loc[case_rows.content_hash_r].values)
     total = case_rows.groupby(GROUP).chars.sum().reset_index()
-    chosen = total.sort_values("chars").groupby("bench").head(per_bench)
+    if seed is not None:
+        chosen = total.sample(frac=1, random_state=seed).groupby("bench").head(per_bench)
+    else:
+        chosen = total.sort_values("chars").groupby("bench").head(per_bench)
     return chosen.sort_values(["bench", "chars"])[GROUP].values.tolist()
 
 
@@ -112,23 +115,29 @@ def main():
     parser.add_argument("--per-bench", type=int, default=10)
     parser.add_argument("--judges", nargs="+", default=["gemma-4-31b-it", "deepseek-v4-flash-0731"],
                         help="judges that must all flip the same way between the two rollout pairs")
+    parser.add_argument("--benches", nargs="+", help="only these benchmarks (default: all)")
+    parser.add_argument("--random", type=int, help="draw cases at random with this seed instead of the shortest")
+    parser.add_argument("--output", default="contrasts.html")
     args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     rows, groups = load_contrasts(args.judges)
+    if args.benches:
+        rows = rows[rows.bench.isin(args.benches)]
+        groups = groups[groups.index.get_level_values("bench").isin(args.benches)]
     rows.drop(columns=["judge_input", "judge_sample_metadata_json"]).to_parquet(OUT / "contrasts.parquet", index=False)
     print(f"{len(groups)} groups where {args.judges} flip the same way; {rows.judge.nunique()} judges")
     transcripts = load_transcripts()
-    cases = choose_cases(rows, transcripts, args.per_bench)
+    cases = choose_cases(rows, transcripts, args.per_bench, args.random)
     judges_shown = sorted(rows.judge.unique(), key=lambda j: (j not in args.judges, j))
     nav = " ".join(f'<a href="#case-{i + 1}">{i + 1}</a>' for i in range(len(cases)))
     body = "\n".join(render_case(i + 1, key, rows, transcripts, judges_shown) for i, key in enumerate(cases))
     intro = (f"<p>Same two models, same item, same shown order; only the rollouts differ. "
              f"{' and '.join(args.judges)} both flipped the same way between rollout pair 0 and 1 "
-             f"({len(groups)} such groups; showing the {args.per_bench} shortest per benchmark). "
+             f"({len(groups)} such groups; showing {args.per_bench} per benchmark, {'a random draw' if args.random is not None else 'the shortest'}). "
              f"Green box = the transcript most judges picked.</p>")
-    (OUT / "contrasts.html").write_text(f"<!doctype html><meta charset=utf-8><title>Within-model contrasts</title>"
+    (OUT / args.output).write_text(f"<!doctype html><meta charset=utf-8><title>Within-model contrasts</title>"
                                         f"<style>{STYLE}</style><h1>Within-model verdict flips</h1>{intro}<nav>{nav}</nav>{body}")
-    print(f"wrote {OUT / 'contrasts.html'} with {len(cases)} cases")
+    print(f"wrote {OUT / args.output} with {len(cases)} cases")
 
 
 if __name__ == "__main__":
