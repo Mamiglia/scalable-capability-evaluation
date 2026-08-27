@@ -23,12 +23,19 @@ FIT = {"samples": 500, "warmup": 500, "chains": 4, "seed": 0, "target_accept": 0
 
 
 SURPRISAL_LOCAL = ["surprisal_local_mean__llama", "surprisal_rolling_short_position_adjusted_mean__llama"]
+STRUCTURE = ["assistant_turns", "tool_calls", "tool_errors", "tool_outputs_empty", "submit_calls", "test_commands",
+             "repeated_tool_calls", "distinct_tools", "prose_chars", "tool_call_chars", "tool_output_chars", "prose_share",
+             "bare_answer", "display_equations", "inline_math", "option_references", "elimination_terms",
+             "final_answer_restated", "bold_spans", "headers"]          # features_structure.py; present with predictors-structure.yaml
 
 
 def waves(predictors):
     """Feature sets to fit, each an explicit list. Surprisal "local" needs only the 32-64 token window;
     "global" needs the full transcript and question context."""
-    surface = [p for p in predictors if not p.startswith(("sae_", "qwen_dim_")) and "surprisal" not in p and p != "n_words"]
+    surface = [p for p in predictors if not p.startswith(("sae_", "qwen_dim_", "topo_")) and "surprisal" not in p
+               and p != "n_words" and p not in STRUCTURE]
+    structure = [p for p in predictors if p in STRUCTURE]
+    clause = [p for p in predictors if p.startswith("topo_")]           # clause-network graph shape; predictors-clause.yaml
     sae = [p for p in predictors if p.startswith("sae_shared_")]
     surprisal_local = [p for p in predictors if p in SURPRISAL_LOCAL]
     surprisal_global = [p for p in predictors if "surprisal" in p and p not in SURPRISAL_LOCAL]
@@ -41,6 +48,11 @@ def waves(predictors):
         "surface+surprisal-local": surface + surprisal_local,
         "surface+surprisal": surface + surprisal_local + surprisal_global,
         "surface+sae+surprisal": surface + sae + surprisal_local + surprisal_global,
+        **({"structure": structure, "surface+structure": surface + structure,
+            "surface+sae+surprisal+structure": surface + sae + surprisal_local + surprisal_global + structure} if structure else {}),
+        **({"clause": clause, "surface+clause": surface + clause,
+            "surface+sae+surprisal+structure+clause": surface + sae + surprisal_local + surprisal_global + structure + clause}
+           if clause else {}),
     }
 
 
