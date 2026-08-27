@@ -15,9 +15,13 @@ Usage:
 import argparse
 import math
 import re
+import sys
 from pathlib import Path
 
 from inspect_ai.log import read_eval_log, write_eval_log
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "audit" / "logs"))
+from eval_edits import stamp_edit  # noqa: E402
 
 ANSWER_RE = re.compile(r"ANSWER\s*:\s*[*_$\s]*\(?([A-Za-z])\)?", re.IGNORECASE)
 
@@ -58,6 +62,16 @@ def main() -> int:
     if "stderr" in metrics:
         metrics["stderr"].value = math.sqrt(accuracy * (1 - accuracy) / n)
 
+    stamp_edit(
+        log,
+        tool="scripts/judge/rescore_mcq.py",
+        reason=f"stock MCQ parser missed {changed} answers; re-parsed with {ANSWER_RE.pattern!r}",
+        source=args.input,
+        samples_changed=changed,
+        before={"accuracy": old_accuracy},
+        after={"accuracy": accuracy},
+        transcripts_modified=False,
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     write_eval_log(log, args.out)
     print(f"{n} samples, {changed} rescored, accuracy {old_accuracy:.3f} -> {accuracy:.3f}")

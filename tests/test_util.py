@@ -35,6 +35,50 @@ class TestFormatMessage:
         assert "Final Answer" in result
         assert result.endswith("Final Answer")
 
+    def test_format_message_summary_is_never_shown(self):
+        """A redacted block holds a blob and a provider summary: neither reaches the judge."""
+        msg = ChatMessageAssistant(
+            content=[
+                ContentReasoning(type="reasoning", reasoning="<blob>", summary="Gist", redacted=True),
+                ContentText(type="text", text="Final Answer"),
+            ]
+        )
+        result = format_message(msg)
+        assert "Gist" not in result and "<blob>" not in result
+        assert "THOUGHT" not in result and "SUMMARY" not in result
+        assert result.strip().endswith("Final Answer")
+
+    def test_format_message_inline_think_becomes_a_reasoning_block(self):
+        """DeepSeek inline CoT is the same evidence as a reasoning block: render it the same."""
+        msg = ChatMessageAssistant(content=[ContentText(type="text", text="<think>Step 1</think>Final Answer")])
+        result = format_message(msg)
+        assert "<THOUGHT_START>" in result and "Step 1" in result
+        assert "<think>" not in result
+        assert result.strip().endswith("Final Answer")
+
+    def test_format_message_inline_think_matches_native_block(self):
+        """Same CoT, two transports -> identical rendering, so the judge cannot tell them apart."""
+        inline = ChatMessageAssistant(content=[ContentText(type="text", text="<think>Step 1</think>Final Answer")])
+        native = ChatMessageAssistant(
+            content=[
+                ContentReasoning(type="reasoning", reasoning="Step 1"),
+                ContentText(type="text", text="Final Answer"),
+            ]
+        )
+        assert format_message(inline) == format_message(native)
+
+    def test_format_message_empty_summary_renders_nothing(self):
+        """Redacted with an empty summary (opus-5, fable-5) must not look like reasoning."""
+        msg = ChatMessageAssistant(
+            content=[
+                ContentReasoning(type="reasoning", reasoning="<blob>", summary="", redacted=True),
+                ContentText(type="text", text="Final Answer"),
+            ]
+        )
+        result = format_message(msg)
+        assert "SUMMARY" not in result and "THOUGHT" not in result
+        assert result.strip().endswith("Final Answer")
+
     def test_format_message_tool_calls(self):
         """Test formatting assistant message with tool calls."""
         msg = ChatMessageAssistant(
