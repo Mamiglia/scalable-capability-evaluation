@@ -1,19 +1,24 @@
-# Quantization: unquantized bf16 on Novita. CoreWeave dropped its bf16 endpoint on
-# long prompts, so it is never used.
+# Quantization: unquantized bf16 on Venice (256k context, 8k output cap; verdicts incl.
+# reasoning run ~1-4k tokens). No max_tokens: Venice's default is its cap.
+# Not Novita (also bf16): it rejects requests as "input is longer than the model's
+# context length" depending on max_tokens rather than the prompt (probed 2026-08-27:
+# 65536 fails past ~7k input tokens, 32768 past ~18k, 16384 past ~116k) and is ~1.5x
+# slower per verdict. CoreWeave dropped its bf16 endpoint on long prompts; Together,
+# SiliconFlow, Parasail are fp8; Crusoe/Phala undeclared; Cerebras fp16 returns no reasoning.
+
+# This model gets used exclusively as a judge. which is why 4K reasoning tokens is reasonable
 name: google/gemma-4-31b-it
 slug: openrouter/google/gemma-4-31b-it
 release_date: '2026-03-31'
 generate_args:
-  # Novita rejects requests without an output cap ("input is longer than the model's
-  # context length"); the longest verdict incl. reasoning seen is ~4k tokens.
-  max_tokens: 65536
   extra_body:
     reasoning:
       enabled: true
 model_args:
   provider:
     only:
-    - novita/bf16
+    - venice/bf16
     allow_fallbacks: false
+    require_parameters: true
     quantizations:
     - bf16
