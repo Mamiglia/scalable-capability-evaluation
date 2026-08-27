@@ -70,6 +70,8 @@ def main() -> None:
     parser.add_argument("--pairs", type=Path, default=Path("configs/frontier_pairs.yaml"))
     parser.add_argument("--log-root", default="logs/frontier")
     parser.add_argument("--out-prefix", default="configs/judge_frontier")
+    parser.add_argument("--shards", type=int, default=1, help="split each per-judge config into this many files "
+                        "(pairs dealt round-robin) so several runners can work side by side")
     parser.add_argument("--per-judge-dir", type=Path,
                         help="also write one config per judge here (<bench>/<judge>.yaml) with the judge's "
                              "endpoint pin and generate args inlined, the schema earth's runner reads")
@@ -105,14 +107,17 @@ def main() -> None:
         if args.per_judge_dir:
             for judge in cfg["judges"]:
                 spec = judge_spec(judge)
-                per_judge = {"log_root": out["log_root"], "transcripts": out["transcripts"],
-                             "comparisons": [row for row in comparisons if row[0] == judge],
-                             "judge_model_args": {judge: spec.get("model_args") or {}}}
-                if spec.get("generate_args"):
-                    per_judge["generate_args"] = spec["generate_args"]
-                path = args.per_judge_dir / bench / f"{judge.split('/')[-1]}.yaml"
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(yaml.safe_dump(per_judge, sort_keys=False, width=200))
+                rows = [row for row in comparisons if row[0] == judge]
+                for shard in range(args.shards):
+                    per_judge = {"log_root": out["log_root"], "transcripts": out["transcripts"],
+                                 "comparisons": rows[shard::args.shards],
+                                 "judge_model_args": {judge: spec.get("model_args") or {}}}
+                    if spec.get("generate_args"):
+                        per_judge["generate_args"] = spec["generate_args"]
+                    suffix = f"-{shard}" if args.shards > 1 else ""
+                    path = args.per_judge_dir / bench / f"{judge.split('/')[-1]}{suffix}.yaml"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(yaml.safe_dump(per_judge, sort_keys=False, width=200))
 
 
 if __name__ == "__main__":
