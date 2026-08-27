@@ -32,6 +32,7 @@ INSTRUCTIONS = (
     'solution>", "kind": "<' + KINDS + '>", "why": "<one sentence>"}]}, ...]} with one entry per numbered solution.'
 )
 JSON_BLOCK = re.compile(r"\{.*\}", re.S)
+BAD_ESCAPE = re.compile(r'\\(?![\\"/bfnrtu])')          # LaTeX like \( or \frac inside a JSON string
 
 
 def build_prompt(rows):
@@ -60,10 +61,14 @@ def parse(reply, n):
     match = JSON_BLOCK.search(reply)
     if not match:
         return None
+    text = match.group(0)
     try:
-        entries = json.loads(match.group(0)).get("annotations", [])
+        entries = json.loads(text).get("annotations", [])
     except json.JSONDecodeError:
-        return None
+        try:
+            entries = json.loads(BAD_ESCAPE.sub(r"\\\\", text)).get("annotations", [])
+        except json.JSONDecodeError:
+            return None
     out = {}
     for entry in entries:
         if isinstance(entry, dict) and isinstance(entry.get("id"), int) and 1 <= entry["id"] <= n:
@@ -85,7 +90,7 @@ def main():
     rows = pd.read_parquet(args.input)
     done = set()
     if args.output.exists():
-        done = {json.loads(line)["content_hash"] for line in args.output.open() if line.strip()}
+        done = {r["content_hash"] for r in map(json.loads, filter(str.strip, args.output.open())) if r["parsed"]}   # unparsed rows are redone
     todo = rows[~rows.content_hash.isin(done)].reset_index(drop=True)
     if args.limit:
         todo = todo.head(args.limit)
@@ -109,7 +114,7 @@ def main():
                     errors = parsed.get(number) if parsed else None
                     out.write(json.dumps({"content_hash": row.content_hash, "bench": row.bench, "model": row.model,
                                           "item": row.item, "errors": errors or [], "n_errors": None if errors is None else len(errors),
-                                          "parsed": errors is not None, "raw": reply[-6000:]}, ensure_ascii=False) + "\n")
+                                          "parsed": errors is not None, "raw": reply}, ensure_ascii=False) + "\n")
             counts["ok" if parsed else "failed"] += 1
             if (counts["ok"] + counts["failed"]) % 20 == 0:
                 print(f"{counts['ok']} calls ok, {counts['failed']} failed, of {len(batches)}", flush=True)
