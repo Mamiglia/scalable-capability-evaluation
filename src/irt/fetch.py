@@ -3,8 +3,8 @@ Download the Epoch benchmark eval logs.
 
 Selections are based on a leaderboard CSV that maps each Model version to a Logs S3 URL.
 
-The S3 URLs are not publicly readable; each file is served by Epoch's CDN
-(logs.epoch.ai), so the host is swapped before downloading.
+Some S3 URLs are publicly readable and are tried first; the rest are served by
+Epoch's CDN (logs.epoch.ai), so the host is swapped for a second attempt.
 
 The CDN sits behind an AWS WAF. Requests carry an aws-waf-token cookie taken from
 a browser session, supplied via the EPOCH_WAF_TOKEN environment variable.
@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse, urlunparse
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import draccus
@@ -90,16 +91,23 @@ def download(name: str, url: str, out_dir: Path, token: Optional[str] = None) ->
     headers = {"User-Agent": USER_AGENT}
     if token:
         headers["Cookie"] = f"aws-waf-token={token}"
-    request = Request(cdn_url(url), headers=headers)
     temporary = target.with_suffix(".eval.tmp")
-    try:
-        with urlopen(request, timeout=TIMEOUT) as response, open(temporary, "wb") as handle:
-            shutil.copyfileobj(response, handle)
-        temporary.replace(target)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
-    return True
+    # Some buckets are public and serve the S3 URL directly; the rest need the CDN + token.
+    for candidate in (url, cdn_url(url)):
+        try:
+            request = Request(candidate, headers=headers)
+            with urlopen(request, timeout=TIMEOUT) as response, open(temporary, "wb") as handle:
+                shutil.copyfileobj(response, handle)
+            temporary.replace(target)
+            return True
+        except HTTPError as error:
+            temporary.unlink(missing_ok=True)
+            if candidate == cdn_url(url):
+                raise
+            print(f"  direct download of {name} failed ({error.code}); trying the CDN")
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
 
 
 def main() -> int:

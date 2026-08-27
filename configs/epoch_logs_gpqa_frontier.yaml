@@ -1,0 +1,9 @@
+# Epoch GPQA Diamond logs still missing for the best-model-per-quarter roster
+# (src/irt/fetch.py; the rest are already in external_data/epoch-gpqa).
+
+csv: external_data/epoch-gpqa/gpqa_diamond.csv
+out_dir: external_data/epoch-gpqa
+
+models:
+  - gemini-3.1-pro-preview_high  # 2026Q1
+  - claude-opus-5                # 2026Q3

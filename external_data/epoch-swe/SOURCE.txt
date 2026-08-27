@@ -1,0 +1,1 @@
+downloaded 2026-08-27 from https://epoch.ai/data/benchmark_data.zip (swe_bench_verified.csv); logs via src/irt/fetch.py

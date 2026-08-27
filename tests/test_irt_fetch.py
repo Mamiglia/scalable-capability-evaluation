@@ -4,6 +4,7 @@ Unit tests for the IRT fetch downloader.
 
 import io
 from pathlib import Path
+from urllib.error import HTTPError
 
 import pandas as pd
 import pytest
@@ -80,7 +81,7 @@ def test_download_writes_file_and_removes_tmp(tmp_path, monkeypatch):
     assert created is True
     assert (tmp_path / "model-a.eval").read_bytes() == b"payload"
     assert not (tmp_path / "model-a.eval.tmp").exists()
-    assert fake.calls[0].full_url == cdn_url("https://s3/a.eval")
+    assert fake.calls[0].full_url == "https://s3/a.eval"  # public bucket: direct first
 
 
 def test_download_skips_existing_and_does_not_redownload(tmp_path, monkeypatch):
@@ -110,15 +111,26 @@ def test_download_cleans_tmp_on_failure(tmp_path, monkeypatch):
     assert not (tmp_path / "model-a.eval").exists()
 
 
-def test_download_sends_waf_token_as_cookie(tmp_path, monkeypatch):
+def test_download_falls_back_to_cdn_with_waf_token(tmp_path, monkeypatch):
     fake = FakeUrlopen(b"payload")
-    monkeypatch.setattr(fetch, "urlopen", fake)
+    real_call = fake.__call__
 
-    download("model-a", "https://s3/a.eval", tmp_path, token="tok123")
+    def forbid_direct(url, timeout=None):
+        if url.full_url == "https://s3/a.eval":
+            fake.calls.append(url)
+            raise HTTPError(url.full_url, 403, "Forbidden", {}, None)
+        return real_call(url, timeout=timeout)
 
-    request = fake.calls[0]
-    assert request.full_url == cdn_url("https://s3/a.eval")  # host-swapped to the CDN
-    assert request.headers.get("Cookie") == "aws-waf-token=tok123"
+    monkeypatch.setattr(fetch, "urlopen", forbid_direct)
+
+    created = download("model-a", "https://s3/a.eval", tmp_path, token="tok123")
+
+    assert created is True
+    assert (tmp_path / "model-a.eval").read_bytes() == b"payload"
+    direct, cdn = fake.calls
+    assert direct.full_url == "https://s3/a.eval"
+    assert cdn.full_url == cdn_url("https://s3/a.eval")  # host-swapped to the CDN
+    assert cdn.headers.get("Cookie") == "aws-waf-token=tok123"
 
 
 # --- main ---
