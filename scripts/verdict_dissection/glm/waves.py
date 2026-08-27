@@ -1,6 +1,6 @@
 """Write one hibayes config per (model, feature wave, held-out design).
 
-    uv run python scripts/verdict_dissection/glm/waves.py <grid_dir> [--models ...]
+    uv run python scripts/verdict_dissection/glm/waves.py <grid_dir> [--models ...] [--waves ...] [--designs ...]
 
 Waves add feature classes cumulatively: surface, + shared SAE, + surprisal. The judge model also
 gets a "+accuracy-gap" variant of each wave (the capability-added specification). Configs go to
@@ -70,14 +70,18 @@ def main():
     parser.add_argument("grid_dir", type=Path)
     parser.add_argument("--models", nargs="+", default=list(MODELS), choices=list(MODELS))
     parser.add_argument("--inputs", type=Path, default=Path("judge_results/verdict_dissection/glm_inputs"))
+    parser.add_argument("--waves", nargs="+", help="feature sets to fit (default all)")
+    parser.add_argument("--designs", nargs="+", default=list(designs()), help="held-out designs (default all)")
     args = parser.parse_args()
     predictors = yaml.safe_load((HERE / "predictors.yaml").read_text())
     jobs = []
     for model in args.models:
         for wave, kept in waves(predictors).items():
+            if args.waves and wave not in args.waves:
+                continue
             specs = {wave: False, f"{wave}+accuracy-gap": True} if model == "judge_verdict_from_pair" else {wave: False}
             for wave_name, use_gap in specs.items():
-                for design in designs():
+                for design in args.designs:
                     path = args.grid_dir / "configs" / model / wave_name / f"{design}.yaml"
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(yaml.safe_dump(
