@@ -48,7 +48,8 @@ class ExperimentConfig(DraccusConfig):
     q_dst: int = 4  # quartile whose accuracy is the ground truth for major/minor
 
     include_reverse: bool = True
-    include_reasoning: bool = True
+    include_reasoning: bool = False  # hidden by default
+    # Chars kept per transcript. Two transcripts must fit the judge's context with its output
     max_length: int = 262144
     system_prompt: str = "assets/system_prompt/default.txt"
     truncate_frac: float = 0.0  # 0 = off
