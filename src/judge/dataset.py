@@ -65,17 +65,21 @@ def read_transcripts(
 ) -> dict[str, list[Transcript]]:
     """Read one eval log into transcripts per question id, ordered by epoch.
 
+    With require_correct, a transcript must be scored correct AND have reasoning text
+    (has_reasoning): answer-only or attachment-only outputs are skipped.
+
     Samples are streamed and reduced to text as they arrive: single logs reach tens of MB
     compressed, and judging runs many of them in parallel processes.
     """
     by_id: dict[str, list[Transcript]] = {}
     for sample in read_eval_log_samples(str(path), all_samples_required=False):
-        if require_correct and not extract_score(sample):
+        text = extract_transcript(sample, include_reasoning=include_reasoning)
+        if require_correct and not (extract_score(sample) and has_reasoning(text)):
             continue
         record = Transcript(
             id=str(sample.id),
             question=sample.input,
-            text=extract_transcript(sample, include_reasoning=include_reasoning),
+            text=text,
             options=tuple(getattr(sample, "choices", None) or ()),
             epoch=getattr(sample, "epoch", 0) or 0,
         )

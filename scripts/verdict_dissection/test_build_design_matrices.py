@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from build_design_matrices import (KEYS, block_columns, leave_item_out_accuracy, pair_differences,
-                                   scale, transform)
+from build_design_matrices import (KEYS, TRANSCRIPT_KEYS, block_columns, drop_answer_only,
+                                   leave_item_out_accuracy, pair_differences, scale, transform)
 
 
 def _transcripts():
@@ -80,3 +80,23 @@ def test_pool_aime_merges_years_and_keeps_items_unique():
     pooled = pool_aime(frame)
     assert pooled.bench.tolist() == ["aime", "aime", "gpqa"]
     assert pooled.item.tolist() == ["aime2024/0", "aime2025/0", "x"]
+
+
+def test_drop_answer_only_removes_transcripts_and_their_pairs():
+    frame = _transcripts()
+    store = frame[TRANSCRIPT_KEYS].copy()
+    store["transcript"] = "[Assistant]: " + "reasoning " * 20 + "ANSWER: A"
+    store.loc[(store.model == "b") & (store.item == "x") & (store.bench == "gpqa"), "transcript"] = "ANSWER: A"
+    pairs = pd.DataFrame([
+        dict(bench="gpqa", item="x", model_left="a", model_right="b", epoch_left=0, epoch_right=0,
+             log_left="a-x", log_right="b-x"),
+        dict(bench="gpqa", item="x", model_left="b", model_right="a", epoch_left=0, epoch_right=0,
+             log_left="b-x", log_right="a-x"),
+        dict(bench="gpqa", item="y", model_left="a", model_right="b", epoch_left=0, epoch_right=0,
+             log_left="a-y", log_right="b-y"),
+    ])
+    kept, kept_pairs, n_bad = drop_answer_only(frame, pairs, store)
+    assert n_bad == 1
+    assert len(kept) == len(frame) - 1
+    assert not ((kept.model == "b") & (kept.item == "x") & (kept.bench == "gpqa")).any()
+    assert kept_pairs.item.tolist() == ["y"]

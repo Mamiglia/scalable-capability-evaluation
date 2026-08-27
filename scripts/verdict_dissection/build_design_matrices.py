@@ -11,6 +11,7 @@ development items leaving the row's own item out.
 """
 import argparse
 import re
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -18,11 +19,15 @@ import pandas as pd
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "src"))
+from judge.dataset import has_reasoning   # noqa: E402
 TRANSCRIPT_KEYS = ["bench", "model", "item", "epoch", "log"]
 KEYS = TRANSCRIPT_KEYS + ["sample_epoch", "content_hash"]
 PAIR_KEYS = ["bench", "judge", "item", "model_left", "model_right", "epoch_left", "epoch_right",
              "log_left", "log_right", "judge_log", "judge_sample", "judge_epoch", "pick_left"]
-EXTENSIVE = re.compile(r"^(?!.*gain)(n_words|.*_count|.*_chars|.*_sum|surprisal_(full|noq|local))(__\w+)?$")
+STRUCTURE_COUNTS = ("assistant_turns|tool_calls|tool_errors|tool_outputs_empty|submit_calls|test_commands|repeated_tool_calls"
+                    "|distinct_tools|display_equations|inline_math|option_references|elimination_terms|bold_spans|headers")
+EXTENSIVE = re.compile(rf"^(?!.*gain)(n_words|.*_count|.*_chars|.*_sum|surprisal_(full|noq|local)|{STRUCTURE_COUNTS})(__\w+)?$")
 DEVELOPMENT = {"representation_train", "representation_validation"}
 
 
@@ -61,6 +66,22 @@ def leave_item_out_accuracy(identity, split):
     out = out.join(totals, on=["bench", "model"]).join(own, rsuffix="_own").fillna(0)
     out["model_accuracy"] = (out["sum"] - out["sum_own"]) / (out["size"] - out["size_own"])
     return out.reset_index()[["bench", "model", "item", "model_accuracy"]]
+
+
+def drop_answer_only(frame, pairs, store):
+    """Drop transcripts with no reasoning text (has_reasoning) and every pair that shows one.
+
+    The v1 freeze marked answer-only outputs correct; later freezes apply the rule in the store.
+    """
+    bad = store.loc[~store.transcript.map(has_reasoning), TRANSCRIPT_KEYS].drop_duplicates()
+    bad["answer_only"] = True
+    frame = frame.merge(bad, on=TRANSCRIPT_KEYS, how="left")
+    frame = frame[frame.answer_only.isna()].drop(columns="answer_only")
+    for side in ("left", "right"):
+        keys = {k: f"{k}_{side}" if k not in ("bench", "item") else k for k in TRANSCRIPT_KEYS}
+        pairs = pairs.merge(bad.rename(columns=keys), on=list(keys.values()), how="left")
+        pairs = pairs[pairs.answer_only.isna()].drop(columns="answer_only")
+    return frame.reset_index(drop=True), pairs.reset_index(drop=True), len(bad)
 
 
 def pair_differences(pairs, transcripts, features):
@@ -131,6 +152,11 @@ def build(cfg):
     dictionary["n_missing"] = frame[features].isna().sum().to_numpy()
 
     pairs = pd.read_parquet(features_root / "paired/raw-features.parquet", columns=PAIR_KEYS)
+    store = pd.read_parquet(freeze / "transcript_store.parquet", columns=TRANSCRIPT_KEYS + ["transcript"])
+    n_transcripts, n_pairs = len(frame), len(pairs)
+    frame, pairs, n_answer_only = drop_answer_only(frame, pairs, store)
+    print(f"answer-only transcripts dropped: {n_answer_only} "
+          f"(transcript rows {n_transcripts}->{len(frame)}, pair rows {n_pairs}->{len(pairs)})")
     pairs = pd.concat([pairs, pair_differences(pairs, frame, features)], axis=1)     # matched on original keys
     frame, pairs = pool_aime(frame), pool_aime(pairs)
     accuracy = leave_item_out_accuracy(identity, split)

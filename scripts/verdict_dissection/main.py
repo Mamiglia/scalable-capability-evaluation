@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).parent))
 from judge.util import (extract_transcript, extract_transcript_parts, render_transcript_parts,
                         transcript_content_hash, extract_score)   # noqa: E402
-from judge.dataset import Transcript, responses_to_sample         # noqa: E402
+from judge.dataset import Transcript, responses_to_sample, has_reasoning   # noqa: E402
 from features_basic import basic_features                          # noqa: E402
 from llm_surprisal import CACHE_DIR, SCORERS, cache_file, surprisal_features   # noqa: E402
 
@@ -209,7 +209,8 @@ def read_rollouts(bench):
                                  list(getattr(sample, "choices", None) or ()), ensure_ascii=False),
                              "transcript_parts_json": json.dumps(parts, ensure_ascii=False),
                              "content_hash": transcript_content_hash(question, text, parts),
-                             "correct": extract_score(sample), "is_canonical": path in chosen})
+                             "correct": extract_score(sample) and has_reasoning(text),   # answer-only outputs are not judged
+                             "is_canonical": path in chosen})
     return pd.DataFrame(rows)
 
 
@@ -530,7 +531,7 @@ def write_freeze_manifest(directory, store, verdicts, pairs, final_directory=Non
         "row_keys": {"transcript_store": KEYS, "item_split": ["bench", "item", "split"],
                      "verdicts": VERDICT_DRAW_KEYS,
                      "pairs": VERDICT_DRAW_KEYS + ["content_hash_l", "content_hash_r"]},
-        "correctness_rule": "judge.util.extract_score",
+        "correctness_rule": "judge.util.extract_score and judge.dataset.has_reasoning",
         "population_rule": "is_canonical & correct",
         "transcript_schema_hash": dataframe_schema_hash(store),
         "canonical_content_hash": canonical_content_hash(store),

@@ -21,14 +21,19 @@ def transcript(text, id="q1", question="Question", options=(), epoch=1):
     return Transcript(id=id, question=question, text=text, options=tuple(options), epoch=epoch)
 
 
-def eval_sample(sample_id, content, correct=True, question=None, choices=None, epoch=1):
-    """A stand-in for an EvalSample as read_eval_log_samples yields them."""
+REASONING = "\n" + "some working shown before the answer. " * 4    # enough text to pass has_reasoning
+
+
+def eval_sample(sample_id, content, correct=True, question=None, choices=None, epoch=1, pad=True):
+    """A stand-in for an EvalSample as read_eval_log_samples yields them.
+
+    Content is padded with reasoning text unless pad=False (answer-only fixtures)."""
     return SimpleNamespace(
         id=sample_id,
         input=question or f"Q{sample_id}",
         epoch=epoch,
         choices=choices,
-        output=ModelOutput.from_content(model="m", content=content),
+        output=ModelOutput.from_content(model="m", content=content + REASONING if pad else content),
         scores={"scorer": Score(value="C" if correct else "I")},
     )
 
@@ -130,7 +135,16 @@ class TestReadTranscripts:
         by_id = read_transcripts(Path("log.eval"))
 
         assert list(by_id) == ["q1"]
-        assert [t.text for t in by_id["q1"]] == ["first epoch", "second epoch"]
+        assert [t.text.split("\n")[0] for t in by_id["q1"]] == ["first epoch", "second epoch"]
+
+    @patch("dataset.read_eval_log_samples")
+    def test_drops_answer_only_transcripts(self, mock_samples):
+        mock_samples.return_value = iter([
+            eval_sample("q1", "ANSWER: A", pad=False),
+            eval_sample("q2", "attachment://2a2c179a6d626631bdc59da7b76d4681", pad=False),
+            eval_sample("q3", "step one, step two, " * 10 + "ANSWER: A", pad=False),
+        ])
+        assert list(read_transcripts(Path("log.eval"))) == ["q3"]
 
     @patch("dataset.read_eval_log_samples")
     def test_keeps_incorrect_when_not_required(self, mock_samples):
