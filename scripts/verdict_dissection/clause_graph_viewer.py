@@ -44,27 +44,28 @@ def render(transcript, group, edge_rows, title):
     text_html = "".join(parts)
     n = len(nodes)
     height = ROW * (n + 1)
-    svg = [f'<svg width="560" height="{height}" data-n="{n}">']
+    spine = 230                                   # arcs go to the left of the spine, labels to the right
+    svg = [f'<svg width="620" height="{height}" data-n="{n}">']
     for r in nodes.itertuples():
         y = ROW * (r.node_id + 1)
         colour = COLOURS.get(r.type, CLAUSE_COLOUR)
         label = r.type + (" ⟲" if r.backtracking_marker else "") + (" ✓" if r.verification_marker else "")
-        snippet = html.escape(str(r.text if isinstance(r.text, str) else "")[:40].replace("\n", " "))
-        svg.append(f'<g class="gnode" data-id="{r.node_id}"><circle cx="20" cy="{y}" r="7" fill="{colour}"/>'
-                   f'<text x="32" y="{y + 4}" font-size="11">{r.node_id} {html.escape(label)}</text>'
-                   f'<text x="150" y="{y + 4}" font-size="9" fill="#777">{snippet}</text></g>')
+        snippet = html.escape(str(r.text if isinstance(r.text, str) else "")[:45].replace("\n", " "))
+        svg.append(f'<g class="gnode" data-id="{r.node_id}"><circle cx="{spine}" cy="{y}" r="7" fill="{colour}"/>'
+                   f'<text x="{spine + 12}" y="{y + 4}" font-size="11">{r.node_id} {html.escape(label)}</text>'
+                   f'<text x="{spine + 125}" y="{y + 4}" font-size="9" fill="#777">{snippet}</text></g>')
     for e in edge_rows.itertuples():
         y1, y2 = ROW * (e.source_node_id + 1), ROW * (e.target_node_id + 1)
         colour, dash = EDGE_STYLE[e.edge_source]
-        bulge = 14 + 3 * (e.target_node_id - e.source_node_id)
-        x = 20 - min(bulge, 18) if e.edge_source == "discourse" else 20 + 8      # discourse arcs left of the spine, others right
-        path = f"M 20 {y1} C {x - bulge} {y1}, {x - bulge} {y2}, 20 {y2}" if e.edge_source == "discourse" \
-            else f"M 26 {y1} C {26 + bulge} {y1}, {26 + bulge} {y2}, 26 {y2}"
+        bulge = min(20 + 6 * (e.target_node_id - e.source_node_id), spine - 12)
+        if e.edge_source != "discourse":
+            bulge = min(bulge + 30, spine - 12)   # tool/similarity/identifier arcs sit further out so they don't overlap parser arcs
+        x = spine - bulge
+        path = f"M {spine - 7} {y1} C {x} {y1}, {x} {y2}, {spine - 7} {y2}"
         label = html.escape(e.relation if isinstance(e.relation, str) else e.edge_source[:3]) + (f"/{e.nuclearity}" if isinstance(e.nuclearity, str) else "")
-        lx = (x - bulge) if e.edge_source == "discourse" else 26 + bulge
         svg.append(f'<g class="gedge" data-s="{e.source_node_id}" data-t="{e.target_node_id}">'
                    f'<path d="{path}" fill="none" stroke="{colour}" stroke-width="1.2" stroke-dasharray="{dash}"/>'
-                   f'<text x="{lx}" y="{(y1 + y2) / 2 + 3}" font-size="8" fill="{colour}" text-anchor="middle">{label}</text></g>')
+                   f'<text x="{x + (spine - 7 - x) / 4}" y="{(y1 + y2) / 2 + 3}" font-size="8" fill="{colour}" text-anchor="middle">{label}</text></g>')
     svg.append("</svg>")
     return (f'<section class="case"><h2>{html.escape(title)}</h2><div class="cols">'
             f'<div class="text"><pre>{text_html}</pre></div><div class="graph">{"".join(svg)}</div></div></section>')
@@ -72,8 +73,9 @@ def render(transcript, group, edge_rows, title):
 
 STYLE = """
 body{font:13px/1.4 -apple-system,Helvetica,sans-serif;margin:0;padding:1em 1.5em}
+nav{position:sticky;top:0;background:#fff;padding:.4em 0;border-bottom:1px solid #ddd;font-size:12px}
 .case{border-top:2px solid #999;margin-top:2em;padding-top:.5em}
-.cols{display:grid;grid-template-columns:1fr 580px;gap:1.5em;align-items:start}
+.cols{display:grid;grid-template-columns:1fr 640px;gap:1.5em;align-items:start}
 .text pre{white-space:pre-wrap;word-wrap:break-word;font:12px/1.5 Menlo,monospace;max-height:85vh;overflow:auto}
 .graph{overflow:auto;max-height:85vh}
 .node{border-left:3px solid;padding-left:3px;margin-left:1px}
@@ -91,7 +93,7 @@ document.querySelectorAll('.case').forEach(c=>{
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--per-bench", type=int, default=2)
+    parser.add_argument("--per-bench", type=int, default=4)
     parser.add_argument("--max-nodes", type=int, default=60)
     parser.add_argument("--seed", type=int, default=1)
     args = parser.parse_args()
@@ -101,20 +103,23 @@ def main():
     nodes["type"] = node_types(nodes, edges)
     store = pd.read_parquet(FREEZE / "transcript_store.parquet", columns=["content_hash", "transcript"]).drop_duplicates("content_hash").set_index("content_hash")
     sizes = nodes.groupby("transcript_key").size()
-    sections = []
+    sections, titles = [], []
     for bench in ["gpqa", "aime2024", "aime2025", "intercode", "swe_bench_mini"]:
         keys = nodes[(nodes.bench == bench) & (nodes.transcript_key.map(sizes).between(12, args.max_nodes))].transcript_key.drop_duplicates()
         for key in keys.sample(min(args.per_bench, len(keys)), random_state=args.seed):
             group = nodes[nodes.transcript_key == key]
             head = group.iloc[0]
             title = f"{head['bench']} | {head['model']} | item {head['item']} | {len(group)} nodes, {int((edges.transcript_key == key).sum())} edges"
-            sections.append(render(store.transcript[head["content_hash"]], group, edges[edges.transcript_key == key], title))
+            titles.append(title)
+            sections.append(render(store.transcript[head["content_hash"]], group, edges[edges.transcript_key == key], f"{len(sections) + 1}. {title}"))
     legend = ("<p>Left: transcript, each node's span numbered and coloured by type (clauses dark grey, equations red, headings purple, "
-              "answer green, tool calls blue, tool outputs light blue / orange on error). Right: nodes in reading order; arcs on the left "
-              "= discourse-parser edges (relation/nuclearity), arcs on the right = tool flow (blue), similarity (grey dashed), shared identifier (green). "
+              "answer green, tool calls blue, tool outputs light blue / orange on error). Right: nodes in reading order; arcs = edges: "
+              "discourse parser (black, relation/nuclearity), tool flow (blue), similarity (grey dashed), shared identifier (green); longer arcs bulge further out. "
               "⟲ backtracking marker, ✓ verification marker. Hover a node on either side.</p>")
+    nav = "<nav>" + " | ".join(f'<a href="#case-{i + 1}">{i + 1} {html.escape(t.split(" | item")[0])}</a>' for i, t in enumerate(titles)) + "</nav>"
+    sections = [sec.replace('<section class="case">', f'<section class="case" id="case-{i + 1}">', 1) for i, sec in enumerate(sections)]
     OUT.write_text(f"<!doctype html><meta charset=utf-8><title>Clause graphs</title><style>{STYLE}</style>"
-                   f"<h1>Clause network: transcript beside graph</h1>{legend}{''.join(sections)}<script>{SCRIPT}</script>")
+                   f"<h1>Clause network: transcript beside graph</h1>{legend}{nav}{''.join(sections)}<script>{SCRIPT}</script>")
     print(f"wrote {OUT} with {len(sections)} transcripts")
 
 

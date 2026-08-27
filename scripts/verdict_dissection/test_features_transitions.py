@@ -9,7 +9,7 @@ def test_node_types_use_nearest_discourse_parent_and_tool_fields():
                           "tool_type": [None] * 5, "outcome": [None, None, None, None, "error"]})
     edges = pd.DataFrame({"transcript_key": ["k", "k", "k"], "source_node_id": [1, 2, 1], "target_node_id": [2, 3, 2],
                           "edge_source": ["discourse", "similarity", "discourse"], "relation": ["causal", None, "elaboration"]})
-    assert list(node_types(nodes, edges)) == ["question", "causal", "elaboration", "equation", "output_error"]   # node 1 has no parent: typed by its first edge as nucleus
+    assert list(node_types(nodes, edges)) == ["question", "causal", "elaboration", "equation", "output_error"]   # node 1 has no parent: typed by its first rhetorical edge as source
 
 
 def test_transition_shares_count_one_and_two_step_pairs():
