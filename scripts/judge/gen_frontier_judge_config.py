@@ -79,14 +79,14 @@ def main() -> None:
                     raise SystemExit(f"{bench}: {model} ({dates[model].date()}) released after the judge "
                                      f"may only meet earlier models; {opponent} is {dates[opponent].date()}")
                 major, minor = sorted([model, opponent], key=lambda m: -accuracies[m])
-                comparisons.append([cfg["judge"], major, minor])
+                comparisons.extend([judge, major, minor] for judge in cfg["judges"])
 
         out = {"log_root": f"{args.log_root}/{bench}",
                "transcripts": {m: paths[m] for m in used},
                "comparisons": comparisons}
         target = Path(f"{args.out_prefix}_{bench}.yaml")
         target.write_text(yaml.safe_dump(out, sort_keys=False, width=200))
-        print(f"{target}: {len(comparisons)} comparisons over {len(used)} models")
+        print(f"{target}: {len(comparisons)} comparisons ({len(cfg['judges'])} judges) over {len(used)} models")
 
 
 if __name__ == "__main__":

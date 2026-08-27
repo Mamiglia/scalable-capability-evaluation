@@ -7,7 +7,9 @@
 # model gets at least three opponents spanning the accuracy range. Pairs already judged
 # in the pilot are not repeated.
 
-judge: openrouter/deepseek/deepseek-v4-flash-0731
+judges:
+  - openrouter/deepseek/deepseek-v4-flash-0731
+  - openrouter/google/gemma-4-31b-it
 judge_release: '2025-04-16'
 epoch_logs:
   gpqa: configs/epoch_logs_gpqa_frontier.yaml
@@ -55,4 +57,4 @@ pairs:
     gpt-5.4-high: [claude-opus-4.6, claude-opus-4.5, deepseek-v3.2, kimi-k2.6, qwen3.5-9b]
     claude-opus-4.7: [gpt-5.4-high, claude-opus-4.6, claude-opus-4.5]
     kimi-k3: [gpt-5.4-high, glm-5.2, gemini-3.5-flash]
-    glm-5.3: [claude-opus-4.7, qwen3.8-2.4t-a95b, glm-5.2]
+    glm-5.3: [claude-opus-4.7, gemini-3.5-flash, glm-5.2]

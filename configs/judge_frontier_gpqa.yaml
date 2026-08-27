@@ -35,183 +35,366 @@ comparisons:
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - claude-3-opus
   - gpt-4-1106
+- - openrouter/google/gemma-4-31b-it
+  - claude-3-opus
+  - gpt-4-1106
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - claude-3.5-sonnet-0620
   - gpt-4-1106
+- - openrouter/google/gemma-4-31b-it
+  - claude-3.5-sonnet-0620
+  - gpt-4-1106
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-4.1
+  - gpt-4-1106
+- - openrouter/google/gemma-4-31b-it
   - gpt-4.1
   - gpt-4-1106
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemma3-12b-it
   - gpt-4-1106
+- - openrouter/google/gemma-4-31b-it
+  - gemma3-12b-it
+  - gpt-4-1106
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - claude-3.5-sonnet-0620
+  - claude-3-opus
+- - openrouter/google/gemma-4-31b-it
   - claude-3.5-sonnet-0620
   - claude-3-opus
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gpt-4.1
   - claude-3-opus
+- - openrouter/google/gemma-4-31b-it
+  - gpt-4.1
+  - claude-3-opus
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3-32b
+  - claude-3-opus
+- - openrouter/google/gemma-4-31b-it
   - qwen3-32b
   - claude-3-opus
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - o1-mini-high
   - claude-3.5-sonnet-0620
+- - openrouter/google/gemma-4-31b-it
+  - o1-mini-high
+  - claude-3.5-sonnet-0620
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-4.1
+  - claude-3.5-sonnet-0620
+- - openrouter/google/gemma-4-31b-it
   - gpt-4.1
   - claude-3.5-sonnet-0620
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - mistral-medium-3
   - claude-3.5-sonnet-0620
+- - openrouter/google/gemma-4-31b-it
+  - mistral-medium-3
+  - claude-3.5-sonnet-0620
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - o1-high
+  - o1-mini-high
+- - openrouter/google/gemma-4-31b-it
   - o1-high
   - o1-mini-high
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gpt-4.1
   - o1-mini-high
+- - openrouter/google/gemma-4-31b-it
+  - gpt-4.1
+  - o1-mini-high
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3-32b
+  - o1-mini-high
+- - openrouter/google/gemma-4-31b-it
   - qwen3-32b
   - o1-mini-high
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-2.5-pro-exp-0325
   - o1-high
+- - openrouter/google/gemma-4-31b-it
+  - gemini-2.5-pro-exp-0325
+  - o1-high
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - deepseek-r1-0528
+  - o1-high
+- - openrouter/google/gemma-4-31b-it
   - deepseek-r1-0528
   - o1-high
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - o3
   - o1-high
+- - openrouter/google/gemma-4-31b-it
+  - o3
+  - o1-high
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-2.5-pro-exp-0325
+  - o3
+- - openrouter/google/gemma-4-31b-it
   - gemini-2.5-pro-exp-0325
   - o3
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-2.5-pro-exp-0325
   - gpt-4.1
+- - openrouter/google/gemma-4-31b-it
+  - gemini-2.5-pro-exp-0325
+  - gpt-4.1
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-2.5-pro-exp-0325
+  - deepseek-r1-0528
+- - openrouter/google/gemma-4-31b-it
   - gemini-2.5-pro-exp-0325
   - deepseek-r1-0528
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-2.5-pro
   - gemini-2.5-pro-exp-0325
+- - openrouter/google/gemma-4-31b-it
+  - gemini-2.5-pro
+  - gemini-2.5-pro-exp-0325
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-2.5-pro
+  - o3
+- - openrouter/google/gemma-4-31b-it
   - gemini-2.5-pro
   - o3
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-2.5-pro
   - o1-high
+- - openrouter/google/gemma-4-31b-it
+  - gemini-2.5-pro
+  - o1-high
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-2.5-pro
+  - deepseek-r1-0528
+- - openrouter/google/gemma-4-31b-it
   - gemini-2.5-pro
   - deepseek-r1-0528
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-2.5-pro
   - qwen3-32b
+- - openrouter/google/gemma-4-31b-it
+  - gemini-2.5-pro
+  - qwen3-32b
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-5-high
+  - gemini-2.5-pro
+- - openrouter/google/gemma-4-31b-it
   - gpt-5-high
   - gemini-2.5-pro
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gpt-5-high
   - o3
+- - openrouter/google/gemma-4-31b-it
+  - gpt-5-high
+  - o3
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-5-high
+  - deepseek-r1-0528
+- - openrouter/google/gemma-4-31b-it
   - gpt-5-high
   - deepseek-r1-0528
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gpt-5-high
   - o1-high
+- - openrouter/google/gemma-4-31b-it
+  - gpt-5-high
+  - o1-high
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-5-high
+  - mistral-medium-3
+- - openrouter/google/gemma-4-31b-it
   - gpt-5-high
   - mistral-medium-3
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-3-pro-preview
   - gpt-5-high
+- - openrouter/google/gemma-4-31b-it
+  - gemini-3-pro-preview
+  - gpt-5-high
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3-pro-preview
+  - gemini-2.5-pro
+- - openrouter/google/gemma-4-31b-it
   - gemini-3-pro-preview
   - gemini-2.5-pro
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-3-pro-preview
   - claude-sonnet-4.5
+- - openrouter/google/gemma-4-31b-it
+  - gemini-3-pro-preview
+  - claude-sonnet-4.5
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3-pro-preview
+  - glm-4.6
+- - openrouter/google/gemma-4-31b-it
   - gemini-3-pro-preview
   - glm-4.6
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-3-pro-preview
   - gpt-5
+- - openrouter/google/gemma-4-31b-it
+  - gemini-3-pro-preview
+  - gpt-5
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-3.1-pro-high
   - gemini-3-pro-preview
+- - openrouter/google/gemma-4-31b-it
+  - gemini-3.1-pro-high
+  - gemini-3-pro-preview
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3.1-pro-high
+  - kimi-k2.6
+- - openrouter/google/gemma-4-31b-it
   - gemini-3.1-pro-high
   - kimi-k2.6
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-3.1-pro-high
   - deepseek-v3.2
+- - openrouter/google/gemma-4-31b-it
+  - gemini-3.1-pro-high
+  - deepseek-v3.2
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3.1-pro-high
+  - qwen3.5-9b
+- - openrouter/google/gemma-4-31b-it
   - gemini-3.1-pro-high
   - qwen3.5-9b
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-3.1-pro-high
   - gpt-5-high
+- - openrouter/google/gemma-4-31b-it
+  - gemini-3.1-pro-high
+  - gpt-5-high
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3.1-pro-high
+  - claude-opus-4.7
+- - openrouter/google/gemma-4-31b-it
   - gemini-3.1-pro-high
   - claude-opus-4.7
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - kimi-k2.6
   - claude-opus-4.7
+- - openrouter/google/gemma-4-31b-it
+  - kimi-k2.6
+  - claude-opus-4.7
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3-pro-preview
+  - claude-opus-4.7
+- - openrouter/google/gemma-4-31b-it
   - gemini-3-pro-preview
   - claude-opus-4.7
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-3.1-pro-high
   - gpt-5.5-xhigh
+- - openrouter/google/gemma-4-31b-it
+  - gemini-3.1-pro-high
+  - gpt-5.5-xhigh
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gpt-5.5-xhigh
   - claude-opus-4.7
+- - openrouter/google/gemma-4-31b-it
+  - gpt-5.5-xhigh
+  - claude-opus-4.7
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-5.5-xhigh
+  - kimi-k2.6
+- - openrouter/google/gemma-4-31b-it
   - gpt-5.5-xhigh
   - kimi-k2.6
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gpt-5.5-xhigh
   - qwen3.5-4b
+- - openrouter/google/gemma-4-31b-it
+  - gpt-5.5-xhigh
+  - qwen3.5-4b
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-5.5-xhigh
+  - gemini-3-pro-preview
+- - openrouter/google/gemma-4-31b-it
   - gpt-5.5-xhigh
   - gemini-3-pro-preview
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gpt-5.5-xhigh
   - gemini-3.5-flash
+- - openrouter/google/gemma-4-31b-it
+  - gpt-5.5-xhigh
+  - gemini-3.5-flash
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3.5-flash
+  - claude-opus-4.7
+- - openrouter/google/gemma-4-31b-it
   - gemini-3.5-flash
   - claude-opus-4.7
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-3.1-pro-high
   - gemini-3.5-flash
+- - openrouter/google/gemma-4-31b-it
+  - gemini-3.1-pro-high
+  - gemini-3.5-flash
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3.5-flash
+  - kimi-k3
+- - openrouter/google/gemma-4-31b-it
   - gemini-3.5-flash
   - kimi-k3
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - glm-5.2
   - kimi-k3
+- - openrouter/google/gemma-4-31b-it
+  - glm-5.2
+  - kimi-k3
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-5.5-xhigh
+  - kimi-k3
+- - openrouter/google/gemma-4-31b-it
   - gpt-5.5-xhigh
   - kimi-k3
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gpt-5.5-xhigh
   - claude-opus-5
+- - openrouter/google/gemma-4-31b-it
+  - gpt-5.5-xhigh
+  - claude-opus-5
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - claude-opus-5
+  - gemini-3.5-flash
+- - openrouter/google/gemma-4-31b-it
   - claude-opus-5
   - gemini-3.5-flash
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - claude-opus-5
   - glm-5.2
+- - openrouter/google/gemma-4-31b-it
+  - claude-opus-5
+  - glm-5.2
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - claude-opus-5
+  - kimi-k3
+- - openrouter/google/gemma-4-31b-it
   - claude-opus-5
   - kimi-k3
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - claude-opus-5
   - nemotron-3-ultra-550b-a55b
+- - openrouter/google/gemma-4-31b-it
+  - claude-opus-5
+  - nemotron-3-ultra-550b-a55b
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - claude-opus-5
+  - glm-5.3
+- - openrouter/google/gemma-4-31b-it
   - claude-opus-5
   - glm-5.3
 - - openrouter/deepseek/deepseek-v4-flash-0731
   - gemini-3.5-flash
   - glm-5.3
+- - openrouter/google/gemma-4-31b-it
+  - gemini-3.5-flash
+  - glm-5.3
 - - openrouter/deepseek/deepseek-v4-flash-0731
+  - glm-5.3
+  - glm-5.2
+- - openrouter/google/gemma-4-31b-it
   - glm-5.3
   - glm-5.2
