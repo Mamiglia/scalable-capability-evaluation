@@ -31,3 +31,17 @@ blocks:
     table: judge_results/verdict_dissection/transcript_sae/tables-qwen-k8/transcript_features_qwen.parquet
     columns: "^sae_(?!shared_)"
     fill_missing: 0
+  - name: structure                    # agentic trajectory shape and answer presentation (features_structure.py)
+    table: "{features_root}/raw/structure.parquet"
+    columns: "^(assistant_turns|tool_calls|tool_errors|tool_outputs_empty|submit_calls|test_commands|repeated_tool_calls|distinct_tools|prose_chars|tool_call_chars|tool_output_chars|prose_share|bare_answer|display_equations|inline_math|option_references|elimination_terms|final_answer_restated|bold_spans|headers)$"
+  - name: clause-topology              # clause-network graph shape (scripts/discourse_network, clause_network_v2_sim070)
+    table: "{features_root}/raw/clause-network.parquet"
+    columns: "^topo_"
+  - name: clause-node-sae              # Top-K SAE on clause embeddings, per benchmark (NaN outside the benchmark's own SAE)
+    table: "{features_root}/raw/clause-network.parquet"
+    columns: "^node_sae_"
+    fill_missing: 0
+  - name: clause-edge-sae              # Top-K SAE on edge vectors [s, t, t - s, s * t], per benchmark
+    table: "{features_root}/raw/clause-network.parquet"
+    columns: "^edge_sae_"
+    fill_missing: 0
