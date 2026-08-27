@@ -24,7 +24,8 @@ OUT = NETWORK / "graph_viewer.html"
 COLOURS = {"equation": "#c44", "heading": "#a0a", "answer": "#080", "code": "#886", "tool_inspect": "#06c", "tool_act": "#039",
            "output_ok": "#69c", "output_error": "#e60", "feedback": "#c90", "question": "#666"}
 CLAUSE_COLOUR = "#333"
-EDGE_STYLE = {"discourse": ("#222", ""), "tool": ("#06c", ""), "similarity": ("#999", "4 3"), "identifier": ("#2a2", "")}
+EDGE_STYLE = {"discourse": ("#222", ""), "tool": ("#06c", ""), "similarity": ("#999", "4 3"), "identifier": ("#2a2", ""),
+              "plan": ("#d0a000", "6 2")}
 ROW = 22
 
 
@@ -96,9 +97,15 @@ def main():
     parser.add_argument("--per-bench", type=int, default=4)
     parser.add_argument("--max-nodes", type=int, default=60)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--with-plans", action="store_true", help="only transcripts that state a plan (agentic benchmarks)")
     args = parser.parse_args()
     nodes = pd.read_parquet(NETWORK / "nodes.parquet")
     edges = pd.read_parquet(NETWORK / "edges.parquet")
+    plan_path = NETWORK / "plan_edges.parquet"
+    if plan_path.exists():                       # plan item -> the tool call that carries it out (plan_edges.py)
+        plan = pd.read_parquet(plan_path)
+        plan = plan.assign(edge_source="plan", relation=plan.overlap.map({1.0: "realises", 0.0: "nearest"}), nuclearity=None)
+        edges = pd.concat([edges, plan[["transcript_key", "source_node_id", "target_node_id", "edge_source", "relation", "nuclearity", "cosine"]]], ignore_index=True)
     nodes = nodes.sort_values(["transcript_key", "node_id"]).reset_index(drop=True)
     nodes["type"] = node_types(nodes, edges)
     store = pd.read_parquet(FREEZE / "transcript_store.parquet", columns=["content_hash", "transcript"]).drop_duplicates("content_hash").set_index("content_hash")
@@ -106,6 +113,8 @@ def main():
     sections, titles = [], []
     for bench in ["gpqa", "aime2024", "aime2025", "intercode", "swe_bench_mini"]:
         keys = nodes[(nodes.bench == bench) & (nodes.transcript_key.map(sizes).between(12, args.max_nodes))].transcript_key.drop_duplicates()
+        if args.with_plans:
+            keys = keys[keys.isin(set(edges.transcript_key[edges.edge_source == "plan"]))]
         for key in keys.sample(min(args.per_bench, len(keys)), random_state=args.seed):
             group = nodes[nodes.transcript_key == key]
             head = group.iloc[0]
@@ -114,10 +123,13 @@ def main():
             sections.append(render(store.transcript[head["content_hash"]], group, edges[edges.transcript_key == key], f"{len(sections) + 1}. {title}"))
     legend = ("<p>Left: transcript, each node's span numbered and coloured by type (clauses dark grey, equations red, headings purple, "
               "answer green, tool calls blue, tool outputs light blue / orange on error). Right: nodes in reading order; arcs = edges: "
-              "discourse parser (black, relation/nuclearity), tool flow (blue), similarity (grey dashed), shared identifier (green); longer arcs bulge further out. "
+              "discourse parser (black, relation/nuclearity), tool flow (blue), similarity (grey dashed), shared identifier (green), plan item → the call that realises it (gold dashed; 'nearest' = no class match); longer arcs bulge further out. "
               "⟲ backtracking marker, ✓ verification marker. Hover a node on either side.</p>")
     nav = "<nav>" + " | ".join(f'<a href="#case-{i + 1}">{i + 1} {html.escape(t.split(" | item")[0])}</a>' for i, t in enumerate(titles)) + "</nav>"
     sections = [sec.replace('<section class="case">', f'<section class="case" id="case-{i + 1}">', 1) for i, sec in enumerate(sections)]
+    global OUT
+    if args.with_plans:
+        OUT = OUT.with_name("graph_viewer_plans.html")
     OUT.write_text(f"<!doctype html><meta charset=utf-8><title>Clause graphs</title><style>{STYLE}</style>"
                    f"<h1>Clause network: transcript beside graph</h1>{legend}{nav}{''.join(sections)}<script>{SCRIPT}</script>")
     print(f"wrote {OUT} with {len(sections)} transcripts")
