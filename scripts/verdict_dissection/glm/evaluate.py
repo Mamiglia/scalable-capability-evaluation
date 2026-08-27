@@ -19,7 +19,6 @@ import pickle
 import sys
 from pathlib import Path
 
-import arviz as az
 import jax
 import numpy as np
 import pandas as pd
@@ -32,6 +31,7 @@ import model as glm_models  # noqa: E402
 
 
 def load_posterior(model_dir, num_draws):
+    import arviz as az          # imported here: arviz's import writes a stamp file, and parallel jobs race on it
     posterior = az.from_netcdf(model_dir / "inference_data.nc").posterior
     return {name: posterior[name].values.reshape(-1, *posterior[name].shape[2:])[:num_draws]
             for name in posterior.data_vars}
