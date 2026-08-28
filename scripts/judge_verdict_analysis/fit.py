@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from tempfile import mkdtemp
 
@@ -84,7 +85,10 @@ def _prepared_manifest(backend: str, fold: str, config: AnalysisConfig) -> dict[
         "backend": backend,
         "fold": fold,
         "target": config.execution_target,
-        "command": "python -m scripts.judge_verdict_analysis.fit",
+        "command": [
+            "python", "-c",
+            "from scripts.judge_verdict_analysis.fit import run_remote_fits\nrun_remote_fits()",
+        ],
         "source_paths": {
             "design_matrix_config": str(config.design_matrix_config),
             "processed_matrix_dir": str(config.processed_matrix_dir),
@@ -248,6 +252,11 @@ def run_fits(config: AnalysisConfig = CONFIG) -> None:
             else:
                 result = evaluate_hibayes(config.fit_dir / "hibayes" / fold, test, config)
                 _write_result(result, train, test, config, existing_job=True)
+
+
+def run_remote_fits(config: AnalysisConfig = CONFIG) -> None:
+    """Execute configured fits after the configured remote-target guard."""
+    run_fits(replace(config, execution_mode="execute"))
 
 
 def main() -> None:

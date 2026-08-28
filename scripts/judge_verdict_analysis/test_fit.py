@@ -1,3 +1,4 @@
+import ast
 import json
 from pathlib import Path
 
@@ -84,8 +85,25 @@ def test_prepare_writes_remote_descriptors_without_loading_the_matrix(tmp_path: 
     assert manifest["state"] == "prepared"
     assert manifest["target"] == "swc_hpc"
     assert manifest["source_paths"]["design_matrix_config"] == str(config.design_matrix_config)
+    command = ast.parse(manifest["command"][-1])
+    assert isinstance(command.body[0], ast.ImportFrom)
+    assert isinstance(command.body[1].value, ast.Call)
+    assert command.body[1].value.func.id == "run_remote_fits"
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
         fit.run_fits(config)
+
+
+def test_remote_entry_point_guards_before_loading_pair_rows(tmp_path: Path, monkeypatch) -> None:
+    """Fails if the descriptor's remote entry point can bypass target validation."""
+    config = AnalysisConfig(
+        design_matrix_config=tmp_path / "not-read.yaml", results_dir=tmp_path / "results",
+        execution_target="swc_hpc",
+    ).validate()
+    monkeypatch.setattr(fit, "_active_remote_target", lambda _: False)
+    monkeypatch.setattr(fit, "_load_rows", lambda _: pytest.fail("remote guard loaded pair rows"))
+
+    with pytest.raises(RuntimeError, match="refusing heavy local fit"):
+        fit.run_remote_fits(config)
 
 
 def test_local_test_limit_refuses_before_loading_pair_rows(tmp_path: Path, monkeypatch) -> None:
