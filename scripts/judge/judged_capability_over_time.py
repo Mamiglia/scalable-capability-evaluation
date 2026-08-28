@@ -133,8 +133,8 @@ def draw(ax, x, table, judge):
 
 
 def save(fig, path):
-    fig.savefig(path.with_suffix(".png"), dpi=300, bbox_inches="tight")
-    fig.savefig(path.with_suffix(".svg"), bbox_inches="tight")
+    fig.savefig(f"{path}.png", dpi=300, bbox_inches="tight")
+    fig.savefig(f"{path}.svg", bbox_inches="tight")
     plt.close(fig)
 
 
