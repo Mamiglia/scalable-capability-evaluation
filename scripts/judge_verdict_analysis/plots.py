@@ -378,6 +378,7 @@ def plot_coefficients(
     judges: Sequence[str] = CONFIG.judges,
     benchmarks: Sequence[str] = CONFIG.benchmarks,
     feature_order: Sequence[str] = CONFIG.regressors,
+    coefficient_limit: float | None = None,
 ) -> dict[str, tuple[Path, Path]]:
     """Plot saved effective coefficients; only HiBayes rows receive intervals."""
     _style()
@@ -391,7 +392,7 @@ def plot_coefficients(
         scale_values = [frame.effective]
         if interval:
             scale_values.extend([frame[interval[0]], frame[interval[1]]])
-        limit = _symmetric_limit(*scale_values)
+        limit = coefficient_limit if coefficient_limit is not None else _symmetric_limit(*scale_values)
         rows, columns = len(panel_judges), len(panel_benches)
         height = max(1.25 * rows, 0.18 * len(features) * rows + 0.65)
         fig, axes = plt.subplots(
@@ -401,9 +402,16 @@ def plot_coefficients(
         for row, judge in enumerate(panel_judges):
             for column, benchmark in enumerate(panel_benches):
                 ax = axes[row, column]
-                subset = frame[(frame.judge == judge) & (frame.benchmark == benchmark)]
-                subset = subset.set_index("feature").reindex(features).dropna(subset=["effective"])
-                y = np.array([features.index(feature) for feature in subset.index])
+                subset = frame[(frame.judge == judge) & (frame.benchmark == benchmark)].copy()
+                subset["feature_index"] = subset.feature.map({feature: index for index, feature in enumerate(features)})
+                subset = subset.dropna(subset=["effective", "feature_index"]).sort_values("feature_index")
+                folds = _configured_order(
+                    subset.fold if "fold" in subset else pd.Series("saved", index=subset.index), ()
+                )
+                fold_dodge = dict(zip(folds, np.linspace(-0.16, 0.16, len(folds))))
+                y = subset.feature_index.to_numpy(float) + (
+                    subset.fold.map(fold_dodge).to_numpy(float) if "fold" in subset else 0
+                )
                 if interval:
                     lower, upper = interval
                     xerr = np.vstack((subset.effective - subset[lower], subset[upper] - subset.effective))
@@ -500,6 +508,11 @@ def plot_saved_model_results(config=CONFIG) -> dict[str, tuple[Path, Path]]:
 
     coefficient_table = saved_table(coefficient_files, config.fit_dir)
     lesion_table = saved_table(lesion_files, config.lesion_dir)
+    hibayes = coefficient_table[coefficient_table.backend == "hibayes"]
+    scale_values = [coefficient_table.effective]
+    if interval := _interval_columns(hibayes):
+        scale_values.extend([hibayes[interval[0]], hibayes[interval[1]]])
+    coefficient_limit = _symmetric_limit(*scale_values)
     config.model_figure_dir.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".plot-", dir=config.model_figure_dir) as temporary:
         coefficient_path = Path(temporary) / "coefficients.csv"
@@ -508,7 +521,8 @@ def plot_saved_model_results(config=CONFIG) -> dict[str, tuple[Path, Path]]:
         lesion_table.to_csv(lesion_path, index=False)
         outputs = plot_coefficients(coefficient_path, config.model_figure_dir,
                                     judges=config.judges, benchmarks=config.benchmarks,
-                                    feature_order=config.regressors)
+                                    feature_order=config.regressors,
+                                    coefficient_limit=coefficient_limit)
         outputs["lesions"] = plot_lesions(lesion_path, config.model_figure_dir,
                                            metric=config.lesion_metric,
                                            feature_order=config.regressors)
