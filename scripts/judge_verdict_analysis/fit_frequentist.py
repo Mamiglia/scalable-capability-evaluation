@@ -38,7 +38,6 @@ def _splits(frame: pd.DataFrame, config: AnalysisConfig) -> list[tuple[np.ndarra
 def _model(config: AnalysisConfig, *, c: float, l1_ratio: float | None) -> LogisticRegression:
     return LogisticRegression(
         C=c,
-        penalty="elasticnet" if l1_ratio is not None else "l2",
         solver="saga" if l1_ratio is not None else "lbfgs",
         l1_ratio=0.0 if l1_ratio is None else l1_ratio,
         fit_intercept=False,

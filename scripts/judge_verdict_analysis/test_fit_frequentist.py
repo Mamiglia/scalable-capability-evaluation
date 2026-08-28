@@ -2,9 +2,13 @@ from dataclasses import replace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from .config import CONFIG
 from .fit_frequentist import fit_frequentist
+
+
+pytestmark = pytest.mark.filterwarnings("error::FutureWarning")
 
 
 def test_sparse_signal_is_selected_and_refit_with_the_full_hierarchy() -> None:
@@ -44,7 +48,9 @@ def test_sparse_signal_is_selected_and_refit_with_the_full_hierarchy() -> None:
     assert {"population", "judge_deviation", "benchmark_deviation",
             "cell_deviation", "effective"} <= set(result.coefficients)
     assert set(result.coefficients.feature) == {"signal"}
+    assert np.isfinite(result.coefficients.select_dtypes(include="number")).all().all()
     assert np.isfinite(result.predictions.probability).all()
     assert result.predictions.observed.tolist() == test.pick_left.tolist()
     assert set(result.tuning.stage) == {"elastic_net", "ridge"}
     assert set(result.metrics.metric) == {"accuracy", "log_loss"}
+    assert np.isfinite(result.metrics.value).all()
