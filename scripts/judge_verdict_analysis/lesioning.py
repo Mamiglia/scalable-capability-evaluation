@@ -169,7 +169,7 @@ def run_lesions(config: AnalysisConfig = CONFIG) -> None:
     config = config.validate()
     if config.execution_mode != "execute":
         raise RuntimeError("lesions require execution_mode='execute'")
-    fit._require_execution_target(config)
+    fit._guard_execution(config)
     rows, _ = fit._load_rows(config)
     if config.execution_target == "local_test" and len(rows) > config.local_test_max_rows:
         raise RuntimeError("refusing local lesions above local_test_max_rows; use SWC HPC or RunPod")

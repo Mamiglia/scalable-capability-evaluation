@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from . import fit, lesioning
 from .config import CONFIG
 from .fit_common import FitResult
 from .lesioning import _bootstrap_summary, lesion_fold
@@ -77,3 +78,13 @@ def test_clustered_summary_reports_both_deltas_and_the_configured_primary_metric
     assert summary.row_count == 4
     assert summary.delta_accuracy_lower == summary.delta_accuracy_upper == 0.2
     assert summary.delta_log_loss_lower <= summary.delta_log_loss <= summary.delta_log_loss_upper
+
+
+def test_remote_lesion_guard_rejects_before_loading_rows(monkeypatch) -> None:
+    """Fails if lesions bypass the fit facade's unavailable-target guard."""
+    config = replace(CONFIG, execution_mode="execute", execution_target="swc_hpc")
+    monkeypatch.setattr(fit, "_active_remote_target", lambda _: False)
+    monkeypatch.setattr(fit, "_load_rows", lambda _: pytest.fail("guard loaded rows"))
+
+    with pytest.raises(RuntimeError, match="refusing heavy local fit"):
+        lesioning.run_lesions(config)
