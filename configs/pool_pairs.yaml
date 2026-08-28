@@ -4,6 +4,9 @@
 judges:
 - openrouter/deepseek/deepseek-v4-flash-0731
 - openrouter/google/gemma-4-31b-it
+system_prompts:
+  gpqa: assets/system_prompt/mcq.txt
+  swe_bench_mini: assets/system_prompt/default.txt
 epoch_logs:
   gpqa: configs/epoch_logs_gpqa_frontier.yaml
   swe_bench_mini: configs/epoch_logs_swe.yaml

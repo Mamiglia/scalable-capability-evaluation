@@ -7,6 +7,7 @@ The config (see gen_judge_config.py) has these sections:
                      slug whose model YAML under configs/models supplies the
                      endpoint pin, generate args and runpod settings
 Optional knobs:
+  system_prompt:     prompt file shown to the judge (default assets/system_prompt/default.txt)
   phase1_items:      items judged in the early phase (default 20)
   epochs:            judge every sample this many times, to measure how much
                      verdicts vary for a fixed input (default 1)
@@ -35,11 +36,15 @@ from inspect_ai import eval_set
 from inspect_ai.log import read_eval_log
 
 from configs import ModelConfig
-from judge.task import judge_task
+from judge.task import DEFAULT_SYSTEM_PROMPT, judge_task
 from model import Model
 
 DEFAULT_PHASE1_ITEMS = 20
 MODEL_CONFIGS = Path("configs/models")
+
+
+def configured_system_prompt(cfg: dict) -> str:
+    return cfg.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
 
 
 def judge_config(slug: str) -> ModelConfig:
@@ -91,6 +96,7 @@ def main() -> int:
     phase1_items = cfg.get("phase1_items") or DEFAULT_PHASE1_ITEMS
     epochs = cfg.get("epochs") or 1
     fracs = cfg.get("truncate_fracs") or [None]
+    system_prompt = configured_system_prompt(cfg)
     # Ablation switch: judges see candidates' reasoning. Protocol default stays False.
     include_reasoning = bool(cfg.get("include_reasoning", False))
     if "judge_model_args" in cfg:
@@ -114,6 +120,7 @@ def main() -> int:
             tasks[key] = judge_task(
                 major_path=Path(paths[major]),
                 minor_path=Path(paths[minor]),
+                system_prompt=system_prompt,
                 include_reasoning=include_reasoning,
                 truncate_frac=frac,
                 task_name=f"{judge_short}_{major}-vs-{minor}{suffix}",

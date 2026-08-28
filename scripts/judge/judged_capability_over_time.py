@@ -13,7 +13,7 @@ ability and line refitted per draw. AIME years are pooled.
 
     uv run python scripts/judge/judged_capability_over_time.py --judge o4-mini
     uv run python scripts/judge/judged_capability_over_time.py --judge o4-mini --x capability   # models ordered by hard-half accuracy
-    uv run python scripts/judge/judged_capability_over_time.py --judge o4-mini --x frontier     # best model per quarter by release date
+    uv run python scripts/judge/judged_capability_over_time.py --judge o4-mini --x frontier     # frozen frontier roster
 """
 import argparse
 import glob
@@ -39,6 +39,7 @@ CONFIG = ROOT / "configs/design_matrices.yaml"
 OUT = ROOT / "judge_results/judged_capability_over_time"
 ACTUAL, PREDICTED, ORACLE, ORACLE_HARD = "#333333", "#2a78d6", "#eb6834", "#1baf7a"
 BENCH_LABEL = {"gpqa": "GPQA", "aime": "AIME", "intercode": "InterCode CTF", "swe_bench_mini": "SWE-bench mini"}
+EXCLUDED_EFFORT = re.compile(r"(?:^|[-_])(?:low|high|xhigh)$", re.IGNORECASE)
 plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,
                      "ytick.labelsize": 7, "font.family": "sans-serif", "font.sans-serif": ["Arial"],
                      "axes.spines.top": False, "axes.spines.right": False, "axes.linewidth": 0.8,
@@ -52,6 +53,15 @@ def slug(name):
 
 def short_name(model):
     return re.sub(r"^nvidia-|-bf16$|-it$|-instruct$", "", model)
+
+
+def load_frontier_roster(path, bench):
+    """Load the frozen side-analysis roster and reject excluded effort variants."""
+    roster = (yaml.safe_load(Path(path).read_text()) or {}).get(bench, {})
+    excluded = [model for model in roster.values() if EXCLUDED_EFFORT.search(model)]
+    if excluded:
+        raise ValueError(f"frontier roster contains excluded effort variant: {', '.join(excluded)}")
+    return roster
 
 
 def release_dates():
@@ -175,11 +185,19 @@ def plot(table, judge, judge_date, bench, path):
     save(fig, path)
 
 
-def frontier(table, min_opponents):
-    """The most accurate model (hard half) released in each quarter, among models judged against at least min_opponents others."""
-    table = table[table.n_opponents >= min_opponents]
-    best = table.groupby(table.release.dt.to_period("Q")).actual.idxmax()
-    return table.loc[best].sort_values("release")
+def frontier(table, min_opponents, roster):
+    """The frozen frontier roster, requiring enough judged opponents for every model."""
+    eligible = table[table.n_opponents >= min_opponents]
+    models = list(roster.values())
+    missing = [model for model in models if model not in eligible.index]
+    if missing:
+        raise ValueError(f"frontier roster models missing or underjudged: {', '.join(missing)}")
+    wrong_quarter = [f"{model}: roster {quarter}, release {eligible.loc[model, 'release'].to_period('Q')}"
+                     for quarter, model in roster.items()
+                     if str(eligible.loc[model, "release"].to_period("Q")) != str(quarter)]
+    if wrong_quarter:
+        raise ValueError(f"frontier roster has wrong release quarter: {', '.join(wrong_quarter)}")
+    return eligible.loc[models].sort_values("release")
 
 
 def earlier_opponents_only(verdicts, dates, reference_date):
@@ -197,9 +215,8 @@ def opponents_per_model(verdicts):
     return pairs.drop_duplicates().groupby("model_left").model_right.nunique()
 
 
-def plot_frontier(table, judge, judge_date, bench, path, style, min_opponents):
-    """Best model per quarter by release date, with its prediction as a band or as points."""
-    table = frontier(table, min_opponents)
+def plot_frontier(table, judge, judge_date, bench, path, style):
+    """Frozen frontier models by release date, with predictions as a band or as points."""
     test = table
     fig, ax = plt.subplots(figsize=(3.6, 2.4))
     ax.axvspan(judge_date, table.release.max() + pd.Timedelta(days=400), color="#f2f2f2", lw=0, zorder=0)
@@ -222,7 +239,7 @@ def plot_frontier(table, judge, judge_date, bench, path, style, min_opponents):
     ax.spines["left"].set_bounds(0, 1)
     for side in ("left", "bottom"):
         ax.spines[side].set_position(("outward", 3))
-    ax.legend([points, handle], ["actual (best model per quarter)", "predicted"],
+    ax.legend([points, handle], ["actual (frozen frontier roster)", "predicted"],
               handler_map={tuple: HandlerTuple(ndivide=1)}, loc="lower left", bbox_to_anchor=(0, 1.02), ncol=1,
               frameon=False, handletextpad=0.5, handlelength=1.8)
     date_axis(ax, table, judge, judge_date, bench)
@@ -236,6 +253,9 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--x", choices=["release", "capability", "frontier"], default="release", help="what orders the models along x")
     parser.add_argument("--min-opponents", type=int, default=2, help="frontier plot: only models judged against at least this many others")
+    parser.add_argument("--frontier-roster", type=Path, default=ROOT / "configs/frontier_roster.yaml",
+                        help="frozen benchmark -> quarter -> model roster used by --x frontier")
+    parser.add_argument("--out-dir", type=Path, default=OUT)
     parser.add_argument("--earlier-opponents-only", action="store_true",
                         help="models released after the reference judge keep only verdicts against models released before themselves")
     parser.add_argument("--reference-judge", help="judge whose release date the pairing rule refers to (default: --judge)")
@@ -263,26 +283,28 @@ def main():
     rollout_is_easy = easy.reindex(pd.MultiIndex.from_frame(rollouts[["bench", "item"]])).to_numpy()
     easy_rollouts, hard_rollouts = rollouts[rollout_is_easy], rollouts[~rollout_is_easy]
     easy_verdicts = verdicts[easy.reindex(pd.MultiIndex.from_frame(verdicts[["bench", "item"]])).fillna(False).to_numpy(bool)]
-    OUT.mkdir(parents=True, exist_ok=True)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
     for bench, bench_verdicts in easy_verdicts.groupby("bench"):
         easy_accuracy = easy_rollouts[easy_rollouts.bench == bench].groupby("model").correct.mean()
         hard_accuracy = hard_rollouts[hard_rollouts.bench == bench].groupby("model").correct.mean()
         table = predictions_with_intervals(bench_verdicts, easy_accuracy, hard_accuracy, args.judge, args.resamples, args.seed)
         table["release"] = [dates[slug(m)] for m in table.index]
         table["n_opponents"] = opponents_per_model(bench_verdicts).reindex(table.index).fillna(0).astype(int)
-        table.sort_values("release").to_csv(OUT / f"{args.judge}_{bench}.csv", index_label="model")
+        table.sort_values("release").to_csv(args.out_dir / f"{args.judge}_{bench}.csv", index_label="model")
         print(f"{bench}: {len(table)} models, {len(bench_verdicts)} easy-half verdicts on "
               f"{bench_verdicts.item.nunique()} items, MAE {args.judge} {(table.predicted - table.actual).abs().mean():.3f}, "
               f"oracle easy {(table.oracle - table.actual).abs().mean():.3f}, "
               f"oracle hard {(table.oracle_hard - table.actual).abs().mean():.3f}")
         if args.x == "capability":
-            plot_by_capability(table, args.judge, bench, OUT / f"{args.judge}_{bench}_by_capability")
+            plot_by_capability(table, args.judge, bench, args.out_dir / f"{args.judge}_{bench}_by_capability")
         elif args.x == "frontier":
+            selected = frontier(table, args.min_opponents, load_frontier_roster(args.frontier_roster, bench))
+            selected.to_csv(args.out_dir / f"{args.judge}_{bench}_frontier.csv", index_label="model")
             for style in ("band", "points"):
-                plot_frontier(table, args.judge, dates[slug(args.judge)], bench, OUT / f"{args.judge}_{bench}_frontier_{style}",
-                              style, args.min_opponents)
+                plot_frontier(selected, args.judge, dates[slug(args.judge)], bench,
+                              args.out_dir / f"{args.judge}_{bench}_frontier_{style}", style)
         else:
-            plot(table, args.judge, dates[slug(args.judge)], bench, OUT / f"{args.judge}_{bench}")
+            plot(table, args.judge, dates[slug(args.judge)], bench, args.out_dir / f"{args.judge}_{bench}")
 
 
 if __name__ == "__main__":

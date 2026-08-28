@@ -128,6 +128,7 @@ def main() -> None:
                 comparisons.extend([judge, major, minor] for judge in cfg["judges"])
 
         out = {"log_root": f"{args.log_root}/{bench}",
+               "system_prompt": cfg.get("system_prompts", {}).get(bench, "assets/system_prompt/default.txt"),
                "transcripts": {m: paths[m] for m in used},
                "comparisons": comparisons}
         target = Path(f"{args.out_prefix}_{bench}.yaml")
@@ -138,7 +139,8 @@ def main() -> None:
                 spec = judge_spec(judge)
                 rows = [row for row in comparisons if row[0] == judge]
                 for shard in range(args.shards):
-                    per_judge = {"log_root": out["log_root"], "transcripts": out["transcripts"],
+                    per_judge = {"log_root": out["log_root"], "system_prompt": out["system_prompt"],
+                                 "transcripts": out["transcripts"],
                                  "comparisons": rows[shard::args.shards],
                                  "judge_model_args": {judge: spec.get("model_args") or {}}}
                     if spec.get("generate_args"):

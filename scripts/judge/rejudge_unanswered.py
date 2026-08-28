@@ -17,7 +17,7 @@ from inspect_ai.log import read_eval_log, read_eval_log_samples
 
 from judge.task import judge_task
 from model import Model
-from run_judging import judge_config
+from run_judging import configured_system_prompt, judge_config
 
 
 def latest_success(phase_dir: Path) -> Path | None:
@@ -32,6 +32,7 @@ def main() -> int:
     cfg = yaml.safe_load(config.read_text())
     paths = cfg["transcripts"]
     include_reasoning = bool(cfg.get("include_reasoning", False))
+    system_prompt = configured_system_prompt(cfg)
     total, failures, models = 0, [], {}
     for judge, major, minor in cfg["comparisons"]:
         judge_short = judge.split("/")[-1]
@@ -49,6 +50,7 @@ def main() -> int:
             if dry_run:
                 continue
             task = judge_task(major_path=Path(paths[major]), minor_path=Path(paths[minor]),
+                              system_prompt=system_prompt,
                               include_reasoning=include_reasoning,
                               task_name=f"{judge_short}_{major}-vs-{minor}", experiment_name=config.stem)
             if judge not in models:
