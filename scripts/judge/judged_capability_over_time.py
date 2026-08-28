@@ -212,6 +212,10 @@ def plot_frontier(table, judge, judge_date, bench, path, style, min_opponents):
     else:
         handle, = ax.plot(test.release, test.predicted, "o", ms=3, color=PREDICTED, clip_on=False)
     points, = ax.plot(table.release, table.actual, "o", ms=3, color=ACTUAL, clip_on=False)
+    for model, r in table.iterrows():   # model names in a row under the axis label, vertical text
+        ax.annotate(short_name(model), (r.release, 0), xycoords=("data", "axes fraction"), xytext=(0, -34),
+                    textcoords="offset points", fontsize=5, rotation=90, ha="center", va="top",
+                    color="#555555", annotation_clip=False)
     ax.set_ylabel("Hard-half accuracy")
     ax.set_ylim(-0.02, 1.02)
     ax.set_yticks([0, 0.5, 1])
