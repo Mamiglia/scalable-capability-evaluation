@@ -1,0 +1,448 @@
+from pathlib import Path
+
+import matplotlib
+import pandas as pd
+import pytest
+import yaml
+
+matplotlib.use("Agg")
+from . import plots
+from .associations import (
+    block_correlations,
+    capability_correlations,
+    verdict_correlations,
+)
+from .basic_eda import (
+    block_summary,
+    correlation_pairs,
+    duplicate_features,
+    feature_summary,
+)
+from .config import AnalysisConfig, CONFIG
+from .data import list_blocks, load_features
+from .feature_definitions import definitions_for
+from .pca import align_pc_signs, pca_tables
+from .plots import (
+    _pair_label,
+    _pca_loading_matrices,
+    _verdict_matrices,
+    plot_block_correlations,
+    plot_capability_heatmap,
+    plot_pca_loadings,
+    plot_scree,
+    plot_top_correlation_pairs,
+    plot_verdict_heatmaps,
+)
+
+
+def _matrix(tmp_path: Path) -> Path:
+    matrix = tmp_path / "matrix"
+    matrix.mkdir()
+    pd.DataFrame([
+        {"feature": "length", "block": "surface", "source": "surface.parquet", "transform": "none", "n_missing": 0},
+        {"feature": "hedging", "block": "surface", "source": "surface.parquet", "transform": "none", "n_missing": 0},
+        {"feature": "rigour", "block": "rubric", "source": "rubric.parquet", "transform": "none", "n_missing": 1},
+    ]).to_parquet(matrix / "feature-dictionary.parquet", index=False)
+    pd.DataFrame({
+        "bench": ["gpqa", "gpqa"], "model": ["a", "b"], "item": ["q", "q"],
+        "split": ["representation_train", "confirmation"],
+        "model_accuracy": [0.8, 0.6], "length": [2.0, 1.0],
+        "hedging": [0.0, 1.0], "rigour": [4.0, 3.0],
+    }).to_parquet(matrix / "transcript.parquet", index=False)
+    pd.DataFrame({
+        "bench": ["gpqa"], "judge": ["j"], "item": ["q"],
+        "split": ["representation_train"], "pick_left": [1],
+        "d_length": [1.0], "d_hedging": [-1.0], "d_rigour": [1.0],
+    }).to_parquet(matrix / "pair.parquet", index=False)
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.safe_dump({"output_root": str(matrix)}))
+    return config
+
+
+def test_loader_selects_blocks_and_maps_pair_columns(tmp_path: Path) -> None:
+    config = _matrix(tmp_path)
+    blocks = list_blocks(config)
+    assert blocks.set_index("block").n_features.to_dict() == {"surface": 2, "rubric": 1}
+
+    transcripts, dictionary = load_features("transcript", ["surface"], config=config)
+    assert dictionary[["feature", "column"]].values.tolist() == [
+        ["length", "length"], ["hedging", "hedging"]]
+    assert {"bench", "model", "split", "model_accuracy", "length", "hedging"} <= set(transcripts)
+    assert "rigour" not in transcripts
+
+    pairs, dictionary = load_features("pair", ["rubric"], config=config)
+    assert dictionary[["feature", "column"]].values.tolist() == [["rigour", "d_rigour"]]
+    assert {"bench", "judge", "pick_left", "d_rigour"} <= set(pairs)
+
+
+def test_loader_rejects_unknown_blocks(tmp_path: Path) -> None:
+    config = _matrix(tmp_path)
+    with pytest.raises(ValueError, match="unknown feature blocks: missing"):
+        load_features("transcript", ["missing"], config=config)
+
+
+def test_config_defaults_are_readable_and_validate_regressors(tmp_path: Path) -> None:
+    assert "embedding-dense" not in CONFIG.feature_blocks
+    assert "gpt-oss-120b" in CONFIG.judges
+    assert CONFIG.min_reasoning_chars == 100
+    assert CONFIG.glm_max_iter > 0
+    assert CONFIG.pca_common_support
+    assert CONFIG.pca_alignment == "stronger"
+    assert CONFIG.correlation_threshold == 0.8
+    assert CONFIG.design_matrix_config.name == "design_matrices.yaml"
+    assert CONFIG.data_dir == CONFIG.results_dir / "data"
+    assert CONFIG.figure_dir == CONFIG.results_dir / "figures"
+    assert CONFIG.basic_eda_dir == CONFIG.results_dir / "basic-eda"
+    with pytest.raises(ValueError, match="glm_max_iter"):
+        AnalysisConfig(glm_max_iter=0).validate()
+    with pytest.raises(ValueError, match="correlation_threshold"):
+        AnalysisConfig(correlation_threshold=1.1).validate()
+
+    config = _matrix(tmp_path)
+    table, dictionary = load_features(
+        "transcript", ["surface"], features=["length"], config=config)
+    assert dictionary.feature.tolist() == ["length"]
+    assert "length" in table and "hedging" not in table
+
+
+def test_feature_definitions_disambiguate_rubric_and_graph_depth() -> None:
+    dictionary = pd.DataFrame({
+        "feature": ["depth", "depth_max"],
+        "block": ["rubric", "clause-motifs"],
+    })
+    got = definitions_for(dictionary).set_index("feature")
+    assert "1–5" in got.loc["depth", "definition"]
+    assert "longest" in got.loc["depth_max", "definition"].lower()
+    assert got.loc["depth", "measurement"] == "LLM annotation"
+    assert got.loc["depth_max", "measurement"] == "Deterministic"
+
+
+def test_basic_eda_finds_constants_duplicates_and_correlations() -> None:
+    table = pd.DataFrame({
+        "bench": ["a"] * 4 + ["b"] * 4,
+        "x": [1.0, 2.0, 3.0, 4.0, 4.0, 3.0, 2.0, 1.0],
+        "same": [1.0, 2.0, 3.0, 4.0, 4.0, 3.0, 2.0, 1.0],
+        "opposite": [-1.0, -2.0, -3.0, -4.0, -4.0, -3.0, -2.0, -1.0],
+        "constant": [7.0] * 8,
+        "constant2": [7.0] * 8,
+        "partial": [1.0, None, 0.0, 1.0, 0.0, 1.0, None, 0.0],
+    })
+    dictionary = pd.DataFrame({
+        "feature": ["x", "same", "opposite", "constant", "constant2", "partial"],
+        "column": ["x", "same", "opposite", "constant", "constant2", "partial"],
+        "block": ["surface", "surface", "surface", "rubric", "rubric", "rubric"],
+    })
+
+    features = feature_summary(table, dictionary)
+    constant = features[(features.bench == "a") & (features.feature == "constant")].iloc[0]
+    assert constant.n_unique == 1
+    assert constant.is_constant
+    assert features[(features.bench == "a") & (features.feature == "partial")].missing_rate.item() == 0.25
+
+    blocks = block_summary(features)
+    assert blocks[(blocks.bench == "a") & (blocks.block == "rubric")].n_constant.item() == 2
+
+    duplicates = duplicate_features(table, dictionary)
+    relations = {(r.feature_a, r.feature_b, r.relation) for r in duplicates.itertuples() if r.bench == "a"}
+    assert ("x", "same", "identical") in relations
+    assert ("x", "opposite", "sign_flipped") in relations
+    assert not any("constant" in pair[:2] for pair in relations)
+
+    correlations = correlation_pairs(table, dictionary, threshold=0.9, method="spearman")
+    pairs = {(r.feature_a, r.feature_b, r.correlation) for r in correlations.itertuples() if r.bench == "a"}
+    assert ("x", "same", 1.0) in pairs
+    assert ("x", "opposite", -1.0) in pairs
+
+
+def test_correlation_groups_are_shared_transitive_and_thresholded() -> None:
+    from .preprocessing import correlation_groups
+
+    pairs = pd.DataFrame([
+        {"bench": bench, "feature_a": a, "feature_b": b,
+         "abs_correlation": correlation}
+        for bench, values in {
+            "one": (("a", "b", 0.95), ("a", "c", 0.40), ("b", "c", 0.92)),
+            "two": (("a", "b", 0.93), ("a", "c", 0.50), ("b", "c", 0.94)),
+        }.items()
+        for a, b, correlation in values
+    ])
+    dictionary = pd.DataFrame({
+        "feature": ["a", "b", "c", "d"],
+        "block": ["surface", "surface", "rubric", "rubric"],
+    })
+
+    grouped = correlation_groups(pairs, dictionary, threshold=0.9)
+    groups = grouped.set_index("feature").correlation_group
+
+    assert groups["a"] == groups["b"] == groups["c"]
+    assert groups["d"] != groups["a"]
+    assert grouped.set_index("feature").group_size.to_dict() == {
+        "a": 3, "b": 3, "c": 3, "d": 1}
+
+
+def test_correlation_groups_can_require_all_pairs_to_pass() -> None:
+    from .preprocessing import correlation_groups
+
+    pairs = pd.DataFrame([
+        {"bench": bench, "feature_a": a, "feature_b": b,
+         "abs_correlation": correlation}
+        for bench, values in {
+            "one": (("a", "b", 0.95), ("a", "c", 0.40), ("b", "c", 0.92)),
+            "two": (("a", "b", 0.93), ("a", "c", 0.50), ("b", "c", 0.94)),
+        }.items()
+        for a, b, correlation in values
+    ])
+    dictionary = pd.DataFrame({
+        "feature": ["a", "b", "c"],
+        "block": ["surface", "surface", "rubric"],
+    })
+
+    grouped = correlation_groups(
+        pairs, dictionary, threshold=0.9, transitive=False)
+    groups = grouped.set_index("feature").correlation_group
+
+    assert groups["a"] == groups["b"]
+    assert groups["c"] != groups["a"]
+
+
+def test_common_support_requires_training_variance_in_every_benchmark() -> None:
+    from .preprocessing import common_support
+
+    table = pd.DataFrame({
+        "bench": ["a"] * 3 + ["b"] * 3,
+        "split": ["representation_train"] * 6,
+        "common": [0, 1, 2, 2, 1, 0],
+        "domain_only": [0, 1, 2, 0, 0, 0],
+    })
+    dictionary = pd.DataFrame({
+        "feature": ["common", "domain_only"],
+        "column": ["common", "domain_only"],
+        "block": ["surface", "clause-plan"],
+    })
+
+    got = common_support(
+        table, dictionary, ("a", "b"), ("representation_train",))
+
+    assert got.feature.tolist() == ["common"]
+
+
+def test_representatives_choose_shortest_name_and_honour_override() -> None:
+    from .preprocessing import select_representatives
+
+    groups = pd.DataFrame({
+        "feature": ["clustering", "transitivity", "n_words"],
+        "correlation_group": ["g1", "g1", "g2"],
+        "group_size": [2, 2, 1],
+        "original_block": ["clause-descriptors", "clause-descriptors", "surface"],
+    })
+
+    got = select_representatives(
+        groups, "shortest_name", {"g1": "clustering"}, {})
+
+    assert got.set_index("feature").retained.to_dict() == {
+        "clustering": True, "transitivity": False, "n_words": True}
+
+
+def test_associations_separate_judges_and_use_within_item_capability() -> None:
+    pair = pd.DataFrame({
+        "bench": ["b"] * 8,
+        "judge": ["j1"] * 4 + ["j2"] * 4,
+        "pick_left": [0, 0, 1, 1] * 2,
+        "d_good": [0.0, 1.0, 2.0, 3.0] * 2,
+        "d_bad": [3.0, 2.0, 1.0, 0.0] * 2,
+    })
+    pair_dictionary = pd.DataFrame({
+        "feature": ["good", "bad"], "column": ["d_good", "d_bad"],
+        "block": ["surface", "rubric"],
+    })
+    verdict = verdict_correlations(pair, pair_dictionary).set_index(["judge", "feature"])
+    assert verdict.loc[("j1", "good"), "correlation"] > 0
+    assert verdict.loc[("j2", "bad"), "correlation"] < 0
+
+    rows = []
+    for item in ("q1", "q2"):
+        for model, score in (("weak", 0.2), ("mid", 0.5), ("strong", 0.8)):
+            rows.append({"bench": "b", "item": item, "model": model,
+                         "model_accuracy": score, "quality": score,
+                         "reverse": -score})
+    dictionary = pd.DataFrame({
+        "feature": ["quality", "reverse"], "column": ["quality", "reverse"],
+        "block": ["surface", "surface"],
+    })
+    capability = capability_correlations(pd.DataFrame(rows), dictionary, min_models=3)
+    capability = capability.set_index("feature")
+    assert capability.loc["quality", "within_item_rank_rho"] == pytest.approx(1.0)
+    assert capability.loc["reverse", "within_item_rank_rho"] == pytest.approx(-1.0)
+
+
+def test_pca_tables_and_block_correlations_are_readable() -> None:
+    table = pd.DataFrame({
+        "bench": ["a"] * 6,
+        "f1": [-3.0, -2.0, -1.0, 1.0, 2.0, 3.0],
+        "f2": [-6.0, -4.0, -2.0, 2.0, 4.0, 6.0],
+        "f3": [0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    })
+    dictionary = pd.DataFrame({
+        "feature": ["f1", "f2", "f3"], "column": ["f1", "f2", "f3"],
+        "block": ["surface", "surface", "rubric"],
+    })
+    variance, loadings = pca_tables(table, dictionary, n_components=2)
+    assert variance.pc.tolist() == [1, 2]
+    assert variance.cumulative.is_monotonic_increasing
+    first = loadings[loadings.pc == 1].set_index("feature").abs_loading
+    assert first["f1"] == pytest.approx(first["f2"])
+
+    pairs = pd.DataFrame([
+        {"bench": "a", "feature_a": "f1", "block_a": "surface",
+         "feature_b": "f2", "block_b": "surface", "abs_correlation": 1.0},
+        {"bench": "a", "feature_a": "f1", "block_a": "surface",
+         "feature_b": "f3", "block_b": "rubric", "abs_correlation": 0.2},
+    ])
+    blocks = block_correlations(pairs).set_index(["bench", "block_a", "block_b"])
+    assert blocks.loc[("a", "surface", "surface"), "mean_abs_correlation"] == 1.0
+    assert blocks.loc[("a", "rubric", "surface"), "mean_abs_correlation"] == 0.2
+
+
+def test_pca_common_support_excludes_domain_only_features_and_aligns_signs() -> None:
+    table = pd.DataFrame({
+        "bench": ["a"] * 4 + ["b"] * 4,
+        "common": [0.0, 1.0, 2.0, 3.0] * 2,
+        "domain_only": [0.0, 1.0, 0.0, 1.0] + [0.0] * 4,
+    })
+    dictionary = pd.DataFrame({
+        "feature": ["common", "domain_only"],
+        "column": ["common", "domain_only"],
+        "block": ["surface", "clause-plan"],
+    })
+    _, loadings = pca_tables(table, dictionary, n_components=1, common_support=True)
+    assert set(loadings.feature) == {"common"}
+
+    associations = pd.DataFrame({
+        "bench": ["a", "b"], "feature": ["common", "common"],
+        "target_rho": [-0.5, 0.5],
+    })
+    aligned, directions = align_pc_signs(
+        loadings, associations, "target_rho", alignment="stronger")
+    direction = directions.set_index("bench").sign.to_dict()
+    assert direction == {"a": -1, "b": 1}
+    assert (directions.projection_after >= 0).all()
+    assert set(aligned.alignment) == {"stronger"}
+
+
+def test_nature_plots_write_png_and_editable_svg(tmp_path: Path) -> None:
+    verdict = pd.DataFrame([
+        {"bench": "a", "judge": judge, "feature": feature, "block": "surface",
+         "correlation": value}
+        for judge in ("j1", "j2")
+        for feature, value in (("length", 0.3), ("errors", -0.4))
+    ])
+    capability = pd.DataFrame([
+        {"bench": bench, "feature": feature, "block": "surface",
+         "within_item_rank_rho": value}
+        for bench in ("a", "b")
+        for feature, value in (("length", 0.2), ("errors", -0.3))
+    ])
+    pairs = pd.DataFrame([
+        {"bench": "a", "feature_a": "length", "block_a": "surface",
+         "feature_b": "errors", "block_b": "rubric", "correlation": 1.0,
+         "abs_correlation": 1.0},
+    ])
+    blocks = block_correlations(pairs)
+    variance = pd.DataFrame([
+        {"bench": bench, "pc": pc, "explained_variance_ratio": value,
+         "cumulative": sum((0.6, 0.3)[:pc])}
+        for bench in ("a", "b") for pc, value in ((1, 0.6), (2, 0.3))
+    ])
+    loadings = pd.DataFrame([
+        {"bench": bench, "pc": pc, "feature": feature, "block": "surface",
+         "loading": value, "abs_loading": abs(value)}
+        for bench in ("a", "b") for pc in (1, 2)
+        for feature, value in (("length", 0.7), ("errors", -0.6))
+    ])
+
+    plot_verdict_heatmaps(verdict, tmp_path, top=2)
+    plot_capability_heatmap(capability, tmp_path, top=2)
+    plot_block_correlations(blocks, tmp_path)
+    plot_top_correlation_pairs(pairs, tmp_path, top=1)
+    plot_scree(variance, tmp_path)
+    plot_pca_loadings(loadings, tmp_path, pcs=2, top_per_pc=1)
+
+    expected = ["verdict-correlations", "capability-correlations",
+                "block-correlations", "top-feature-correlations", "pca-scree",
+                "pca-loadings"]
+    for name in expected:
+        assert (tmp_path / f"{name}.png").exists()
+        svg = (tmp_path / f"{name}.svg").read_text()
+        assert "<text" in svg
+    pair_svg = (tmp_path / "top-feature-correlations.svg").read_text()
+    marker_group = pair_svg.split('<g id="PathCollection_1">', 1)[1].split(
+        '<g id="line2d_', 1)[0]
+    assert "clip-path" not in marker_group
+    assert "Distinct-feature" in (tmp_path / "block-correlations.svg").read_text()
+
+
+def test_correlation_group_plots_skip_singletons_and_show_benchmarks(tmp_path: Path) -> None:
+    from .preprocessing import correlation_groups
+
+    correlations = pd.DataFrame([
+        {"bench": bench, "feature_a": a, "feature_b": b,
+         "correlation": correlation, "abs_correlation": abs(correlation)}
+        for bench, values in {
+            "gpqa": (("a", "b", 0.95), ("a", "c", 0.40), ("b", "c", 0.92)),
+            "intercode": (("a", "b", 0.93), ("a", "c", -0.50), ("b", "c", 0.94)),
+            "swe_bench_mini": (("a", "b", 0.94), ("a", "c", 0.30), ("b", "c", 0.93)),
+            "aime": (("a", "b", 0.92), ("a", "c", -0.20), ("b", "c", 0.95)),
+        }.items()
+        for a, b, correlation in values
+    ])
+    dictionary = pd.DataFrame({
+        "feature": ["a", "b", "c", "d"],
+        "block": ["surface", "surface", "rubric", "rubric"],
+    })
+    groups = correlation_groups(correlations, dictionary, threshold=0.9)
+
+    plots.plot_correlation_groups(correlations, groups, tmp_path)
+
+    output = tmp_path / "groupings"
+    assert sorted(path.name for path in output.iterdir()) == ["group-001.png", "group-001.svg"]
+    svg = (output / "group-001.svg").read_text()
+    assert "<text" in svg
+    assert svg.count(">a</text>") == 4
+    assert ">SWE-bench</text>" in svg and ">Mini</text>" in svg
+    assert ">Pearson r</text>" in svg
+
+
+def test_pair_labels_are_single_line_and_bounded() -> None:
+    label = _pair_label(
+        "a_very_long_feature_name_that_would_wrap",
+        "another_very_long_feature_name_that_would_wrap",
+        "swe_bench_mini",
+    )
+    assert "\n" not in label
+    assert len(label) <= 54
+
+
+def test_verdict_panels_use_the_same_global_feature_rows() -> None:
+    table = pd.DataFrame([
+        {"bench": bench, "judge": "j", "feature": feature, "correlation": value}
+        for bench, values in {
+            "a": (("shared", 0.8), ("a_only", 0.7), ("b_only", 0.0)),
+            "b": (("shared", 0.6), ("a_only", 0.0), ("b_only", 0.9)),
+        }.items()
+        for feature, value in values
+    ])
+    matrices = _verdict_matrices(table, top=2)
+    assert [matrix.index.tolist() for _, matrix in matrices] == [
+        ["shared", "b_only"], ["shared", "b_only"]]
+
+
+def test_pca_panels_use_the_same_global_feature_rows() -> None:
+    table = pd.DataFrame([
+        {"bench": bench, "pc": pc, "feature": feature,
+         "loading": value, "abs_loading": abs(value)}
+        for bench in ("a", "b") for pc in (1, 2)
+        for feature, value in (("shared", 0.8), ("small", 0.1), ("other", 0.6))
+    ])
+    matrices = _pca_loading_matrices(table, pcs=2, top=2)
+    assert [matrix.index.tolist() for _, matrix in matrices] == [
+        ["shared", "other"], ["shared", "other"]]
