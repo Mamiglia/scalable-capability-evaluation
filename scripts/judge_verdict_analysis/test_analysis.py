@@ -18,6 +18,7 @@ from .basic_eda import (
     duplicate_features,
     feature_summary,
 )
+from .build_dm import build_design_matrix, write_design_matrix
 from .config import AnalysisConfig, CONFIG
 from .data import list_blocks, load_features
 from .feature_definitions import definitions_for
@@ -57,6 +58,72 @@ def _matrix(tmp_path: Path) -> Path:
     config = tmp_path / "config.yaml"
     config.write_text(yaml.safe_dump({"output_root": str(matrix)}))
     return config
+
+
+def _matrix_with_scaling(tmp_path: Path) -> Path:
+    config = _matrix(tmp_path)
+    matrix = Path(yaml.safe_load(config.read_text())["output_root"])
+    pd.DataFrame({
+        "bench": ["a", "a", "b", "b"],
+        "row_id": ["a1", "a2", "b1", "b2"],
+        "split": ["representation_train"] * 4,
+        "common": [0.0, 1.0, 1.0, 0.0],
+        "duplicate": [0.0, 1.0, 1.0, 0.0],
+        "domain_only": [0.0, 1.0, 0.0, 0.0],
+    }).to_parquet(matrix / "transcript.parquet", index=False)
+    pd.DataFrame({
+        "bench": ["a"] * 4 + ["b"] * 4,
+        "judge": ["j1", "j2"] * 4,
+        "pair_id": ["a1", "a1", "a2", "a2", "b1", "b1", "b2", "b2"],
+        "split": ["representation_train"] * 8,
+        "pick_left": [1, 0] * 4,
+        "d_common": [1.0, 1.0, 2.0, 2.0, -1.0, -1.0, -2.0, -2.0],
+        "d_duplicate": [1.0, 1.0, 2.0, 2.0, -1.0, -1.0, -2.0, -2.0],
+        "d_domain_only": [1.0, 1.0, 2.0, 2.0, 0.0, 0.0, 0.0, 0.0],
+    }).to_parquet(matrix / "pair.parquet", index=False)
+    pd.DataFrame([
+        {"feature": feature, "block": "surface", "source": "fixture", "transform": "none", "n_missing": 0}
+        for feature in ("common", "duplicate", "domain_only")
+    ]).to_parquet(matrix / "feature-dictionary.parquet", index=False)
+    for name, prefix in (("scaling-transcript", ""), ("scaling-pair", "d_")):
+        pd.DataFrame([
+            {"benchmark": bench, "feature": f"{prefix}{feature}", "mean": 0.0, "sd": 1.0}
+            for bench in ("a", "b") for feature in ("common", "duplicate", "domain_only")
+        ]).to_parquet(matrix / f"{name}.parquet", index=False)
+    return config
+
+
+def test_build_dm_writes_source_compatible_representative_matrix(tmp_path: Path) -> None:
+    config = _matrix_with_scaling(tmp_path)
+    settings = AnalysisConfig(
+        design_matrix_config=config,
+        results_dir=tmp_path / "results",
+        feature_blocks=("surface",),
+        benchmarks=("a", "b"),
+        correlation_threshold=0.8,
+        correlation_transitive=False,
+    ).validate()
+    outputs = build_design_matrix(settings)
+
+    assert outputs["feature-dictionary.parquet"].feature.tolist() == ["common"]
+    assert outputs["transcript.parquet"].bench.tolist() == ["a", "a", "b", "b"]
+    assert outputs["representative-map.csv"].feature.tolist() == ["common", "duplicate", "domain_only"]
+    assert outputs["representative-map.csv"].status.tolist() == [
+        "retained", "grouped_out", "outside_common_support"]
+    pd.testing.assert_frame_equal(
+        pd.read_parquet(Path(yaml.safe_load(config.read_text())["output_root"]) / "transcript.parquet")
+        [["bench", "row_id", "split"]],
+        outputs["transcript.parquet"][["bench", "row_id", "split"]],
+    )
+    assert set(outputs) == {
+        "transcript.parquet", "pair.parquet", "feature-dictionary.parquet",
+        "scaling-transcript.parquet", "scaling-pair.parquet", "representative-map.csv",
+        "manifest.json", "design-matrix.yaml",
+    }
+
+    write_design_matrix(outputs, settings.processed_matrix_dir)
+    written = yaml.safe_load((settings.processed_matrix_dir / "design-matrix.yaml").read_text())
+    assert Path(written["output_root"]) == settings.processed_matrix_dir
 
 
 def test_loader_selects_blocks_and_maps_pair_columns(tmp_path: Path) -> None:
