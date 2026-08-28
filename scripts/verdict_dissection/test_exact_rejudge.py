@@ -62,6 +62,8 @@ def test_manifest_pools_aime_excludes_answer_only_and_keeps_one_order():
                 "model_call": {"model": row["judge"]}}
 
     manifest = build_manifest(pairs, store, fake_prompt_loader, seed=20260828, per_cell=2)
+    repeated = build_manifest(pairs, store, fake_prompt_loader, seed=20260828, per_cell=2)
+    pd.testing.assert_frame_equal(manifest, repeated)
     assert set(manifest.bench) == {"aime", "gpqa"}
     assert manifest.groupby(["judge", "bench"]).size().eq(2).all()
     assert not manifest.duplicated("source_draw_id").any()

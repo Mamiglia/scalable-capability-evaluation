@@ -254,6 +254,9 @@ def validate_manifest(manifest, store, per_cell: int = PER_CELL) -> None:
     required = set(SOURCE_KEYS) | {"bench", "judge_config_hash", "dominant_config_hash", "config_count",
                "config_share", "pick_left", "target", "underlying_pair_hash", "source_draw_id",
                "judge_input", "input_hash", "system_prompt", "system_prompt_hash"}
+    if per_cell == PER_CELL:
+        required |= {"system_source_log_path", "system_source_sample", "system_source_epoch",
+                     "current_model", "current_config_json", "current_config_hash", "current_route"}
     if missing := required - set(manifest):
         raise ValueError(f"manifest missing columns: {sorted(missing)}")
     if manifest.empty or not manifest.groupby(["judge", "bench"]).size().eq(per_cell).all():
@@ -284,6 +287,11 @@ def validate_manifest(manifest, store, per_cell: int = PER_CELL) -> None:
         raise ValueError("invalid historical verdict or sample seed")
     if not manifest.judge_config_hash.eq(manifest.dominant_config_hash).all():
         raise ValueError("non-dominant configuration in manifest")
+    if per_cell == PER_CELL:
+        for judge, group in manifest.groupby("judge"):
+            expected = _current_config_record(judge)
+            if any(not group[column].eq(value).all() for column, value in expected.items()):
+                raise ValueError(f"current configuration snapshot mismatch for {judge}")
     if (manifest.config_count <= 0).any() or ~(manifest.config_share.between(0, 1)).all():
         raise ValueError("invalid dominant configuration accounting")
     reasoning = _reasoning_hashes(store)
@@ -764,8 +772,10 @@ def write_results(rejudgments: pd.DataFrame, output_dir: Path) -> None:
                  no_answers=("status", lambda values: int((values == "no_answer").sum()))))
     cost["gpu_seconds"] = 0.0
     billing_path = output_dir / "runpod_billing.csv"
+    runpod_cost = 0.0
     if billing_path.exists():
         billing = pd.read_csv(billing_path)
+        runpod_cost = float(billing["amount"].sum())
         billing_rows = pd.DataFrame({
             "judge": billing["role"], "provider": "RunPod", "n": 0,
             "input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0,
@@ -810,13 +820,15 @@ The six judge-specific run commands were executed in parallel. Smoke rows are te
 - No answer: {int(counts.get('no_answer', 0))}.
 - Request errors: {int(counts.get('error', 0))}.
 - Primary agreements: {int(rejudgments.agreement.sum())}.
-- OpenRouter API cost: ${rejudgments.cost_usd.sum():.11f}; RunPod billing is itemised in `cost.csv`.
+- OpenRouter API cost: ${rejudgments.cost_usd.sum():.11f}.
+- RunPod cost: ${runpod_cost:.11f}.
+- Exact total paid cost: ${rejudgments.cost_usd.sum() + runpod_cost:.11f}.
 
 DeepSeek R1's current `max_tokens=147456` leaves only 16,384 tokens for input on its 163,840-token SiliconFlow endpoint. This caused long SWE inputs to fail with HTTP 400; those rows were not retried and count as primary non-agreement.
 
 ## Provenance and caveats
 
-Raw endpoint snapshots are in `endpoint_snapshots/`; historical/current arguments are in `config_drift.csv`; per-response route metadata is in `rejudgments.parquet`.
+Raw endpoint snapshots are in `endpoint_snapshots/`; all historical configuration counts are in `config_population.csv`; historical/current arguments are in `config_drift.csv`; per-response route metadata is in `rejudgments.parquet`.
 
 Historical configurations differ from current routes for several cells, including provider, fallback, quantization, output cap, and vLLM backend. The estimate therefore includes temporal/provider drift as well as stochastic judge variation. Llama's streaming vLLM responses did not expose token counts; exact A40 billed time/cost is reported instead.
 """
