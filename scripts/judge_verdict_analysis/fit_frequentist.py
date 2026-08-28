@@ -5,12 +5,15 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from itertools import product
 from typing import TypeVar
+import warnings
 
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, log_loss
 from sklearn.model_selection import GroupKFold
+from sklearn.exceptions import ConvergenceWarning
+from scipy.sparse import csr_matrix
 
 from .config import AnalysisConfig
 from .fit_common import FitResult
@@ -53,6 +56,17 @@ def _model(config: AnalysisConfig, *, c: float, l1_ratio: float | None) -> Logis
     )
 
 
+def _fit_model(
+    model: LogisticRegression, design: csr_matrix, outcome: np.ndarray
+) -> tuple[LogisticRegression, int, bool]:
+    """Fit one model and return explicit convergence diagnostics."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        model.fit(design, outcome)
+    iterations = int(model.n_iter_[0])
+    return model, iterations, iterations < model.max_iter
+
+
 def _designs(
     frame: pd.DataFrame,
     fit_rows: np.ndarray,
@@ -93,44 +107,53 @@ def select_features(
     ]
     rows: list[dict[str, object]] = []
 
-    def score(parameters: tuple[float, float]) -> tuple[float, float, float]:
+    def score(parameters: tuple[float, float]) -> tuple[float, float, float, int, bool]:
         c, l1_ratio = parameters
         losses = []
+        iterations = []
         for fit_rows, check_rows, fit_x, check_x, _ in designs:
-            model = _model(config, c=c, l1_ratio=l1_ratio).fit(fit_x, y[fit_rows])
+            model, n_iter, _ = _fit_model(
+                _model(config, c=c, l1_ratio=l1_ratio), fit_x, y[fit_rows])
+            iterations.append(n_iter)
             losses.append(log_loss(
                 y[check_rows], model.predict_proba(check_x)[:, 1], labels=[0, 1]))
-        return c, l1_ratio, float(np.mean(losses))
+        return c, l1_ratio, float(np.mean(losses)), max(iterations), all(
+            n_iter < config.glm_max_iter for n_iter in iterations)
 
     scores = _parallel_map(
         score, list(product(config.elastic_net_cs, config.elastic_net_l1_ratios)),
         config.fit_n_jobs,
     )
-    best_c, best_l1_ratio, _ = min(scores, key=lambda result: result[2])
+    best_c, best_l1_ratio, _, _, _ = min(scores, key=lambda result: result[2])
     best = (best_c, best_l1_ratio)
-    for c, l1_ratio, mean_loss in scores:
+    for c, l1_ratio, mean_loss, max_n_iter, converged in scores:
         rows.append({
             "stage": "elastic_net", "record_type": "tuning", "C": c,
             "l1_ratio": l1_ratio, "mean_log_loss": mean_loss,
+            "max_n_iter": max_n_iter, "converged": converged,
         })
 
     counts = dict.fromkeys(features, 0)
 
-    def active_features(design) -> set[str]:
+    def active_features(design) -> tuple[set[str], int, bool]:
         fit_rows, _, fit_x, _, column_map = design
-        coefficients = _model(config, c=best[0], l1_ratio=best[1]).fit(
-            fit_x, y[fit_rows]).coef_[0]
+        model, n_iter, converged = _fit_model(
+            _model(config, c=best[0], l1_ratio=best[1]), fit_x, y[fit_rows])
+        coefficients = model.coef_[0]
         active = column_map.loc[
             column_map.block.isin((
                 "population_slope", "judge_slope", "benchmark_slope", "cell_slope"))
             & (coefficients != 0),
             "feature",
         ]
-        return set(active.dropna())
+        return set(active.dropna()), n_iter, converged
 
-    for active in _parallel_map(active_features, designs, config.fit_n_jobs):
+    stability = _parallel_map(active_features, designs, config.fit_n_jobs)
+    for active, _, _ in stability:
         for feature in active:
             counts[feature] += 1
+    stability_max_n_iter = max(n_iter for _, n_iter, _ in stability)
+    stability_converged = all(converged for _, _, converged in stability)
 
     selected = [
         feature for feature in features
@@ -142,6 +165,7 @@ def select_features(
             "stage": "elastic_net", "record_type": "stability", "C": best[0],
             "l1_ratio": best[1], "feature": feature, "fold_share": share,
             "retained": feature in selected,
+            "max_n_iter": stability_max_n_iter, "converged": stability_converged,
         })
     tuning = pd.DataFrame(rows)
     tuning["selected"] = (
@@ -168,19 +192,26 @@ def tune_ridge(
         for fit_rows, check_rows in splits
     ]
 
-    def score(c: float) -> tuple[float, float]:
+    def score(c: float) -> tuple[float, float, int, bool]:
         losses = []
+        iterations = []
         for fit_rows, check_rows, fit_x, check_x, _ in designs:
-            model = _model(config, c=c, l1_ratio=None).fit(fit_x, y[fit_rows])
+            model, n_iter, _ = _fit_model(
+                _model(config, c=c, l1_ratio=None), fit_x, y[fit_rows])
+            iterations.append(n_iter)
             losses.append(log_loss(
                 y[check_rows], model.predict_proba(check_x)[:, 1], labels=[0, 1]))
-        return c, float(np.mean(losses))
+        return c, float(np.mean(losses)), max(iterations), all(
+            n_iter < config.glm_max_iter for n_iter in iterations)
 
     scores = _parallel_map(score, list(config.ridge_cs), config.fit_n_jobs)
-    best_c, _ = min(scores, key=lambda result: result[1])
+    best_c, _, _, _ = min(scores, key=lambda result: result[1])
     rows = [
-        {"stage": "ridge", "record_type": "tuning", "C": c, "mean_log_loss": loss}
-        for c, loss in scores
+        {
+            "stage": "ridge", "record_type": "tuning", "C": c,
+            "mean_log_loss": loss, "max_n_iter": max_n_iter, "converged": converged,
+        }
+        for c, loss, max_n_iter, converged in scores
     ]
     tuning = pd.DataFrame(rows)
     tuning["selected"] = tuning.C == best_c
@@ -202,8 +233,9 @@ def fit_fixed_ridge(
     penalties = _penalties(config)
     train_x, column_map = hierarchical_design(train, features, levels, penalties)
     test_x, _ = hierarchical_design(test, features, levels, penalties)
-    model = _model(config, c=ridge_c, l1_ratio=None).fit(
-        train_x, train.pick_left.to_numpy(dtype=int))
+    model, n_iter, converged = _fit_model(
+        _model(config, c=ridge_c, l1_ratio=None), train_x,
+        train.pick_left.to_numpy(dtype=int))
     probability = model.predict_proba(test_x)[:, 1]
     observed = test["pick_left"].to_numpy(dtype=int)
     predictions = test.drop(columns=features + ["pick_left"], errors="ignore").copy()
@@ -223,7 +255,9 @@ def fit_fixed_ridge(
                 log_loss(observed, probability, labels=[0, 1]),
             ],
         }),
-        diagnostics={"ridge_C": ridge_c, "ridge_n_iter": int(model.n_iter_[0])},
+        diagnostics={
+            "ridge_C": ridge_c, "ridge_n_iter": n_iter, "ridge_converged": converged,
+        },
     )
 
 
@@ -246,7 +280,8 @@ def fit_frequentist(
     penalties = _penalties(config)
     train_x, column_map = hierarchical_design(train, selected, levels, penalties)
     test_x, _ = hierarchical_design(test, selected, levels, penalties)
-    model = _model(config, c=best_c, l1_ratio=None).fit(train_x, y)
+    model, ridge_n_iter, ridge_converged = _fit_model(
+        _model(config, c=best_c, l1_ratio=None), train_x, y)
     probability = model.predict_proba(test_x)[:, 1]
     observed = test["pick_left"].to_numpy(dtype=int)
     predictions = test.drop(columns=features + ["pick_left"], errors="ignore").copy()
@@ -276,8 +311,13 @@ def fit_frequentist(
         diagnostics={
             "elastic_net_C": float(screen_choice.C),
             "elastic_net_l1_ratio": float(screen_choice.l1_ratio),
+            "elastic_net_max_n_iter": int(screen_choice.max_n_iter),
+            "elastic_net_converged": bool(screen_choice.converged),
+            "screen_refits_max_n_iter": int(stability.max_n_iter.max()),
+            "screen_refits_converged": bool(stability.converged.all()),
             "ridge_C": best_c,
-            "ridge_n_iter": int(model.n_iter_[0]),
+            "ridge_n_iter": ridge_n_iter,
+            "ridge_converged": ridge_converged,
             "selected_feature_stability": dict(zip(stability.feature, stability.fold_share)),
         },
     )

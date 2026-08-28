@@ -62,3 +62,11 @@ def test_sparse_signal_is_selected_and_refit_with_the_full_hierarchy() -> None:
     assert result.selected_features == serial.selected_features
     np.testing.assert_allclose(result.predictions.probability, serial.predictions.probability)
     pd.testing.assert_frame_equal(result.tuning, serial.tuning)
+
+    limited = fit_frequentist(
+        train, test, ["signal", "noise"], replace(config, fit_n_jobs=1, glm_max_iter=1)
+    )
+    assert {"converged", "max_n_iter"} <= set(limited.tuning)
+    assert not limited.tuning[limited.tuning.record_type == "tuning"].converged.all()
+    assert limited.tuning.max_n_iter.max() == 1
+    assert not limited.diagnostics["ridge_converged"]
