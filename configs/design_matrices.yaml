@@ -45,3 +45,26 @@ blocks:
     table: "{features_root}/raw/clause-network.parquet"
     columns: "^edge_sae_"
     fill_missing: 0
+  - name: rubric                       # gpt-5-mini rubric annotation of each transcript (annotate_transcripts.py)
+    table: "{features_root}/raw/rubric-gpt-5-mini.parquet"
+    columns: "^(reasoning_errors|unjustified_claims|redundant_steps|self_corrections|verifies_result|explains_reasoning|considers_alternatives|wasted_actions|clarity|rigour|efficiency|depth)$"
+  - name: exposition                   # think-aloud / option-matching / labelled exposition counts (features_exposition.py)
+    table: "{features_root}/raw/exposition.parquet"
+    columns: "^(think_aloud_per_100_words|option_matching_per_100_words|conditionals_per_100_words|answer_assertion_per_100_words|consequence_per_100_words|label_line_share|step_headers|bold_labels_per_100_words|mean_line_words)$"
+  - name: derivation                   # how much of the derivation chain is written out (features_derivation.py)
+    table: "{features_root}/raw/derivation.parquet"
+    columns: "^(stated_relations|equation_lines|chained_equalities|consequence_markers|justification_markers|named_methods|intermediate_numbers|defined_symbols|symbol_links|answer_derived|relations_per_100_words)$"
+  - name: intermediate-errors          # Codex-flagged slips in the reasoning of correct GPQA/AIME transcripts (features_intermediate_errors.py); 0 elsewhere
+    table: "{features_root}/raw/intermediate-errors.parquet"
+    columns: "^(error_count|any_error|errors_per_100_words|errors_nomenclature|errors_notation|errors_constant_or_formula|errors_arithmetic|errors_contradiction|errors_definition|errors_other)$"
+    fill_missing: 0
+  - name: clause-descriptors           # graph-theoretic descriptors of the clause network (features_graph_descriptors.py)
+    table: "{features_root}/raw/clause-descriptors.parquet"
+    columns: "^(density|cyclomatic|mean_degree|degree_cv|max_degree_share|assortativity|clustering|transitivity|small_world_sigma|path_length_mean|diameter|giant_component_share|components_per_node|betweenness_centralisation|communities_per_node|modularity|source_share|sink_share|edge_length_mean|edge_length_median|edge_length_max|edge_length_cv|adjacent_edge_share|long_edge_share|edge_length_entropy|type_entropy|relation_entropy)$"
+  - name: clause-motifs                # named shape features: fan-in/out, plan fan-out, typed motifs (features_graph_motifs.py)
+    table: "{features_root}/raw/clause-motifs.parquet"
+    columns: "^(in_degree_max|out_degree_max|fan_in_share|fan_out_share|sequential_share|depth_max|width_max|depth_over_width|answer_in_degree|sibling_convergence_max|plan_fan_out|plan_coverage|motif_chain|motif_fan_in|motif_fan_out|motif_feed_forward|after_tool_backtrack|after_tool_verify|after_tool_adversative|after_tool_another_tool|after_error_backtrack|equation_explained|equation_to_equation|equation_from_clause|heading_fan_out|backtrack_share|verify_share)$"
+  - name: clause-plan                  # stated plan and its execution, agentic transcripts only (plan_edges.py); 0 elsewhere
+    table: "{features_root}/raw/clause-plan.parquet"
+    columns: "^(plan_items|plan_present|plan_executed_share|plan_order_concordance|plan_unplanned_share|plan_position)$"
+    fill_missing: 0

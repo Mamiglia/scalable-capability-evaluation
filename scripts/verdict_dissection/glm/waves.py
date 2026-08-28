@@ -27,14 +27,20 @@ STRUCTURE = ["assistant_turns", "tool_calls", "tool_errors", "tool_outputs_empty
              "repeated_tool_calls", "distinct_tools", "prose_chars", "tool_call_chars", "tool_output_chars", "prose_share",
              "bare_answer", "display_equations", "inline_math", "option_references", "elimination_terms",
              "final_answer_restated", "bold_spans", "headers"]          # features_structure.py; present with predictors-structure.yaml
+PAIRWISE = ["more_rigorous", "more_efficient", "fewer_errors", "deeper_understanding", "clearer", "better_verified",
+            "more_complete", "better_tool_use"]        # annotate_pairs.py, signed per shown order
+RUBRIC = ["reasoning_errors", "unjustified_claims", "redundant_steps", "self_corrections", "verifies_result",
+          "explains_reasoning", "considers_alternatives", "wasted_actions", "clarity", "rigour", "efficiency", "depth"]   # annotate_transcripts.py
 
 
 def waves(predictors):
     """Feature sets to fit, each an explicit list. Surprisal "local" needs only the 32-64 token window;
     "global" needs the full transcript and question context."""
     surface = [p for p in predictors if not p.startswith(("sae_", "qwen_dim_", "topo_")) and "surprisal" not in p
-               and p != "n_words" and p not in STRUCTURE]
+               and p != "n_words" and p not in STRUCTURE and p not in RUBRIC and p not in PAIRWISE]
     structure = [p for p in predictors if p in STRUCTURE]
+    rubric = [p for p in predictors if p in RUBRIC]
+    pairwise = [p for p in predictors if p in PAIRWISE]
     clause = [p for p in predictors if p.startswith("topo_")]           # clause-network graph shape; predictors-clause.yaml
     sae = [p for p in predictors if p.startswith("sae_shared_")]
     surprisal_local = [p for p in predictors if p in SURPRISAL_LOCAL]
@@ -53,7 +59,38 @@ def waves(predictors):
         **({"clause": clause, "surface+clause": surface + clause,
             "surface+sae+surprisal+structure+clause": surface + sae + surprisal_local + surprisal_global + structure + clause}
            if clause else {}),
+        **({"rubric": rubric, "surface+structure+rubric": surface + structure + rubric,
+            "surface+sae+surprisal+structure+rubric": surface + sae + surprisal_local + surprisal_global + structure + rubric}
+           if rubric else {}),
+        **({"pairwise": pairwise, "rubric+pairwise": rubric + pairwise,
+            "surface+structure+rubric+pairwise": surface + structure + rubric + pairwise,
+            "surface+sae+surprisal+structure+rubric+pairwise": surface + sae + surprisal_local + surprisal_global + structure + rubric + pairwise}
+           if pairwise else {}),
     }
+
+
+BLOCK_ORDER = ["surface", "structure", "exposition", "derivation", "intermediate-errors", "clause-topology",
+               "clause-descriptors", "clause-motifs", "clause-plan", "rubric", "sae", "surprisal", "pairwise"]
+
+
+def block_waves(predictors, blocks=None):
+    """Waves over named feature blocks (glm/blocks.yaml): each block alone, blocks added cumulatively in
+    BLOCK_ORDER, everything, and everything minus one block at a time. Only blocks present in `predictors`."""
+    blocks = blocks or yaml.safe_load((HERE / "blocks.yaml").read_text())
+    present = {name: [p for p in members if p in predictors] for name, members in blocks.items()}
+    present = {name: cols for name, cols in present.items() if cols}
+    order = [b for b in BLOCK_ORDER if b in present] + [b for b in present if b not in BLOCK_ORDER]
+    everything = [p for b in order for p in present[b]]
+    out = {b: present[b] for b in order}
+    running = []
+    for b in order:
+        running = running + present[b]
+        if len(running) > len(present[b]):
+            out["+".join(order[:order.index(b) + 1]) if order.index(b) < 3 else f"upto-{b}"] = list(running)
+    out["all"] = everything
+    for b in order:
+        out[f"all-minus-{b}"] = [p for p in everything if p not in present[b]]
+    return out
 
 
 def config(model, predictors, input_path, use_accuracy_gap=False):

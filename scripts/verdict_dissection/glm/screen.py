@@ -22,7 +22,7 @@ from sklearn.model_selection import GroupKFold
 
 sys.path.insert(0, str(Path(__file__).parent))
 from evaluate import model_level, placement, report  # noqa: E402
-from waves import MODELS, waves  # noqa: E402
+from waves import MODELS, block_waves, waves  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 GROUP_COLUMN = {"capability_from_transcript": "bench", "stronger_model_from_pair": "bench",
@@ -130,6 +130,16 @@ def run(table, predictors, model, use_accuracy_gap, out_dir, inner_group_column)
     return scores.loc[0, "spearman" if gaussian else "accuracy"]
 
 
+def principal_components(table, features, k):
+    """Add pc_1..pc_k columns to `table` (in place): PCA of `features` fitted on the training rows."""
+    from sklearn.decomposition import PCA
+    x = table[features].to_numpy(np.float32)
+    pca = PCA(n_components=k, random_state=0).fit(x[~table.test.to_numpy()])
+    names = [f"pc_{i + 1}" for i in range(k)]
+    table[names] = pca.transform(x).astype(np.float32)
+    return names
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs_dir", type=Path)
@@ -142,18 +152,26 @@ def main():
     parser.add_argument("--sides", action="store_true", help="judge model on each side's own features (<feature>_left + _right) instead of the difference")
     parser.add_argument("--judge-bench-deviations", action="store_true", help="judge model: feature deviations per judge x benchmark cell instead of per judge")
     parser.add_argument("--difficulty-deviations", action="store_true", help="extra feature deviations per item difficulty band (easy / medium / hard)")
+    parser.add_argument("--block-waves", action="store_true", help="waves over feature blocks (blocks.yaml): each alone, cumulative, all, all minus one")
+    parser.add_argument("--pca", nargs="*", type=int, default=[], help="also fit the `all` wave on this many principal components of its features (fitted on training rows)")
     args = parser.parse_args()
     predictors = yaml.safe_load(args.predictors.read_text())
     global BY_DIFFICULTY
     BY_DIFFICULTY = args.difficulty_deviations
-    feature_sets = {name: kept for name, kept in waves(predictors).items() if not args.waves or name in args.waves}
+    all_sets = block_waves(predictors) if args.block_waves else waves(predictors)
+    feature_sets = {name: kept for name, kept in all_sets.items() if not args.waves or name in args.waves}
     for model in args.models:
         for design_dir in sorted(p for p in args.inputs_dir.iterdir() if p.is_dir() and (not args.designs or p.name in args.designs)):
             table = pd.read_parquet(design_dir / f"{model}.parquet")
             if args.judge_bench_deviations and model == "judge_verdict_from_pair":
                 table["judge"] = table.judge + "|" + table.bench          # each judge x benchmark cell gets its own slopes
             inner_group = "model" if model == "capability_from_transcript" else "model_left"   # inner CV groups by model
-            for wave, kept in feature_sets.items():
+            sets = {name: [p for p in kept if p in table.columns] for name, kept in feature_sets.items()}   # pair-only blocks are absent from other tables
+            sets = {name: kept for name, kept in sets.items() if kept}
+            for k in args.pca:                                    # principal components of the full set, as a redundancy check
+                if "all" in sets:
+                    sets[f"all-pca{k}"] = principal_components(table, sets["all"], k)
+            for wave, kept in sets.items():
                 specs = {wave: False, f"{wave}+accuracy-gap": True} if model == "judge_verdict_from_pair" else {wave: False}
                 variants = {name: (kept, gap) for name, gap in specs.items()}
                 if args.drop_one:                                # the set minus one predictor, for every predictor
