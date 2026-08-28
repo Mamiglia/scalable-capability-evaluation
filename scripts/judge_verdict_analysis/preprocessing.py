@@ -88,7 +88,7 @@ def correlation_groups(
     pairs: pd.DataFrame,
     dictionary: pd.DataFrame,
     threshold: float = CONFIG.correlation_threshold,
-    transitive: bool = True,
+    transitive: bool = CONFIG.correlation_transitive,
 ) -> pd.DataFrame:
     """Create shared groups from mean absolute correlations.
 

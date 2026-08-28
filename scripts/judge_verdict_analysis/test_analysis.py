@@ -171,7 +171,7 @@ def test_correlation_groups_are_shared_transitive_and_thresholded() -> None:
         "block": ["surface", "surface", "rubric", "rubric"],
     })
 
-    grouped = correlation_groups(pairs, dictionary, threshold=0.9)
+    grouped = correlation_groups(pairs, dictionary, threshold=0.9, transitive=True)
     groups = grouped.set_index("feature").correlation_group
 
     assert groups["a"] == groups["b"] == groups["c"]
@@ -180,7 +180,7 @@ def test_correlation_groups_are_shared_transitive_and_thresholded() -> None:
         "a": 3, "b": 3, "c": 3, "d": 1}
 
 
-def test_correlation_groups_can_require_all_pairs_to_pass() -> None:
+def test_correlation_groups_default_to_requiring_all_pairs_to_pass() -> None:
     from .preprocessing import correlation_groups
 
     pairs = pd.DataFrame([
@@ -197,8 +197,7 @@ def test_correlation_groups_can_require_all_pairs_to_pass() -> None:
         "block": ["surface", "surface", "rubric"],
     })
 
-    grouped = correlation_groups(
-        pairs, dictionary, threshold=0.9, transitive=False)
+    grouped = correlation_groups(pairs, dictionary, threshold=0.9)
     groups = grouped.set_index("feature").correlation_group
 
     assert groups["a"] == groups["b"]
