@@ -99,6 +99,21 @@ def get_eval_path(
     return Path(base_dir) / task.name.lower() / hash_task_args(task) / model.shortname.lower()
 
 
+def collection_logs(root: str | Path) -> list[Path]:
+    """Every collection log under ``root``, which may be ``data`` or a single benchmark dir.
+
+    A collection log is ``.../<bench>/<hash>/<model>/<repeat>/*.eval`` with a numeric
+    repeat. Matching on that shape rather than on a fixed glob depth keeps the audit
+    scripts working from either root, and drops what is not collected data: ``legacy/``
+    (archived) and judge eval-sets whose third component is a condition hash, not a repeat.
+    """
+    return sorted(
+        p for p in Path(root).rglob("*.eval")
+        if "legacy" not in p.parts and p.parent.name.isdigit()
+        and not any(part.startswith(".") for part in p.parts)
+    )
+
+
 def is_successful_eval(eval_path: Path) -> bool:
     """Whether an eval log completed successfully.
 
