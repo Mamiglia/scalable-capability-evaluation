@@ -52,6 +52,13 @@ def test_hibayes_trace_has_crossed_slopes_and_item_intercepts_only() -> None:
 def test_hibayes_prior_scales_are_explicit_positive_config() -> None:
     config = AnalysisConfig()
 
+    assert (
+        config.mcmc_method,
+        config.mcmc_target_accept,
+        config.mcmc_max_tree_depth,
+        config.mcmc_init_strategy,
+        config.mcmc_chain_method,
+    ) == ("NUTS", 0.85, 10, "median", "parallel")
     assert {
         config.hibayes_population_prior_scale,
         config.hibayes_judge_prior_scale,
@@ -67,6 +74,18 @@ def test_hibayes_prior_scales_are_explicit_positive_config() -> None:
         judge_verdict_hibayes(
             predictors=("signal",), prior_scales=PRIOR_SCALES | {"item": float("nan")}
         )
+
+
+@pytest.mark.parametrize(("update", "match"), [
+    ({"mcmc_method": "GIBBS"}, "mcmc_method"),
+    ({"mcmc_target_accept": 1.0}, "mcmc_target_accept"),
+    ({"mcmc_max_tree_depth": 0}, "mcmc_max_tree_depth"),
+    ({"mcmc_init_strategy": "zero"}, "mcmc_init_strategy"),
+    ({"mcmc_chain_method": "threaded"}, "mcmc_chain_method"),
+])
+def test_hibayes_mcmc_config_rejects_invalid_choices(update, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        AnalysisConfig(**update).validate()
 
 
 def test_write_hibayes_job_uses_selected_features_and_fold_inputs(tmp_path: Path) -> None:
@@ -89,7 +108,15 @@ def test_write_hibayes_job_uses_selected_features_and_fold_inputs(tmp_path: Path
         "discarded": [9.0],
     }).to_parquet(test_path, index=False)
     config = AnalysisConfig(
-        results_dir=tmp_path / "results", mcmc_warmup=3, mcmc_samples=4, mcmc_chains=1
+        results_dir=tmp_path / "results",
+        mcmc_warmup=3,
+        mcmc_samples=4,
+        mcmc_chains=1,
+        mcmc_method="HMC",
+        mcmc_target_accept=0.9,
+        mcmc_max_tree_depth=7,
+        mcmc_init_strategy="mean",
+        mcmc_chain_method="sequential",
     ).validate()
 
     job_dir = write_hibayes_job(
@@ -113,7 +140,17 @@ def test_write_hibayes_job_uses_selected_features_and_fold_inputs(tmp_path: Path
     assert job["model"]["path"] == "scripts/judge_verdict_analysis/fit_hibayes.py"
     assert model_config["predictors"] == ["signal"]
     assert model_config["prior_scales"] == PRIOR_SCALES
-    assert model_config["fit"] == {"samples": 4, "warmup": 3, "chains": 1, "seed": 0}
+    assert model_config["fit"] == {
+        "method": "HMC",
+        "samples": 4,
+        "warmup": 3,
+        "chains": 1,
+        "seed": 0,
+        "target_accept": 0.9,
+        "max_tree_depth": 7,
+        "init_strategy": "mean",
+    }
+    assert job["platform"]["chain_method"] == "sequential"
 
 
 def test_evaluate_hibayes_uses_saved_draws_without_sampling(tmp_path: Path, monkeypatch) -> None:

@@ -175,16 +175,20 @@ def write_hibayes_job(
                 "predictors": list(selected_features),
                 "prior_scales": _prior_scales(config),
                 "fit": {
+                    "method": config.mcmc_method,
                     "samples": config.mcmc_samples,
                     "warmup": config.mcmc_warmup,
                     "chains": config.mcmc_chains,
                     "seed": config.random_seed,
+                    "target_accept": config.mcmc_target_accept,
+                    "max_tree_depth": config.mcmc_max_tree_depth,
+                    "init_strategy": config.mcmc_init_strategy,
                 },
             }}],
         },
         "check": {"checkers": ["divergences", "r_hat", "ess_bulk", "ess_tail", "bfmi"]},
         "communicate": {"communicators": ["summary_table"]},
-        "platform": {"device_type": "cpu", "chain_method": "parallel"},
+        "platform": {"device_type": "cpu", "chain_method": config.mcmc_chain_method},
     }
     (job_dir / "config.yaml").write_text(yaml.safe_dump(job, sort_keys=False))
     return job_dir

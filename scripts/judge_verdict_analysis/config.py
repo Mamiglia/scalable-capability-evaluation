@@ -103,6 +103,11 @@ class AnalysisConfig:
     mcmc_warmup: int = 1_000  # Adaptation draws per hierarchical Bayesian chain.
     mcmc_samples: int = 1_000  # Retained posterior draws per Bayesian chain.
     mcmc_chains: int = 4  # Independent chains used for convergence checks.
+    mcmc_method: str = "NUTS"  # HiBayes sampler method.
+    mcmc_target_accept: float = 0.85  # NUTS target acceptance probability.
+    mcmc_max_tree_depth: int = 10  # NUTS tree-depth ceiling.
+    mcmc_init_strategy: str = "median"  # HiBayes parameter initialisation strategy.
+    mcmc_chain_method: str = "parallel"  # NumPyro chain execution method.
     hibayes_population_prior_scale: float = 0.5  # Population intercept/slope Normal scale.
     hibayes_judge_prior_scale: float = 0.5  # HalfNormal scale for judge deviations.
     hibayes_benchmark_prior_scale: float = 0.5  # HalfNormal scale for benchmark deviations.
@@ -166,6 +171,7 @@ class AnalysisConfig:
             "mcmc_warmup": self.mcmc_warmup,
             "mcmc_samples": self.mcmc_samples,
             "mcmc_chains": self.mcmc_chains,
+            "mcmc_max_tree_depth": self.mcmc_max_tree_depth,
             "hibayes_population_prior_scale": self.hibayes_population_prior_scale,
             "hibayes_judge_prior_scale": self.hibayes_judge_prior_scale,
             "hibayes_benchmark_prior_scale": self.hibayes_benchmark_prior_scale,
@@ -177,6 +183,14 @@ class AnalysisConfig:
             if value <= 0 or (name.startswith("hibayes_") and not isfinite(value))
         ]:
             raise ValueError(f"{', '.join(invalid)} must be positive")
+        if self.mcmc_method not in {"NUTS", "HMC"}:
+            raise ValueError("mcmc_method must be 'NUTS' or 'HMC'")
+        if not isfinite(self.mcmc_target_accept) or not 0 < self.mcmc_target_accept < 1:
+            raise ValueError("mcmc_target_accept must be between 0 and 1")
+        if self.mcmc_init_strategy not in {"median", "mean", "uniform"}:
+            raise ValueError("mcmc_init_strategy must be 'median', 'mean', or 'uniform'")
+        if self.mcmc_chain_method not in {"parallel", "sequential", "vectorized"}:
+            raise ValueError("mcmc_chain_method must be 'parallel', 'sequential', or 'vectorized'")
         if not 0 <= self.correlation_threshold <= 1:
             raise ValueError("correlation_threshold must be between 0 and 1")
         if self.correlation_method not in {"pearson", "spearman"}:
