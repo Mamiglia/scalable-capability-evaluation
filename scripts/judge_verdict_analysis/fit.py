@@ -55,6 +55,7 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "hibayes_benchmark_prior_scale": config.hibayes_benchmark_prior_scale,
         "hibayes_cell_prior_scale": config.hibayes_cell_prior_scale,
         "hibayes_item_prior_scale": config.hibayes_item_prior_scale,
+        "require_pinned_source_for_fit": config.require_pinned_source_for_fit,
     }
 
 
@@ -77,6 +78,17 @@ def _guard_execution(config: AnalysisConfig) -> None:
         raise RuntimeError(
             f"refusing heavy local fit; execute on configured {config.execution_target} target"
         )
+    if not config.require_pinned_source_for_fit:
+        return
+    if not config.source_hf_revision:
+        raise RuntimeError("refusing non-local fit without source_hf_revision")
+    values = yaml.safe_load(Path(config.design_matrix_config).read_text())
+    manifest_path = Path(values["output_root"]) / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if (manifest.get("source_hf_repo"), manifest.get("source_hf_revision")) != (
+        config.source_hf_repo, config.source_hf_revision,
+    ):
+        raise RuntimeError("refusing non-local fit: processed matrix source provenance does not match config")
 
 
 def _prepared_manifest(backend: str, fold: str, config: AnalysisConfig) -> dict[str, object]:
@@ -85,6 +97,9 @@ def _prepared_manifest(backend: str, fold: str, config: AnalysisConfig) -> dict[
         "backend": backend,
         "fold": fold,
         "target": config.execution_target,
+        "source_hf_repo": config.source_hf_repo,
+        "source_hf_revision": config.source_hf_revision,
+        "source_status": "resolved" if config.source_hf_revision else "unresolved/test-only",
         "command": [
             "python", "-c",
             "from scripts.judge_verdict_analysis.fit import run_remote_fits\nrun_remote_fits()",
@@ -179,6 +194,9 @@ def _write_result(
         "state": "completed",
         "backend": result.backend, "fold": result.fold,
         "train_rows": len(train), "test_rows": len(test),
+        "source_hf_repo": config.source_hf_repo,
+        "source_hf_revision": config.source_hf_revision,
+        "source_status": "resolved" if config.source_hf_revision else "unresolved/test-only",
         "settings": _manifest_settings(config),
     }
     try:

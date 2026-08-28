@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
+import re
 from typing import Self
 
 
@@ -35,6 +36,9 @@ JUDGES: tuple[str, ...] = (
 class AnalysisConfig:
     design_matrix_config: Path = ROOT / "configs/design_matrices.yaml"  # Existing matrix/source-path config.
     results_dir: Path = ROOT / "judge_results/verdict_interpretability/readable-eda-20260828"  # Canonical output root.
+    source_hf_repo: str = "LASR-G5/judging"  # Hugging Face repository used to build the source matrix.
+    source_hf_revision: str = ""  # Required full commit SHA for non-test fitting; empty keeps schema fixtures unresolved.
+    require_pinned_source_for_fit: bool = True  # Refuse non-local fits unless the source matrix matches this pin.
 
     # Feature selection: empty regressors means every feature in feature_blocks.
     feature_blocks: tuple[str, ...] = READABLE_BLOCKS  # Matrix blocks loaded by default.
@@ -155,6 +159,10 @@ class AnalysisConfig:
 
     def validate(self) -> Self:
         """Validate editable options early and return this immutable config."""
+        if not self.source_hf_repo.strip():
+            raise ValueError("source_hf_repo cannot be empty")
+        if self.source_hf_revision and not re.fullmatch(r"[0-9a-fA-F]{40}", self.source_hf_revision):
+            raise ValueError("source_hf_revision must be a 40-character commit SHA when provided")
         if not self.feature_blocks:
             raise ValueError("feature_blocks cannot be empty")
         if not self.judges:

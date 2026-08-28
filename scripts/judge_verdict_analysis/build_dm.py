@@ -98,6 +98,9 @@ def _manifest(
         "processed_aliases": [list(pair) for pair in config.processed_aliases],
     }
     return {
+        "source_hf_repo": config.source_hf_repo,
+        "source_hf_revision": config.source_hf_revision,
+        "source_status": "resolved" if config.source_hf_revision else "unresolved/test-only",
         "source_paths": {path.name: str(path) for path in source_files},
         "source_sha256": {path.name: _sha256(path) for path in source_files if path.exists()},
         "settings": settings,
@@ -173,7 +176,12 @@ def build_design_matrix(config: AnalysisConfig = CONFIG) -> dict[str, pd.DataFra
         "representative-map.csv": representative_map,
     }
     tables["manifest.json"] = _manifest(config, source_config, source_root, tables, len(selected))
-    tables["design-matrix.yaml"] = yaml.safe_dump({"output_root": str(config.processed_matrix_dir)}, sort_keys=False)
+    tables["design-matrix.yaml"] = yaml.safe_dump({
+        "output_root": str(config.processed_matrix_dir),
+        "source_hf_repo": config.source_hf_repo,
+        "source_hf_revision": config.source_hf_revision,
+        "source_status": "resolved" if config.source_hf_revision else "unresolved/test-only",
+    }, sort_keys=False)
     return tables
 
 
