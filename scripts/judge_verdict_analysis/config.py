@@ -70,6 +70,10 @@ class AnalysisConfig:
 
     # Frequentist and resampling fits.
     fit_backends: tuple[str, ...] = ("frequentist", "hibayes")  # Joint-model backends to run.
+    execution_mode: str = "prepare"  # "prepare" writes jobs only; "execute" runs an approved target.
+    execution_target: str = "swc_hpc"  # Full-data fits run only on "swc_hpc" or "runpod".
+    local_test_max_rows: int = 200  # Explicit synthetic-test ceiling when execution_target="local_test".
+    hibayes_action: str = "prepare"  # Write a job, or evaluate an already-completed remote job.
     item_folds: int = 4  # Item-fold count for held-out new-items evaluations.
     model_folds: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("model-fold-0", ("qwen3.8-2.4t-a95b", "qwen3.8-27b", "gpt-5", "glm-4.6",
@@ -164,6 +168,7 @@ class AnalysisConfig:
             "top_verdict_features": self.top_verdict_features,
             "top_capability_features": self.top_capability_features,
             "item_folds": self.item_folds,
+            "local_test_max_rows": self.local_test_max_rows,
             "inner_folds": self.inner_folds,
             "glm_max_iter": self.glm_max_iter,
             "glm_c": self.glm_c,
@@ -201,6 +206,12 @@ class AnalysisConfig:
             raise ValueError("support_splits cannot be empty")
         if not self.fit_backends or not set(self.fit_backends) <= {"frequentist", "hibayes"}:
             raise ValueError("fit_backends must contain only 'frequentist' or 'hibayes'")
+        if self.execution_mode not in {"prepare", "execute"}:
+            raise ValueError("execution_mode must be 'prepare' or 'execute'")
+        if self.execution_target not in {"swc_hpc", "runpod", "local_test"}:
+            raise ValueError("execution_target must be 'swc_hpc', 'runpod', or 'local_test'")
+        if self.hibayes_action not in {"prepare", "evaluate"}:
+            raise ValueError("hibayes_action must be 'prepare' or 'evaluate'")
         if not self.lesion_backends or not set(self.lesion_backends) <= {"frequentist", "hibayes"}:
             raise ValueError("lesion_backends must contain only 'frequentist' or 'hibayes'")
         if self.lesion_metric not in {"log_loss", "accuracy"}:
