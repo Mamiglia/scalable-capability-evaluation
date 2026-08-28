@@ -37,6 +37,27 @@ def _matrix(tmp_path: Path) -> Path:
     return config
 
 
+def _set_processed_config(config: AnalysisConfig, matrix_config: Path) -> None:
+    config.processed_matrix_dir.mkdir(parents=True)
+    config.processed_matrix_config.write_text(matrix_config.read_text())
+
+
+def test_fit_loads_the_processed_matrix_config_not_the_build_input(tmp_path: Path) -> None:
+    """Fails if fitting falls back to the unprocessed design-matrix input."""
+    processed_config = _matrix(tmp_path)
+    config = AnalysisConfig(
+        design_matrix_config=tmp_path / "missing-build-input.yaml",
+        results_dir=tmp_path / "results", feature_blocks=("surface",),
+        judges=("j0", "j1"), benchmarks=("b0",),
+    ).validate()
+    _set_processed_config(config, processed_config)
+
+    rows, features = fit._load_rows(config)
+
+    assert features == ["signal", "noise"]
+    assert set(rows) >= {"signal", "noise", "pick_left"}
+
+
 def test_local_synthetic_fit_writes_the_backend_fold_contract(tmp_path: Path) -> None:
     """Fails if orchestration stops writing a complete, non-overwriting fold."""
     config = AnalysisConfig(
@@ -48,6 +69,7 @@ def test_local_synthetic_fit_writes_the_backend_fold_contract(tmp_path: Path) ->
         elastic_net_cs=(1.0,), elastic_net_l1_ratios=(1.0,), ridge_cs=(1.0,),
         execution_mode="execute", execution_target="local_test", local_test_max_rows=32,
     ).validate()
+    _set_processed_config(config, config.design_matrix_config)
 
     fit.run_fits(config)
 
@@ -89,7 +111,7 @@ def test_prepare_writes_remote_descriptors_without_loading_the_matrix(tmp_path: 
         {"backend": "frequentist", "fold": "held-models__item-1"},
     ]
     assert manifest["target"] == "swc_hpc"
-    assert manifest["source_paths"]["design_matrix_config"] == str(config.design_matrix_config)
+    assert manifest["source_paths"]["processed_matrix_config"] == str(config.processed_matrix_config)
     command = ast.parse(manifest["command"][-1])
     assert isinstance(command.body[0], ast.ImportFrom)
     assert isinstance(command.body[1].value, ast.Call)
@@ -119,6 +141,7 @@ def test_local_test_limit_refuses_before_loading_pair_rows(tmp_path: Path, monke
         model_folds=(("held-models", ("held",)),), item_folds=2,
         execution_mode="execute", execution_target="local_test", local_test_max_rows=1,
     ).validate()
+    _set_processed_config(config, config.design_matrix_config)
     monkeypatch.setattr(fit, "_load_rows", lambda _: pytest.fail("oversized local test loaded pair rows"))
 
     with pytest.raises(RuntimeError, match="local_test_max_rows"):
@@ -134,6 +157,7 @@ def test_hibayes_job_uses_the_fold_local_frequentist_selection(tmp_path: Path, m
         model_folds=(("held-models", ("held",)),), item_folds=2,
         execution_mode="execute", execution_target="local_test", local_test_max_rows=32,
     ).validate()
+    _set_processed_config(config, config.design_matrix_config)
     monkeypatch.setattr(
         fit, "select_features", lambda *_: (["signal"], pd.DataFrame({"feature": ["signal"]})),
         raising=False,
@@ -155,6 +179,7 @@ def test_hibayes_evaluation_adds_artifacts_to_an_existing_remote_job(tmp_path: P
         model_folds=(("held-models", ("held",)),), item_folds=2,
         execution_mode="execute", execution_target="local_test", local_test_max_rows=32,
     ).validate()
+    _set_processed_config(config, config.design_matrix_config)
     for item_fold in range(2):
         (config.fit_dir / "hibayes" / f"held-models__item-{item_fold}").mkdir(parents=True)
 

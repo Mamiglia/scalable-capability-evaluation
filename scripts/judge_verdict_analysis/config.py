@@ -143,6 +143,11 @@ class AnalysisConfig:
         return self.results_dir / "design-matrix"
 
     @property
+    def processed_matrix_config(self) -> Path:
+        """Processed matrix YAML consumed by fitting and its safety checks."""
+        return self.processed_matrix_dir / "design-matrix.yaml"
+
+    @property
     def fit_dir(self) -> Path:
         """Directory for fitted-model artifacts and held-out predictions."""
         return self.results_dir / "fits"

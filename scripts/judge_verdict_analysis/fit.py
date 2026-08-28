@@ -69,7 +69,7 @@ def _guard_execution(config: AnalysisConfig) -> None:
     if config.execution_mode != "execute":
         return
     if config.execution_target == "local_test":
-        values = yaml.safe_load(Path(config.design_matrix_config).read_text())
+        values = yaml.safe_load(config.processed_matrix_config.read_text())
         pair_path = Path(values["output_root"]) / "pair.parquet"
         if pq.ParquetFile(pair_path).metadata.num_rows > config.local_test_max_rows:
             raise RuntimeError("refusing local fit above local_test_max_rows; use SWC HPC or RunPod")
@@ -82,7 +82,7 @@ def _guard_execution(config: AnalysisConfig) -> None:
         return
     if not config.source_hf_revision:
         raise RuntimeError("refusing non-local fit without source_hf_revision")
-    values = yaml.safe_load(Path(config.design_matrix_config).read_text())
+    values = yaml.safe_load(config.processed_matrix_config.read_text())
     manifest_path = Path(values["output_root"]) / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     if (manifest.get("source_hf_repo"), manifest.get("source_hf_revision")) != (
@@ -105,8 +105,8 @@ def _prepared_manifest(backend: str, fold: str, config: AnalysisConfig) -> dict[
             "from scripts.judge_verdict_analysis.fit import run_remote_fits\nrun_remote_fits()",
         ],
         "source_paths": {
-            "design_matrix_config": str(config.design_matrix_config),
-            "processed_matrix_dir": str(config.processed_matrix_dir),
+            "build_design_matrix_config": str(config.design_matrix_config),
+            "processed_matrix_config": str(config.processed_matrix_config),
         },
         "settings": _manifest_settings(config),
     }
@@ -146,7 +146,7 @@ def _load_rows(config: AnalysisConfig) -> tuple[pd.DataFrame, list[str]]:
         "pair", config.feature_blocks,
         features=config.regressors or None,
         splits=config.splits,
-        config=config.design_matrix_config,
+        config=config.processed_matrix_config,
     )
     rows = rows[
         rows.judge.isin(config.judges) & rows.bench.isin(config.benchmarks)
