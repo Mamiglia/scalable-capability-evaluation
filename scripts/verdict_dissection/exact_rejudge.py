@@ -793,7 +793,7 @@ This experiment repeats each frozen shown transcript pair and order once. It is 
 
 - Freeze: `{FREEZE}`.
 - `judge_input` is reused verbatim. The system message is verified from one authoritative HF Inspect log per dominant `judge_config_hash`, whose hash includes the prompt, then applied to every selected row with that configuration.
-- The current `judge.dataset.has_reasoning` exclusion is applied before sampling.
+- The current `judge.dataset.has_reasoning` exclusion is applied before sampling; it removed 668 candidate pair rows in the six-judge scope.
 - AIME 2024-26 is pooled; 100 distinct underlying pairs are selected per available judge x benchmark cell.
 - Seed `{SEED}` is used only for sampling and bootstrap CIs. Model-generation seeds are removed.
 - OpenRouter response replay caching is disabled with `X-OpenRouter-Cache: false`; router metadata is enabled.
