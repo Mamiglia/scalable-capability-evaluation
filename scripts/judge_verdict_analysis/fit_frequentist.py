@@ -126,6 +126,80 @@ def select_features(
     return selected, tuning
 
 
+def tune_ridge(
+    train: pd.DataFrame,
+    features: list[str],
+    config: AnalysisConfig,
+    levels: HierarchyLevels | None = None,
+) -> tuple[float, pd.DataFrame]:
+    """Choose the hierarchical-ridge penalty without feature selection."""
+    levels = levels or HierarchyLevels.from_training(train)
+    splits = _splits(train, config)
+    y = train["pick_left"].to_numpy(dtype=int)
+    rows = []
+    best_c = None
+    best_loss = np.inf
+    for c in config.ridge_cs:
+        losses = []
+        for fit_rows, check_rows in splits:
+            fit_x, check_x, _ = _designs(
+                train, fit_rows, check_rows, features, levels, config)
+            model = _model(config, c=c, l1_ratio=None).fit(fit_x, y[fit_rows])
+            losses.append(log_loss(
+                y[check_rows], model.predict_proba(check_x)[:, 1], labels=[0, 1]))
+        mean_loss = float(np.mean(losses))
+        rows.append({
+            "stage": "ridge", "record_type": "tuning", "C": c,
+            "mean_log_loss": mean_loss,
+        })
+        if mean_loss < best_loss:
+            best_c, best_loss = c, mean_loss
+    assert best_c is not None
+    tuning = pd.DataFrame(rows)
+    tuning["selected"] = tuning.C == best_c
+    return best_c, tuning
+
+
+def fit_fixed_ridge(
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    features: list[str],
+    config: AnalysisConfig,
+    ridge_c: float,
+) -> FitResult:
+    """Fit one hierarchical ridge model with fixed predictors and penalty."""
+    folds = pd.concat([train["fold"], test["fold"]]).drop_duplicates().tolist()
+    if len(folds) != 1:
+        raise ValueError("train and test must contain exactly one shared fold")
+    levels = HierarchyLevels.from_training(train)
+    penalties = _penalties(config)
+    train_x, column_map = hierarchical_design(train, features, levels, penalties)
+    test_x, _ = hierarchical_design(test, features, levels, penalties)
+    model = _model(config, c=ridge_c, l1_ratio=None).fit(
+        train_x, train.pick_left.to_numpy(dtype=int))
+    probability = model.predict_proba(test_x)[:, 1]
+    observed = test["pick_left"].to_numpy(dtype=int)
+    predictions = test.drop(columns=features + ["pick_left"], errors="ignore").copy()
+    predictions["observed"] = observed
+    predictions["probability"] = probability
+    return FitResult(
+        backend="frequentist",
+        fold=folds[0],
+        selected_features=tuple(features),
+        predictions=predictions,
+        coefficients=effective_coefficients(model.coef_[0], column_map),
+        tuning=pd.DataFrame(),
+        metrics=pd.DataFrame({
+            "metric": ["accuracy", "log_loss"],
+            "value": [
+                accuracy_score(observed, probability >= 0.5),
+                log_loss(observed, probability, labels=[0, 1]),
+            ],
+        }),
+        diagnostics={"ridge_C": ridge_c, "ridge_n_iter": int(model.n_iter_[0])},
+    )
+
+
 def fit_frequentist(
     train: pd.DataFrame,
     test: pd.DataFrame,

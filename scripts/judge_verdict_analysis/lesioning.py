@@ -12,30 +12,12 @@ import pandas as pd
 from . import fit
 from .config import AnalysisConfig, CONFIG
 from .fit_common import FitResult
-from .fit_frequentist import _model, _penalties
-from .hierarchy import HierarchyLevels, hierarchical_design
+from .fit_frequentist import fit_fixed_ridge, tune_ridge
 
 
 def _log_losses(observed: np.ndarray, probabilities: np.ndarray) -> np.ndarray:
     probability = np.clip(probabilities, 1e-12, 1 - 1e-12)
     return -(observed * np.log(probability) + (1 - observed) * np.log1p(-probability))
-
-
-def _fixed_frequentist(
-    full_fit: FitResult, train: pd.DataFrame, test: pd.DataFrame, features: list[str], config: AnalysisConfig
-) -> np.ndarray:
-    try:
-        ridge_c = float(full_fit.diagnostics["ridge_C"])
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("frequentist lesion needs the saved full fit's ridge_C") from error
-    levels = HierarchyLevels.from_training(train)
-    penalties = _penalties(config)
-    train_x, _ = hierarchical_design(train, features, levels, penalties)
-    test_x, _ = hierarchical_design(test, features, levels, penalties)
-    model = _model(config, c=ridge_c, l1_ratio=None).fit(
-        train_x, train.pick_left.to_numpy(dtype=int)
-    )
-    return model.predict_proba(test_x)[:, 1]
 
 
 def _full_predictions(full_fit: FitResult, test: pd.DataFrame) -> pd.DataFrame:
@@ -63,16 +45,21 @@ def lesion_fold(
     if full_fit.backend != "frequentist":
         raise NotImplementedError("fixed-selection lesions currently require the frequentist backend")
     full = _full_predictions(full_fit, test)
-    selected = list(full_fit.selected_features)
-    if missing := sorted(set(selected) - set(train) | set(selected) - set(test)):
+    features = list(full_fit.selected_features)
+    if missing := sorted(set(features) - set(train) | set(features) - set(test)):
         raise ValueError(f"selected features are missing from lesion rows: {missing}")
+    try:
+        ridge_c = float(full_fit.diagnostics["ridge_C"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("frequentist lesion needs the full baseline's ridge_C") from error
     observed = full.observed.to_numpy(dtype=int)
     full_probability = full.probability.to_numpy(dtype=float)
     full_loss = _log_losses(observed, full_probability)
     rows = []
-    for feature in selected:
-        lesion_probability = _fixed_frequentist(
-            full_fit, train, test, [name for name in selected if name != feature], config)
+    for feature in features:
+        lesion = fit_fixed_ridge(
+            train, test, [name for name in features if name != feature], config, ridge_c)
+        lesion_probability = lesion.predictions.probability.to_numpy(dtype=float)
         lesion_loss = _log_losses(observed, lesion_probability)
         result = full.copy()
         result["backend"] = full_fit.backend
@@ -126,18 +113,6 @@ def _bootstrap_summary(rows: pd.DataFrame, config: AnalysisConfig) -> pd.DataFra
     return pd.DataFrame(summaries)
 
 
-def _load_full_fit(path: Path, backend: str, fold: str) -> FitResult:
-    if not path.exists():
-        raise FileNotFoundError(f"missing saved full fit: {path}")
-    return FitResult(
-        backend=backend, fold=fold,
-        selected_features=tuple(pd.read_csv(path / "selection.csv").feature),
-        predictions=pd.read_parquet(path / "predictions.parquet"),
-        coefficients=pd.DataFrame(), tuning=pd.DataFrame(), metrics=pd.DataFrame(),
-        diagnostics=json.loads((path / "diagnostics.json").read_text()),
-    )
-
-
 def _write_lesions(rows: pd.DataFrame, summary: pd.DataFrame, config: AnalysisConfig) -> None:
     output = config.lesion_dir
     if output.exists():
@@ -149,6 +124,7 @@ def _write_lesions(rows: pd.DataFrame, summary: pd.DataFrame, config: AnalysisCo
         summary.to_csv(stage / "lesions.csv", index=False)
         (stage / "manifest.json").write_text(json.dumps({
             "lesion_backends": list(config.lesion_backends),
+            "lesion_feature_scope": config.lesion_feature_scope,
             "lesion_metric": config.lesion_metric,
             "bootstrap_iterations": config.bootstrap_iterations,
             "random_seed": config.random_seed,
@@ -170,13 +146,16 @@ def run_lesions(config: AnalysisConfig = CONFIG) -> None:
     if config.execution_mode != "execute":
         raise RuntimeError("lesions require execution_mode='execute'")
     fit._guard_execution(config)
-    rows, _ = fit._load_rows(config)
+    rows, features = fit._load_rows(config)
     if config.execution_target == "local_test" and len(rows) > config.local_test_max_rows:
         raise RuntimeError("refusing local lesions above local_test_max_rows; use SWC HPC or RunPod")
     lesion_rows = []
     for fold_name, train, test in fit._outer_folds(rows, config):
         for backend in config.lesion_backends:
-            full_fit = _load_full_fit(config.fit_dir / backend / fold_name, backend, fold_name)
+            if backend != "frequentist":
+                raise NotImplementedError("fixed-selection lesions currently require the frequentist backend")
+            ridge_c, _ = tune_ridge(train, features, config)
+            full_fit = fit_fixed_ridge(train, test, features, config, ridge_c)
             lesion_rows.append(lesion_fold(full_fit, train, test, config))
     combined = pd.concat(lesion_rows, ignore_index=True) if lesion_rows else pd.DataFrame()
     _write_lesions(combined, _bootstrap_summary(combined, config), config)

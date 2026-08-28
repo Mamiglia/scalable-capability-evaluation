@@ -101,6 +101,7 @@ class AnalysisConfig:
     cell_deviation_penalty: float = 10.0  # Shrinkage penalty for judge-by-benchmark deviations.
     item_intercept_penalty: float = 10.0  # Shrinkage penalty for item intercepts.
     lesion_backends: tuple[str, ...] = ("frequentist",)  # Backends included in paired lesions.
+    lesion_feature_scope: str = "all"  # Lesion every processed regressor, not elastic-net selections.
     lesion_metric: str = "log_loss"  # Primary held-out lesion metric.
     glm_max_iter: int = 3_000  # Optimiser iteration ceiling for the forthcoming logistic GLM.
     glm_c: float = 0.1  # Inverse ridge penalty for the first frequentist GLM screen.
@@ -227,6 +228,8 @@ class AnalysisConfig:
             raise ValueError("hibayes_action must be 'prepare' or 'evaluate'")
         if not self.lesion_backends or not set(self.lesion_backends) <= {"frequentist", "hibayes"}:
             raise ValueError("lesion_backends must contain only 'frequentist' or 'hibayes'")
+        if self.lesion_feature_scope != "all":
+            raise ValueError("lesion_feature_scope must be 'all'")
         if self.lesion_metric not in {"log_loss", "accuracy"}:
             raise ValueError("lesion_metric must be 'log_loss' or 'accuracy'")
         grids = {
