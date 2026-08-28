@@ -23,7 +23,7 @@ from pathlib import Path
 
 from inspect_ai.log import read_eval_log, read_eval_log_samples
 
-from configs.paths import is_successful_eval
+from configs.paths import collection_logs, is_successful_eval
 
 
 def prices() -> dict[str, tuple[float, float]]:
@@ -72,7 +72,7 @@ def main() -> None:
     price = prices()
     rows, totals = [], defaultdict(float)
     for root in args.roots:
-        for path in sorted(root.glob("*/*/*/*.eval")):
+        for path in collection_logs(root):
             if path.stat().st_mtime < cutoff or not is_successful_eval(path):
                 continue
             log = read_eval_log(str(path), header_only=True)
@@ -87,7 +87,7 @@ def main() -> None:
                 p_in, p_out = price.get(used_model.split("/", 1)[-1], (0.0, 0.0))
                 cost += u.input_tokens * p_in + u.output_tokens * p_out
             rows.append((
-                root.name, path.parent.parent.name, path.parent.name, samples,
+                path.parts[-5], path.parent.parent.name, path.parent.name, samples,
                 accuracy, out_tokens / samples if samples else 0,
                 reasoning_share(path, args.samples), cost,
             ))

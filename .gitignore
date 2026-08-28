@@ -14,10 +14,12 @@ uv.lock
 .env
 .agents
 .codex
-.claude
+.claude/*
+# ...but the project's skills are part of the repo
+!.claude/skills/
 
 # logs
-logs/
+/logs/
 artifacts/
 /docs/
 analysis/

@@ -82,7 +82,10 @@ def main() -> int:
     # A model dir is any dir holding numbered repeat dirs, so roots can be data/, a bench, or a hash dir.
     model_dirs = sorted(
         d for root in args.roots for d in [root, *root.rglob("*")]
-        if d.is_dir() and "legacy" not in d.parts and any(c.is_dir() and c.name.isdigit() for c in d.iterdir())
+        # Skip legacy/ (archived) and dot-dirs: data/.cache/huggingface/download is full of
+        # numerically-named dirs and otherwise reads as 5800 broken model dirs.
+        if d.is_dir() and "legacy" not in d.parts and not any(x.startswith(".") for x in d.parts)
+        and any(c.is_dir() and c.name.isdigit() for c in d.iterdir())
     )
     for model_dir in model_dirs:
         for child in model_dir.iterdir():
