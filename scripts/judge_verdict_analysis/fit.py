@@ -97,15 +97,25 @@ def _prepared_manifest(backend: str, fold: str, config: AnalysisConfig) -> dict[
     }
 
 
-def _write_descriptor(backend: str, fold: str, config: AnalysisConfig) -> None:
-    output = config.fit_dir / "prepared" / backend / fold
+def _write_plan_descriptor(config: AnalysisConfig) -> None:
+    output = config.fit_dir / "prepared"
     if output.exists():
         raise FileExistsError(f"refusing to overwrite {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    stage = Path(mkdtemp(prefix=f".{fold}-", dir=output.parent))
+    stage = Path(mkdtemp(prefix=".prepared-", dir=output.parent))
+    manifest = _prepared_manifest("", "", config)
+    manifest.pop("backend")
+    manifest.pop("fold")
+    manifest["scope"] = "full_plan"
+    manifest["jobs"] = [
+        {"backend": backend, "fold": f"{model_name}__item-{item_fold}"}
+        for backend in config.fit_backends
+        for model_name, _ in config.model_folds
+        for item_fold in range(config.item_folds)
+    ]
     try:
         (stage / "manifest.json").write_text(
-            json.dumps(_prepared_manifest(backend, fold, config), indent=2, sort_keys=True) + "\n"
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
         )
         os.replace(stage, output)
     except BaseException:
@@ -227,10 +237,7 @@ def run_fits(config: AnalysisConfig = CONFIG) -> None:
     """Run approved fits, or prepare external HiBayes jobs without sampling."""
     config = config.validate()
     if config.execution_mode == "prepare":
-        for backend in config.fit_backends:
-            for model_name, _ in config.model_folds:
-                for item_fold in range(config.item_folds):
-                    _write_descriptor(backend, f"{model_name}__item-{item_fold}", config)
+        _write_plan_descriptor(config)
         return
     _guard_execution(config)
     rows, features = _load_rows(config)

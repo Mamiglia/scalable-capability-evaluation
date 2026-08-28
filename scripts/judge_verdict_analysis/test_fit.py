@@ -79,10 +79,15 @@ def test_prepare_writes_remote_descriptors_without_loading_the_matrix(tmp_path: 
 
     fit.run_fits(config)
 
-    descriptor = config.fit_dir / "prepared" / "frequentist" / "held-models__item-0"
+    descriptor = config.fit_dir / "prepared"
     assert sorted(path.name for path in descriptor.iterdir()) == ["manifest.json"]
     manifest = json.loads((descriptor / "manifest.json").read_text())
     assert manifest["state"] == "prepared"
+    assert manifest["scope"] == "full_plan"
+    assert manifest["jobs"] == [
+        {"backend": "frequentist", "fold": "held-models__item-0"},
+        {"backend": "frequentist", "fold": "held-models__item-1"},
+    ]
     assert manifest["target"] == "swc_hpc"
     assert manifest["source_paths"]["design_matrix_config"] == str(config.design_matrix_config)
     command = ast.parse(manifest["command"][-1])
