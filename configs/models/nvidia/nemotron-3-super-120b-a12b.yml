@@ -1,11 +1,21 @@
-# Quantization: Unquantized BF16 (DeepInfra)
+# pin: DigitalOcean (OpenRouter reports quantization 'unknown').
+# Was deepinfra/bf16, whose endpoint declares max_completion_tokens=16384 and enforces it
+# whatever max_tokens says. That cut ~38% of samples off mid-thought (exactly 16384 output
+# tokens, stop=max_tokens, zero reasoning recovered) across gpqa and aime24/25/26. Probed
+# 2026-08-28: DigitalOcean returns 11k-31k output tokens with full reasoning on the same
+# prompts. Same trade the sibling nemotron-3-ultra config makes -- declared precision for
+# completeness. The BF16 in the model name now describes DeepInfra's endpoint, not this
+# one: do not repeat it in write-ups without measuring.
 name: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
 slug: openrouter/nvidia/nemotron-3-super-120b-a12b
 release_date: '2026-03-11'
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: true
+  max_tokens: 65536
 model_args:
   provider:
     only:
-    - deepinfra/bf16
+    - digitalocean
     allow_fallbacks: false
-    quantizations:
-    - bf16
