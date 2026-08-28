@@ -78,8 +78,9 @@ def current_log(path: str) -> str:
 
 
 def read_rollouts(candidate_logs: set[str]) -> pd.DataFrame:
+    """Easy-half copies (<collection>-easy-half) point back to the full log: accuracy needs every item."""
     rows = []
-    for path in sorted({current_log(p) for p in candidate_logs}):
+    for path in sorted({current_log(p.replace("-easy-half/", "/")) for p in candidate_logs}):
         bench, model, epoch = rollout_key(path)
         for sample in read_eval_log_samples(path, all_samples_required=False):
             rows.append(dict(bench=bench, model=model, item=str(sample.id), epoch=epoch,
