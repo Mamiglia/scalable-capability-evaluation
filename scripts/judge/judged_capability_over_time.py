@@ -157,7 +157,8 @@ def date_axis(ax, table, judge, judge_date, bench):
     ax.axvline(judge_date, color="grey", lw=0.8, ls="--")
     ax.text(judge_date, ax.get_ylim()[1], f" {judge} released", color="grey", fontsize=6, va="top", ha="left")
     first, last = min(table.release.min(), judge_date), max(table.release.max(), judge_date)
-    ticks = pd.date_range(first.replace(month=1, day=1), last + pd.DateOffset(months=6), freq="6MS")
+    every = "12MS" if (last - first).days > 900 else "6MS"   # yearly ticks once the span passes ~2.5 years
+    ticks = pd.date_range(first.replace(month=1, day=1), last + pd.DateOffset(months=6), freq=every)
     ax.set_xticks(ticks)
     ax.set_xticklabels([t.strftime("%b %Y") for t in ticks])
     ax.set_xlim(ticks[0] - pd.Timedelta(days=30), ticks[-1] + pd.Timedelta(days=30))
