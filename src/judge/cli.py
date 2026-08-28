@@ -70,6 +70,7 @@ def run_experiments(experiments: list[ExperimentConfig], display: str | None = N
         build_domain(exp.domain)
     tasks = [task for exp in experiments for task in build_tasks(exp)]
     kwargs = exp.eval_kwargs() | {"temperature": exp.temperature}
+    display = kwargs.pop("display", display)  # --display on the CLI wins over the runner's choice
     if exp.cache:
         kwargs["cache"] = CachePolicy(expiry=None)  # repeated pairs must never re-bill
     if not run_tasks(tasks, exp.judge, exp.log_dir, display, **kwargs):
