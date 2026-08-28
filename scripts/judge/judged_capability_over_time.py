@@ -251,12 +251,14 @@ def main():
     if args.earlier_opponents_only:
         verdicts = earlier_opponents_only(verdicts, dates, dates[slug(args.reference_judge or args.judge)])
     easy = split_items(rollouts)
-    if args.easy_items:
+    if args.easy_items:   # fixed split; benchmarks absent from the file are left out entirely
         listed = pd.read_csv(args.easy_items, dtype=str).set_index(["bench", "item"]).index
         easy = pd.Series(easy.index.isin(listed), index=easy.index)
+        rollouts = rollouts[rollouts.bench.isin(listed.get_level_values("bench"))]
+        verdicts = verdicts[verdicts.bench.isin(listed.get_level_values("bench"))]
     rollout_is_easy = easy.reindex(pd.MultiIndex.from_frame(rollouts[["bench", "item"]])).to_numpy()
     easy_rollouts, hard_rollouts = rollouts[rollout_is_easy], rollouts[~rollout_is_easy]
-    easy_verdicts = verdicts[easy.reindex(pd.MultiIndex.from_frame(verdicts[["bench", "item"]])).to_numpy()]
+    easy_verdicts = verdicts[easy.reindex(pd.MultiIndex.from_frame(verdicts[["bench", "item"]])).fillna(False).to_numpy(bool)]
     OUT.mkdir(parents=True, exist_ok=True)
     for bench, bench_verdicts in easy_verdicts.groupby("bench"):
         easy_accuracy = easy_rollouts[easy_rollouts.bench == bench].groupby("model").correct.mean()
