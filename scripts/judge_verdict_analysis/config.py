@@ -1,5 +1,6 @@
 """Edit these defaults to configure the judge-verdict analysis module."""
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Self
 
@@ -102,6 +103,11 @@ class AnalysisConfig:
     mcmc_warmup: int = 1_000  # Adaptation draws per hierarchical Bayesian chain.
     mcmc_samples: int = 1_000  # Retained posterior draws per Bayesian chain.
     mcmc_chains: int = 4  # Independent chains used for convergence checks.
+    hibayes_population_prior_scale: float = 0.5  # Population intercept/slope Normal scale.
+    hibayes_judge_prior_scale: float = 0.5  # HalfNormal scale for judge deviations.
+    hibayes_benchmark_prior_scale: float = 0.5  # HalfNormal scale for benchmark deviations.
+    hibayes_cell_prior_scale: float = 0.5  # HalfNormal scale for judge-by-benchmark deviations.
+    hibayes_item_prior_scale: float = 0.5  # HalfNormal scale for nested item intercepts.
 
     @property
     def data_dir(self) -> Path:
@@ -160,8 +166,16 @@ class AnalysisConfig:
             "mcmc_warmup": self.mcmc_warmup,
             "mcmc_samples": self.mcmc_samples,
             "mcmc_chains": self.mcmc_chains,
+            "hibayes_population_prior_scale": self.hibayes_population_prior_scale,
+            "hibayes_judge_prior_scale": self.hibayes_judge_prior_scale,
+            "hibayes_benchmark_prior_scale": self.hibayes_benchmark_prior_scale,
+            "hibayes_cell_prior_scale": self.hibayes_cell_prior_scale,
+            "hibayes_item_prior_scale": self.hibayes_item_prior_scale,
         }
-        if invalid := [name for name, value in positive.items() if value <= 0]:
+        if invalid := [
+            name for name, value in positive.items()
+            if value <= 0 or (name.startswith("hibayes_") and not isfinite(value))
+        ]:
             raise ValueError(f"{', '.join(invalid)} must be positive")
         if not 0 <= self.correlation_threshold <= 1:
             raise ValueError("correlation_threshold must be between 0 and 1")
