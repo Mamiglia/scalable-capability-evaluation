@@ -46,10 +46,13 @@ def trim_log(source: Path, pool_inputs: dict[str, str], message_limit: int, task
 
     results = header.results.model_copy(deep=True)
     results.total_samples = results.completed_samples = len(samples)
-    accuracy = results.scores[0].metrics["accuracy"]
-    accuracy.value = statistics.mean(correct)
-    if "stderr" in results.scores[0].metrics:
-        results.scores[0].metrics["stderr"].value = statistics.stdev(correct) / len(correct) ** 0.5
+    metrics = results.scores[0].metrics
+    for name in ("accuracy", "mean"):           # the pool's swe logs report the score as "mean"
+        if name in metrics:
+            metrics[name].value = statistics.mean(correct)
+    for name in ("stderr", "std"):
+        if name in metrics:
+            metrics[name].value = statistics.stdev(correct) / (len(correct) ** 0.5 if name == "stderr" else 1)
 
     return EvalLog(version=header.version, status=header.status, eval=spec, plan=header.plan,
                    results=results, stats=header.stats, samples=samples)

@@ -12,13 +12,17 @@ Usage:
 
 import argparse
 import glob
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
 
 import pandas as pd
 import yaml
-from inspect_ai.log import read_eval_log
+from inspect_ai.log import read_eval_log, read_eval_log_samples, write_eval_log
 
 from configs.paths import is_successful_eval
+from trim_epoch_swe_logs import trim_log
 
 MODELS_DIR = Path("configs/models")
 
@@ -60,6 +64,20 @@ def judge_spec(slug: str) -> dict:
     return found[0]
 
 
+def easy_half_copy(path: str, easy_items: set[str], message_limit: int = 100) -> str:
+    """A copy of a candidate log holding only the easy-half items, filed under <collection>-easy-half."""
+    parts = list(Path(path).parts)
+    parts[2] += "-easy-half"
+    target = Path(*parts)
+    if not target.exists():
+        inputs = {str(sample.id): sample.input
+                  for sample in read_eval_log_samples(path, all_samples_required=False) if str(sample.id) in easy_items}
+        log = trim_log(Path(path), inputs, message_limit, read_eval_log(path, header_only=True).eval.task)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write_eval_log(log, str(target))
+    return str(target)
+
+
 def accuracy(path: str) -> float:
     metrics = read_eval_log(path, header_only=True).results.scores[0].metrics
     return next(metrics[key].value for key in ("accuracy", "mean") if key in metrics)
@@ -70,6 +88,9 @@ def main() -> None:
     parser.add_argument("--pairs", type=Path, default=Path("configs/frontier_pairs.yaml"))
     parser.add_argument("--log-root", default="logs/frontier")
     parser.add_argument("--out-prefix", default="configs/judge_frontier")
+    parser.add_argument("--judges", nargs="+", help="judge slugs to use instead of the config's list")
+    parser.add_argument("--easy-half", type=Path, help="easy-items CSV (bench,item): judge those items only, "
+                        "through easy-only copies of the candidate logs")
     parser.add_argument("--shards", type=int, default=1, help="split each per-judge config into this many files "
                         "(pairs dealt round-robin) so several runners can work side by side")
     parser.add_argument("--per-judge-dir", type=Path,
@@ -78,21 +99,29 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = yaml.safe_load(args.pairs.read_text())
+    if args.judges:
+        cfg["judges"] = args.judges
+    easy_items = pd.read_csv(args.easy_half) if args.easy_half else None
     dates = release_dates()
-    judge_release = pd.Timestamp(cfg["judge_release"])
+    judge_release = pd.Timestamp(cfg["judge_release"]) if cfg.get("judge_release") else None   # no rule without it
 
     for bench, pairs in cfg["pairs"].items():
         paths = transcript_paths(cfg, bench)
         used = sorted({model for model, opponents in pairs.items() for model in [model, *opponents]})
-        missing = [m for m in used if m not in paths or not Path(paths[m]).exists()]
+        missing = {m for m in used if m not in paths or not Path(paths[m]).exists()}
         if missing:
-            raise SystemExit(f"{bench}: no transcript log for {missing}")
+            print(f"{bench}: no transcript log for {sorted(missing)}; their pairs are dropped")
+            pairs = {m: [o for o in opponents if o not in missing] for m, opponents in pairs.items() if m not in missing}
+            used = [m for m in used if m not in missing]
         accuracies = {m: accuracy(paths[m]) for m in used}
+        if easy_items is not None:
+            bench_easy = set(easy_items[easy_items.bench == bench].item.astype(str))
+            paths = {m: easy_half_copy(paths[m], bench_easy) for m in used}
 
         comparisons = []
         for model, opponents in pairs.items():
             for opponent in opponents:
-                if dates[model] > judge_release and dates[opponent] >= dates[model]:
+                if judge_release is not None and dates[model] > judge_release and dates[opponent] >= dates[model]:
                     raise SystemExit(f"{bench}: {model} ({dates[model].date()}) released after the judge "
                                      f"may only meet earlier models; {opponent} is {dates[opponent].date()}")
                 major, minor = sorted([model, opponent], key=lambda m: -accuracies[m])

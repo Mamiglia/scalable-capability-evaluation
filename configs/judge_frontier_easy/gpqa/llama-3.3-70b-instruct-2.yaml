@@ -1,0 +1,89 @@
+log_root: logs/frontier-easy/gpqa
+transcripts:
+  claude-3-opus: data/gpqa/a288e1a9-easy-half/claude-3-opus/0/claude-3-opus-20240229.eval
+  claude-3.5-sonnet-0620: data/gpqa/a288e1a9-easy-half/claude-3.5-sonnet-0620/0/claude-3-5-sonnet-20240620.eval
+  claude-opus-4.7: data/gpqa/b0a0d9c9-easy-half/claude-opus-4.7/0/2026-08-14T15-17-19-00-00_gpqa-diamond_4HT6PobhEXYjr9z7zCj89C.eval
+  claude-opus-5: data/gpqa/a288e1a9-easy-half/claude-opus-5/0/claude-opus-5.eval
+  claude-sonnet-4.5: data/gpqa/b0a0d9c9-easy-half/claude-sonnet-4.5/0/2026-08-11T14-30-58-00-00_gpqa-diamond_2q5ksicxaEiKJhKvriJEct.eval
+  deepseek-r1-0528: data/gpqa/b0a0d9c9-easy-half/deepseek-r1-0528/0/2026-08-21T09-33-10-00-00_gpqa-diamond_er69b5WxUZKX2muDcJZ5jD.eval
+  deepseek-v3.2: data/gpqa/b0a0d9c9-easy-half/deepseek-v3.2/0/2026-08-19T19-29-50-00-00_gpqa-diamond_QeLSTDeesS23WkQXhrK7D8.eval
+  gemini-2.5-pro: data/gpqa/a288e1a9-easy-half/gemini-2.5-pro/0/gemini-2.5-pro.eval
+  gemini-2.5-pro-exp-0325: data/gpqa/a288e1a9-easy-half/gemini-2.5-pro-exp-0325/0/gemini-2.5-pro-exp-03-25.eval
+  gemini-3-pro-preview: data/gpqa/a288e1a9-easy-half/gemini-3-pro-preview/0/gemini-3-pro-preview.eval
+  gemini-3.1-pro-high: data/gpqa/a288e1a9-easy-half/gemini-3.1-pro-high/0/gemini-3.1-pro-preview_high.eval
+  gemini-3.5-flash: data/gpqa/b0a0d9c9-easy-half/gemini-3.5-flash/0/2026-08-11T14-31-09-00-00_gpqa-diamond_HWFSnd2EScAHXFBnG2x3Tz.eval
+  gemma3-12b-it: data/gpqa/b0a0d9c9-easy-half/gemma-3-12b-it/0/2026-08-12T14-22-19-00-00_gpqa-diamond_TVoY7XMmkaPqQ6JycP27Vv.eval
+  glm-4.6: data/gpqa/b0a0d9c9-easy-half/glm-4.6/0/2026-08-13T11-02-11-00-00_gpqa-diamond_aGhTX5x8f799yPZ7geiKHr.eval
+  glm-5.2: data/gpqa/b0a0d9c9-easy-half/glm-5.2/0/2026-08-11T14-31-10-00-00_gpqa-diamond_75dQtbTHvFMo9pU8G2xpRL.eval
+  glm-5.3: data/gpqa/b0a0d9c9-easy-half/glm-5.3/0/2026-08-19T22-42-35-00-00_gpqa-diamond_g96MkRM8ecL7ALTJb37ngS.eval
+  gpt-4-1106: data/gpqa/a288e1a9-easy-half/gpt-4-1106/0/gpt-4-1106-preview.eval
+  gpt-4.1: data/gpqa/b0a0d9c9-easy-half/gpt-4.1/0/2026-08-13T09-58-25-00-00_gpqa-diamond_4iP4ZHa5PGgenVYVByizR2.eval
+  gpt-5: data/gpqa/b0a0d9c9-easy-half/gpt-5/0/2026-08-11T14-31-09-00-00_gpqa-diamond_9WinP5zw8GgQXvvJgx49Nk.eval
+  gpt-5-high: data/gpqa/a288e1a9-easy-half/gpt-5-high/0/gpt-5-2025-08-07_high.eval
+  gpt-5.5-xhigh: data/gpqa/a288e1a9-easy-half/gpt-5.5-xhigh/0/gpt-5.5-pre-release_xhigh.eval
+  kimi-k2.6: data/gpqa/b0a0d9c9-easy-half/kimi-k2.6/0/LjgJoDosTLkiGVT59smA7q.eval
+  kimi-k3: data/gpqa/b0a0d9c9-easy-half/kimi-k3/0/2026-08-12T14-22-20-00-00_gpqa-diamond_HG9QEEJBeoTCGpPwxNXZWX.eval
+  mistral-medium-3: data/gpqa/b0a0d9c9-easy-half/mistral-medium-3/0/2026-08-11T14-31-08-00-00_gpqa-diamond_mrxWhg6S5wT5nSn3qe2Wxi.eval
+  nemotron-3-ultra-550b-a55b: data/gpqa/b0a0d9c9-easy-half/nvidia-nemotron-3-ultra-550b-a55b-bf16/0/2026-08-21T09-51-03-00-00_gpqa-diamond_5gmpBm6Lk4wSnAFLU7nTzY.eval
+  o1-high: data/gpqa/a288e1a9-easy-half/o1-high/0/o1-2024-12-17_high.eval
+  o1-mini-high: data/gpqa/a288e1a9-easy-half/o1-mini-high/0/o1-mini-2024-09-12_high.eval
+  o3: data/gpqa/b0a0d9c9-easy-half/o3/0/2026-08-11T14-31-03-00-00_gpqa-diamond_dCwsQoaEeS7WA45UyfMbJD.eval
+  qwen3-32b: data/gpqa/b0a0d9c9-easy-half/qwen3-32b/0/2026-08-13T11-02-11-00-00_gpqa-diamond_8RphQCTbQjQXu6Rn3dYv8L.eval
+  qwen3.5-4b: data/gpqa/b0a0d9c9-easy-half/qwen3.5-4b/0/2026-08-14T09-33-52-00-00_gpqa-diamond_MdjLpP5FeXJxH9wfVXMjqd.eval
+  qwen3.5-9b: data/gpqa/b0a0d9c9-easy-half/qwen3.5-9b/0/2026-08-11T21-35-30-00-00_gpqa-diamond_GbdZokJZdZbnKUZZnQTQj6.eval
+comparisons:
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - gpt-4.1
+  - gpt-4-1106
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - qwen3-32b
+  - claude-3-opus
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - o1-high
+  - o1-mini-high
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - deepseek-r1-0528
+  - o1-high
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - gemini-2.5-pro-exp-0325
+  - deepseek-r1-0528
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - gemini-2.5-pro
+  - deepseek-r1-0528
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - gpt-5-high
+  - deepseek-r1-0528
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - gemini-3-pro-preview
+  - gemini-2.5-pro
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - gemini-3.1-pro-high
+  - gemini-3-pro-preview
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - gemini-3.1-pro-high
+  - gpt-5-high
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - gpt-5.5-xhigh
+  - gemini-3.1-pro-high
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - gpt-5.5-xhigh
+  - gemini-3-pro-preview
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - gemini-3.5-flash
+  - kimi-k3
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - claude-opus-5
+  - gemini-3.5-flash
+- - openrouter/meta-llama/llama-3.3-70b-instruct
+  - claude-opus-5
+  - glm-5.3
+judge_model_args:
+  openrouter/meta-llama/llama-3.3-70b-instruct:
+    provider:
+      only:
+      - crusoe/bf16
+      allow_fallbacks: false
+      quantizations:
+      - bf16
+generate_args:
+  max_tokens: 4096

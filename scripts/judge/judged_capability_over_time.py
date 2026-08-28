@@ -234,6 +234,8 @@ def main():
     parser.add_argument("--earlier-opponents-only", action="store_true",
                         help="models released after the reference judge keep only verdicts against models released before themselves")
     parser.add_argument("--reference-judge", help="judge whose release date the pairing rule refers to (default: --judge)")
+    parser.add_argument("--easy-items", type=Path, help="CSV (bench,item) fixing the easy half; default splits "
+                        "the loaded rollouts in two by item accuracy")
     parser.add_argument("--tables", type=Path, help="directory with verdicts.parquet and rollouts.parquet from "
                         "verdict_tables.py; default is the verdict-dissection store")
     args = parser.parse_args()
@@ -248,6 +250,9 @@ def main():
     if args.earlier_opponents_only:
         verdicts = earlier_opponents_only(verdicts, dates, dates[slug(args.reference_judge or args.judge)])
     easy = split_items(rollouts)
+    if args.easy_items:
+        listed = pd.read_csv(args.easy_items, dtype=str).set_index(["bench", "item"]).index
+        easy = pd.Series(easy.index.isin(listed), index=easy.index)
     rollout_is_easy = easy.reindex(pd.MultiIndex.from_frame(rollouts[["bench", "item"]])).to_numpy()
     easy_rollouts, hard_rollouts = rollouts[rollout_is_easy], rollouts[~rollout_is_easy]
     easy_verdicts = verdicts[easy.reindex(pd.MultiIndex.from_frame(verdicts[["bench", "item"]])).to_numpy()]
