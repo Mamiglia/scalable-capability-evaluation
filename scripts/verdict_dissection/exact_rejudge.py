@@ -637,8 +637,6 @@ def _result_rows(log_root: Path) -> dict[str, dict]:
         on_runpod = str(log.eval.model).startswith("openai-api/runpod/")
         for sample in log.samples or []:
             sample_id = str(sample.id)
-            if sample_id in results:
-                raise ValueError(f"duplicate output for {sample_id}")
             score = (sample.scores or {}).get("judge_scorer")
             if score is None and sample.scores:
                 score = next(iter(sample.scores.values()))
@@ -658,7 +656,7 @@ def _result_rows(log_root: Path) -> dict[str, dict]:
             raw_usage = response.get("usage") or {}
             output_usage = _as_jsonable(getattr(getattr(sample, "output", None), "usage", None)) or {}
             usage = raw_usage | output_usage if isinstance(raw_usage, dict) and isinstance(output_usage, dict) else output_usage
-            results[sample_id] = {
+            result = {
                 "repeated_verdict": answer,
                 "confidence": metadata.get("confidence"),
                 "explanation": getattr(score, "explanation", None),
@@ -678,6 +676,19 @@ def _result_rows(log_root: Path) -> dict[str, dict]:
                 "cost_usd": raw_usage.get("cost") if isinstance(raw_usage, dict) else None,
                 "log_path": str(path),
             }
+            if sample_id in results:
+                previous = results[sample_id]
+                if previous["paid_generation_count"] and result["paid_generation_count"]:
+                    raise ValueError(f"duplicate paid output for {sample_id}")
+                calls = result["model_call_count"] + previous["model_call_count"]
+                paid = result["paid_generation_count"] + previous["paid_generation_count"]
+                errors = (int(result["status"] == "error") + int(previous["status"] == "error")
+                          + int(previous.get("prior_error_count", 0)))
+                if previous["paid_generation_count"]:
+                    result = previous.copy()
+                result |= {"model_call_count": calls, "paid_generation_count": paid,
+                           "prior_error_count": errors}
+            results[sample_id] = result
     return results
 
 
@@ -824,7 +835,7 @@ The six judge-specific run commands were executed in parallel. Smoke rows are te
 - RunPod cost: ${runpod_cost:.11f}.
 - Exact total paid cost: ${rejudgments.cost_usd.sum() + runpod_cost:.11f}.
 
-DeepSeek R1's current `max_tokens=147456` leaves only 16,384 tokens for input on its 163,840-token SiliconFlow endpoint. This caused long SWE inputs to fail with HTTP 400; those rows were not retried and count as primary non-agreement.
+DeepSeek R1's current `max_tokens=147456` initially caused 86 unpaid SWE HTTP-400 failures. Only those rows were completed with `max_tokens=16384`; the 14 original paid SWE judgments were untouched. Pre-repair artifacts are retained as `*_pre_r1_repair.*`.
 
 ## Provenance and caveats
 
