@@ -97,6 +97,7 @@ def judge_verdict_from_pair(pair, predictors, design):
     return pd.DataFrame({
         "bench": pair.bench, "item": pair.item, "judge": pair.judge,
         "model_left": pair.model_left, "model_right": pair.model_right,
+        "epoch_left": pair.epoch_left, "epoch_right": pair.epoch_right, "log_left": pair.log_left, "log_right": pair.log_right,
         "pick_left": pair.pick_left, "accuracy_difference": pair.accuracy_left - pair.accuracy_right,
         "role": held_out(design, pair.bench, pair.item, pair.model_left, pair.model_right),
     }).join(_bare_names(pair, predictors))
@@ -136,10 +137,12 @@ def main():
     parser.add_argument("--models", nargs="+", default=["capability_from_transcript", "stronger_model_from_pair", "judge_verdict_from_pair"])
     parser.add_argument("--dense", action="store_true", help="add the 2,560 dense embedding columns (qwen_dim_*) as predictors")
     parser.add_argument("--sides", action="store_true", help="judge tables also carry each side's own features as <feature>_left / _right")
+    parser.add_argument("--predictors", type=Path, default=HERE / "predictors.yaml", help="predictor list to carry into the tables")
+    parser.add_argument("--config", type=Path, default=ROOT / "configs/design_matrices.yaml", help="design-matrix config (names the matrices' directory)")
     args = parser.parse_args()
-    config = yaml.safe_load((ROOT / "configs/design_matrices.yaml").read_text())
+    config = yaml.safe_load(args.config.read_text())
     design_matrices = Path(config["output_root"])
-    predictors = yaml.safe_load((HERE / "predictors.yaml").read_text())
+    predictors = yaml.safe_load(args.predictors.read_text())
 
     transcript = pd.read_parquet(design_matrices / "transcript.parquet")
     if args.dense:

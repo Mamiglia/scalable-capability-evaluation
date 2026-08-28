@@ -58,12 +58,18 @@ def search(x, y, groups, n_categorical, rng):
     return best, best_score
 
 
+def side_columns(table, feature_names):
+    """<feature>_left and _right where the table has them; pair-level features (no sides) enter once."""
+    sided = [f for f in feature_names if f"{f}_left" in table]
+    return [f"{f}_{side}" for side in ("left", "right") for f in sided] + [f for f in feature_names if f not in sided]
+
+
 def permutation_importance(model, x, y, judges, feature_names, features, rng):
-    """Accuracy lost per feature when its left and right columns are shuffled together, per judge and overall."""
+    """Accuracy lost per feature when its columns (left and right together, or the pair-level column) are shuffled, per judge and overall."""
     base = model.predict(x) == y
     rows = []
     for name in feature_names:
-        columns = [features.index(f"{name}_left"), features.index(f"{name}_right")]
+        columns = [features.index(c) for c in (f"{name}_left", f"{name}_right", name) if c in features]
         shuffled = x.copy()
         order = rng.permutation(len(x))
         shuffled[:, columns] = x[order][:, columns]
@@ -75,7 +81,7 @@ def permutation_importance(model, x, y, judges, feature_names, features, rng):
 
 def run(table, feature_names, out_dir, per_judge, use_gap, seed=0):
     rng = np.random.default_rng(seed)
-    features = [f"{f}_{side}" for side in ("left", "right") for f in feature_names] + (["accuracy_difference"] if use_gap else [])
+    features = side_columns(table, feature_names) + (["accuracy_difference"] if use_gap else [])
     categorical = ["bench"] if per_judge else ["judge", "bench"]
     train, test = table[~table.test], table[table.test]
     predicted, params_rows = np.zeros(len(test)), []
@@ -111,8 +117,9 @@ def main():
     parser.add_argument("--wave", default="surface+sae+surprisal")
     parser.add_argument("--per-judge", action="store_true")
     parser.add_argument("--gap", action="store_true")
+    parser.add_argument("--predictors", type=Path, default=HERE / "predictors.yaml", help="predictor list (predictors-structure.yaml for the structure waves)")
     args = parser.parse_args()
-    feature_names = waves(yaml.safe_load((HERE / "predictors.yaml").read_text()))[args.wave]
+    feature_names = waves(yaml.safe_load(args.predictors.read_text()))[args.wave]
     name = args.wave + ("+accuracy-gap" if args.gap else "") + "+sides+gbm" + ("+per-judge" if args.per_judge else "")
     for design in args.designs:
         table = pd.read_parquet(args.inputs_dir / design / f"{MODEL}.parquet")

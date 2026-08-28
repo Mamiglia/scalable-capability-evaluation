@@ -26,7 +26,8 @@ KEYS = TRANSCRIPT_KEYS + ["sample_epoch", "content_hash"]
 PAIR_KEYS = ["bench", "judge", "item", "model_left", "model_right", "epoch_left", "epoch_right",
              "log_left", "log_right", "judge_log", "judge_sample", "judge_epoch", "pick_left"]
 STRUCTURE_COUNTS = ("assistant_turns|tool_calls|tool_errors|tool_outputs_empty|submit_calls|test_commands|repeated_tool_calls"
-                    "|distinct_tools|display_equations|inline_math|option_references|elimination_terms|bold_spans|headers")
+                    "|distinct_tools|display_equations|inline_math|option_references|elimination_terms|bold_spans|headers"
+                    "|reasoning_errors|unjustified_claims|redundant_steps|self_corrections|wasted_actions")
 EXTENSIVE = re.compile(rf"^(?!.*gain)(n_words|.*_count|.*_chars|.*_sum|surprisal_(full|noq|local)|{STRUCTURE_COUNTS})(__\w+)?$")
 DEVELOPMENT = {"representation_train", "representation_validation"}
 
