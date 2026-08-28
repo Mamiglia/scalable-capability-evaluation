@@ -58,7 +58,9 @@ def test_hibayes_prior_scales_are_explicit_positive_config() -> None:
         config.mcmc_max_tree_depth,
         config.mcmc_init_strategy,
         config.mcmc_chain_method,
-    ) == ("NUTS", 0.85, 10, "median", "parallel")
+        config.mcmc_device_type,
+        config.mcmc_gpu_memory_fraction,
+    ) == ("NUTS", 0.85, 10, "median", "parallel", "cpu", 0.9)
     assert {
         config.hibayes_population_prior_scale,
         config.hibayes_judge_prior_scale,
@@ -82,6 +84,8 @@ def test_hibayes_prior_scales_are_explicit_positive_config() -> None:
     ({"mcmc_max_tree_depth": 0}, "mcmc_max_tree_depth"),
     ({"mcmc_init_strategy": "zero"}, "mcmc_init_strategy"),
     ({"mcmc_chain_method": "threaded"}, "mcmc_chain_method"),
+    ({"mcmc_device_type": "metal"}, "mcmc_device_type"),
+    ({"mcmc_gpu_memory_fraction": 1.1}, "mcmc_gpu_memory_fraction"),
 ])
 def test_hibayes_mcmc_config_rejects_invalid_choices(update, match: str) -> None:
     with pytest.raises(ValueError, match=match):
@@ -117,6 +121,8 @@ def test_write_hibayes_job_uses_selected_features_and_fold_inputs(tmp_path: Path
         mcmc_max_tree_depth=7,
         mcmc_init_strategy="mean",
         mcmc_chain_method="sequential",
+        mcmc_device_type="gpu",
+        mcmc_gpu_memory_fraction=0.8,
     ).validate()
 
     job_dir = write_hibayes_job(
@@ -150,7 +156,9 @@ def test_write_hibayes_job_uses_selected_features_and_fold_inputs(tmp_path: Path
         "max_tree_depth": 7,
         "init_strategy": "mean",
     }
-    assert job["platform"]["chain_method"] == "sequential"
+    assert job["platform"] == {
+        "device_type": "gpu", "gpu_memory_fraction": 0.8, "chain_method": "sequential"
+    }
 
 
 def test_evaluate_hibayes_uses_saved_draws_without_sampling(tmp_path: Path, monkeypatch) -> None:

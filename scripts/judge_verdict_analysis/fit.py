@@ -31,6 +31,8 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "model_folds": [[name, list(models)] for name, models in config.model_folds],
         "item_folds": config.item_folds,
         "inner_folds": config.inner_folds,
+        "fit_n_jobs": config.fit_n_jobs,
+        "resume_completed_folds": config.resume_completed_folds,
         "elastic_net_cs": list(config.elastic_net_cs),
         "elastic_net_l1_ratios": list(config.elastic_net_l1_ratios),
         "selection_min_fold_share": config.selection_min_fold_share,
@@ -50,6 +52,8 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "mcmc_max_tree_depth": config.mcmc_max_tree_depth,
         "mcmc_init_strategy": config.mcmc_init_strategy,
         "mcmc_chain_method": config.mcmc_chain_method,
+        "mcmc_device_type": config.mcmc_device_type,
+        "mcmc_gpu_memory_fraction": config.mcmc_gpu_memory_fraction,
         "hibayes_population_prior_scale": config.hibayes_population_prior_scale,
         "hibayes_judge_prior_scale": config.hibayes_judge_prior_scale,
         "hibayes_benchmark_prior_scale": config.hibayes_benchmark_prior_scale,
@@ -161,6 +165,19 @@ def _load_rows(config: AnalysisConfig) -> tuple[pd.DataFrame, list[str]]:
     return rows, features
 
 
+def _resume_existing(
+    output: Path, required: tuple[str, ...], config: AnalysisConfig
+) -> bool:
+    """Skip a complete output only when explicit resume mode is enabled."""
+    if not output.exists():
+        return False
+    if not config.resume_completed_folds:
+        raise FileExistsError(f"refusing to overwrite {output}")
+    if missing := [name for name in required if not (output / name).exists()]:
+        raise RuntimeError(f"cannot resume partial output {output}; missing {missing}")
+    return True
+
+
 def _outer_folds(frame: pd.DataFrame, config: AnalysisConfig):
     for model_name, models in config.model_folds:
         for item_fold in range(config.item_folds):
@@ -261,20 +278,37 @@ def run_fits(config: AnalysisConfig = CONFIG) -> None:
     rows, features = _load_rows(config)
 
     for fold, train, test in _outer_folds(rows, config):
-        frequentist = None
+        selected: list[str] | None = None
+        tuning: pd.DataFrame | None = None
         if "frequentist" in config.fit_backends:
-            frequentist = fit_frequentist(train, test, features, config)
-            _write_result(frequentist, train, test, config)
+            output = config.fit_dir / "frequentist" / fold
+            if _resume_existing(output, ARTIFACTS, config):
+                selected = pd.read_csv(output / "selection.csv").feature.tolist()
+                tuning = pd.read_csv(output / "tuning.csv")
+            else:
+                frequentist = fit_frequentist(train, test, features, config)
+                _write_result(frequentist, train, test, config)
+                selected = list(frequentist.selected_features)
+                tuning = frequentist.tuning
         if "hibayes" in config.fit_backends:
             if config.hibayes_action == "prepare":
-                if frequentist is None:
+                output = config.fit_dir / "hibayes" / fold
+                if _resume_existing(output, (
+                    "config.yaml", "train.parquet", "test.parquet",
+                    "screen-selection.csv", "screen-tuning.csv", "manifest.json",
+                ), config):
+                    continue
+                if selected is None or tuning is None:
                     selected, tuning = select_features(
                         train, features, config, HierarchyLevels.from_training(train)
                     )
-                else:
-                    selected, tuning = list(frequentist.selected_features), frequentist.tuning
                 _prepare_hibayes(fold, train, test, selected, tuning, config)
             else:
+                output = config.fit_dir / "hibayes" / fold
+                if config.resume_completed_folds and all(
+                    (output / name).exists() for name in ARTIFACTS
+                ):
+                    continue
                 result = evaluate_hibayes(config.fit_dir / "hibayes" / fold, test, config)
                 _write_result(result, train, test, config, existing_job=True)
 

@@ -7,6 +7,8 @@ from typing import Self
 
 
 ROOT: Path = Path(__file__).resolve().parents[2]  # Repository root used to make every default path absolute.
+DEFAULT_RESULTS_DIR = ROOT / "judge_results/verdict_interpretability/readable-eda-20260828"
+DEFAULT_PROCESSED_MATRIX_ROOT = ROOT / "judge_results/capability_predictions_glm/no-common-support/design-matrix"
 
 # Readable blocks used by EDA/PCA unless a command overrides ``--blocks``.
 # Opaque/high-dimensional blocks (embedding-dense, transcript/clause SAEs,
@@ -35,7 +37,8 @@ JUDGES: tuple[str, ...] = (
 @dataclass(frozen=True)
 class AnalysisConfig:
     design_matrix_config: Path = ROOT / "configs/design_matrices.yaml"  # Existing matrix/source-path config.
-    results_dir: Path = ROOT / "judge_results/verdict_interpretability/readable-eda-20260828"  # Canonical output root.
+    results_dir: Path = DEFAULT_RESULTS_DIR  # Canonical output root.
+    processed_matrix_root: Path | None = None  # Explicit override; production defaults to the shared 117-feature matrix.
     source_hf_repo: str = "LASR-G5/judging"  # Hugging Face repository used to build the source matrix.
     source_hf_revision: str = ""  # Required full commit SHA for non-test fitting; empty keeps schema fixtures unresolved.
     require_pinned_source_for_fit: bool = True  # Refuse non-local fits unless the source matrix matches this pin.
@@ -60,7 +63,7 @@ class AnalysisConfig:
     correlation_method: str = "pearson"  # Correlation statistic used for readable-feature grouping.
     correlation_threshold: float = 0.8  # |r| cutoff for correlated pairs and feature groups.
     correlation_transitive: bool = False  # Require every cross-group pair to pass the cutoff.
-    common_support: bool = True  # Retain features variable in every benchmark's support split.
+    common_support: bool = False  # Keep domain-specific features for benchmark-specific slopes.
     support_splits: tuple[str, ...] = ("representation_train",)  # Splits used for common-support checks.
     representative_rule: str = "shortest_name"  # Initial readable-feature representative policy.
     representative_overrides: tuple[tuple[str, str], ...] = ()  # (group ID, retained feature) exceptions.
@@ -92,6 +95,8 @@ class AnalysisConfig:
                           "qwen3.5-9b", "gemma-4-e2b-it")),
     )  # Strict new-model folds, copied here so fitting owns no cross-package defaults.
     inner_folds: int = 3  # Grouped folds used to tune each outer frequentist fit.
+    fit_n_jobs: int = 2  # Concurrent hyperparameter evaluations within each outer fit.
+    resume_completed_folds: bool = False  # Skip complete atomic fold outputs when resuming a remote run.
     elastic_net_cs: tuple[float, ...] = (0.01, 0.1, 1.0, 10.0)  # Elastic-net inverse penalties.
     elastic_net_l1_ratios: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)  # Elastic-net L1 shares.
     selection_min_fold_share: float = 2 / 3  # Inner-fold share required to retain a base feature.
@@ -117,6 +122,8 @@ class AnalysisConfig:
     mcmc_max_tree_depth: int = 10  # NUTS tree-depth ceiling.
     mcmc_init_strategy: str = "median"  # HiBayes parameter initialisation strategy.
     mcmc_chain_method: str = "parallel"  # NumPyro chain execution method.
+    mcmc_device_type: str = "cpu"  # HiBayes execution device: CPU locally, GPU on an approved pod.
+    mcmc_gpu_memory_fraction: float = 0.9  # Maximum fraction of GPU memory exposed to JAX.
     hibayes_population_prior_scale: float = 0.5  # Population intercept/slope Normal scale.
     hibayes_judge_prior_scale: float = 0.5  # HalfNormal scale for judge deviations.
     hibayes_benchmark_prior_scale: float = 0.5  # HalfNormal scale for benchmark deviations.
@@ -141,7 +148,10 @@ class AnalysisConfig:
     @property
     def processed_matrix_dir(self) -> Path:
         """Directory for the rebuilt readable-feature design matrix."""
-        return self.results_dir / "design-matrix"
+        if self.processed_matrix_root is not None:
+            return self.processed_matrix_root
+        return (DEFAULT_PROCESSED_MATRIX_ROOT if self.results_dir == DEFAULT_RESULTS_DIR
+                else self.results_dir / "design-matrix")
 
     @property
     def processed_matrix_config(self) -> Path:
@@ -184,6 +194,7 @@ class AnalysisConfig:
             "item_folds": self.item_folds,
             "local_test_max_rows": self.local_test_max_rows,
             "inner_folds": self.inner_folds,
+            "fit_n_jobs": self.fit_n_jobs,
             "glm_max_iter": self.glm_max_iter,
             "glm_c": self.glm_c,
             "bootstrap_iterations": self.bootstrap_iterations,
@@ -210,6 +221,10 @@ class AnalysisConfig:
             raise ValueError("mcmc_init_strategy must be 'median', 'mean', or 'uniform'")
         if self.mcmc_chain_method not in {"parallel", "sequential", "vectorized"}:
             raise ValueError("mcmc_chain_method must be 'parallel', 'sequential', or 'vectorized'")
+        if self.mcmc_device_type not in {"cpu", "gpu"}:
+            raise ValueError("mcmc_device_type must be 'cpu' or 'gpu'")
+        if not isfinite(self.mcmc_gpu_memory_fraction) or not 0.1 <= self.mcmc_gpu_memory_fraction <= 1:
+            raise ValueError("mcmc_gpu_memory_fraction must be between 0.1 and 1")
         if not 0 <= self.correlation_threshold <= 1:
             raise ValueError("correlation_threshold must be between 0 and 1")
         if self.correlation_method not in {"pearson", "spearman"}:

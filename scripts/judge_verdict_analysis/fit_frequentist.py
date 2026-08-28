@@ -1,7 +1,10 @@
 """Grouped elastic-net screening and hierarchical ridge refitting."""
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from itertools import product
+from typing import TypeVar
 
 import numpy as np
 import pandas as pd
@@ -12,6 +15,10 @@ from sklearn.model_selection import GroupKFold
 from .config import AnalysisConfig
 from .fit_common import FitResult
 from .hierarchy import HierarchyLevels, effective_coefficients, hierarchical_design
+
+
+Input = TypeVar("Input")
+Output = TypeVar("Output")
 
 
 def _penalties(config: AnalysisConfig) -> dict[str, float]:
@@ -62,6 +69,14 @@ def _designs(
     return fit_x, check_x, column_map
 
 
+def _parallel_map(
+    function: Callable[[Input], Output], values: Iterable[Input], n_jobs: int
+) -> list[Output]:
+    """Apply independent fit tasks concurrently while preserving input order."""
+    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+        return list(executor.map(function, values))
+
+
 def select_features(
     train: pd.DataFrame,
     features: list[str],
@@ -71,30 +86,38 @@ def select_features(
     """Tune a grouped elastic-net screen and retain stable base features."""
     splits = _splits(train, config)
     y = train["pick_left"].to_numpy(dtype=int)
+    designs = [
+        (fit_rows, check_rows, *_designs(
+            train, fit_rows, check_rows, features, levels, config))
+        for fit_rows, check_rows in splits
+    ]
     rows: list[dict[str, object]] = []
-    best: tuple[float, float] | None = None
-    best_loss = np.inf
-    for c, l1_ratio in product(config.elastic_net_cs, config.elastic_net_l1_ratios):
+
+    def score(parameters: tuple[float, float]) -> tuple[float, float, float]:
+        c, l1_ratio = parameters
         losses = []
-        for fit_rows, check_rows in splits:
-            fit_x, check_x, _ = _designs(
-                train, fit_rows, check_rows, features, levels, config)
+        for fit_rows, check_rows, fit_x, check_x, _ in designs:
             model = _model(config, c=c, l1_ratio=l1_ratio).fit(fit_x, y[fit_rows])
             losses.append(log_loss(
                 y[check_rows], model.predict_proba(check_x)[:, 1], labels=[0, 1]))
-        mean_loss = float(np.mean(losses))
+        return c, l1_ratio, float(np.mean(losses))
+
+    scores = _parallel_map(
+        score, list(product(config.elastic_net_cs, config.elastic_net_l1_ratios)),
+        config.fit_n_jobs,
+    )
+    best_c, best_l1_ratio, _ = min(scores, key=lambda result: result[2])
+    best = (best_c, best_l1_ratio)
+    for c, l1_ratio, mean_loss in scores:
         rows.append({
             "stage": "elastic_net", "record_type": "tuning", "C": c,
             "l1_ratio": l1_ratio, "mean_log_loss": mean_loss,
         })
-        if mean_loss < best_loss:
-            best, best_loss = (c, l1_ratio), mean_loss
 
-    assert best is not None
     counts = dict.fromkeys(features, 0)
-    for fit_rows, check_rows in splits:
-        fit_x, _, column_map = _designs(
-            train, fit_rows, check_rows, features, levels, config)
+
+    def active_features(design) -> set[str]:
+        fit_rows, _, fit_x, _, column_map = design
         coefficients = _model(config, c=best[0], l1_ratio=best[1]).fit(
             fit_x, y[fit_rows]).coef_[0]
         active = column_map.loc[
@@ -103,7 +126,10 @@ def select_features(
             & (coefficients != 0),
             "feature",
         ]
-        for feature in set(active.dropna()):
+        return set(active.dropna())
+
+    for active in _parallel_map(active_features, designs, config.fit_n_jobs):
+        for feature in active:
             counts[feature] += 1
 
     selected = [
@@ -136,25 +162,26 @@ def tune_ridge(
     levels = levels or HierarchyLevels.from_training(train)
     splits = _splits(train, config)
     y = train["pick_left"].to_numpy(dtype=int)
-    rows = []
-    best_c = None
-    best_loss = np.inf
-    for c in config.ridge_cs:
+    designs = [
+        (fit_rows, check_rows, *_designs(
+            train, fit_rows, check_rows, features, levels, config))
+        for fit_rows, check_rows in splits
+    ]
+
+    def score(c: float) -> tuple[float, float]:
         losses = []
-        for fit_rows, check_rows in splits:
-            fit_x, check_x, _ = _designs(
-                train, fit_rows, check_rows, features, levels, config)
+        for fit_rows, check_rows, fit_x, check_x, _ in designs:
             model = _model(config, c=c, l1_ratio=None).fit(fit_x, y[fit_rows])
             losses.append(log_loss(
                 y[check_rows], model.predict_proba(check_x)[:, 1], labels=[0, 1]))
-        mean_loss = float(np.mean(losses))
-        rows.append({
-            "stage": "ridge", "record_type": "tuning", "C": c,
-            "mean_log_loss": mean_loss,
-        })
-        if mean_loss < best_loss:
-            best_c, best_loss = c, mean_loss
-    assert best_c is not None
+        return c, float(np.mean(losses))
+
+    scores = _parallel_map(score, list(config.ridge_cs), config.fit_n_jobs)
+    best_c, _ = min(scores, key=lambda result: result[1])
+    rows = [
+        {"stage": "ridge", "record_type": "tuning", "C": c, "mean_log_loss": loss}
+        for c, loss in scores
+    ]
     tuning = pd.DataFrame(rows)
     tuning["selected"] = tuning.C == best_c
     return best_c, tuning
@@ -212,30 +239,8 @@ def fit_frequentist(
         raise ValueError("train and test must contain exactly one shared fold")
     levels = HierarchyLevels.from_training(train)
     selected, tuning = select_features(train, features, config, levels)
-    splits = _splits(train, config)
     y = train["pick_left"].to_numpy(dtype=int)
-
-    ridge_rows = []
-    best_c = None
-    best_loss = np.inf
-    for c in config.ridge_cs:
-        losses = []
-        for fit_rows, check_rows in splits:
-            fit_x, check_x, _ = _designs(
-                train, fit_rows, check_rows, selected, levels, config)
-            model = _model(config, c=c, l1_ratio=None).fit(fit_x, y[fit_rows])
-            losses.append(log_loss(
-                y[check_rows], model.predict_proba(check_x)[:, 1], labels=[0, 1]))
-        mean_loss = float(np.mean(losses))
-        ridge_rows.append({
-            "stage": "ridge", "record_type": "tuning", "C": c,
-            "mean_log_loss": mean_loss,
-        })
-        if mean_loss < best_loss:
-            best_c, best_loss = c, mean_loss
-    assert best_c is not None
-    ridge_tuning = pd.DataFrame(ridge_rows)
-    ridge_tuning["selected"] = ridge_tuning.C == best_c
+    best_c, ridge_tuning = tune_ridge(train, selected, config, levels)
     tuning = pd.concat([tuning, ridge_tuning], ignore_index=True, sort=False)
 
     penalties = _penalties(config)

@@ -19,7 +19,7 @@ def _processed_config(tmp_path: Path, manifest: dict[str, object]) -> Path:
     root = tmp_path / "processed"
     root.mkdir()
     (root / "manifest.json").write_text(json.dumps(manifest))
-    config = tmp_path / "matrix.yaml"
+    config = root / "design-matrix.yaml"
     config.write_text(yaml.safe_dump({"output_root": str(root)}))
     return config
 
@@ -73,8 +73,10 @@ def test_remote_fit_rejects_unpinned_or_mismatched_source_before_loading(
     tmp_path: Path, monkeypatch, revision: str, manifest: dict[str, str], error: str,
 ) -> None:
     """Fails if a remote fit can load processed rows before provenance agrees."""
+    processed_config = _processed_config(tmp_path, manifest)
     config = AnalysisConfig(
-        design_matrix_config=_processed_config(tmp_path, manifest), results_dir=tmp_path / "results",
+        design_matrix_config=processed_config, processed_matrix_root=processed_config.parent,
+        results_dir=tmp_path / "results",
         execution_mode="execute", execution_target="swc_hpc", source_hf_revision=revision,
     ).validate()
     monkeypatch.setattr(fit, "_active_remote_target", lambda _: True)
@@ -89,10 +91,11 @@ def test_local_test_allows_an_unresolved_synthetic_source(tmp_path: Path) -> Non
     root = tmp_path / "matrix"
     root.mkdir()
     pd.DataFrame({"value": [1]}).to_parquet(root / "pair.parquet", index=False)
-    config_path = tmp_path / "matrix.yaml"
+    config_path = root / "design-matrix.yaml"
     config_path.write_text(yaml.safe_dump({"output_root": str(root)}))
     config = AnalysisConfig(
-        design_matrix_config=config_path, results_dir=tmp_path / "results",
+        design_matrix_config=config_path, processed_matrix_root=root,
+        results_dir=tmp_path / "results",
         execution_mode="execute", execution_target="local_test", local_test_max_rows=1,
     ).validate()
 

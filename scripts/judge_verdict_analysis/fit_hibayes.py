@@ -188,7 +188,11 @@ def write_hibayes_job(
         },
         "check": {"checkers": ["divergences", "r_hat", "ess_bulk", "ess_tail", "bfmi"]},
         "communicate": {"communicators": ["summary_table"]},
-        "platform": {"device_type": "cpu", "chain_method": config.mcmc_chain_method},
+        "platform": {
+            "device_type": config.mcmc_device_type,
+            "gpu_memory_fraction": config.mcmc_gpu_memory_fraction,
+            "chain_method": config.mcmc_chain_method,
+        },
     }
     (job_dir / "config.yaml").write_text(yaml.safe_dump(job, sort_keys=False))
     return job_dir

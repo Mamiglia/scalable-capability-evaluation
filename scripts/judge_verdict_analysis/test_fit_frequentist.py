@@ -40,7 +40,12 @@ def test_sparse_signal_is_selected_and_refit_with_the_full_hierarchy() -> None:
         random_seed=4,
     )
 
-    result = fit_frequentist(train, test, ["signal", "noise"], config)
+    serial = fit_frequentist(
+        train, test, ["signal", "noise"], replace(config, fit_n_jobs=1)
+    )
+    result = fit_frequentist(
+        train, test, ["signal", "noise"], replace(config, fit_n_jobs=2)
+    )
 
     assert result.backend == "frequentist"
     assert result.fold == "synthetic"
@@ -54,3 +59,6 @@ def test_sparse_signal_is_selected_and_refit_with_the_full_hierarchy() -> None:
     assert set(result.tuning.stage) == {"elastic_net", "ridge"}
     assert set(result.metrics.metric) == {"accuracy", "log_loss"}
     assert np.isfinite(result.metrics.value).all()
+    assert result.selected_features == serial.selected_features
+    np.testing.assert_allclose(result.predictions.probability, serial.predictions.probability)
+    pd.testing.assert_frame_equal(result.tuning, serial.tuning)

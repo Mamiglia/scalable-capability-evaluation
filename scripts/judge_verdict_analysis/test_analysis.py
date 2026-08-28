@@ -102,6 +102,7 @@ def test_build_dm_writes_source_compatible_representative_matrix(tmp_path: Path)
         benchmarks=("a", "b"),
         correlation_threshold=0.8,
         correlation_transitive=False,
+        common_support=True,
     ).validate()
     outputs = build_design_matrix(settings)
 
@@ -156,6 +157,12 @@ def test_config_defaults_are_readable_and_validate_regressors(tmp_path: Path) ->
     assert CONFIG.pca_common_support
     assert CONFIG.pca_alignment == "stronger"
     assert CONFIG.correlation_threshold == 0.8
+    assert not CONFIG.common_support
+    assert CONFIG.fit_n_jobs == 2
+    assert not CONFIG.resume_completed_folds
+    assert CONFIG.processed_matrix_config == (
+        Path(__file__).resolve().parents[2]
+        / "judge_results/capability_predictions_glm/no-common-support/design-matrix/design-matrix.yaml")
     assert CONFIG.design_matrix_config.name == "design_matrices.yaml"
     assert CONFIG.data_dir == CONFIG.results_dir / "data"
     assert CONFIG.figure_dir == CONFIG.results_dir / "figures"
@@ -164,6 +171,8 @@ def test_config_defaults_are_readable_and_validate_regressors(tmp_path: Path) ->
         AnalysisConfig(glm_max_iter=0).validate()
     with pytest.raises(ValueError, match="correlation_threshold"):
         AnalysisConfig(correlation_threshold=1.1).validate()
+    with pytest.raises(ValueError, match="fit_n_jobs"):
+        AnalysisConfig(fit_n_jobs=0).validate()
 
     config = _matrix(tmp_path)
     table, dictionary = load_features(

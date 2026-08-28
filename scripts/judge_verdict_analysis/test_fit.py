@@ -1,4 +1,5 @@
 import ast
+from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -88,6 +89,7 @@ def test_local_synthetic_fit_writes_the_backend_fold_contract(tmp_path: Path) ->
     assert set(pd.read_parquet(fold / "predictions.parquet")) >= {"observed", "probability"}
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
         fit.run_fits(config)
+    fit.run_fits(replace(config, resume_completed_folds=True))
 
 
 def test_prepare_writes_remote_descriptors_without_loading_the_matrix(tmp_path: Path, monkeypatch) -> None:
