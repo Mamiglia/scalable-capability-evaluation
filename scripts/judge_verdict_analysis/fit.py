@@ -7,23 +7,28 @@ from pathlib import Path
 from tempfile import mkdtemp
 
 import pandas as pd
+import pyarrow.parquet as pq
+import yaml
 
 from .config import AnalysisConfig, CONFIG
 from .data import load_features
 from .fit_common import FitResult
-from .fit_frequentist import fit_frequentist
+from .fit_frequentist import fit_frequentist, select_features
 from .fit_hibayes import evaluate_hibayes, write_hibayes_job
-from .hierarchy import outer_roles
+from .hierarchy import HierarchyLevels, outer_roles
 
 
 ARTIFACTS = (
     "predictions.parquet", "metrics.csv", "coefficients.csv", "selection.csv",
     "tuning.csv", "diagnostics.json", "manifest.json",
 )
+_COMPLETED_ARTIFACTS = tuple(name for name in ARTIFACTS if name != "manifest.json")
 
 
 def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
     return {
+        "model_folds": [[name, list(models)] for name, models in config.model_folds],
+        "item_folds": config.item_folds,
         "inner_folds": config.inner_folds,
         "elastic_net_cs": list(config.elastic_net_cs),
         "elastic_net_l1_ratios": list(config.elastic_net_l1_ratios),
@@ -36,6 +41,19 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "glm_max_iter": config.glm_max_iter,
         "glm_c": config.glm_c,
         "random_seed": config.random_seed,
+        "mcmc_warmup": config.mcmc_warmup,
+        "mcmc_samples": config.mcmc_samples,
+        "mcmc_chains": config.mcmc_chains,
+        "mcmc_method": config.mcmc_method,
+        "mcmc_target_accept": config.mcmc_target_accept,
+        "mcmc_max_tree_depth": config.mcmc_max_tree_depth,
+        "mcmc_init_strategy": config.mcmc_init_strategy,
+        "mcmc_chain_method": config.mcmc_chain_method,
+        "hibayes_population_prior_scale": config.hibayes_population_prior_scale,
+        "hibayes_judge_prior_scale": config.hibayes_judge_prior_scale,
+        "hibayes_benchmark_prior_scale": config.hibayes_benchmark_prior_scale,
+        "hibayes_cell_prior_scale": config.hibayes_cell_prior_scale,
+        "hibayes_item_prior_scale": config.hibayes_item_prior_scale,
     }
 
 
@@ -45,15 +63,53 @@ def _active_remote_target(target: str) -> bool:
     return target == "runpod" and bool(os.environ.get("RUNPOD_POD_ID"))
 
 
-def _require_execution_target(config: AnalysisConfig) -> None:
+def _guard_execution(config: AnalysisConfig) -> None:
     if config.execution_mode != "execute":
         return
     if config.execution_target == "local_test":
+        values = yaml.safe_load(Path(config.design_matrix_config).read_text())
+        pair_path = Path(values["output_root"]) / "pair.parquet"
+        if pq.ParquetFile(pair_path).metadata.num_rows > config.local_test_max_rows:
+            raise RuntimeError("refusing local fit above local_test_max_rows; use SWC HPC or RunPod")
         return
     if not _active_remote_target(config.execution_target):
         raise RuntimeError(
             f"refusing heavy local fit; execute on configured {config.execution_target} target"
         )
+
+
+def _prepared_manifest(backend: str, fold: str, config: AnalysisConfig) -> dict[str, object]:
+    return {
+        "state": "prepared",
+        "backend": backend,
+        "fold": fold,
+        "target": config.execution_target,
+        "command": "python -m scripts.judge_verdict_analysis.fit",
+        "source_paths": {
+            "design_matrix_config": str(config.design_matrix_config),
+            "processed_matrix_dir": str(config.processed_matrix_dir),
+        },
+        "settings": _manifest_settings(config),
+    }
+
+
+def _write_descriptor(backend: str, fold: str, config: AnalysisConfig) -> None:
+    output = config.fit_dir / "prepared" / backend / fold
+    if output.exists():
+        raise FileExistsError(f"refusing to overwrite {output}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(mkdtemp(prefix=f".{fold}-", dir=output.parent))
+    try:
+        (stage / "manifest.json").write_text(
+            json.dumps(_prepared_manifest(backend, fold, config), indent=2, sort_keys=True) + "\n"
+        )
+        os.replace(stage, output)
+    except BaseException:
+        if stage.exists():
+            for path in stage.iterdir():
+                path.unlink()
+            stage.rmdir()
+        raise
 
 
 def _load_rows(config: AnalysisConfig) -> tuple[pd.DataFrame, list[str]]:
@@ -101,11 +157,12 @@ def _write_result(
     existing_job: bool = False,
 ) -> None:
     output = config.fit_dir / result.backend / result.fold
-    if output.exists() and (not existing_job or any((output / name).exists() for name in ARTIFACTS)):
+    if output.exists() and (not existing_job or any((output / name).exists() for name in _COMPLETED_ARTIFACTS)):
         raise FileExistsError(f"refusing to overwrite {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(mkdtemp(prefix=f".{result.fold}-", dir=output.parent))
     manifest = {
+        "state": "completed",
         "backend": result.backend, "fold": result.fold,
         "train_rows": len(train), "test_rows": len(test),
         "settings": _manifest_settings(config),
@@ -135,7 +192,12 @@ def _write_result(
 
 
 def _prepare_hibayes(
-    fold: str, train: pd.DataFrame, test: pd.DataFrame, features: list[str], config: AnalysisConfig
+    fold: str,
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    selected_features: list[str],
+    tuning: pd.DataFrame,
+    config: AnalysisConfig,
 ) -> None:
     output = config.fit_dir / "hibayes" / fold
     if output.exists():
@@ -145,7 +207,12 @@ def _prepare_hibayes(
         train_path, test_path = stage / "train.parquet", stage / "test.parquet"
         train.to_parquet(train_path, index=False)
         test.to_parquet(test_path, index=False)
-        write_hibayes_job(train_path, test_path, features, fold, config)
+        job_dir = write_hibayes_job(train_path, test_path, selected_features, fold, config)
+        pd.DataFrame({"feature": selected_features}).to_csv(job_dir / "screen-selection.csv", index=False)
+        tuning.to_csv(job_dir / "screen-tuning.csv", index=False)
+        manifest = _prepared_manifest("hibayes", fold, config)
+        manifest["selected_features"] = selected_features
+        (job_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     finally:
         for path in stage.iterdir():
             path.unlink()
@@ -155,19 +222,30 @@ def _prepare_hibayes(
 def run_fits(config: AnalysisConfig = CONFIG) -> None:
     """Run approved fits, or prepare external HiBayes jobs without sampling."""
     config = config.validate()
-    _require_execution_target(config)
+    if config.execution_mode == "prepare":
+        for backend in config.fit_backends:
+            for model_name, _ in config.model_folds:
+                for item_fold in range(config.item_folds):
+                    _write_descriptor(backend, f"{model_name}__item-{item_fold}", config)
+        return
+    _guard_execution(config)
     rows, features = _load_rows(config)
-    if config.execution_target == "local_test" and len(rows) > config.local_test_max_rows:
-        raise RuntimeError("refusing local fit above local_test_max_rows; use SWC HPC or RunPod")
 
     for fold, train, test in _outer_folds(rows, config):
-        for backend in config.fit_backends:
-            if backend == "frequentist":
-                if config.execution_mode == "execute":
-                    _write_result(fit_frequentist(train, test, features, config), train, test, config)
-            elif config.hibayes_action == "prepare":
-                _prepare_hibayes(fold, train, test, features, config)
-            elif config.execution_mode == "execute":
+        frequentist = None
+        if "frequentist" in config.fit_backends:
+            frequentist = fit_frequentist(train, test, features, config)
+            _write_result(frequentist, train, test, config)
+        if "hibayes" in config.fit_backends:
+            if config.hibayes_action == "prepare":
+                if frequentist is None:
+                    selected, tuning = select_features(
+                        train, features, config, HierarchyLevels.from_training(train)
+                    )
+                else:
+                    selected, tuning = list(frequentist.selected_features), frequentist.tuning
+                _prepare_hibayes(fold, train, test, selected, tuning, config)
+            else:
                 result = evaluate_hibayes(config.fit_dir / "hibayes" / fold, test, config)
                 _write_result(result, train, test, config, existing_job=True)
 

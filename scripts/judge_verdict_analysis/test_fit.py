@@ -13,7 +13,10 @@ from .fit_common import FitResult
 def _matrix(tmp_path: Path) -> Path:
     root = tmp_path / "matrix"
     root.mkdir()
-    pd.DataFrame([{"feature": "signal", "block": "surface"}]).to_parquet(
+    pd.DataFrame([
+        {"feature": "signal", "block": "surface"},
+        {"feature": "noise", "block": "surface"},
+    ]).to_parquet(
         root / "feature-dictionary.parquet", index=False
     )
     rows = []
@@ -25,7 +28,7 @@ def _matrix(tmp_path: Path) -> Path:
                     "bench": "b0", "judge": judge, "item": f"i{item_index}",
                     "model_left": model_left, "model_right": "seen",
                     "split": "representation_train", "pick_left": int(signal > 0),
-                    "d_signal": signal,
+                    "d_signal": signal, "d_noise": 0.0,
                 })
     pd.DataFrame(rows).to_parquet(root / "pair.parquet", index=False)
     config = tmp_path / "matrix.yaml"
@@ -62,6 +65,62 @@ def test_local_synthetic_fit_writes_the_backend_fold_contract(tmp_path: Path) ->
     assert set(pd.read_parquet(fold / "predictions.parquet")) >= {"observed", "probability"}
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
         fit.run_fits(config)
+
+
+def test_prepare_writes_remote_descriptors_without_loading_the_matrix(tmp_path: Path, monkeypatch) -> None:
+    """Fails if default laptop preparation reads or copies full pair data."""
+    config = AnalysisConfig(
+        design_matrix_config=tmp_path / "not-read.yaml", results_dir=tmp_path / "results",
+        model_folds=(("held-models", ("held",)),), item_folds=2,
+        fit_backends=("frequentist",),
+    ).validate()
+    monkeypatch.setattr(fit, "_load_rows", lambda _: pytest.fail("prepare loaded pair data"))
+
+    fit.run_fits(config)
+
+    descriptor = config.fit_dir / "prepared" / "frequentist" / "held-models__item-0"
+    assert sorted(path.name for path in descriptor.iterdir()) == ["manifest.json"]
+    manifest = json.loads((descriptor / "manifest.json").read_text())
+    assert manifest["state"] == "prepared"
+    assert manifest["target"] == "swc_hpc"
+    assert manifest["source_paths"]["design_matrix_config"] == str(config.design_matrix_config)
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        fit.run_fits(config)
+
+
+def test_local_test_limit_refuses_before_loading_pair_rows(tmp_path: Path, monkeypatch) -> None:
+    """Fails if an oversized local test reads the full pair matrix before refusing."""
+    config = AnalysisConfig(
+        design_matrix_config=_matrix(tmp_path), results_dir=tmp_path / "results",
+        feature_blocks=("surface",), judges=("j0", "j1"), benchmarks=("b0",),
+        model_folds=(("held-models", ("held",)),), item_folds=2,
+        execution_mode="execute", execution_target="local_test", local_test_max_rows=1,
+    ).validate()
+    monkeypatch.setattr(fit, "_load_rows", lambda _: pytest.fail("oversized local test loaded pair rows"))
+
+    with pytest.raises(RuntimeError, match="local_test_max_rows"):
+        fit.run_fits(config)
+
+
+def test_hibayes_job_uses_the_fold_local_frequentist_selection(tmp_path: Path, monkeypatch) -> None:
+    """Fails if HiBayes is handed every processed feature instead of the screen."""
+    config = AnalysisConfig(
+        design_matrix_config=_matrix(tmp_path), results_dir=tmp_path / "results",
+        feature_blocks=("surface",), judges=("j0", "j1"), benchmarks=("b0",),
+        fit_backends=("hibayes",), hibayes_action="prepare",
+        model_folds=(("held-models", ("held",)),), item_folds=2,
+        execution_mode="execute", execution_target="local_test", local_test_max_rows=32,
+    ).validate()
+    monkeypatch.setattr(
+        fit, "select_features", lambda *_: (["signal"], pd.DataFrame({"feature": ["signal"]})),
+        raising=False,
+    )
+
+    fit.run_fits(config)
+
+    job = yaml.safe_load((config.fit_dir / "hibayes" / "held-models__item-0" / "config.yaml").read_text())
+    assert job["model"]["models"][0]["config"]["predictors"] == ["signal"]
+    assert json.loads((config.fit_dir / "hibayes" / "held-models__item-0" / "manifest.json").read_text())["selected_features"] == ["signal"]
 
 
 def test_hibayes_evaluation_adds_artifacts_to_an_existing_remote_job(tmp_path: Path, monkeypatch) -> None:
