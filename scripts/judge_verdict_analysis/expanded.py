@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import socket
+from tempfile import TemporaryDirectory
 
 import pandas as pd
 import yaml
@@ -65,6 +66,20 @@ def _resume_variant(
         pair_fields = {
             "bench", "judge", "item", "model_left", "model_right", "split", "pick_left",
         }
+        expected_transcript_scaling = {
+            (benchmark, feature)
+            for benchmark in set(transcript.bench) for feature in inventory
+        }
+        expected_pair_scaling = {
+            (benchmark, feature)
+            for benchmark in set(pair.bench) for feature in pair_inventory
+        }
+        transcript_scaling_keys = set(zip(
+            transcript_scaling.benchmark, transcript_scaling.feature, strict=True,
+        ))
+        pair_scaling_keys = set(zip(
+            pair_scaling.benchmark, pair_scaling.feature, strict=True,
+        ))
         valid = (
             settings == {
                 "construction": "processed-baseline-plus-explicit-additions",
@@ -89,11 +104,11 @@ def _resume_variant(
             and [column for column in pair if column in set(pair_inventory)] == pair_inventory
             and not pair.columns.duplicated().any()
             and scaling_fields <= set(transcript_scaling)
-            and set(transcript_scaling.feature) == inventory_set
-            and not transcript_scaling.duplicated(["benchmark", "feature"]).any()
+            and transcript_scaling_keys == expected_transcript_scaling
+            and len(transcript_scaling) == len(expected_transcript_scaling)
             and scaling_fields <= set(pair_scaling)
-            and set(pair_scaling.feature) == set(pair_inventory)
-            and not pair_scaling.duplicated(["benchmark", "feature"]).any()
+            and pair_scaling_keys == expected_pair_scaling
+            and len(pair_scaling) == len(expected_pair_scaling)
             and representative_fields <= set(representative_map)
             and representative_map.feature.tolist() == inventory
             and not representative_map.feature.duplicated().any()
@@ -135,14 +150,29 @@ def build_variants(
     source_config = Path(source_config).expanduser().resolve()
     output_matrix_root = Path(output_matrix_root).expanduser().resolve()
     _validate_build_inputs(baseline_config, source_config)
-    for name, additions in CONFIG.expanded_feature_sets:
-        output = output_matrix_root / name
-        if _resume_variant(output, additions, Path(baseline_config), Path(source_config)):
-            continue
-        tables = build_expanded_design_matrix(
-            baseline_config, source_config, additions, output
-        )
-        write_design_matrix(tables, output)
+    with TemporaryDirectory(
+        prefix="judge-expanded-", dir=os.environ.get("SLURM_TMPDIR")
+    ) as temporary:
+        temporary = Path(temporary)
+        normalized_baseline = temporary / "baseline.yaml"
+        normalized_source = temporary / "canonical.yaml"
+        normalized_baseline.write_text(yaml.safe_dump(_config_values(baseline_config)))
+        normalized_source.write_text(yaml.safe_dump(_config_values(source_config)))
+        for name, additions in CONFIG.expanded_feature_sets:
+            output = output_matrix_root / name
+            if _resume_variant(output, additions, baseline_config, source_config):
+                continue
+            tables = build_expanded_design_matrix(
+                normalized_baseline, normalized_source, additions, output
+            )
+            manifest = tables["manifest.json"]
+            assert isinstance(manifest, dict)
+            for key, config in (
+                ("baseline_config", baseline_config), ("canonical_config", source_config),
+            ):
+                manifest["source_paths"][key] = str(config)
+                manifest["source_sha256"][key] = _sha256(config)
+            write_design_matrix(tables, output)
 
 
 def _guard_swc() -> None:
@@ -153,12 +183,20 @@ def _guard_swc() -> None:
         raise RuntimeError("refusing expanded work on the SWC gateway")
 
 
-def _config_root(config: Path) -> Path:
+def _config_values(config: Path) -> dict[str, object]:
     try:
         values = yaml.safe_load(config.read_text())
-        return Path(values["output_root"]).expanduser().resolve()
+        root = Path(values["output_root"]).expanduser()
+        values["output_root"] = str(
+            root.resolve() if root.is_absolute() else (config.parent / root).resolve()
+        )
+        return values
     except Exception as error:
         raise RuntimeError(f"invalid design-matrix config: {config}") from error
+
+
+def _config_root(config: Path) -> Path:
+    return Path(_config_values(config)["output_root"])
 
 
 def _validate_build_inputs(baseline_config: Path, source_config: Path) -> None:

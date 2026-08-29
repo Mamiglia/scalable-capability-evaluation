@@ -110,12 +110,21 @@ def test_build_materializes_the_three_exact_variants(tmp_path: Path, monkeypatch
     _allow_swc(monkeypatch, expanded)
     baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
     calls = []
-    monkeypatch.setattr(
-        expanded, "build_expanded_design_matrix",
-        lambda baseline, source, additions, output: calls.append(
-            (baseline, source, tuple(additions), output)
-        ) or {"variant": output.name},
-    )
+    def fake_build(baseline_config, source_config, additions, output):
+        calls.append((
+            Path(yaml.safe_load(baseline_config.read_text())["output_root"]),
+            Path(yaml.safe_load(source_config.read_text())["output_root"]),
+            tuple(additions), output,
+        ))
+        return {"manifest.json": {
+            "source_paths": {
+                "baseline_config": str(baseline_config),
+                "canonical_config": str(source_config),
+            },
+            "source_sha256": {"baseline_config": "", "canonical_config": ""},
+        }}
+
+    monkeypatch.setattr(expanded, "build_expanded_design_matrix", fake_build)
     monkeypatch.setattr(expanded, "write_design_matrix", lambda tables, output: None)
     output = tmp_path / "matrices"
 
@@ -124,7 +133,26 @@ def test_build_materializes_the_three_exact_variants(tmp_path: Path, monkeypatch
     assert [call[2] for call in calls] == [features for _, features in CONFIG.expanded_feature_sets]
     assert [len(call[2]) for call in calls] == [10, 32, 42]
     assert [call[3] for call in calls] == [output / name for name, _ in CONFIG.expanded_feature_sets]
-    assert all(call[:2] == (baseline, source) for call in calls)
+    assert all(path.is_absolute() for call in calls for path in call[:2])
+
+
+def test_build_normalizes_relative_yaml_roots_end_to_end(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    expanded = _expanded()
+    _allow_swc(monkeypatch, expanded)
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    baseline.write_text(yaml.safe_dump({"output_root": "baseline"}))
+    source.write_text(yaml.safe_dump({"output_root": "source"}))
+    output_root = tmp_path / "matrices"
+
+    expanded.build_variants(baseline, source, output_root)
+
+    for name, additions in CONFIG.expanded_feature_sets:
+        output = output_root / name
+        manifest = json.loads((output / "manifest.json").read_text())
+        assert all(Path(path).is_absolute() for path in manifest["source_paths"].values())
+        assert expanded._resume_variant(output, additions, baseline, source)
 
 
 def _complete_variant(
@@ -243,6 +271,29 @@ def test_resume_rejects_manifest_row_count_mismatch(tmp_path: Path, monkeypatch)
     output = _complete_variant(tmp_path / "matrices", name, additions, baseline, source)
     manifest = json.loads((output / "manifest.json").read_text())
     manifest["rows"]["pair"] = 2
+    (output / "manifest.json").write_text(json.dumps(manifest))
+
+    with pytest.raises(RuntimeError, match="invalid variant"):
+        expanded._resume_variant(output, additions, baseline, source)
+
+
+def test_resume_rejects_scaling_missing_one_benchmark_feature(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    name, additions = CONFIG.expanded_feature_sets[0]
+    output = _complete_variant(tmp_path / "matrices", name, additions, baseline, source)
+    for filename in ("transcript.parquet", "pair.parquet"):
+        table = pd.read_parquet(output / filename)
+        second = table.assign(bench="b2", item="i2")
+        pd.concat([table, second], ignore_index=True).to_parquet(output / filename, index=False)
+    for filename in ("scaling-transcript.parquet", "scaling-pair.parquet"):
+        scaling = pd.read_parquet(output / filename)
+        second = scaling.assign(benchmark="b2").iloc[1:]
+        pd.concat([scaling, second], ignore_index=True).to_parquet(output / filename, index=False)
+    manifest = json.loads((output / "manifest.json").read_text())
+    manifest["rows"] = {"transcript": 2, "pair": 2}
     (output / "manifest.json").write_text(json.dumps(manifest))
 
     with pytest.raises(RuntimeError, match="invalid variant"):
