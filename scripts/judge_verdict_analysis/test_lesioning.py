@@ -17,10 +17,12 @@ from .lesioning import (
     _bootstrap_summary,
     _checkpoint,
     _guard_execution,
+    _paired_item_metrics,
     _paired_predictions,
     _prediction_rows,
     _resume_checkpoint,
     _validate_prediction_rows,
+    _validate_ridge_checkpoint,
     _validate_specification_inventory,
     aggregate_lesions,
     build_specifications,
@@ -156,6 +158,13 @@ def test_fold_runner_tunes_once_reuses_c_and_resumes_completed_specs(tmp_path, m
     assert len(list((fold_dir / "reference-coefficients").glob("*.parquet"))) == 2
     assert len(list((fold_dir / "reference-item-metrics").glob("*.parquet"))) == 2
     assert (fold_dir / "manifest.json").exists()
+    ridge_lock = fold_dir / ".ridge.json.lock"
+    coefficient_lock = (
+        fold_dir / "coefficients" / f".{specifications.artifact.iloc[0]}.parquet.lock")
+    ridge_lock.unlink()
+    coefficient_lock.unlink()
+    run_fold(0, config)
+    assert ridge_lock.exists() and coefficient_lock.exists()
     with pytest.raises(RuntimeError, match="settings"):
         run_fold(0, replace(config, ridge_cs=(1.0,)))
     missing = fold_dir / "coefficients" / f"{specifications.artifact.iloc[0]}.parquet"
@@ -333,6 +342,23 @@ def test_paired_predictions_use_full_for_lesions_and_null_for_singulars() -> Non
     assert singular_rows.reference.eq("intercept-only").all()
     assert lesion_rows.delta_accuracy.eq(0).all()
     assert singular_rows.delta_accuracy.tolist() == [0.0, 1.0]
+
+
+def test_paired_item_metrics_reject_mismatched_item_keys() -> None:
+    candidate = pd.DataFrame({
+        "bench": ["a"], "item": ["i0"], "log_loss": [0.2],
+        "accuracy": [1.0], "row_count": [2],
+    })
+    reference = pd.DataFrame({
+        "bench": ["a", "a"], "item": ["i0", "i1"], "log_loss": [0.1, 0.1],
+        "accuracy": [1.0, 1.0], "row_count": [2, 2],
+    })
+    specification = lesioning.Specification(
+        "lesion-feature-x", "lesion-feature", "x", "full", ("y",)
+    )
+
+    with pytest.raises(RuntimeError, match="item keys"):
+        _paired_item_metrics(candidate, reference, specification, "fold-0")
 
 
 def test_real_fixed_fits_normalize_reference_and_singular_prediction_columns() -> None:
@@ -513,6 +539,35 @@ def test_checkpoint_lock_serializes_duplicate_writers_and_keeps_the_lock_file(tm
     assert output.read_text() == "first"
     assert writes == ["first"]
     assert (tmp_path / ".artifact.txt.lock").exists()
+
+
+def test_new_checkpoint_validates_the_published_final_before_unlocking(tmp_path) -> None:
+    output = tmp_path / "artifact.txt"
+    validated = []
+
+    def read(path):
+        validated.append(path)
+        return path.read_text()
+
+    _checkpoint(output, lambda path: path.write_text("complete"), read)
+
+    assert validated[-1] == output
+
+
+def test_ridge_checkpoint_requires_finite_c_features_and_tuning() -> None:
+    valid = {"ridge_C": 0.1, "features": ["x"], "tuning": [{"C": 0.1}]}
+
+    assert _validate_ridge_checkpoint(valid, ["x"]) == 0.1
+    for invalid in (
+        {"features": ["x"], "tuning": []},
+        {"ridge_C": float("nan"), "features": ["x"], "tuning": []},
+        {"ridge_C": 0.1, "features": ["wrong"], "tuning": []},
+        {"ridge_C": 0.1, "features": ["x"], "tuning": "bad"},
+    ):
+        with pytest.raises(RuntimeError, match="ridge checkpoint"):
+            _validate_ridge_checkpoint(invalid, ["x"])
+    with pytest.raises(RuntimeError, match="ridge checkpoint"):
+        _validate_ridge_checkpoint(valid, ["x"], expected_c=1.0)
 
 
 def test_resumed_prediction_rows_must_match_the_held_out_schema() -> None:

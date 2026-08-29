@@ -236,8 +236,11 @@ def _paired_item_metrics(
         raise RuntimeError("item-metric schema is not recoverable")
     merged = candidate.merge(
         reference, on=["bench", "item"], suffixes=("_candidate", "_reference"),
-        validate="one_to_one",
+        validate="one_to_one", how="outer", indicator=True,
     )
+    if not merged._merge.eq("both").all():
+        raise RuntimeError("candidate and reference item keys differ")
+    merged = merged.drop(columns="_merge")
     if not merged.row_count_candidate.equals(merged.row_count_reference):
         raise RuntimeError("candidate and reference item metrics have different row counts")
     output = merged[["bench", "item"]].copy()
@@ -507,6 +510,7 @@ def _checkpoint(
         if path.exists():
             raise FileExistsError(f"refusing to overwrite checkpoint created concurrently: {path}")
         os.replace(partial, path)
+        read(path)
 
 
 def _resume_checkpoint(path: Path, read) -> bool:
@@ -542,6 +546,7 @@ def _resume_checkpoint_unlocked(path: Path, read) -> bool:
     if path.exists():
         raise FileExistsError(f"refusing to overwrite checkpoint created concurrently: {path}")
     os.replace(partial, path)
+    read(path)
     return True
 
 
@@ -636,12 +641,19 @@ def _require_fit_artifacts(
     all_features: list[str],
     fitted_features: tuple[str, ...],
 ) -> None:
-    if any(not path.exists() for path in paths):
-        missing = [str(path) for path in paths if not path.exists()]
+    readers = (
+        lambda target: _validate_prediction_rows(
+            pd.read_parquet(target), test, all_features),
+        lambda target: _validate_coefficient_rows(
+            pd.read_parquet(target), fitted_features),
+        lambda target: _validate_item_metric_rows(pd.read_parquet(target), test),
+    )
+    missing = [
+        str(path) for path, read in zip(paths, readers)
+        if not _resume_checkpoint(path, read)
+    ]
+    if missing:
         raise RuntimeError(f"missing completed checkpoint: {missing}")
-    _validate_prediction_rows(pd.read_parquet(paths[0]), test, all_features)
-    _validate_coefficient_rows(pd.read_parquet(paths[1]), fitted_features)
-    _validate_item_metric_rows(pd.read_parquet(paths[2]), test)
 
 
 def _write_csv(frame: pd.DataFrame, path: Path) -> None:
@@ -725,19 +737,41 @@ def _fold_settings(
     }
 
 
+def _validate_ridge_checkpoint(
+    ridge: dict[str, object], features: list[str], expected_c: float | None = None,
+) -> float:
+    try:
+        ridge_c = float(ridge["ridge_C"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("invalid ridge checkpoint") from error
+    if (
+        not np.isfinite(ridge_c)
+        or ridge_c <= 0
+        or ridge.get("features") != features
+        or not isinstance(ridge.get("tuning"), list)
+        or not ridge["tuning"]
+        or any(not isinstance(row, dict) for row in ridge["tuning"])
+        or (expected_c is not None and ridge_c != float(expected_c))
+    ):
+        raise RuntimeError("invalid ridge checkpoint")
+    return ridge_c
+
+
 def _require_completed_fold(
     fold_dir: Path,
     test: pd.DataFrame,
     features: list[str],
     references: tuple[Specification, Specification],
     specifications: list[Specification],
+    expected_ridge_c: float,
 ) -> None:
     ridge_path = fold_dir / "ridge.json"
-    if not ridge_path.exists():
+    if not _resume_checkpoint(
+        ridge_path,
+        lambda path: _validate_ridge_checkpoint(
+            json.loads(path.read_text()), features, expected_ridge_c),
+    ):
         raise RuntimeError(f"missing completed checkpoint: {ridge_path}")
-    ridge = json.loads(ridge_path.read_text())
-    if ridge.get("features") != features:
-        raise RuntimeError(f"fold settings mismatch at {ridge_path}")
     for specification in references:
         _require_fit_artifacts(
             _artifact_paths(fold_dir, specification.name, reference=True),
@@ -777,23 +811,40 @@ def run_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
     _write_csv(table, table_path)
     if not pd.read_csv(table_path, keep_default_na=False).equals(table):
         raise RuntimeError(f"fold settings mismatch at {table_path}")
-    if completion.exists():
-        manifest = json.loads(completion.read_text())
+    completed: dict[str, object] = {}
+
+    def read_completion(path: Path) -> dict[str, object]:
+        completed.update(json.loads(path.read_text()))
+        return completed
+
+    if _resume_checkpoint(completion, read_completion):
+        manifest = completed
         if (manifest.get("state"), manifest.get("settings_signature")) != (
             "completed", settings_signature,
         ):
             raise RuntimeError(f"invalid fold completion manifest: {completion}")
+        try:
+            manifest_ridge_c = float(manifest["ridge_C"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(f"invalid fold completion manifest: {completion}") from error
+        if not np.isfinite(manifest_ridge_c) or manifest_ridge_c <= 0:
+            raise RuntimeError(f"invalid fold completion manifest: {completion}")
         _require_completed_fold(
-            fold_dir, test, features, reference_specifications(dictionary), unique)
+            fold_dir, test, features, reference_specifications(dictionary), unique,
+            manifest_ridge_c,
+        )
         return fold_dir
 
     ridge_path = fold_dir / "ridge.json"
-    read_json = lambda path: json.loads(path.read_text())
-    if _resume_checkpoint(ridge_path, read_json):
-        ridge = json.loads(ridge_path.read_text())
-        if ridge.get("features") != features:
-            raise RuntimeError(f"fold settings mismatch at {ridge_path}")
-        ridge_c = float(ridge["ridge_C"])
+    resumed_ridge: dict[str, float] = {}
+
+    def read_ridge(path: Path) -> dict[str, object]:
+        ridge = json.loads(path.read_text())
+        resumed_ridge["ridge_C"] = _validate_ridge_checkpoint(ridge, features)
+        return ridge
+
+    if _resume_checkpoint(ridge_path, read_ridge):
+        ridge_c = resumed_ridge["ridge_C"]
     else:
         ridge_c, tuning = tune_ridge(train, features, config)
         _write_json(
@@ -822,7 +873,7 @@ def run_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
         _write_fit_artifacts(
             result, paths, test, features, specification.features)
 
-    _require_completed_fold(fold_dir, test, features, references, unique)
+    _require_completed_fold(fold_dir, test, features, references, unique, ridge_c)
 
     _write_json({
         "state": "completed", "backend": "frequentist", "fold": fold,
@@ -882,9 +933,12 @@ def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
     plan_signatures = set()
     for fold_dir in fold_dirs:
         manifest = fold_dir / "manifest.json"
-        values = json.loads(manifest.read_text()) if manifest.exists() else {}
+        values: dict[str, object] = {}
+        manifest_ready = _resume_checkpoint(
+            manifest, lambda path: values.update(json.loads(path.read_text())))
         if (
-            values.get("state") != "completed"
+            not manifest_ready
+            or values.get("state") != "completed"
             or not values.get("settings_signature")
             or not values.get("plan_signature")
         ):
@@ -910,8 +964,14 @@ def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
     }
     settings_signature = _ensure_settings(
         config.lesion_dir / "summary-settings.json", summary_settings, "summary")
-    if completion.exists():
-        values = json.loads(completion.read_text())
+    completed: dict[str, object] = {}
+
+    def read_completion(path: Path) -> dict[str, object]:
+        completed.update(json.loads(path.read_text()))
+        return completed
+
+    if _resume_checkpoint(completion, read_completion):
+        values = completed
         if (values.get("state"), values.get("settings_signature")) != (
             "completed", settings_signature,
         ):
