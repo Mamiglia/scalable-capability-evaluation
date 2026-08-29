@@ -47,16 +47,19 @@ def main() -> int:
     parser.add_argument("--baseline", required=True, type=float)
     parser.add_argument("--limit", required=True, type=float)
     parser.add_argument("--reserve-multiplier", type=float, default=1.5)
-    parser.add_argument("--preflight", required=True, type=Path)
+    parser.add_argument("--preflight", type=Path)
+    parser.add_argument("--reserve-usd", type=float, default=5.0,
+                        help="per-pair reserve when no preflight table is supplied")
     parser.add_argument("--ledger", required=True, type=Path)
     args = parser.parse_args()
-    upper = reserves(args.preflight)
+    upper = reserves(args.preflight) if args.preflight else {}
 
     for config_path in args.configs:
         config_key = config_path.as_posix()
         config = yaml.safe_load(config_path.read_text())
         for judge, target, opponent in config["comparisons"]:
-            reserve = args.reserve_multiplier * upper[(config_key, target, opponent)]
+            reserve = args.reserve_multiplier * upper.get(
+                (config_key, target, opponent), args.reserve_usd)
             usage = key_usage()
             spent = usage - args.baseline
             if not can_afford(spent=spent, reserve=reserve, limit=args.limit):
