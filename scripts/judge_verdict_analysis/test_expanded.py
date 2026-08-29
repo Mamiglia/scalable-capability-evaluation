@@ -155,6 +155,65 @@ def test_build_normalizes_relative_yaml_roots_end_to_end(
         assert expanded._resume_variant(output, additions, baseline, source)
 
 
+def test_build_resolves_production_yaml_roots_from_repository_cwd(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    expanded = _expanded()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _allow_swc(monkeypatch, expanded)
+    baseline_config, source_config = _source_fixture(repo, monkeypatch, expanded)
+    baseline_root = repo / "judge_results/capability/design-matrix"
+    source_root = repo / "judge_results/canonical/design-matrix"
+    baseline_root.parent.mkdir(parents=True)
+    source_root.parent.mkdir(parents=True)
+    (repo / "baseline").rename(baseline_root)
+    (repo / "source").rename(source_root)
+    baseline = baseline_root / "design-matrix.yaml"
+    source = source_root / "design-matrix.yaml"
+    baseline_config.rename(baseline)
+    source_config.rename(source)
+    baseline.write_text(yaml.safe_dump({
+        "output_root": "judge_results/capability/design-matrix",
+    }))
+    source.write_text(yaml.safe_dump({
+        "output_root": "judge_results/canonical/design-matrix",
+    }))
+    monkeypatch.chdir(repo)
+    output_root = repo / "expanded"
+
+    expanded.build_variants(baseline, source, output_root)
+
+    for name, additions in CONFIG.expanded_feature_sets:
+        assert expanded._resume_variant(output_root / name, additions, baseline, source)
+
+
+def test_relative_yaml_root_rejects_missing_candidates(tmp_path: Path, monkeypatch) -> None:
+    expanded = _expanded()
+    cwd, config_dir = tmp_path / "repo", tmp_path / "configs"
+    cwd.mkdir()
+    config_dir.mkdir()
+    config = config_dir / "matrix.yaml"
+    config.write_text(yaml.safe_dump({"output_root": "missing"}))
+    monkeypatch.chdir(cwd)
+
+    with pytest.raises(RuntimeError, match="does not resolve"):
+        expanded._config_root(config)
+
+
+def test_relative_yaml_root_rejects_ambiguous_candidates(tmp_path: Path, monkeypatch) -> None:
+    expanded = _expanded()
+    cwd, config_dir = tmp_path / "repo", tmp_path / "configs"
+    (cwd / "matrix").mkdir(parents=True)
+    (config_dir / "matrix").mkdir(parents=True)
+    config = config_dir / "matrix.yaml"
+    config.write_text(yaml.safe_dump({"output_root": "matrix"}))
+    monkeypatch.chdir(cwd)
+
+    with pytest.raises(RuntimeError, match="ambiguous"):
+        expanded._config_root(config)
+
+
 def _complete_variant(
     root: Path,
     name: str,

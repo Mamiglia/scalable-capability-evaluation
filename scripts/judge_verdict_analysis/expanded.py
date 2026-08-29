@@ -187,12 +187,25 @@ def _config_values(config: Path) -> dict[str, object]:
     try:
         values = yaml.safe_load(config.read_text())
         root = Path(values["output_root"]).expanduser()
-        values["output_root"] = str(
-            root.resolve() if root.is_absolute() else (config.parent / root).resolve()
-        )
-        return values
     except Exception as error:
         raise RuntimeError(f"invalid design-matrix config: {config}") from error
+    if root.is_absolute():
+        resolved = root.resolve()
+    else:
+        candidates = {
+            (Path.cwd() / root).resolve(),
+            (config.parent / root).resolve(),
+        }
+        existing = [candidate for candidate in candidates if candidate.exists()]
+        if not existing:
+            raise RuntimeError(
+                f"relative output_root does not resolve from cwd or config parent: {root}"
+            )
+        if len(existing) > 1:
+            raise RuntimeError(f"ambiguous relative output_root {root}: {sorted(map(str, existing))}")
+        resolved = existing[0]
+    values["output_root"] = str(resolved)
+    return values
 
 
 def _config_root(config: Path) -> Path:
