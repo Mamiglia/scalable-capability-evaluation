@@ -3,12 +3,15 @@ from xml.etree import ElementTree
 
 import matplotlib
 import matplotlib.image as mpimg
+from matplotlib.text import Annotation, Text
 import numpy as np
 import pandas as pd
 import pytest
 
 matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
+from . import result_plots
 from .result_plots import (
     accuracy_comparison,
     coefficient_selection_stability,
@@ -326,6 +329,55 @@ def test_result_plots_are_compact_editable_shared_scale_and_unclipped(tmp_path: 
     assert ">−0.3</text>" in singular_svg and ">0.3</text>" in singular_svg
     assert ">−0.3</text>" in unique_svg and ">0.3</text>" in unique_svg
     assert not any("suptitle" in source.lower() for source in svgs)
+
+
+def test_dense_legends_and_scatter_labels_stay_inside_canvas_without_overlap(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    blocks = list(result_plots.BLOCK_COLORS)
+    features = pd.DataFrame({
+        "feature": [f"dense_feature_label_{index}" for index in range(len(blocks))],
+        "block": blocks,
+        "singular": np.linspace(0.010, 0.018, len(blocks)),
+        "singular_lower": np.linspace(0.008, 0.016, len(blocks)),
+        "singular_upper": np.linspace(0.012, 0.020, len(blocks)),
+        "unique": np.linspace(-0.0004, 0.0004, len(blocks)),
+        "unique_lower": np.linspace(-0.0014, -0.0006, len(blocks)),
+        "unique_upper": np.linspace(0.0006, 0.0014, len(blocks)),
+    })
+    groups = pd.DataFrame([
+        {
+            "level": level, "group": name, "singular": 0.04, "singular_lower": 0.03,
+            "singular_upper": 0.05, "unique": 0.01, "unique_lower": 0.0,
+            "unique_upper": 0.02,
+        }
+        for level, names in (
+            ("block", blocks),
+            ("family", ["annotations", "clause-structure", "hand-engineered-text", "planning"]),
+        )
+        for name in names
+    ])
+
+    def checked_save(fig, output_dir, name):
+        fig.canvas.draw()
+        renderer, canvas = fig.canvas.get_renderer(), fig.bbox
+        text = [artist for artist in fig.findobj(Text) if artist.get_visible() and artist.get_text()]
+        for artist in [*fig.legends, *text]:
+            bounds = artist.get_window_extent(renderer)
+            assert bounds.x0 >= canvas.x0 - 1 and bounds.x1 <= canvas.x1 + 1, (name, artist)
+            assert bounds.y0 >= canvas.y0 - 1 and bounds.y1 <= canvas.y1 + 1, (name, artist)
+        annotations = [Text.get_window_extent(artist, renderer) for artist in text
+                       if isinstance(artist, Annotation)]
+        assert not any(left.overlaps(right) for index, left in enumerate(annotations)
+                       for right in annotations[index + 1:]), name
+        plt.close(fig)
+        return Path(output_dir) / f"{name}.png", Path(output_dir) / f"{name}.svg"
+
+    monkeypatch.setattr(result_plots, "_save", checked_save)
+
+    result_plots.plot_feature_scatter(features, tmp_path, top_labels=3)
+    result_plots.plot_ranked_features(features, tmp_path, top=len(features))
+    result_plots.plot_group_effects(groups, tmp_path)
 
 
 def test_loaders_reject_incomplete_or_invalid_saved_artifacts(tmp_path: Path) -> None:

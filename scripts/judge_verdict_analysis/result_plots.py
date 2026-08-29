@@ -496,32 +496,37 @@ def _block_legend(fig: Figure, blocks: Sequence[object]) -> None:
     unique = list(dict.fromkeys(map(str, blocks)))
     fig.legend(handles=[
         Line2D([], [], marker="o", color="none", markerfacecolor=_block_color(block),
-               markeredgecolor=_block_color(block), label=block.replace("-", " "))
+               markeredgecolor=_block_color(block),
+               label=textwrap.fill(block.replace("-", " "), width=13))
         for block in unique
-    ], loc="outside lower center", ncol=min(3, len(unique)), frameon=False)
+    ], loc="outside lower center", ncol=min(2, len(unique)), frameon=False,
+       fontsize=6, columnspacing=0.8, handletextpad=0.4)
 
 
 def plot_feature_scatter(
-    features: pd.DataFrame, output_dir: str | Path, *, top_labels: int = 6,
+    features: pd.DataFrame, output_dir: str | Path, *, top_labels: int = 3,
 ) -> tuple[Path, Path]:
     """Plot paired singular-vs-unique feature effects, colored by feature block."""
     _require(features, {"feature", "block", "singular", "unique"}, "features")
     _style()
     limit = _symmetric_limit(features, columns=("singular", "unique"))
-    fig, ax = plt.subplots(figsize=(2.6, 2.6), layout="constrained")
+    fig, ax = plt.subplots(figsize=(2.6, 3.2), layout="constrained")
     for block, frame in features.groupby("block", sort=False):
         ax.scatter(frame.singular, frame.unique, s=15, color=_block_color(block),
                    clip_on=False, label=str(block))
     ax.axhline(0, color="#999999", lw=0.8, ls="--")
     ax.axvline(0, color="#999999", lw=0.8, ls="--")
     labelled = features.assign(rank=features[["singular", "unique"]].abs().max(axis=1)).nlargest(
-        top_labels, "rank"
+        min(top_labels, 3), "rank"
     )
-    for row in labelled.itertuples():
+    offsets = (-12, 3, 18)
+    for index, row in enumerate(labelled.itertuples()):
+        x_offset = -6 if row.singular >= 0 else 6
         ax.annotate(textwrap.shorten(str(row.feature).replace("_", " "), width=22, placeholder="…"),
-                    (row.singular, row.unique), xytext=(-3 if row.singular > 0 else 3, 3),
-                    textcoords="offset points", ha="right" if row.singular > 0 else "left",
-                    fontsize=6, color="#444444", annotation_clip=False)
+                    (row.singular, row.unique), xytext=(x_offset, offsets[index]),
+                    textcoords="offset points", ha="right" if x_offset < 0 else "left",
+                    va="center", fontsize=6, color="#444444", annotation_clip=False,
+                    arrowprops={"arrowstyle": "-", "color": "#888888", "lw": 0.5})
     ax.set_xlim(-limit, limit)
     ax.set_ylim(-limit, limit)
     ax.set_xticks([-limit, 0, limit])
@@ -549,7 +554,7 @@ def plot_ranked_features(
     outputs = {}
     for effect, label in (("singular", "Singular improvement"), ("unique", "Unique removal loss")):
         frame = features.nlargest(min(top, len(features)), effect).sort_values(effect)
-        height = min(3.2, max(1.5, 0.18 * len(frame) + 0.8))
+        height = min(3.2, max(1.8, 0.18 * len(frame) + 1.2))
         fig, ax = plt.subplots(figsize=(2.5, height), layout="constrained")
         y = np.arange(len(frame))
         colors = [_block_color(block) for block in frame.block]
@@ -599,7 +604,7 @@ def plot_group_effects(groups: pd.DataFrame, output_dir: str | Path) -> tuple[Pa
     ax.set_xticks([-limit, 0, limit])
     ax.set_yticks(y, [f"{row.level.title()} · {str(row.group).replace('-', ' ')}" for row in groups.itertuples()])
     ax.set_ylim(len(groups) - 0.5, -0.5)
-    ax.set_xlabel("Held-out log-loss change")
+    ax.set_xlabel("Δ log loss")
     _ordinary(ax)
     fig.legend(handles=[
         Line2D([], [], marker="o", color="none", markerfacecolor="#2a78d6",
