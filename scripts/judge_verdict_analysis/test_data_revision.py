@@ -1,4 +1,5 @@
 """Regression tests for pinned Hugging Face source provenance."""
+import hashlib
 import json
 from pathlib import Path
 
@@ -78,12 +79,34 @@ def test_remote_fit_rejects_unpinned_or_mismatched_source_before_loading(
         design_matrix_config=processed_config, processed_matrix_root=processed_config.parent,
         results_dir=tmp_path / "results",
         execution_mode="execute", execution_target="swc_hpc", source_hf_revision=revision,
+        processed_matrix_manifest_sha256="",
     ).validate()
     monkeypatch.setattr(fit, "_active_remote_target", lambda _: True)
     monkeypatch.setattr(fit, "_load_rows", lambda _: pytest.fail("provenance guard loaded pair rows"))
 
     with pytest.raises(RuntimeError, match=error):
         fit.run_fits(config)
+
+
+def test_remote_fit_accepts_a_checksum_pinned_old_matrix(tmp_path: Path, monkeypatch) -> None:
+    """Fails if the approved old-data bundle cannot use its exact manifest hash."""
+    processed_config = _processed_config(tmp_path, {})
+    manifest_path = processed_config.parent / "manifest.json"
+    digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    config = AnalysisConfig(
+        design_matrix_config=processed_config, processed_matrix_root=processed_config.parent,
+        results_dir=tmp_path / "results", execution_mode="execute", execution_target="swc_hpc",
+        source_hf_revision="", processed_matrix_manifest_sha256=digest,
+    ).validate()
+    monkeypatch.setattr(fit, "_active_remote_target", lambda _: True)
+
+    fit._guard_execution(config)
+
+    bad = AnalysisConfig(**{
+        **config.__dict__, "processed_matrix_manifest_sha256": "0" * 64,
+    }).validate()
+    with pytest.raises(RuntimeError, match="provenance"):
+        fit._guard_execution(bad)
 
 
 def test_local_test_allows_an_unresolved_synthetic_source(tmp_path: Path) -> None:

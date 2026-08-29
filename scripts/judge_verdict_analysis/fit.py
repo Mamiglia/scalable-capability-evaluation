@@ -1,8 +1,10 @@
 """Safe orchestration for the joint judge-verdict fitting backends."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import socket
 from dataclasses import replace
 from pathlib import Path
 from tempfile import mkdtemp
@@ -15,7 +17,6 @@ from .config import AnalysisConfig, CONFIG
 from .data import load_features
 from .fit_common import FitResult
 from .fit_frequentist import fit_frequentist, select_features
-from .fit_hibayes import evaluate_hibayes, write_hibayes_job
 from .hierarchy import HierarchyLevels, outer_roles
 
 
@@ -60,13 +61,45 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "hibayes_cell_prior_scale": config.hibayes_cell_prior_scale,
         "hibayes_item_prior_scale": config.hibayes_item_prior_scale,
         "require_pinned_source_for_fit": config.require_pinned_source_for_fit,
+        "processed_matrix_manifest_sha256": config.processed_matrix_manifest_sha256,
     }
+
+
+def _ceph_available() -> bool:
+    return Path("/ceph/mrsic_flogel").exists()
 
 
 def _active_remote_target(target: str) -> bool:
     if target == "swc_hpc":
-        return Path("/ceph/mrsic_flogel").exists()
+        hostname = socket.gethostname().lower()
+        return (
+            _ceph_available()
+            and bool(os.environ.get("SLURM_JOB_ID"))
+            and not hostname.startswith(("gateway", "sgw"))
+        )
     return target == "runpod" and bool(os.environ.get("RUNPOD_POD_ID"))
+
+
+def write_hibayes_job(
+    train_path: Path,
+    test_path: Path,
+    selected_features: list[str],
+    fold: str,
+    config: AnalysisConfig,
+) -> Path:
+    """Load HiBayes only for an explicitly requested Bayesian job."""
+    from .fit_hibayes import write_hibayes_job as implementation
+
+    return implementation(train_path, test_path, selected_features, fold, config)
+
+
+def evaluate_hibayes(
+    job_dir: Path, test_rows: pd.DataFrame, config: AnalysisConfig
+) -> FitResult:
+    """Load HiBayes only when evaluating an explicitly requested Bayesian job."""
+    from .fit_hibayes import evaluate_hibayes as implementation
+
+    return implementation(job_dir, test_rows, config)
 
 
 def _guard_execution(config: AnalysisConfig) -> None:
@@ -84,14 +117,22 @@ def _guard_execution(config: AnalysisConfig) -> None:
         )
     if not config.require_pinned_source_for_fit:
         return
-    if not config.source_hf_revision:
-        raise RuntimeError("refusing non-local fit without source_hf_revision")
     values = yaml.safe_load(config.processed_matrix_config.read_text())
     manifest_path = Path(values["output_root"]) / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
-    if (manifest.get("source_hf_repo"), manifest.get("source_hf_revision")) != (
-        config.source_hf_repo, config.source_hf_revision,
-    ):
+    if config.source_hf_revision:
+        manifest = json.loads(manifest_path.read_text())
+        matches = (manifest.get("source_hf_repo"), manifest.get("source_hf_revision")) == (
+            config.source_hf_repo, config.source_hf_revision,
+        )
+    elif config.processed_matrix_manifest_sha256:
+        matches = hashlib.sha256(manifest_path.read_bytes()).hexdigest() == (
+            config.processed_matrix_manifest_sha256
+        )
+    else:
+        raise RuntimeError(
+            "refusing non-local fit without source_hf_revision or processed matrix manifest hash"
+        )
+    if not matches:
         raise RuntimeError("refusing non-local fit: processed matrix source provenance does not match config")
 
 

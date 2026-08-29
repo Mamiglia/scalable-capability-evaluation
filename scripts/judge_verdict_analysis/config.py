@@ -9,6 +9,35 @@ from typing import Self
 ROOT: Path = Path(__file__).resolve().parents[2]  # Repository root used to make every default path absolute.
 DEFAULT_RESULTS_DIR = ROOT / "judge_results/verdict_interpretability/readable-eda-20260828"
 DEFAULT_PROCESSED_MATRIX_ROOT = ROOT / "judge_results/capability_predictions_glm/no-common-support/design-matrix"
+DEFAULT_EXPANDED_RESULTS_ROOT = ROOT / "judge_results/verdict_interpretability/expanded-features-20260829"
+
+SURPRISAL_FEATURES: tuple[str, ...] = (
+    "surprisal_local_mean__llama",
+    "surprisal_full_bpc__llama",
+    "surprisal_question_gain_bpc__llama",
+    "surprisal_total_context_gain_bpc__llama",
+    "surprisal_long_context_gain_bpc__llama",
+    "surprisal_rolling_short_position_adjusted_mean__llama",
+    "surprisal_rolling_long_position_adjusted_mean__llama",
+    "surprisal_rolling_long_question_position_adjusted_mean__llama",
+    "surprisal_rolling_context_gain_position_adjusted_mean__llama",
+    "surprisal_rolling_question_gain_position_adjusted_mean__llama",
+)  # Historical non-redundant Llama surprisal specification.
+SAE_FEATURES: tuple[str, ...] = tuple(
+    f"sae_shared_{index}" for index in range(32)
+)  # Shared transcript-SAE features; benchmark/clause SAEs remain excluded.
+EXPANDED_FEATURE_SETS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("readable-surprisal", SURPRISAL_FEATURES),
+    ("readable-sae", SAE_FEATURES),
+    ("readable-surprisal-sae", SURPRISAL_FEATURES + SAE_FEATURES),
+)  # Exact additions appended to the preserved 117-feature readable matrix.
+LESION_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("annotations", ("rubric", "intermediate-errors")),
+    ("hand-engineered-text", ("surface", "structure", "exposition", "derivation")),
+    ("clause", ("clause-descriptors", "clause-motifs", "clause-plan")),
+    ("clause-structure", ("clause-descriptors", "clause-motifs")),
+    ("planning", ("clause-plan",)),
+)  # Higher-level block families used by remove/alone interpretation fits.
 
 # Readable blocks used by EDA/PCA unless a command overrides ``--blocks``.
 # Opaque/high-dimensional blocks (embedding-dense, transcript/clause SAEs,
@@ -41,7 +70,10 @@ class AnalysisConfig:
     processed_matrix_root: Path | None = None  # Explicit override; production defaults to the shared 117-feature matrix.
     source_hf_repo: str = "LASR-G5/judging"  # Hugging Face repository used to build the source matrix.
     source_hf_revision: str = ""  # Required full commit SHA for non-test fitting; empty keeps schema fixtures unresolved.
-    require_pinned_source_for_fit: bool = True  # Refuse non-local fits unless the source matrix matches this pin.
+    processed_matrix_manifest_sha256: str = "2870a25d738c2e2a03b438ee4f35bd4d7e8986518a497a75de0f8aeda0eec0c6"  # Approved old-data bundle manifest.
+    require_pinned_source_for_fit: bool = True  # Require either the HF revision or exact processed-manifest hash remotely.
+    expanded_results_root: Path = DEFAULT_EXPANDED_RESULTS_ROOT  # Root for expanded matrices, fits and comparisons.
+    expanded_feature_sets: tuple[tuple[str, tuple[str, ...]], ...] = EXPANDED_FEATURE_SETS  # Named exact feature additions.
 
     # Feature selection: empty regressors means every feature in feature_blocks.
     feature_blocks: tuple[str, ...] = READABLE_BLOCKS  # Matrix blocks loaded by default.
@@ -96,6 +128,8 @@ class AnalysisConfig:
     )  # Strict new-model folds, copied here so fitting owns no cross-package defaults.
     inner_folds: int = 3  # Grouped folds used to tune each outer frequentist fit.
     fit_n_jobs: int = 2  # Concurrent hyperparameter evaluations within each outer fit.
+    fit_pca_components: int = 20  # Shared uncentred component count for the compressed verdict model.
+    fit_pca_algorithm: str = "randomized"  # TruncatedSVD algorithm used within each outer training fold.
     resume_completed_folds: bool = False  # Skip complete atomic fold outputs when resuming a remote run.
     elastic_net_cs: tuple[float, ...] = (0.01, 0.1, 1.0, 10.0)  # Elastic-net inverse penalties.
     elastic_net_l1_ratios: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)  # Elastic-net L1 shares.
@@ -108,6 +142,7 @@ class AnalysisConfig:
     lesion_backends: tuple[str, ...] = ("frequentist",)  # Backends included in paired lesions.
     lesion_feature_scope: str = "all"  # Lesion every processed regressor, not elastic-net selections.
     lesion_metric: str = "log_loss"  # Primary held-out lesion metric.
+    lesion_families: tuple[tuple[str, tuple[str, ...]], ...] = LESION_FAMILIES  # Named block families for grouped refits.
     glm_max_iter: int = 3_000  # Optimiser iteration ceiling for the forthcoming logistic GLM.
     glm_c: float = 0.1  # Inverse ridge penalty for the first frequentist GLM screen.
     bootstrap_iterations: int = 1_000  # Clustered resamples used for intervals.
@@ -179,6 +214,10 @@ class AnalysisConfig:
             raise ValueError("source_hf_repo cannot be empty")
         if self.source_hf_revision and not re.fullmatch(r"[0-9a-fA-F]{40}", self.source_hf_revision):
             raise ValueError("source_hf_revision must be a 40-character commit SHA when provided")
+        if self.processed_matrix_manifest_sha256 and not re.fullmatch(
+            r"[0-9a-fA-F]{64}", self.processed_matrix_manifest_sha256
+        ):
+            raise ValueError("processed_matrix_manifest_sha256 must be a 64-character SHA-256")
         if not self.feature_blocks:
             raise ValueError("feature_blocks cannot be empty")
         if not self.judges:
@@ -195,6 +234,7 @@ class AnalysisConfig:
             "local_test_max_rows": self.local_test_max_rows,
             "inner_folds": self.inner_folds,
             "fit_n_jobs": self.fit_n_jobs,
+            "fit_pca_components": self.fit_pca_components,
             "glm_max_iter": self.glm_max_iter,
             "glm_c": self.glm_c,
             "bootstrap_iterations": self.bootstrap_iterations,
@@ -221,6 +261,8 @@ class AnalysisConfig:
             raise ValueError("mcmc_init_strategy must be 'median', 'mean', or 'uniform'")
         if self.mcmc_chain_method not in {"parallel", "sequential", "vectorized"}:
             raise ValueError("mcmc_chain_method must be 'parallel', 'sequential', or 'vectorized'")
+        if self.fit_pca_algorithm not in {"randomized", "arpack"}:
+            raise ValueError("fit_pca_algorithm must be 'randomized' or 'arpack'")
         if self.mcmc_device_type not in {"cpu", "gpu"}:
             raise ValueError("mcmc_device_type must be 'cpu' or 'gpu'")
         if not isfinite(self.mcmc_gpu_memory_fraction) or not 0.1 <= self.mcmc_gpu_memory_fraction <= 1:
@@ -282,6 +324,17 @@ class AnalysisConfig:
             raise ValueError("pca_alignment must be 'stronger' or 'judge'")
         if len(set(self.regressors)) != len(self.regressors):
             raise ValueError("regressors contains duplicates")
+        variant_names = [name for name, _ in self.expanded_feature_sets]
+        if len(set(variant_names)) != len(variant_names) or any(
+            not name or not features or len(set(features)) != len(features)
+            for name, features in self.expanded_feature_sets
+        ):
+            raise ValueError("expanded_feature_sets must have unique names and non-empty unique features")
+        family_names = [name for name, _ in self.lesion_families]
+        if len(set(family_names)) != len(family_names) or any(
+            not name or not blocks for name, blocks in self.lesion_families
+        ):
+            raise ValueError("lesion_families must have unique names and non-empty blocks")
         if any(len(pair) != 2 for pair in self.interactions):
             raise ValueError("interactions must contain feature pairs")
         return self

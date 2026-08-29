@@ -460,7 +460,14 @@ def test_config_defaults_are_readable_and_validate_regressors(tmp_path: Path) ->
     assert CONFIG.correlation_threshold == 0.8
     assert not CONFIG.common_support
     assert CONFIG.fit_n_jobs == 2
+    assert CONFIG.fit_pca_components == 20
+    assert CONFIG.fit_pca_algorithm == "randomized"
     assert not CONFIG.resume_completed_folds
+    assert dict(CONFIG.expanded_feature_sets).keys() == {
+        "readable-surprisal", "readable-sae", "readable-surprisal-sae"
+    }
+    assert [len(features) for _, features in CONFIG.expanded_feature_sets] == [10, 32, 42]
+    assert dict(CONFIG.lesion_families)["planning"] == ("clause-plan",)
     assert CONFIG.processed_matrix_config == (
         Path(__file__).resolve().parents[2]
         / "judge_results/capability_predictions_glm/no-common-support/design-matrix/design-matrix.yaml")
@@ -474,6 +481,8 @@ def test_config_defaults_are_readable_and_validate_regressors(tmp_path: Path) ->
         AnalysisConfig(correlation_threshold=1.1).validate()
     with pytest.raises(ValueError, match="fit_n_jobs"):
         AnalysisConfig(fit_n_jobs=0).validate()
+    with pytest.raises(ValueError, match="processed_matrix_manifest_sha256"):
+        AnalysisConfig(processed_matrix_manifest_sha256="not-a-sha").validate()
 
     config = _matrix(tmp_path)
     table, dictionary = load_features(

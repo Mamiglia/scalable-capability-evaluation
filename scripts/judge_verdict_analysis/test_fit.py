@@ -2,6 +2,8 @@ import ast
 from dataclasses import replace
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pandas as pd
 import pytest
@@ -57,6 +59,25 @@ def test_fit_loads_the_processed_matrix_config_not_the_build_input(tmp_path: Pat
 
     assert features == ["signal", "noise"]
     assert set(rows) >= {"signal", "noise", "pick_left"}
+
+
+def test_frequentist_facade_import_does_not_require_hibayes() -> None:
+    """Fails if CPU-only Slurm jobs eagerly import the Bayesian dependency stack."""
+    code = """
+import builtins
+original = builtins.__import__
+def blocked(name, *args, **kwargs):
+    if name == 'scripts.judge_verdict_analysis.fit_hibayes' or name.startswith('hibayes'):
+        raise ImportError('blocked Bayesian dependency')
+    return original(name, *args, **kwargs)
+builtins.__import__ = blocked
+import scripts.judge_verdict_analysis.fit
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=Path(__file__).resolve().parents[2],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_local_synthetic_fit_writes_the_backend_fold_contract(tmp_path: Path) -> None:
@@ -133,6 +154,18 @@ def test_remote_entry_point_guards_before_loading_pair_rows(tmp_path: Path, monk
 
     with pytest.raises(RuntimeError, match="refusing heavy local fit"):
         fit.run_remote_fits(config)
+
+
+def test_swc_target_requires_a_slurm_compute_node(monkeypatch) -> None:
+    """Fails if a Ceph-mounted gateway can satisfy the remote execution guard."""
+    monkeypatch.setattr(fit, "_ceph_available", lambda: True)
+    monkeypatch.setattr(fit.socket, "gethostname", lambda: "gpu-node-1")
+    monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    assert not fit._active_remote_target("swc_hpc")
+    monkeypatch.setenv("SLURM_JOB_ID", "123")
+    assert fit._active_remote_target("swc_hpc")
+    monkeypatch.setattr(fit.socket, "gethostname", lambda: "sgw2")
+    assert not fit._active_remote_target("swc_hpc")
 
 
 def test_local_test_limit_refuses_before_loading_pair_rows(tmp_path: Path, monkeypatch) -> None:
