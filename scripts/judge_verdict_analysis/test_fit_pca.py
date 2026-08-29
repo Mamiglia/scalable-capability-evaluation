@@ -3,6 +3,7 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from .config import CONFIG
 from . import fit_pca
@@ -134,3 +135,80 @@ def test_fold_checkpoints_and_aggregation_have_complete_artifacts(
     ]
     assert len(pd.read_parquet(summary_dir / "predictions.parquet")) == 16
     assert json.loads((summary_dir / "manifest.json").read_text())["fold_count"] == 2
+
+
+def test_resume_rejects_a_different_source_revision_or_feature_inventory(
+    tmp_path, monkeypatch,
+) -> None:
+    config = replace(_config(tmp_path), source_hf_revision="a" * 40)
+    rows = _rows().drop(columns="fold")
+    inventory = [rows, FEATURES]
+    monkeypatch.setattr(fit_pca, "_guard_execution", lambda _: None)
+    monkeypatch.setattr(fit_pca, "_load_rows", lambda _: tuple(inventory))
+    fit_pca.run_fold(0, config)
+
+    with pytest.raises(RuntimeError, match="settings"):
+        fit_pca.run_fold(0, replace(config, source_hf_revision="b" * 40))
+
+    inventory[0] = rows.assign(f3=rows.f0 * rows.f2)
+    inventory[1] = [*FEATURES, "f3"]
+    with pytest.raises(RuntimeError, match="settings"):
+        fit_pca.run_fold(0, config)
+
+
+@pytest.mark.parametrize("artifact", [
+    "predictions.parquet", "metrics.csv", "coefficients.csv", "tuning.csv",
+    "svd-explained-variance.csv", "svd-loadings.csv", "diagnostics.json",
+    "missing-metrics",
+])
+def test_resume_rejects_corrupt_or_incomplete_fold_artifacts(
+    tmp_path, monkeypatch, artifact,
+) -> None:
+    config = _config(tmp_path)
+    rows = _rows().drop(columns="fold")
+    monkeypatch.setattr(fit_pca, "_guard_execution", lambda _: None)
+    monkeypatch.setattr(fit_pca, "_load_rows", lambda _: (rows, FEATURES))
+    fold_dir = fit_pca.run_fold(0, config)
+    path = fold_dir / artifact
+    if artifact == "predictions.parquet":
+        pd.read_parquet(path).iloc[:-1].to_parquet(path, index=False)
+    elif artifact == "diagnostics.json":
+        values = json.loads(path.read_text())
+        values.pop("ridge_C")
+        path.write_text(json.dumps(values))
+    elif artifact == "missing-metrics":
+        (fold_dir / "metrics.csv").unlink()
+    else:
+        table = pd.read_csv(path)
+        if artifact == "metrics.csv":
+            table = table.drop(columns="metric")
+        elif artifact == "coefficients.csv":
+            table = table.drop(columns="effective")
+        elif artifact == "tuning.csv":
+            table.loc[:, "stage"] = "elastic_net"
+        elif artifact == "svd-explained-variance.csv":
+            table = table.iloc[:-1]
+        else:
+            table = table.iloc[:-1]
+        table.to_csv(path, index=False)
+
+    with pytest.raises(RuntimeError):
+        fit_pca.run_fold(0, config)
+
+
+def test_aggregate_resume_rejects_content_that_differs_from_fold_shards(
+    tmp_path, monkeypatch,
+) -> None:
+    config = _config(tmp_path)
+    rows = _rows().drop(columns="fold")
+    monkeypatch.setattr(fit_pca, "_guard_execution", lambda _: None)
+    monkeypatch.setattr(fit_pca, "_load_rows", lambda _: (rows, FEATURES))
+    fit_pca.run_fold(0, config)
+    fit_pca.run_fold(1, config)
+    output = fit_pca.aggregate(config)
+    metrics = pd.read_csv(output / "metrics.csv")
+    metrics.loc[0, "value"] += 0.25
+    metrics.to_csv(output / "metrics.csv", index=False)
+
+    with pytest.raises(RuntimeError, match="aggregate"):
+        fit_pca.aggregate(config)
