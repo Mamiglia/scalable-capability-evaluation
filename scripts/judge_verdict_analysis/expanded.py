@@ -80,6 +80,8 @@ def _resume_variant(
         pair_scaling_keys = set(zip(
             pair_scaling.benchmark, pair_scaling.feature, strict=True,
         ))
+        retained_map = representative_map[representative_map.retained.eq(True)]
+        addition_map = representative_map.set_index("feature").loc[list(additions)]
         valid = (
             settings == {
                 "construction": "processed-baseline-plus-explicit-additions",
@@ -110,8 +112,12 @@ def _resume_variant(
             and pair_scaling_keys == expected_pair_scaling
             and len(pair_scaling) == len(expected_pair_scaling)
             and representative_fields <= set(representative_map)
-            and representative_map.feature.tolist() == inventory
             and not representative_map.feature.duplicated().any()
+            and retained_map.feature.tolist() == inventory
+            and addition_map.retained.eq(True).all()
+            and addition_map.status.eq("retained").all()
+            and addition_map.representative.tolist() == list(additions)
+            and addition_map.processed_name.tolist() == list(additions)
             and isinstance(matrix_config, dict)
             and Path(matrix_config["output_root"]).resolve() == output.resolve()
             and all(

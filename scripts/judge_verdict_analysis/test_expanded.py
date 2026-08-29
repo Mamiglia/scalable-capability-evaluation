@@ -18,11 +18,35 @@ def _expanded():
 
 
 BASELINE_FEATURES = tuple(f"readable_{index:03d}" for index in range(117))
+GROUPED_OUT_FEATURES = tuple(f"grouped_out_{index:02d}" for index in range(20))
 
 
 def _allow_swc(monkeypatch, expanded) -> None:
     monkeypatch.setenv("SLURM_JOB_ID", "123")
     monkeypatch.setattr(expanded.socket, "gethostname", lambda: "cpu-node-1")
+
+
+def _representative_map(additions: tuple[str, ...] = ()) -> pd.DataFrame:
+    features = BASELINE_FEATURES + GROUPED_OUT_FEATURES + additions
+    retained = [True] * 117 + [False] * 20 + [True] * len(additions)
+    return pd.DataFrame({
+        "feature": features,
+        "status": ["retained"] * 117 + ["grouped_out"] * 20 + ["retained"] * len(additions),
+        "correlation_group": [pd.NA] * len(features),
+        "representative": [
+            *BASELINE_FEATURES,
+            *([BASELINE_FEATURES[0]] * 20),
+            *additions,
+        ],
+        "retained": retained,
+        "original_block": ["surface"] * len(features),
+        "group_size": [1] * 117 + [2] * 20 + [1] * len(additions),
+        "processed_name": [
+            *BASELINE_FEATURES,
+            *([BASELINE_FEATURES[0]] * 20),
+            *additions,
+        ],
+    })
 
 
 def _write_matrix(root: Path, features: tuple[str, ...]) -> None:
@@ -68,12 +92,7 @@ def _source_fixture(tmp_path: Path, monkeypatch, expanded) -> tuple[Path, Path]:
     ))
     _write_matrix(baseline_root, BASELINE_FEATURES)
     _write_matrix(source_root, BASELINE_FEATURES + additions)
-    pd.DataFrame({
-        "feature": BASELINE_FEATURES, "status": ["retained"] * 117,
-        "correlation_group": [pd.NA] * 117, "representative": BASELINE_FEATURES,
-        "retained": [True] * 117, "original_block": ["surface"] * 117,
-        "group_size": [1] * 117, "processed_name": BASELINE_FEATURES,
-    }).to_csv(baseline_root / "representative-map.csv", index=False)
+    _representative_map().to_csv(baseline_root / "representative-map.csv", index=False)
     (baseline_root / "manifest.json").write_text(json.dumps({
         "source_hf_repo": "example/judging",
         "source_hf_revision": "a" * 40,
@@ -224,12 +243,7 @@ def _complete_variant(
     output = root / name
     inventory = [*BASELINE_FEATURES, *additions]
     _write_matrix(output, tuple(inventory))
-    pd.DataFrame({
-        "feature": inventory, "status": ["retained"] * len(inventory),
-        "correlation_group": [pd.NA] * len(inventory), "representative": inventory,
-        "retained": [True] * len(inventory), "original_block": ["surface"] * len(inventory),
-        "group_size": [1] * len(inventory), "processed_name": inventory,
-    }).to_csv(output / "representative-map.csv", index=False)
+    _representative_map(additions).to_csv(output / "representative-map.csv", index=False)
     source_paths = _source_paths(baseline_config, source_config)
     manifest = {
         "source_hf_repo": "example/judging",
@@ -367,6 +381,59 @@ def test_resume_rejects_feature_inventory_mismatch(tmp_path: Path, monkeypatch) 
     dictionary = pd.read_parquet(output / "feature-dictionary.parquet")
     dictionary.loc[0, "feature"] = "wrong"
     dictionary.to_parquet(output / "feature-dictionary.parquet", index=False)
+
+    with pytest.raises(RuntimeError, match="invalid variant"):
+        expanded._resume_variant(output, additions, baseline, source)
+
+
+def test_resume_rejects_retained_provenance_outside_inventory(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    name, additions = CONFIG.expanded_feature_sets[0]
+    output = _complete_variant(tmp_path / "matrices", name, additions, baseline, source)
+    representative_map = pd.read_csv(output / "representative-map.csv")
+    representative_map.loc[
+        representative_map.feature == GROUPED_OUT_FEATURES[0], ["retained", "status"]
+    ] = [True, "retained"]
+    representative_map.to_csv(output / "representative-map.csv", index=False)
+
+    with pytest.raises(RuntimeError, match="invalid variant"):
+        expanded._resume_variant(output, additions, baseline, source)
+
+
+def test_resume_rejects_wrong_retained_provenance_order(tmp_path: Path, monkeypatch) -> None:
+    expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    name, additions = CONFIG.expanded_feature_sets[0]
+    output = _complete_variant(tmp_path / "matrices", name, additions, baseline, source)
+    representative_map = pd.read_csv(output / "representative-map.csv")
+    representative_map = representative_map.iloc[
+        [1, 0, *range(2, len(representative_map))]
+    ].reset_index(drop=True)
+    representative_map.to_csv(output / "representative-map.csv", index=False)
+
+    with pytest.raises(RuntimeError, match="invalid variant"):
+        expanded._resume_variant(output, additions, baseline, source)
+
+
+@pytest.mark.parametrize("column,bad_value", [
+    ("retained", False),
+    ("status", "grouped_out"),
+    ("representative", "wrong"),
+    ("processed_name", "wrong"),
+])
+def test_resume_rejects_corrupt_addition_provenance(
+    tmp_path: Path, monkeypatch, column: str, bad_value: object,
+) -> None:
+    expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    name, additions = CONFIG.expanded_feature_sets[0]
+    output = _complete_variant(tmp_path / "matrices", name, additions, baseline, source)
+    representative_map = pd.read_csv(output / "representative-map.csv")
+    representative_map.loc[representative_map.feature == additions[0], column] = bad_value
+    representative_map.to_csv(output / "representative-map.csv", index=False)
 
     with pytest.raises(RuntimeError, match="invalid variant"):
         expanded._resume_variant(output, additions, baseline, source)
