@@ -396,7 +396,7 @@ def test_result_plots_are_compact_editable_and_unclipped(tmp_path: Path) -> None
         assert block_svg.count('id="axes_') == 3 and feature in block_svg
     assert "planning (clause-plan)" in outputs["group-effects"][1].read_text()
     assert "Singular" in outputs["annotation-comparison"][1].read_text()
-    assert "Unique removal" in outputs["annotation-comparison"][1].read_text()
+    assert ">Unique</text>" in outputs["annotation-comparison"][1].read_text()
     assert not any("suptitle" in source.lower() for source in svgs)
 
 
@@ -483,11 +483,44 @@ def test_feature_scatter_and_overview_panels_use_independent_rounded_scales(
     result_plots.plot_feature_overview(features, coefficients, tmp_path, top=2)
 
     assert scales["feature-scatter"][:2] == ((-0.01, 0.06), (-0.002, 0.005))
-    assert scales["feature-scatter"][2].tolist() == [-0.01, 0.0, 0.06]
-    assert scales["feature-scatter"][3].tolist() == [-0.002, 0.0, 0.005]
+    assert scales["feature-scatter"][2].tolist() == [-0.01, 0.06]
+    assert scales["feature-scatter"][3].tolist() == [-0.002, 0.005]
     assert scales["feature-effects-overview-singular"][0] == (-0.01, 0.06)
     assert scales["feature-effects-overview-unique"][0] == (-0.002, 0.005)
     assert scales["feature-effects-overview-coefficient"][0] == (-0.6, 0.6)
+
+
+def test_feature_labels_do_not_call_minimal_prose_a_bare_answer(tmp_path: Path) -> None:
+    features = pd.DataFrame({
+        "feature": ["bare_answer"], "block": ["structure"],
+        "singular": [0.03], "singular_lower": [0.02], "singular_upper": [0.04],
+        "unique": [0.001], "unique_lower": [0.0], "unique_upper": [0.002],
+    })
+    coefficients = pd.DataFrame({
+        "feature": ["bare_answer"], "estimate": [0.1],
+        "lower": [0.05], "upper": [0.15], "fold_count": [4],
+    })
+
+    _, svg = plot_feature_overview(features, coefficients, tmp_path, top=1)
+
+    source = svg.read_text()
+    assert "minimal non-" in source and "answer prose" in source
+    assert "bare answer" not in source
+
+
+def test_annotation_comparison_is_sparse_and_uses_unique_label(tmp_path: Path) -> None:
+    groups = pd.DataFrame([{
+        "level": "family", "group": "annotations",
+        "singular": 0.10, "singular_lower": 0.08, "singular_upper": 0.12,
+        "unique": 0.06, "unique_lower": 0.04, "unique_upper": 0.08,
+    }])
+
+    png, svg = plot_annotation_comparison(groups, tmp_path)
+
+    assert mpimg.imread(png).shape[:2] == (330, 510)
+    source = svg.read_text()
+    assert ">Unique</text>" in source
+    assert "Unique removal" not in source
 
 
 def test_scatter_labels_requested_features_outward_without_overlap(
@@ -537,7 +570,10 @@ def test_scatter_labels_requested_features_outward_without_overlap(
     features = features.assign(
         block_order=features.block.map(block_order),
     ).sort_values("block_order").drop(columns="block_order")
-    expected = {feature.replace("_", " ") for feature, *_ in values[:-1]}
+    expected = {
+        "minimal non- answer prose" if feature == "bare_answer" else feature.replace("_", " ")
+        for feature, *_ in values[:-1]
+    }
     placements = []
     real_save = result_plots._save
 
@@ -716,6 +752,55 @@ def test_judge_grids_use_exact_judge_by_benchmark_coefficients(tmp_path: Path) -
         assert all(label in source for label in ("AIME", "GPQA", "InterCode", "SWE"))
 
 
+def test_judge_grids_share_selected_feature_rows(tmp_path: Path, monkeypatch) -> None:
+    benchmarks = ("aime", "gpqa", "intercode", "swe_bench_mini")
+    features = ("common", "j1_only", "j2_only")
+    effects = pd.DataFrame([
+        {
+            "judge": judge, "benchmark": benchmark, "feature": feature,
+            "block": "surface", "effect": effect, "estimate": estimate,
+            "lower": estimate - 0.001, "upper": estimate + 0.001,
+        }
+        for judge in ("j1", "j2")
+        for benchmark in benchmarks
+        for feature in features
+        for effect, estimate in (
+            ("singular", 0.03),
+            ("unique", {
+                "common": 0.01,
+                "j1_only": 0.02 if judge == "j1" else -0.01,
+                "j2_only": 0.02 if judge == "j2" else -0.01,
+            }[feature]),
+        )
+    ])
+    coefficients = pd.DataFrame([
+        {
+            "judge": judge, "benchmark": benchmark, "feature": feature,
+            "estimate": 0.1, "lower": 0.05, "upper": 0.15,
+            "fold_count": 4,
+        }
+        for judge in ("j1", "j2")
+        for benchmark in benchmarks
+        for feature in features
+    ])
+    selected = {}
+
+    def capture(fig, output_dir, name):
+        selected[name] = [label.get_text() for label in fig.axes[0].get_yticklabels()]
+        plt.close(fig)
+        return Path(output_dir) / f"{name}.png", Path(output_dir) / f"{name}.svg"
+
+    monkeypatch.setattr(result_plots, "_save", capture)
+
+    result_plots.plot_judge_benchmark_grids(
+        effects, coefficients, tmp_path, top=2,
+    )
+
+    assert len(selected) == 2
+    assert len(next(iter(selected.values()))) == 2
+    assert len({tuple(labels) for labels in selected.values()}) == 1
+
+
 def test_benchmark_grid_uses_shared_support_rows_and_keeps_labels_apart(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -751,7 +836,7 @@ def test_benchmark_grid_uses_shared_support_rows_and_keeps_labels_apart(
     def inspect(fig, output_dir, name):
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
-        assert fig.get_size_inches().tolist() == pytest.approx([4.0, 5.6])
+        assert fig.get_size_inches().tolist() == pytest.approx([4.0, 5.5])
         assert len(fig.axes) == 12
         for axis_index, ax in enumerate(fig.axes):
             labels = [label for label in ax.get_yticklabels()

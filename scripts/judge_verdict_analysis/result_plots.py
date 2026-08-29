@@ -27,6 +27,7 @@ BLOCK_COLORS = {
     "intermediate-errors": "#4a3aa7", "clause-descriptors": "#778899",
     "clause-motifs": "#a16f46", "clause-plan": "#5f8f67",
 }
+FEATURE_LABELS = {"bare_answer": "minimal non-answer prose"}
 
 
 def _read_table(path: str | Path) -> pd.DataFrame:
@@ -517,7 +518,7 @@ def _estimate_limits(values: pd.Series) -> tuple[tuple[float, float], list[float
     upper = float(np.round(np.ceil(upper / step) * step, 12))
     if lower == upper:
         upper = float(np.round(lower + step, 12))
-    return (lower, upper), list(dict.fromkeys((lower, 0.0, upper)))
+    return (lower, upper), [lower, upper]
 
 
 def _format_tick(value: float) -> str:
@@ -527,6 +528,10 @@ def _format_tick(value: float) -> str:
     if magnitude.startswith("0."):
         magnitude = magnitude[1:]
     return ("−" if value < 0 else "") + magnitude
+
+
+def _feature_label(value: object) -> str:
+    return FEATURE_LABELS.get(str(value), str(value).replace("_", " "))
 
 
 def _variant_order(values: pd.Series) -> list[str]:
@@ -717,7 +722,7 @@ def plot_feature_scatter(
         label_position = points[index] + direction * 0.06 + tangent * stagger[index]
         leader = label_position - points[index]
         annotation = ax.annotate(
-            textwrap.fill(str(row.feature).replace("_", " "), width=16),
+            textwrap.fill(_feature_label(row.feature), width=16),
             (row.singular, row.unique), xytext=label_position,
             textcoords="axes fraction", ha="left" if leader[0] >= 0 else "right",
             va="bottom" if leader[1] >= 0 else "top", fontsize=6,
@@ -787,7 +792,7 @@ def _plot_feature_axis(
     ax.set_xlim(limits)
     ax.set_xticks(ticks, [_format_tick(value) for value in ticks])
     if labels:
-        tick_labels = [str(value).replace("_", " ") for value in values.feature]
+        tick_labels = [_feature_label(value) for value in values.feature]
         if wrap_width is not None:
             tick_labels = [textwrap.fill(value, wrap_width) for value in tick_labels]
         ax.set_yticks(y, tick_labels)
@@ -907,9 +912,24 @@ def plot_group_effects(
     return _save(fig, output_dir, "group-effects")
 
 
+def _selected_feature_rows(effects: pd.DataFrame, top: int) -> list[str]:
+    support = []
+    for feature, frame in effects[effects.effect == "unique"].groupby("feature", sort=False):
+        positive = frame[frame.lower > 0]
+        support.append({
+            "feature": feature, "positive_support": len(positive),
+            "mean_positive": positive.estimate.mean(), "peak": frame.estimate.max(),
+        })
+    selected = (pd.DataFrame(support).fillna({"mean_positive": -np.inf}).sort_values(
+        ["positive_support", "mean_positive", "peak", "feature"],
+        ascending=[False, False, False, True], kind="stable",
+    ).head(top).feature.tolist())
+    return list(reversed(selected))
+
+
 def _plot_benchmark_grid(
     effects: pd.DataFrame, coefficients: pd.DataFrame, output_dir: str | Path,
-    *, name: str, top: int = 10,
+    *, name: str, top: int = 10, variables: Sequence[str] | None = None,
 ) -> tuple[Path, Path]:
     """Plot four benchmarks by singular, unique, and coefficient columns."""
     _require(effects, {
@@ -922,24 +942,12 @@ def _plot_benchmark_grid(
                   if value in set(effects.benchmark)]
     if not benchmarks:
         raise ValueError("benchmark effects contain no plottable rows")
-    unique = effects[effects.effect == "unique"]
-    support = []
-    for feature, frame in unique.groupby("feature", sort=False):
-        positive = frame[frame.lower > 0]
-        support.append({
-            "feature": feature, "positive_support": len(positive),
-            "mean_positive": positive.estimate.mean(), "peak": frame.estimate.max(),
-        })
-    variables = (pd.DataFrame(support).fillna({"mean_positive": -np.inf}).sort_values(
-        ["positive_support", "mean_positive", "peak", "feature"],
-        ascending=[False, False, False, True], kind="stable",
-    ).head(top).feature.tolist())
-    variables.reverse()
+    variables = list(variables) if variables is not None else _selected_feature_rows(effects, top)
     if not variables:
         raise ValueError("benchmark effects contain no plottable rows")
     _style()
     fig, axes = plt.subplots(
-        len(benchmarks), 3, figsize=(4.0, 1.4 * len(benchmarks)),
+        len(benchmarks), 3, figsize=(4.0, 1.375 * len(benchmarks)),
         layout="constrained", squeeze=False,
     )
     column_points = [[], [], []]
@@ -987,7 +995,7 @@ def _plot_benchmark_grid(
             ax.plot(value.estimate, point_y, "o", ms=2.2, color=color,
                     clip_on=False, zorder=3)
         column_points[2].append(values.estimate.to_numpy(float))
-        tick_labels = [value.replace("_", " ") for value in variables]
+        tick_labels = [_feature_label(value) for value in variables]
         for column, ax in enumerate(axes[row_index]):
             ax.axvline(0, color="#999999", lw=0.6, ls="--")
             ax.set_yticks(y, tick_labels if column == 0 else [], fontsize=3.8)
@@ -1045,11 +1053,12 @@ def plot_judge_benchmark_grids(
     _require(effects, {"judge"}, "judge benchmark effects")
     _require(coefficients, {"judge"}, "judge benchmark coefficients")
     outputs = {}
+    variables = _selected_feature_rows(effects, top)
     for judge, frame in effects.groupby("judge", sort=False):
         name = f"feature-effects-{str(judge).replace('/', '-')}-by-benchmark"
         outputs[name] = _plot_benchmark_grid(
             frame, coefficients[coefficients.judge == judge], output_dir,
-            name=name, top=top,
+            name=name, top=top, variables=variables,
         )
     return outputs
 
@@ -1064,7 +1073,7 @@ def plot_annotation_comparison(groups: pd.DataFrame, output_dir: str | Path) -> 
         frame, columns=("singular_lower", "singular_upper", "unique_lower", "unique_upper"),
     )
     _style()
-    fig, ax = plt.subplots(figsize=(2.0, 1.4), layout="constrained")
+    fig, ax = plt.subplots(figsize=(1.7, 1.1), layout="constrained")
     for effect, y, color in (("singular", -0.08, "#2a78d6"), ("unique", 0.08, "#eb6834")):
         ax.errorbar(row[effect], y,
                     xerr=[[row[effect] - row[f"{effect}_lower"]],
@@ -1082,7 +1091,7 @@ def plot_annotation_comparison(groups: pd.DataFrame, output_dir: str | Path) -> 
         Line2D([], [], marker="o", color="none", markerfacecolor="#2a78d6",
                markeredgecolor="#2a78d6", label="Singular"),
         Line2D([], [], marker="o", color="none", markerfacecolor="#eb6834",
-               markeredgecolor="#eb6834", label="Unique removal"),
+               markeredgecolor="#eb6834", label="Unique"),
     ], loc="outside lower center", ncol=2, frameon=False)
     return _save(fig, output_dir, "annotation-comparison")
 
@@ -1111,7 +1120,7 @@ def plot_stability(
     axes[0].set_xlim(0, 1)
     axes[0].set_xticks([0, 0.5, 1])
     axes[0].set_xlabel("Selection rate")
-    axes[0].set_yticks(y, [textwrap.fill(str(value).replace("_", " "), 20) for value in frame.feature])
+    axes[0].set_yticks(y, [textwrap.fill(_feature_label(value), 20) for value in frame.feature])
     axes[1].axvline(0, color="#999999", lw=0.8, ls="--")
     for row_y, row in zip(y, frame.itertuples()):
         if row.coefficient_fold_count >= 3:
