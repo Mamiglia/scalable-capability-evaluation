@@ -27,10 +27,9 @@ packages=${JV_PACKAGES:-/ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchC
   exit 2
 }
 
-export PYTHONPATH="$repo:$repo/src:$packages"
-export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
-export XDG_CACHE_HOME=${SLURM_TMPDIR:-/tmp}/cache-$SLURM_JOB_ID
-cd "$repo"
+require_absolute() {
+  [[ $1 == /* ]] || { echo "$2 must be absolute: $1" >&2; exit 2; }
+}
 
 case "$mode" in
   build)
@@ -38,19 +37,30 @@ case "$mode" in
     baseline_config=${2:?build requires BASELINE_CONFIG CANONICAL_CONFIG MATRIX_ROOT}
     source_config=${3:?build requires BASELINE_CONFIG CANONICAL_CONFIG MATRIX_ROOT}
     matrix_root=${4:?build requires BASELINE_CONFIG CANONICAL_CONFIG MATRIX_ROOT}
-    "$python" -m scripts.judge_verdict_analysis.expanded build \
-      "$baseline_config" "$source_config" "$matrix_root"
+    require_absolute "$baseline_config" BASELINE_CONFIG
+    require_absolute "$source_config" CANONICAL_CONFIG
+    require_absolute "$matrix_root" MATRIX_ROOT
+    run=("$python" -m scripts.judge_verdict_analysis.expanded build
+      "$baseline_config" "$source_config" "$matrix_root")
     ;;
   fit)
     : "${SLURM_ARRAY_TASK_ID:?fit requires the 0-3 Slurm array}"
     variant=${2:?fit requires VARIANT MATRIX_ROOT RESULTS_ROOT}
     matrix_root=${3:?fit requires VARIANT MATRIX_ROOT RESULTS_ROOT}
     results_root=${4:?fit requires VARIANT MATRIX_ROOT RESULTS_ROOT}
-    "$python" -m scripts.judge_verdict_analysis.expanded fit \
-      "$variant" "$matrix_root" "$results_root" "$SLURM_ARRAY_TASK_ID"
+    require_absolute "$matrix_root" MATRIX_ROOT
+    require_absolute "$results_root" RESULTS_ROOT
+    run=("$python" -m scripts.judge_verdict_analysis.expanded fit
+      "$variant" "$matrix_root" "$results_root" "$SLURM_ARRAY_TASK_ID")
     ;;
   *)
     echo "unknown mode: $mode" >&2
     exit 2
     ;;
 esac
+
+export PYTHONPATH="$repo:$repo/src:$packages"
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+export XDG_CACHE_HOME=${SLURM_TMPDIR:-/tmp}/cache-$SLURM_JOB_ID
+cd "$repo"
+"${run[@]}"

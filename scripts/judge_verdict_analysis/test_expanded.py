@@ -1,9 +1,11 @@
+from dataclasses import replace
 import hashlib
 import importlib
 import json
 from pathlib import Path
 import subprocess
 
+import pandas as pd
 import pytest
 import yaml
 
@@ -15,8 +17,98 @@ def _expanded():
     return importlib.import_module("scripts.judge_verdict_analysis.expanded")
 
 
+BASELINE_FEATURES = tuple(f"readable_{index:03d}" for index in range(117))
+
+
+def _allow_swc(monkeypatch, expanded) -> None:
+    monkeypatch.setenv("SLURM_JOB_ID", "123")
+    monkeypatch.setattr(expanded.socket, "gethostname", lambda: "cpu-node-1")
+
+
+def _write_matrix(root: Path, features: tuple[str, ...]) -> None:
+    root.mkdir(parents=True)
+    pd.DataFrame({
+        "feature": features,
+        "block": ["surface"] * len(features),
+        "source": ["fixture"] * len(features),
+        "transform": ["none"] * len(features),
+        "n_missing": [0] * len(features),
+        "correlation_group": [pd.NA] * len(features),
+        "representative": features,
+        "retained": [True] * len(features),
+        "original_block": ["surface"] * len(features),
+        "group_size": [1] * len(features),
+        "processed_name": features,
+    }).to_parquet(root / "feature-dictionary.parquet", index=False)
+    pd.DataFrame({
+        "bench": ["b"], "model": ["m"], "item": ["i"],
+        "split": ["representation_train"], "model_accuracy": [1.0],
+        **{feature: [0.0] for feature in features},
+    }).to_parquet(root / "transcript.parquet", index=False)
+    pd.DataFrame({
+        "bench": ["b"], "judge": ["j"], "item": ["i"],
+        "model_left": ["m1"], "model_right": ["m2"],
+        "split": ["representation_train"], "pick_left": [1],
+        **{f"d_{feature}": [0.0] for feature in features},
+    }).to_parquet(root / "pair.parquet", index=False)
+    for filename, prefix in (
+        ("scaling-transcript.parquet", ""), ("scaling-pair.parquet", "d_"),
+    ):
+        pd.DataFrame({
+            "benchmark": ["b"] * len(features),
+            "feature": [f"{prefix}{feature}" for feature in features],
+            "mean": [0.0] * len(features), "sd": [1.0] * len(features),
+        }).to_parquet(root / filename, index=False)
+
+
+def _source_fixture(tmp_path: Path, monkeypatch, expanded) -> tuple[Path, Path]:
+    baseline_root, source_root = tmp_path / "baseline", tmp_path / "source"
+    additions = tuple(dict.fromkeys(
+        feature for _, features in CONFIG.expanded_feature_sets for feature in features
+    ))
+    _write_matrix(baseline_root, BASELINE_FEATURES)
+    _write_matrix(source_root, BASELINE_FEATURES + additions)
+    pd.DataFrame({
+        "feature": BASELINE_FEATURES, "status": ["retained"] * 117,
+        "correlation_group": [pd.NA] * 117, "representative": BASELINE_FEATURES,
+        "retained": [True] * 117, "original_block": ["surface"] * 117,
+        "group_size": [1] * 117, "processed_name": BASELINE_FEATURES,
+    }).to_csv(baseline_root / "representative-map.csv", index=False)
+    (baseline_root / "manifest.json").write_text(json.dumps({
+        "source_hf_repo": "example/judging",
+        "source_hf_revision": "a" * 40,
+        "source_status": "resolved",
+    }))
+    baseline_config, source_config = tmp_path / "baseline.yaml", tmp_path / "source.yaml"
+    baseline_config.write_text(yaml.safe_dump({"output_root": str(baseline_root)}))
+    source_config.write_text(yaml.safe_dump({"output_root": str(source_root)}))
+    pin = hashlib.sha256((baseline_root / "manifest.json").read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        expanded, "CONFIG", replace(CONFIG, processed_matrix_manifest_sha256=pin),
+    )
+    return baseline_config, source_config
+
+
+def _source_paths(baseline_config: Path, source_config: Path) -> dict[str, Path]:
+    baseline_root = Path(yaml.safe_load(baseline_config.read_text())["output_root"])
+    source_root = Path(yaml.safe_load(source_config.read_text())["output_root"])
+    paths = {
+        "baseline_config": baseline_config,
+        "canonical_config": source_config,
+        "baseline_manifest": baseline_root / "manifest.json",
+        "baseline_representative_map": baseline_root / "representative-map.csv",
+    }
+    for prefix, root in (("baseline", baseline_root), ("canonical", source_root)):
+        for filename in ARTIFACTS[:5]:
+            key = f"{prefix}_{filename.removesuffix('.parquet').replace('-', '_')}"
+            paths[key] = root / filename
+    return paths
+
+
 def test_build_materializes_the_three_exact_variants(tmp_path: Path, monkeypatch) -> None:
     expanded = _expanded()
+    _allow_swc(monkeypatch, expanded)
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
     calls = []
     monkeypatch.setattr(
         expanded, "build_expanded_design_matrix",
@@ -25,8 +117,6 @@ def test_build_materializes_the_three_exact_variants(tmp_path: Path, monkeypatch
         ) or {"variant": output.name},
     )
     monkeypatch.setattr(expanded, "write_design_matrix", lambda tables, output: None)
-    baseline = tmp_path / "baseline.yaml"
-    source = tmp_path / "source.yaml"
     output = tmp_path / "matrices"
 
     expanded.build_variants(baseline, source, output)
@@ -41,48 +131,57 @@ def _complete_variant(
     root: Path,
     name: str,
     additions: tuple[str, ...],
-    baseline_config: Path | None = None,
-    source_config: Path | None = None,
+    baseline_config: Path,
+    source_config: Path,
 ) -> Path:
     output = root / name
-    output.mkdir(parents=True)
-    inventory = ["readable", *additions]
-    for artifact in ARTIFACTS:
-        (output / artifact).write_text("fixture")
+    inventory = [*BASELINE_FEATURES, *additions]
+    _write_matrix(output, tuple(inventory))
+    pd.DataFrame({
+        "feature": inventory, "status": ["retained"] * len(inventory),
+        "correlation_group": [pd.NA] * len(inventory), "representative": inventory,
+        "retained": [True] * len(inventory), "original_block": ["surface"] * len(inventory),
+        "group_size": [1] * len(inventory), "processed_name": inventory,
+    }).to_csv(output / "representative-map.csv", index=False)
+    source_paths = _source_paths(baseline_config, source_config)
     manifest = {
+        "source_hf_repo": "example/judging",
+        "source_hf_revision": "a" * 40,
+        "source_status": "resolved",
+        "source_paths": {key: str(path) for key, path in source_paths.items()},
+        "source_sha256": {
+            key: hashlib.sha256(path.read_bytes()).hexdigest()
+            for key, path in source_paths.items()
+        },
         "settings": {
             "construction": "processed-baseline-plus-explicit-additions",
             "additions": list(additions),
             "correlation_grouping": False,
         },
         "features": {
-            "baseline": 1,
+            "baseline": 117,
             "added": len(additions),
             "retained": len(inventory),
             "inventory": inventory,
             "additions": list(additions),
         },
+        "rows": {"transcript": 1, "pair": 1},
     }
-    if baseline_config is not None and source_config is not None:
-        manifest["source_paths"] = {
-            "baseline_config": str(baseline_config),
-            "canonical_config": str(source_config),
-        }
-        manifest["source_sha256"] = {
-            key: hashlib.sha256(Path(path).read_bytes()).hexdigest()
-            for key, path in manifest["source_paths"].items()
-        }
     (output / "manifest.json").write_text(json.dumps(manifest))
-    (output / "design-matrix.yaml").write_text(yaml.safe_dump({"output_root": str(output)}))
+    (output / "design-matrix.yaml").write_text(yaml.safe_dump({
+        "output_root": str(output),
+        "source_hf_repo": manifest["source_hf_repo"],
+        "source_hf_revision": manifest["source_hf_revision"],
+        "source_status": manifest["source_status"],
+    }))
     return output
 
 
 def test_build_resumes_only_complete_matching_variants(tmp_path: Path, monkeypatch) -> None:
     expanded = _expanded()
+    _allow_swc(monkeypatch, expanded)
     output = tmp_path / "matrices"
-    baseline, source = tmp_path / "baseline.yaml", tmp_path / "source.yaml"
-    baseline.write_text("baseline")
-    source.write_text("source")
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
     for name, additions in CONFIG.expanded_feature_sets:
         _complete_variant(output, name, additions, baseline, source)
     monkeypatch.setattr(
@@ -93,40 +192,155 @@ def test_build_resumes_only_complete_matching_variants(tmp_path: Path, monkeypat
     expanded.build_variants(baseline, source, output)
 
 
-def test_build_refuses_complete_variants_from_stale_inputs(tmp_path: Path) -> None:
+def test_build_refuses_complete_variants_from_stale_inputs(tmp_path: Path, monkeypatch) -> None:
     expanded = _expanded()
+    _allow_swc(monkeypatch, expanded)
     output = tmp_path / "matrices"
-    baseline, source = tmp_path / "baseline.yaml", tmp_path / "source.yaml"
-    baseline.write_text("baseline")
-    source.write_text("source")
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
     for name, additions in CONFIG.expanded_feature_sets:
         _complete_variant(output, name, additions, baseline, source)
-    baseline.write_text("changed baseline")
+    baseline_root = Path(yaml.safe_load(baseline.read_text())["output_root"])
+    (baseline_root / "representative-map.csv").write_text("changed")
 
     with pytest.raises(RuntimeError, match="invalid variant"):
         expanded.build_variants(baseline, source, output)
 
 
-def test_build_refuses_a_partial_existing_variant(tmp_path: Path) -> None:
+def test_build_refuses_a_partial_existing_variant(tmp_path: Path, monkeypatch) -> None:
     expanded = _expanded()
+    _allow_swc(monkeypatch, expanded)
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
     output = tmp_path / "matrices"
     name = CONFIG.expanded_feature_sets[0][0]
     (output / name).mkdir(parents=True)
     (output / name / "manifest.json").write_text("{}")
 
     with pytest.raises(RuntimeError, match="partial variant"):
-        expanded.build_variants(tmp_path / "baseline.yaml", tmp_path / "source.yaml", output)
+        expanded.build_variants(baseline, source, output)
+
+
+@pytest.mark.parametrize("artifact", ARTIFACTS)
+def test_resume_reads_and_rejects_each_corrupt_artifact(
+    tmp_path: Path, monkeypatch, artifact: str,
+) -> None:
+    expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    name, additions = CONFIG.expanded_feature_sets[0]
+    output = _complete_variant(tmp_path / "matrices", name, additions, baseline, source)
+    if artifact.endswith(".parquet"):
+        (output / artifact).write_bytes(b"not parquet")
+    else:
+        (output / artifact).write_text("{broken")
+
+    with pytest.raises(RuntimeError, match="invalid variant"):
+        expanded._resume_variant(output, additions, baseline, source)
+
+
+def test_resume_rejects_manifest_row_count_mismatch(tmp_path: Path, monkeypatch) -> None:
+    expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    name, additions = CONFIG.expanded_feature_sets[0]
+    output = _complete_variant(tmp_path / "matrices", name, additions, baseline, source)
+    manifest = json.loads((output / "manifest.json").read_text())
+    manifest["rows"]["pair"] = 2
+    (output / "manifest.json").write_text(json.dumps(manifest))
+
+    with pytest.raises(RuntimeError, match="invalid variant"):
+        expanded._resume_variant(output, additions, baseline, source)
+
+
+def test_resume_rejects_feature_inventory_mismatch(tmp_path: Path, monkeypatch) -> None:
+    expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    name, additions = CONFIG.expanded_feature_sets[0]
+    output = _complete_variant(tmp_path / "matrices", name, additions, baseline, source)
+    dictionary = pd.read_parquet(output / "feature-dictionary.parquet")
+    dictionary.loc[0, "feature"] = "wrong"
+    dictionary.to_parquet(output / "feature-dictionary.parquet", index=False)
+
+    with pytest.raises(RuntimeError, match="invalid variant"):
+        expanded._resume_variant(output, additions, baseline, source)
+
+
+def test_resume_rejects_missing_pair_metadata(tmp_path: Path, monkeypatch) -> None:
+    expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    name, additions = CONFIG.expanded_feature_sets[0]
+    output = _complete_variant(tmp_path / "matrices", name, additions, baseline, source)
+    pair = pd.read_parquet(output / "pair.parquet").drop(columns="judge")
+    pair.to_parquet(output / "pair.parquet", index=False)
+
+    with pytest.raises(RuntimeError, match="invalid variant"):
+        expanded._resume_variant(output, additions, baseline, source)
+
+
+def test_resume_rejects_incomplete_provenance_key_set(tmp_path: Path, monkeypatch) -> None:
+    expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    name, additions = CONFIG.expanded_feature_sets[0]
+    output = _complete_variant(tmp_path / "matrices", name, additions, baseline, source)
+    manifest = json.loads((output / "manifest.json").read_text())
+    manifest["source_paths"].pop("canonical_pair")
+    manifest["source_sha256"].pop("canonical_pair")
+    (output / "manifest.json").write_text(json.dumps(manifest))
+
+    with pytest.raises(RuntimeError, match="invalid variant"):
+        expanded._resume_variant(output, additions, baseline, source)
+
+
+def test_build_rejects_a_noncanonical_baseline_feature_count(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    expanded = _expanded()
+    _allow_swc(monkeypatch, expanded)
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    baseline_root = Path(yaml.safe_load(baseline.read_text())["output_root"])
+    dictionary = pd.read_parquet(baseline_root / "feature-dictionary.parquet").head(1)
+    dictionary.to_parquet(baseline_root / "feature-dictionary.parquet", index=False)
+    monkeypatch.setattr(
+        expanded, "build_expanded_design_matrix",
+        lambda *_: pytest.fail("unauthorized baseline reached matrix construction"),
+    )
+
+    with pytest.raises(RuntimeError, match="exactly 117 features"):
+        expanded.build_variants(baseline, source, tmp_path / "matrices")
+
+
+def test_build_rejects_an_unpinned_baseline_manifest(tmp_path: Path, monkeypatch) -> None:
+    expanded = _expanded()
+    _allow_swc(monkeypatch, expanded)
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    monkeypatch.setattr(
+        expanded, "CONFIG",
+        replace(expanded.CONFIG, processed_matrix_manifest_sha256="0" * 64),
+    )
+
+    with pytest.raises(RuntimeError, match="manifest SHA"):
+        expanded.build_variants(baseline, source, tmp_path / "matrices")
+
+
+def test_build_rejects_missing_canonical_additions(tmp_path: Path, monkeypatch) -> None:
+    expanded = _expanded()
+    _allow_swc(monkeypatch, expanded)
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
+    source_root = Path(yaml.safe_load(source.read_text())["output_root"])
+    dictionary = pd.read_parquet(source_root / "feature-dictionary.parquet")
+    dictionary = dictionary[dictionary.feature != CONFIG.expanded_feature_sets[0][1][0]]
+    dictionary.to_parquet(source_root / "feature-dictionary.parquet", index=False)
+
+    with pytest.raises(RuntimeError, match="canonical dictionary additions"):
+        expanded.build_variants(baseline, source, tmp_path / "matrices")
 
 
 def test_fit_pins_manifest_and_restricts_one_model_fold(tmp_path: Path, monkeypatch) -> None:
     expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
     matrix_root, results_root = tmp_path / "matrices", tmp_path / "results"
     name, additions = CONFIG.expanded_feature_sets[2]
-    matrix = _complete_variant(matrix_root, name, additions)
+    matrix = _complete_variant(matrix_root, name, additions, baseline, source)
     expected_sha = hashlib.sha256((matrix / "manifest.json").read_bytes()).hexdigest()
     calls = []
-    monkeypatch.setenv("SLURM_JOB_ID", "123")
-    monkeypatch.setattr(expanded.socket, "gethostname", lambda: "cpu-node-1")
+    _allow_swc(monkeypatch, expanded)
     monkeypatch.setattr(expanded, "run_remote_fits", calls.append)
 
     expanded.fit_variant(name, matrix_root, results_root, 2)
@@ -153,11 +367,11 @@ def test_fit_keeps_variant_results_separate(
     tmp_path: Path, monkeypatch, name: str, additions: tuple[str, ...],
 ) -> None:
     expanded = _expanded()
+    baseline, source = _source_fixture(tmp_path, monkeypatch, expanded)
     matrix_root, results_root = tmp_path / "matrices", tmp_path / "results"
-    _complete_variant(matrix_root, name, additions)
+    _complete_variant(matrix_root, name, additions, baseline, source)
     calls = []
-    monkeypatch.setenv("SLURM_JOB_ID", "123")
-    monkeypatch.setattr(expanded.socket, "gethostname", lambda: "cpu-node-1")
+    _allow_swc(monkeypatch, expanded)
     monkeypatch.setattr(expanded, "run_remote_fits", calls.append)
 
     expanded.fit_variant(name, matrix_root, results_root, 0)
@@ -189,28 +403,52 @@ def test_fit_refuses_gateway_before_touching_the_matrix(tmp_path: Path, monkeypa
         expanded.fit_variant("readable-surprisal", tmp_path, tmp_path / "results", 0)
 
 
+@pytest.mark.parametrize("hostname,job_id,message", [
+    ("cpu-node-1", None, "Slurm allocation"),
+    ("gateway-1", "123", "SWC gateway"),
+])
+def test_build_guards_before_loading_parquet(
+    tmp_path: Path, monkeypatch, hostname: str, job_id: str | None, message: str,
+) -> None:
+    expanded = _expanded()
+    if job_id is None:
+        monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    else:
+        monkeypatch.setenv("SLURM_JOB_ID", job_id)
+    monkeypatch.setattr(expanded.socket, "gethostname", lambda: hostname)
+    monkeypatch.setattr(
+        expanded.pd, "read_parquet", lambda *_: pytest.fail("guard loaded Parquet"),
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        expanded.build_variants(
+            tmp_path / "baseline.yaml", tmp_path / "source.yaml", tmp_path / "matrices",
+        )
+
+
 def test_build_cli_dispatches_paths(tmp_path: Path, monkeypatch) -> None:
     expanded = _expanded()
     calls = []
-    paths = [tmp_path / name for name in ("baseline.yaml", "canonical.yaml", "matrices")]
+    monkeypatch.chdir(tmp_path)
+    names = ("baseline.yaml", "canonical.yaml", "matrices")
     monkeypatch.setattr(expanded, "build_variants", lambda *args: calls.append(args))
 
-    expanded.main(["build", *map(str, paths)])
+    expanded.main(["build", *names])
 
-    assert calls == [tuple(paths)]
+    assert calls == [tuple(tmp_path / name for name in names)]
 
 
 def test_fit_cli_dispatches_variant_paths_and_fold(tmp_path: Path, monkeypatch) -> None:
     expanded = _expanded()
     calls = []
-    matrix_root, results_root = tmp_path / "matrices", tmp_path / "results"
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(expanded, "fit_variant", lambda *args: calls.append(args))
 
     expanded.main([
-        "fit", "readable-sae", str(matrix_root), str(results_root), "3",
+        "fit", "readable-sae", "matrices", "results", "3",
     ])
 
-    assert calls == [("readable-sae", matrix_root, results_root, 3)]
+    assert calls == [("readable-sae", tmp_path / "matrices", tmp_path / "results", 3)]
 
 
 def test_expanded_sbatch_has_valid_bash_syntax() -> None:
@@ -219,3 +457,23 @@ def test_expanded_sbatch_has_valid_bash_syntax() -> None:
     result = subprocess.run(["bash", "-n", script], capture_output=True, text=True, check=False)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_expanded_sbatch_rejects_relative_bundle_paths(tmp_path: Path) -> None:
+    script = Path(__file__).with_name("expanded.sbatch")
+    result = subprocess.run(
+        ["bash", script, "build", "baseline.yaml", "canonical.yaml", "matrices"],
+        cwd=Path(__file__).resolve().parents[2],
+        env={
+            "PATH": "/usr/bin:/bin",
+            "SLURM_JOB_ID": "1",
+            "SLURM_SUBMIT_DIR": str(tmp_path),
+            "JV_CODE_DIR": str(Path(__file__).resolve().parents[2]),
+            "JV_PYTHON": "/usr/bin/true",
+            "JV_PACKAGES": str(tmp_path),
+        },
+        capture_output=True, text=True, check=False,
+    )
+
+    assert result.returncode == 2
+    assert "absolute" in result.stderr
