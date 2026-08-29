@@ -5,10 +5,19 @@ import pandas as pd
 import pytest
 
 from .config import CONFIG
-from .fit_frequentist import fit_frequentist
+from .fit_frequentist import _penalty_options, fit_frequentist
 
 
 pytestmark = pytest.mark.filterwarnings("error::FutureWarning")
+
+
+def test_penalty_options_support_old_and_new_sklearn_apis() -> None:
+    assert _penalty_options(None, "l2") == {}
+    assert _penalty_options(None, "deprecated") == {}
+    assert _penalty_options(0.5, "l2") == {
+        "penalty": "elasticnet", "l1_ratio": 0.5,
+    }
+    assert _penalty_options(0.5, "deprecated") == {"l1_ratio": 0.5}
 
 
 def test_sparse_signal_is_selected_and_refit_with_the_full_hierarchy() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
+from inspect import signature
 from itertools import product
 from typing import TypeVar
 import warnings
@@ -22,6 +23,7 @@ from .hierarchy import HierarchyLevels, effective_coefficients, hierarchical_des
 
 Input = TypeVar("Input")
 Output = TypeVar("Output")
+_PENALTY_DEFAULT = signature(LogisticRegression).parameters["penalty"].default
 
 
 def _penalties(config: AnalysisConfig) -> dict[str, float]:
@@ -45,14 +47,24 @@ def _splits(frame: pd.DataFrame, config: AnalysisConfig) -> list[tuple[np.ndarra
     ).split(frame, frame["pick_left"], groups))
 
 
+def _penalty_options(l1_ratio: float | None, penalty_default: object) -> dict[str, object]:
+    """Return compatible elastic-net options for old and new sklearn APIs."""
+    if l1_ratio is None:
+        return {}
+    options: dict[str, object] = {"l1_ratio": l1_ratio}
+    if penalty_default != "deprecated":
+        options["penalty"] = "elasticnet"
+    return options
+
+
 def _model(config: AnalysisConfig, *, c: float, l1_ratio: float | None) -> LogisticRegression:
     return LogisticRegression(
         C=c,
         solver="saga" if l1_ratio is not None else "lbfgs",
-        l1_ratio=0.0 if l1_ratio is None else l1_ratio,
         fit_intercept=False,
         max_iter=config.glm_max_iter,
         random_state=config.random_seed,
+        **_penalty_options(l1_ratio, _PENALTY_DEFAULT),
     )
 
 
