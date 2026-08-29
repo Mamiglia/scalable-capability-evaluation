@@ -284,8 +284,10 @@ def load_lesion_coefficients(artifact_index_path: str | Path) -> pd.DataFrame:
     artifact_index_path = Path(artifact_index_path)
     index = _read_table(artifact_index_path)
     _require(index, {"fold", "specification", "coefficients"}, artifact_index_path)
+    folds = set(index.fold.astype(str))
     index = index[index.specification == "full"]
-    if index.empty or index.fold.duplicated().any():
+    if (index.empty or index.fold.duplicated().any()
+            or set(index.fold.astype(str)) != folds):
         raise ValueError("artifact index must contain one full coefficient checkpoint per fold")
     frames = []
     for row in index.itertuples(index=False):
@@ -303,6 +305,12 @@ def load_lesion_coefficients(artifact_index_path: str | Path) -> pd.DataFrame:
     output = pd.concat(frames, ignore_index=True)
     if output.duplicated(["fold", "feature", "judge", "benchmark"]).any():
         raise ValueError("full coefficient checkpoints contain duplicate cells")
+    supports = [
+        set(zip(frame.feature, frame.judge, frame.benchmark))
+        for _, frame in output.groupby("fold", sort=False)
+    ]
+    if any(support != supports[0] for support in supports[1:]):
+        raise ValueError("full coefficient checkpoints lack identical feature×judge×benchmark cell support")
     return output
 
 
@@ -662,7 +670,7 @@ def plot_feature_scatter(
     _style()
     xlim, xticks = _estimate_limits(features.singular)
     ylim, yticks = _estimate_limits(features.unique)
-    fig, ax = plt.subplots(figsize=(3.0, 3.2), layout="constrained")
+    fig, ax = plt.subplots(figsize=(3.2, 3.2), layout="constrained")
     for block, frame in features.groupby("block", sort=False):
         ax.scatter(frame.singular, frame.unique, s=15, color=_block_color(block),
                    clip_on=False, label=str(block))
@@ -718,21 +726,43 @@ def plot_feature_scatter(
         )
         annotations.append(annotation)
         geometry.append((points[index], direction, tangent, stagger[index]))
+    fig.canvas.draw()
+    fig.set_layout_engine(None)
     accepted = []
-    for annotation, (point, direction, tangent, initial) in zip(annotations, geometry):
-        for delta in (0, 0.04, -0.04, 0.08, -0.08, 0.12, -0.12, 0.16, -0.16):
-            position = point + direction * 0.06 + tangent * (initial + delta)
-            leader = position - point
-            annotation.set_position(position)
-            annotation.set_ha("left" if leader[0] >= 0 else "right")
-            annotation.set_va("bottom" if leader[1] >= 0 else "top")
-            fig.canvas.draw()
-            box = annotation.get_window_extent(fig.canvas.get_renderer())
-            if (not any(box.overlaps(other.get_window_extent(fig.canvas.get_renderer()))
-                        for other in accepted)
-                    and fig.bbox.contains(box.x0, box.y0)
-                    and fig.bbox.contains(box.x1, box.y1)):
+    placements = list(zip(annotations, geometry))
+    placements.sort(
+        key=lambda value: (
+            value[1][0] + value[1][1] * 0.06 + value[1][2] * value[1][3]
+        )[1],
+        reverse=True,
+    )
+    for annotation, (point, direction, tangent, initial) in placements:
+        placed = False
+        for distance in (0.06, 0.10, 0.14, 0.18):
+            for delta in (
+                0, 0.04, -0.04, 0.08, -0.08, 0.12, -0.12, 0.16, -0.16,
+                0.20, -0.20, 0.24, -0.24, 0.28, -0.28, 0.32, -0.32,
+            ):
+                position = point + direction * distance + tangent * (initial + delta)
+                leader = position - point
+                annotation.set_position(position)
+                annotation.set_ha("left" if leader[0] >= 0 else "right")
+                annotation.set_va("bottom" if leader[1] >= 0 else "top")
+                fig.canvas.draw()
+                box = annotation.get_window_extent(fig.canvas.get_renderer())
+                if (not any(box.overlaps(other.get_window_extent(fig.canvas.get_renderer()))
+                            for other in accepted)
+                        and fig.bbox.contains(box.x0, box.y0)
+                        and fig.bbox.contains(box.x1, box.y1)):
+                    placed = True
+                    break
+            if placed:
                 break
+        if not placed:
+            plt.close(fig)
+            raise RuntimeError(
+                f"could not place scatter labels without overlap or clipping: {annotation.get_text()}"
+            )
         accepted.append(annotation)
     return _save(fig, output_dir, "feature-scatter")
 
@@ -926,6 +956,8 @@ def _plot_benchmark_grid(
             ax = axes[row_index, column]
             values = (benchmark_rows[benchmark_rows.effect == effect]
                       .set_index("feature").reindex(variables))
+            if values.estimate.isna().any():
+                raise ValueError(f"{benchmark} is missing selected {effect} effect rows")
             for point_y, value in enumerate(values.itertuples()):
                 if pd.isna(value.estimate):
                     continue
@@ -942,6 +974,8 @@ def _plot_benchmark_grid(
             column_points[column].append(values.estimate.to_numpy(float))
         values = (coefficients[coefficients.benchmark == benchmark]
                   .set_index("feature").reindex(variables))
+        if values[["estimate", "lower", "upper"]].isna().any().any():
+            raise ValueError(f"{benchmark} is missing coefficient rows for selected features")
         ax = axes[row_index, 2]
         for point_y, value in enumerate(values.itertuples()):
             if pd.isna(value.estimate):
@@ -995,6 +1029,9 @@ def plot_benchmark_feature_grid(
     *, top: int = 10,
 ) -> tuple[Path, Path]:
     """Plot pooled-judge benchmark effects in the capability contribution grammar."""
+    required = {"aime", "gpqa", "intercode", "swe_bench_mini"}
+    if missing := sorted(required - set(effects.benchmark)):
+        raise ValueError(f"pooled benchmark grid requires all four benchmarks; missing {missing}")
     return _plot_benchmark_grid(
         effects, coefficients, output_dir, name="feature-effects-by-benchmark", top=top,
     )

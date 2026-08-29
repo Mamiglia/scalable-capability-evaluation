@@ -513,6 +513,30 @@ def test_scatter_labels_requested_features_outward_without_overlap(
         }
         for feature, block, singular, unique in values
     ])
+    features = pd.concat([features, pd.DataFrame([
+        {
+            "feature": f"background_{index}", "block": block,
+            "singular": -0.008 if index == 0 else 0.0,
+            "singular_lower": -0.009 if index == 0 else -0.001,
+            "singular_upper": -0.007 if index == 0 else 0.001,
+            "unique": -0.0019 if index == 1 else 0.0,
+            "unique_lower": -0.002 if index == 1 else -0.0001,
+            "unique_upper": -0.0018 if index == 1 else 0.0001,
+        }
+        for index, block in enumerate((
+            "derivation", "intermediate-errors", "clause-descriptors",
+            "clause-motifs", "clause-plan",
+        ))
+    ])], ignore_index=True)
+    block_order = {
+        block: index for index, block in enumerate((
+            "rubric", "structure", "clause-descriptors", "clause-motifs",
+            "exposition", "surface", "derivation", "intermediate-errors", "clause-plan",
+        ))
+    }
+    features = features.assign(
+        block_order=features.block.map(block_order),
+    ).sort_values("block_order").drop(columns="block_order")
     expected = {feature.replace("_", " ") for feature, *_ in values[:-1]}
     placements = []
     real_save = result_plots._save
@@ -546,6 +570,24 @@ def test_scatter_labels_requested_features_outward_without_overlap(
 
     assert placements[0] == placements[1]
     assert "<text" in svg.read_text()
+
+
+def test_scatter_rejects_geometry_that_cannot_place_labels(tmp_path: Path) -> None:
+    names = (
+        "hedging_count", "think_aloud_per_100_words", "bare_answer", "tool_errors",
+        "rigour", "depth", "self_corrections", "efficiency",
+    )
+    features = pd.DataFrame([
+        {
+            "feature": name, "block": "rubric", "singular": 0.01,
+            "singular_lower": 0.0, "singular_upper": 0.02, "unique": 0.001,
+            "unique_lower": 0.0, "unique_upper": 0.002,
+        }
+        for name in names
+    ])
+
+    with pytest.raises(RuntimeError, match="place scatter labels"):
+        plot_feature_scatter(features, tmp_path)
 
 
 def test_dense_source_block_labels_do_not_wrap_or_overlap(tmp_path: Path, monkeypatch) -> None:
@@ -740,6 +782,50 @@ def test_benchmark_grid_uses_shared_support_rows_and_keeps_labels_apart(
         tmp_path / "feature-effects-by-benchmark.png",
         tmp_path / "feature-effects-by-benchmark.svg",
     )
+
+
+def test_benchmark_grid_rejects_missing_benchmark_or_coefficient_cells(tmp_path: Path) -> None:
+    lesion_path, dictionary_path = _lesions(tmp_path)
+    effects = load_benchmark_feature_effects(_item_deltas(tmp_path), dictionary_path)
+    coefficients = result_plots.summarize_effective_coefficients(
+        result_plots.load_lesion_coefficients(
+            lesion_path.with_name("artifact-index.csv"),
+        ),
+        by=("benchmark",),
+    )
+
+    with pytest.raises(ValueError, match="all four benchmarks"):
+        plot_benchmark_feature_grid(
+            effects[effects.benchmark != "swe_bench_mini"], coefficients, tmp_path,
+        )
+    with pytest.raises(ValueError, match="missing coefficient rows"):
+        plot_benchmark_feature_grid(
+            effects,
+            coefficients[~((coefficients.benchmark == "aime")
+                           & (coefficients.feature == "signal"))],
+            tmp_path,
+        )
+
+
+def test_full_coefficient_loader_rejects_missing_folds_or_cells(tmp_path: Path) -> None:
+    lesion_path, _ = _lesions(tmp_path)
+    index_path = lesion_path.with_name("artifact-index.csv")
+    index = pd.read_csv(index_path)
+    pd.concat([
+        index,
+        pd.DataFrame([{
+            "fold": "fold-2", "specification": "lesion-feature",
+            "coefficients": index.coefficients.iloc[0],
+        }]),
+    ], ignore_index=True).to_csv(index_path, index=False)
+    with pytest.raises(ValueError, match="full coefficient checkpoint per fold"):
+        result_plots.load_lesion_coefficients(index_path)
+
+    index.to_csv(index_path, index=False)
+    coefficient_path = Path(index.coefficients.iloc[0])
+    pd.read_parquet(coefficient_path).iloc[1:].to_parquet(coefficient_path, index=False)
+    with pytest.raises(ValueError, match="identical feature.*cell support"):
+        result_plots.load_lesion_coefficients(index_path)
 
 
 def test_loaders_reject_incomplete_or_invalid_saved_artifacts(tmp_path: Path) -> None:
