@@ -282,7 +282,7 @@ def _validate_fold(path: Path, settings: dict[str, object]) -> dict[str, object]
         cumulative = variance.cumulative_explained_variance_ratio.to_numpy(float)
         singular = variance.singular_value.to_numpy(float)
         diagnostic_ratio = float(diagnostics["svd_explained_variance_ratio_sum"])
-        ridge_iterations = int(diagnostics["ridge_n_iter"])
+        ridge_iterations = diagnostics["ridge_n_iter"]
         ridge_c = float(diagnostics["ridge_C"])
     except (KeyError, TypeError, ValueError) as error:
         raise RuntimeError(f"invalid PCA fold artifact contents: {path}") from error
@@ -300,13 +300,18 @@ def _validate_fold(path: Path, settings: dict[str, object]) -> dict[str, object]
         or set(tuning.stage) != {"ridge"}
         or set(tuning.record_type) != {"tuning"}
         or set(tuning.C.to_numpy(float)) != set(settings["ridge_cs"])
-        or not set(tuning.converged) <= {True, False}
-        or not set(tuning.selected) <= {True, False}
+        or not pd.api.types.is_bool_dtype(tuning.converged)
+        or not pd.api.types.is_bool_dtype(tuning.selected)
         or tuning.selected.sum() != 1
         or not np.isfinite(tuning_loss).all()
         or np.any(tuning_loss < 0)
         or not np.isfinite(tuning_iterations).all()
+        or np.any(tuning_iterations != np.floor(tuning_iterations))
         or np.any((tuning_iterations < 1) | (tuning_iterations > settings["glm_max_iter"]))
+        or not np.array_equal(
+            tuning.converged.to_numpy(),
+            tuning_iterations < settings["glm_max_iter"],
+        )
         or set(loadings.component) != set(components)
         or set(loadings.feature) != set(features)
         or loadings[["component", "feature"]].duplicated().any()
@@ -329,7 +334,10 @@ def _validate_fold(path: Path, settings: dict[str, object]) -> dict[str, object]
         or diagnostics["svd_input_features"] != len(features)
         or ridge_c not in settings["ridge_cs"]
         or not isinstance(diagnostics["ridge_converged"], bool)
+        or type(ridge_iterations) is not int
         or not 1 <= ridge_iterations <= settings["glm_max_iter"]
+        or diagnostics["ridge_converged"] != (
+            ridge_iterations < settings["glm_max_iter"])
         or not np.isfinite(diagnostic_ratio)
         or not -tolerance <= diagnostic_ratio <= 1 + tolerance
         or not np.isclose(diagnostic_ratio, ratios.sum(), atol=tolerance, rtol=0)

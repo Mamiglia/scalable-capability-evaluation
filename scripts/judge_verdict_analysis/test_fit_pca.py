@@ -241,8 +241,16 @@ def test_aggregate_rejects_mixed_ordered_feature_inventories(
     ("metrics.csv", "accuracy", 1.1),
     ("metrics.csv", "log_loss", -0.1),
     ("tuning.csv", "mean_log_loss", -0.1),
+    ("tuning.csv", "max_n_iter", 1.5),
+    ("tuning.csv", "converged", 1),
+    ("tuning.csv", "converged", False),
+    ("tuning.csv", "max_n_iter", 1_000),
     ("svd-explained-variance.csv", "explained_variance", -0.1),
     ("diagnostics.json", "svd_explained_variance_ratio_sum", 1.1),
+    ("diagnostics.json", "ridge_n_iter", 1.5),
+    ("diagnostics.json", "ridge_converged", 1),
+    ("diagnostics.json", "ridge_converged", False),
+    ("diagnostics.json", "ridge_n_iter", 1_000),
 ])
 def test_resume_rejects_coherent_but_impossible_artifact_values(
     tmp_path, monkeypatch, artifact, column, value,
@@ -268,6 +276,10 @@ def test_resume_rejects_coherent_but_impossible_artifact_values(
         if artifact == "metrics.csv":
             table.loc[table.metric == column, "value"] = value
         else:
+            if column == "max_n_iter":
+                table[column] = table[column].astype(float)
+            elif column in {"converged", "selected"}:
+                table[column] = table[column].astype(object)
             table.loc[0, column] = value
         table.to_csv(path, index=False)
     manifest_path = fold_dir / "manifest.json"
