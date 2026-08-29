@@ -4,6 +4,36 @@ Date: 2026-08-29
 Repo: `/Users/moriohamada/PycharmProjects/ai_safety/small-judge`
 Branch: `judge-dissect` only; never push to `main`.
 
+## Latest update — 2026-08-29 13:54 BST
+
+This section supersedes the stale figure and RunPod status below.
+
+- Figure cleanup is complete in local commit `80d1a53` (`Polish judge
+  contribution figures`). The push to `origin/judge-dissect` was blocked by the
+  environment's remote-trust safeguard, so the commit is local only.
+- Fourteen pooled/overview/source-block/secondary PNGs and six per-judge PNGs
+  were rendered from the canonical 117-feature matrix and manually inspected.
+  Their SVG partners retain editable text. Non-symmetric axes now use endpoint
+  ticks only, all judge figures share the same ten feature rows, and the
+  misleading `bare_answer` display label is now `minimal non-answer prose`.
+- SWC lesion-cell job `3418867` completed successfully. Validated local outputs
+  are under `judge_results/verdict_interpretability/readable-eda-20260828/lesion-cells/`:
+  6,550 summary rows and 1,238,736 item-cell delta rows with manifest hashes
+  verified. All six judge figures are populated under `figures/models/by-judge/`.
+- The readable frequentist fit is complete: 16/16 folds, 113,951 strict
+  new-model-by-new-item OOF predictions, accuracy `0.7256891`, log loss
+  `0.5420933`, final ridge iterations at most 59, and 93–116 selected features
+  per fold. The 113,951 count is correct for the configured six-judge strict
+  outer-fold test roles; 120,200 is the larger processed verdict population.
+  All 112 fit artifacts and four worker logs are downloaded locally.
+- RunPod pod `jizl5l8gv3hol6` is stopped (`runtimeStatus=stopped`), reducing
+  account spend from about $0.45/hour to $0.011/hour. Permanent deletion was
+  blocked pending explicit approval because it destroys ephemeral storage.
+- New heavy work should default to SWC/HPC. Expanded SWC fits remain active;
+  latest counts were readable+surprisal 6/16, readable+SAE 5/16, and
+  readable+both 5/16. Next: wait for all 48 outputs, validate/download them,
+  render the five-variant comparison, then review/stage PC-L1 on SWC.
+
 ## Immediate priority
 
 The current figures are not acceptable. They are visually cluttered, have gone
