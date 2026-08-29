@@ -3,4 +3,8 @@ slug: openrouter/openai/o4-mini
 release_date: '2025-04-16'
 
 model_args:
-  provider: {}
+  provider:
+    only: [openai]
+    allow_fallbacks: false
+    require_parameters: true
+    data_collection: deny

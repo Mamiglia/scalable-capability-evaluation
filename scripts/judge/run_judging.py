@@ -15,6 +15,7 @@ Optional knobs:
                      transcripts cut to that fraction of the shorter one
                      (logs under trunc-<pct>/)
   include_reasoning: judges see candidates' reasoning (protocol default: false)
+  only_items:        optional item-id allowlist, applied before phase splitting
   min_correct:       drop comparisons where either model has fewer than this many
                      correct samples (default 0: keep all)
 
@@ -41,6 +42,13 @@ from model import Model
 
 DEFAULT_PHASE1_ITEMS = 20
 MODEL_CONFIGS = Path("configs/models")
+
+
+def selected_sample_ids(task, only_items):
+    ids = [str(sample.id) for sample in task.dataset]
+    if only_items is None:
+        return ids
+    return [sample_id for sample_id in ids if sample_id.rsplit("_", 1)[0] in only_items]
 
 
 def configured_system_prompt(cfg: dict) -> str:
@@ -96,6 +104,7 @@ def main() -> int:
     phase1_items = cfg.get("phase1_items") or DEFAULT_PHASE1_ITEMS
     epochs = cfg.get("epochs") or 1
     fracs = cfg.get("truncate_fracs") or [None]
+    only_items = set(map(str, cfg.get("only_items", []))) or None
     system_prompt = configured_system_prompt(cfg)
     # Ablation switch: judges see candidates' reasoning. Protocol default stays False.
     include_reasoning = bool(cfg.get("include_reasoning", False))
@@ -150,7 +159,7 @@ def main() -> int:
                     # (e.g. no both-correct overlap, or a transcript log with no samples).
                     print(f"SKIP {judge_short} {major}-vs-{minor}: no samples after filtering")
                     continue
-                ids = [s.id for s in task.dataset]
+                ids = selected_sample_ids(task, only_items)
                 split = 2 * phase1_items
                 block = ids[:split] if phase == 1 else ids[split:]
                 if not block:

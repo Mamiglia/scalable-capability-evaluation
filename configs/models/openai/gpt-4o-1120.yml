@@ -1,3 +1,11 @@
-# Transcripts from Epoch AI's benchmark logs only (external_data/); we never run this model.
 name: openai/gpt-4o-1120
+slug: openrouter/openai/gpt-4o-2024-11-20
 release_date: '2024-11-20'
+generate_args:
+  max_tokens: 16384
+model_args:
+  provider:
+    only: [openai]
+    allow_fallbacks: false
+    require_parameters: true
+    data_collection: deny

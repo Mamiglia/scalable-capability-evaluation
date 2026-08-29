@@ -1,3 +1,13 @@
-# Transcripts from Epoch AI's benchmark logs only (external_data/); we never run this model.
 name: google/gemini-2.5-pro
-release_date: '2025-06-17'
+slug: openrouter/google/gemini-2.5-pro
+release_date: '2025-06-05'
+generate_args:
+  # 1,030 observed judge calls maxed at 5,277 output tokens; 8,192 avoids
+  # OpenRouter's 65k-token credit preauthorization without truncating any.
+  max_tokens: 8192
+model_args:
+  provider:
+    only: [google-ai-studio]
+    allow_fallbacks: false
+    require_parameters: true
+    data_collection: deny

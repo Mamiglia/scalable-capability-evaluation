@@ -1,0 +1,13 @@
+name: openai/gpt-5.2
+slug: openrouter/openai/gpt-5.2
+release_date: '2025-12-11'
+generate_args:
+  max_tokens: 4096
+model_args:
+  provider:
+    only: [openai]
+    allow_fallbacks: false
+    # The endpoint accepts max_completion_tokens but OpenRouter's strict
+    # parameter registry does not advertise that alias.
+    require_parameters: false
+    data_collection: deny
