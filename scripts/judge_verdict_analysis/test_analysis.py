@@ -362,6 +362,38 @@ def test_expanded_dm_scaling_follows_requested_feature_order(tmp_path: Path) -> 
     assert outputs["scaling-pair.parquet"].tail(4).feature.str.removeprefix("d_").tolist() == expected
 
 
+@pytest.mark.parametrize("artifact", [
+    "scaling-transcript.parquet", "scaling-pair.parquet",
+])
+def test_expanded_dm_rejects_scaling_missing_baseline_metadata_column(
+    tmp_path: Path, artifact: str,
+) -> None:
+    baseline_config, source_config = _expanded_matrix_fixture(tmp_path)
+    source_root = Path(yaml.safe_load(source_config.read_text())["output_root"])
+    path = source_root / artifact
+    pd.read_parquet(path).drop(columns="sd").to_parquet(path, index=False)
+
+    with pytest.raises(ValueError, match=f"source {artifact} missing baseline columns: \\['sd'\\]"):
+        build_expanded_design_matrix(
+            baseline_config, source_config, [HISTORICAL_SURPRISAL[0]], tmp_path / "expanded")
+
+
+@pytest.mark.parametrize("column", ["source", "transform", "n_missing"])
+def test_expanded_dm_rejects_dictionary_missing_baseline_source_metadata(
+    tmp_path: Path, column: str,
+) -> None:
+    baseline_config, source_config = _expanded_matrix_fixture(tmp_path)
+    source_root = Path(yaml.safe_load(source_config.read_text())["output_root"])
+    path = source_root / "feature-dictionary.parquet"
+    pd.read_parquet(path).drop(columns=column).to_parquet(path, index=False)
+
+    with pytest.raises(
+        ValueError, match=f"source feature dictionary missing baseline columns: \\['{column}'\\]",
+    ):
+        build_expanded_design_matrix(
+            baseline_config, source_config, [HISTORICAL_SURPRISAL[0]], tmp_path / "expanded")
+
+
 def test_build_dm_writes_source_compatible_representative_matrix(tmp_path: Path) -> None:
     config = _matrix_with_scaling(tmp_path)
     settings = AnalysisConfig(

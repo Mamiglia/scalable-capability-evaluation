@@ -220,6 +220,8 @@ def _expanded_scaling(
 ) -> pd.DataFrame:
     baseline = pd.read_parquet(baseline_root / filename)
     source = pd.read_parquet(source_root / filename)
+    if missing := sorted(set(baseline) - set(source)):
+        raise ValueError(f"source {filename} missing baseline columns: {missing}")
     names = [f"{prefix}{feature}" for feature in additions]
     added = source[source.feature.isin(names)].copy()
     if missing := [feature for feature in names if feature not in set(added.feature)]:
@@ -258,6 +260,13 @@ def build_expanded_design_matrix(
 
     baseline_dictionary = pd.read_parquet(baseline_root / "feature-dictionary.parquet")
     source_dictionary = pd.read_parquet(source_root / "feature-dictionary.parquet")
+    synthesized_dictionary_fields = {
+        "correlation_group", "representative", "retained", "original_block",
+        "group_size", "processed_name",
+    }
+    required_source_fields = set(baseline_dictionary) - synthesized_dictionary_fields
+    if missing := sorted(required_source_fields - set(source_dictionary)):
+        raise ValueError(f"source feature dictionary missing baseline columns: {missing}")
     baseline_features = baseline_dictionary.feature.tolist()
     if overlap := [feature for feature in additions if feature in set(baseline_features)]:
         raise ValueError(f"additions already present in baseline: {overlap}")
