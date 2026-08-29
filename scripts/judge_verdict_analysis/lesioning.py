@@ -1,18 +1,114 @@
 """Fixed-selection, paired held-out feature lesions."""
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
+from dataclasses import dataclass, replace
 from pathlib import Path
-from tempfile import mkdtemp
 
 import numpy as np
 import pandas as pd
+import yaml
 
-from . import fit
 from .config import AnalysisConfig, CONFIG
+from .data import load_features
 from .fit_common import FitResult
 from .fit_frequentist import fit_fixed_ridge, tune_ridge
+from .hierarchy import outer_roles
+
+
+@dataclass(frozen=True)
+class Specification:
+    name: str
+    kind: str
+    variable: str
+    reference: str
+    features: tuple[str, ...]
+
+
+def _slug(value: str) -> str:
+    return value.replace("_", "-").replace("/", "-")
+
+
+def build_specifications(
+    dictionary: pd.DataFrame, config: AnalysisConfig = CONFIG,
+) -> list[Specification]:
+    """Return every labelled leave-out and alone specification in dictionary order."""
+    if missing := {"feature", "block"} - set(dictionary):
+        raise ValueError(f"feature dictionary missing columns: {sorted(missing)}")
+    if dictionary.feature.duplicated().any():
+        raise ValueError("feature dictionary contains duplicate features")
+    full = tuple(dictionary.feature.astype(str))
+    blocks = {
+        str(block): tuple(group.feature.astype(str))
+        for block, group in dictionary.groupby("block", sort=False)
+    }
+    output: list[Specification] = []
+    for feature in full:
+        output.extend((
+            Specification(
+                f"lesion-feature-{_slug(feature)}", "lesion-feature", feature, "full",
+                tuple(name for name in full if name != feature),
+            ),
+            Specification(
+                f"singular-feature-{_slug(feature)}", "singular-feature", feature, "intercept-only", (feature,),
+            ),
+        ))
+    for block, features in blocks.items():
+        members = set(features)
+        output.extend((
+            Specification(
+                f"lesion-block-{_slug(block)}", "lesion-block", block, "full",
+                tuple(name for name in full if name not in members),
+            ),
+            Specification(
+                f"singular-block-{_slug(block)}", "singular-block", block, "intercept-only", features,
+            ),
+        ))
+    for family, configured_blocks in config.lesion_families:
+        family_blocks = set(configured_blocks)
+        features = tuple(
+            row.feature for row in dictionary.itertuples(index=False)
+            if row.block in family_blocks
+        )
+        if not features:
+            continue
+        members = set(features)
+        lesion_name = "no-annotations" if family == "annotations" else f"lesion-family-{family}"
+        output.extend((
+            Specification(
+                lesion_name, "lesion-family", family, "full",
+                tuple(name for name in full if name not in members),
+            ),
+            Specification(
+                f"singular-family-{family}", "singular-family", family, "intercept-only", features,
+            ),
+        ))
+    return output
+
+
+def reference_specifications(dictionary: pd.DataFrame) -> tuple[Specification, Specification]:
+    """Return the full and intercept-only references used by paired comparisons."""
+    full = tuple(dictionary.feature.astype(str))
+    return (
+        Specification("full", "reference", "full", "", full),
+        Specification("intercept-only", "reference", "intercept-only", "", ()),
+    )
+
+
+def unique_specifications(
+    specifications: list[Specification],
+) -> tuple[list[Specification], dict[str, str]]:
+    """Reuse the first label for duplicate feature sets and return later labels as aliases."""
+    by_features: dict[tuple[str, ...], Specification] = {}
+    aliases: dict[str, str] = {}
+    for specification in specifications:
+        canonical = by_features.setdefault(specification.features, specification)
+        if canonical is not specification:
+            aliases[specification.name] = canonical.name
+    return list(by_features.values()), aliases
 
 
 def _log_losses(observed: np.ndarray, probabilities: np.ndarray) -> np.ndarray:
@@ -34,6 +130,80 @@ def _full_predictions(full_fit: FitResult, test: pd.DataFrame) -> pd.DataFrame:
     probability = predictions.probability.to_numpy(dtype=float)
     if not np.isfinite(probability).all() or np.any((probability < 0) | (probability > 1)):
         raise ValueError("full fit probabilities must be finite values in [0, 1]")
+    return predictions
+
+
+def _paired_predictions(
+    candidate: pd.DataFrame,
+    reference: pd.DataFrame,
+    specification: Specification,
+    fold: str,
+    backend: str = "frequentist",
+) -> pd.DataFrame:
+    """Return paired held-out contribution rows for one fitted specification."""
+    required = {"observed", "probability"}
+    if missing := required - set(candidate) | required - set(reference):
+        raise ValueError(f"prediction tables missing columns: {sorted(missing)}")
+    candidate = candidate.reset_index(drop=True)
+    reference = reference.reset_index(drop=True)
+    compared = reference.columns.difference(["probability"])
+    if len(candidate) != len(reference) or any(
+        column not in candidate or not candidate[column].equals(reference[column])
+        for column in compared
+    ):
+        raise ValueError("candidate predictions are not row-aligned with their reference")
+    observed = reference.observed.to_numpy(dtype=int)
+    candidate_probability = candidate.probability.to_numpy(dtype=float)
+    reference_probability = reference.probability.to_numpy(dtype=float)
+    candidate_loss = _log_losses(observed, candidate_probability)
+    reference_loss = _log_losses(observed, reference_probability)
+    candidate_accuracy = (candidate_probability >= 0.5) == observed
+    reference_accuracy = (reference_probability >= 0.5) == observed
+    output = reference.drop(columns="probability").copy()
+    output["backend"] = backend
+    output["fold"] = fold
+    output["specification"] = specification.name
+    output["kind"] = specification.kind
+    output["variable"] = specification.variable
+    output["reference"] = specification.reference
+    output["reference_probability"] = reference_probability
+    output["candidate_probability"] = candidate_probability
+    if specification.reference == "full":
+        output["delta_log_loss"] = candidate_loss - reference_loss
+        output["delta_accuracy"] = reference_accuracy.astype(float) - candidate_accuracy.astype(float)
+    elif specification.reference == "intercept-only":
+        output["delta_log_loss"] = reference_loss - candidate_loss
+        output["delta_accuracy"] = candidate_accuracy.astype(float) - reference_accuracy.astype(float)
+    else:
+        raise ValueError(f"unknown specification reference: {specification.reference}")
+    return output
+
+
+def _prediction_rows(predictions: pd.DataFrame, features: list[str]) -> pd.DataFrame:
+    """Keep the common held-out metadata and probabilities, never inactive regressors."""
+    if missing := {"observed", "probability"} - set(predictions):
+        raise ValueError(f"prediction table missing columns: {sorted(missing)}")
+    return predictions.drop(columns=features, errors="ignore").reset_index(drop=True)
+
+
+def _validate_prediction_rows(
+    predictions: pd.DataFrame, test: pd.DataFrame, features: list[str],
+) -> pd.DataFrame:
+    """Require a checkpoint to match this fold's exact held-out rows and schema."""
+    predictions = predictions.reset_index(drop=True)
+    metadata = test.drop(columns=[*features, "pick_left"], errors="ignore").reset_index(drop=True)
+    expected_columns = [*metadata.columns, "observed", "probability"]
+    if predictions.columns.tolist() != expected_columns or len(predictions) != len(test):
+        raise RuntimeError("prediction schema does not match the held-out fold")
+    if any(not predictions[column].equals(metadata[column]) for column in metadata):
+        raise RuntimeError("prediction rows do not match the held-out fold")
+    if not np.array_equal(
+        predictions.observed.to_numpy(dtype=int), test.pick_left.to_numpy(dtype=int)
+    ):
+        raise RuntimeError("prediction outcomes do not match the held-out fold")
+    probability = predictions.probability.to_numpy(dtype=float)
+    if not np.isfinite(probability).all() or np.any((probability < 0) | (probability > 1)):
+        raise RuntimeError("checkpoint probabilities must be finite values in [0, 1]")
     return predictions
 
 
@@ -77,33 +247,45 @@ def lesion_fold(
 
 
 def _bootstrap_summary(rows: pd.DataFrame, config: AnalysisConfig) -> pd.DataFrame:
+    metadata = ["backend", "specification", "kind", "variable", "reference"]
     if rows.empty:
         return pd.DataFrame(columns=[
-            "backend", "feature", "lesion_metric", "estimate", "lower", "upper",
+            *metadata, "lesion_metric", "estimate", "lower", "upper",
             "delta_log_loss", "delta_log_loss_lower", "delta_log_loss_upper",
             "delta_accuracy", "delta_accuracy_lower", "delta_accuracy_upper",
             "fold_count", "row_count",
         ])
-    required = {"backend", "feature", "bench", "item", "fold", "delta_log_loss", "delta_accuracy"}
+    if "specification" not in rows and "feature" in rows:
+        rows = rows.assign(
+            specification=rows.feature.astype(str), kind="lesion-feature",
+            variable=rows.feature.astype(str), reference="full",
+        )
+    required = {*metadata, "bench", "item", "fold", "delta_log_loss", "delta_accuracy"}
     if missing := sorted(required - set(rows)):
         raise ValueError(f"lesion rows missing bootstrap columns: {missing}")
     metric = f"delta_{config.lesion_metric}"
     rng = np.random.default_rng(config.random_seed)
     summaries = []
-    for (backend, feature), group in rows.groupby(["backend", "feature"], sort=True):
-        clusters = [cluster for _, cluster in group.groupby(["bench", "item"], sort=False)]
+    for keys, group in rows.groupby(metadata, sort=True):
         estimates = {name: float(group[name].mean()) for name in ("delta_log_loss", "delta_accuracy")}
-        samples = {name: np.empty(config.bootstrap_iterations) for name in estimates}
-        for index in range(config.bootstrap_iterations):
-            sample = pd.concat([clusters[i] for i in rng.integers(len(clusters), size=len(clusters))])
-            for name in samples:
-                samples[name][index] = sample[name].mean()
+        clusters = group.groupby(["bench", "item"], sort=False).agg(
+            count=("delta_log_loss", "size"),
+            delta_log_loss=("delta_log_loss", "sum"),
+            delta_accuracy=("delta_accuracy", "sum"),
+        )
+        draws = rng.integers(
+            len(clusters), size=(config.bootstrap_iterations, len(clusters)))
+        counts = clusters["count"].to_numpy()[draws].sum(axis=1)
+        samples = {
+            name: clusters[name].to_numpy()[draws].sum(axis=1) / counts
+            for name in estimates
+        }
         intervals = {name: np.percentile(values, [2.5, 97.5]) for name, values in samples.items()}
         summaries.append({
-            "backend": backend, "feature": feature, "lesion_metric": config.lesion_metric,
+            **dict(zip(metadata, keys)), "lesion_metric": config.lesion_metric,
             "estimate": estimates[metric],
             "delta_log_loss": estimates["delta_log_loss"],
-            "lower": intervals["delta_log_loss"][0], "upper": intervals["delta_log_loss"][1],
+            "lower": intervals[metric][0], "upper": intervals[metric][1],
             "delta_log_loss_lower": intervals["delta_log_loss"][0], "delta_log_loss_upper": intervals["delta_log_loss"][1],
             "delta_accuracy": estimates["delta_accuracy"],
             "delta_accuracy_lower": intervals["delta_accuracy"][0],
@@ -113,57 +295,379 @@ def _bootstrap_summary(rows: pd.DataFrame, config: AnalysisConfig) -> pd.DataFra
     return pd.DataFrame(summaries)
 
 
-def _write_lesions(rows: pd.DataFrame, summary: pd.DataFrame, config: AnalysisConfig) -> None:
-    output = config.lesion_dir
-    if output.exists():
-        raise FileExistsError(f"refusing to overwrite {output}")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    stage = Path(mkdtemp(prefix=".lesions-", dir=output.parent))
-    try:
-        rows.to_parquet(stage / "paired_rows.parquet", index=False)
-        summary.to_csv(stage / "lesions.csv", index=False)
-        (stage / "manifest.json").write_text(json.dumps({
-            "lesion_backends": list(config.lesion_backends),
-            "lesion_feature_scope": config.lesion_feature_scope,
-            "lesion_metric": config.lesion_metric,
-            "bootstrap_iterations": config.bootstrap_iterations,
-            "random_seed": config.random_seed,
-            "paired_rows": "paired_rows.parquet",
-            "summary": "lesions.csv",
-        }, indent=2, sort_keys=True) + "\n")
-        os.replace(stage, output)
-    except BaseException:
-        for artifact in stage.iterdir() if stage.exists() else ():
-            artifact.unlink()
-        if stage.exists():
-            stage.rmdir()
-        raise
-
-
-def run_lesions(config: AnalysisConfig = CONFIG) -> None:
-    """Run configured paired lesions only on an approved execution target."""
-    config = config.validate()
+def _guard_execution(config: AnalysisConfig) -> None:
+    """Require explicit execution and a real SWC allocation for remote work."""
     if config.execution_mode != "execute":
         raise RuntimeError("lesions require execution_mode='execute'")
-    fit._guard_execution(config)
-    rows, features = fit._load_rows(config)
+    if config.execution_target == "local_test":
+        return
+    if config.execution_target != "swc_hpc":
+        raise RuntimeError("judge-verdict lesions support only swc_hpc or local_test")
+    if not os.environ.get("SLURM_JOB_ID"):
+        raise RuntimeError("SWC lesions require a Slurm allocation")
+    hostname = os.uname().nodename.lower()
+    if hostname.startswith(("gateway", "sgw")):
+        raise RuntimeError("refusing lesion execution on the SWC gateway")
+    if not config.processed_matrix_manifest_sha256:
+        raise RuntimeError("SWC lesions require a configured processed matrix manifest hash")
+    matrix = yaml.safe_load(config.processed_matrix_config.read_text())
+    manifest = Path(matrix["output_root"]) / "manifest.json"
+    actual = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    if actual != config.processed_matrix_manifest_sha256:
+        raise RuntimeError(
+            f"processed matrix manifest hash mismatch: expected "
+            f"{config.processed_matrix_manifest_sha256}, found {actual}")
+
+
+def _load_rows(config: AnalysisConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
+    rows, dictionary = load_features(
+        "pair", config.feature_blocks, features=config.regressors or None,
+        splits=config.splits, config=config.processed_matrix_config,
+    )
+    rows = rows[
+        rows.judge.isin(config.judges) & rows.bench.isin(config.benchmarks)
+    ].reset_index(drop=True)
+    rows = rows.rename(columns=dict(zip(dictionary.column, dictionary.feature)))
+    required = {
+        "judge", "bench", "item", "model_left", "model_right", "pick_left",
+        *dictionary.feature,
+    }
+    if missing := sorted(required - set(rows)):
+        raise ValueError(f"pair matrix missing fitting columns: {missing}")
+    if rows.empty:
+        raise ValueError("no pair rows remain after configured judge and benchmark filtering")
+    return rows, dictionary
+
+
+def _select_outer_fold(
+    rows: pd.DataFrame, fold_index: int, config: AnalysisConfig,
+) -> tuple[str, pd.DataFrame, pd.DataFrame]:
+    fold_count = len(config.model_folds) * config.item_folds
+    if not 0 <= fold_index < fold_count:
+        raise ValueError(f"fold_index must be in range({fold_count})")
+    model_index, item_fold = divmod(fold_index, config.item_folds)
+    model_name, models = config.model_folds[model_index]
+    fold = f"{model_name}__item-{item_fold}"
+    roles = outer_roles(rows, models, item_fold, config.item_folds)
+    train = rows.loc[roles == "train"].assign(fold=fold).reset_index(drop=True)
+    test = rows.loc[roles == "test"].assign(fold=fold).reset_index(drop=True)
+    if train.empty or test.empty:
+        raise ValueError(f"outer fold {fold} has no {'train' if train.empty else 'test'} rows")
+    return fold, train, test
+
+
+def _checkpoint(
+    path: Path,
+    write,
+    read,
+) -> None:
+    """Publish one deterministic artifact atomically; preserve failed partials."""
+    if _resume_checkpoint(path, read):
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(f".{path.name}.partial")
+    write(partial)
+    read(partial)
+    if path.exists():
+        raise FileExistsError(f"refusing to overwrite checkpoint created concurrently: {path}")
+    os.replace(partial, path)
+
+
+def _resume_checkpoint(path: Path, read) -> bool:
+    """Validate a final checkpoint or promote its valid deterministic partial."""
+    if path.exists():
+        read(path)
+        return True
+    partial = path.with_name(f".{path.name}.partial")
+    if not partial.exists():
+        return False
+    try:
+        read(partial)
+    except Exception as error:
+        raise RuntimeError(f"incomplete checkpoint preserved at {partial}") from error
+    if path.exists():
+        raise FileExistsError(f"refusing to overwrite checkpoint created concurrently: {path}")
+    os.replace(partial, path)
+    return True
+
+
+def _write_prediction(
+    frame: pd.DataFrame, path: Path, test: pd.DataFrame, features: list[str],
+) -> None:
+    _checkpoint(
+        path,
+        lambda target: frame.to_parquet(target, index=False),
+        lambda target: _validate_prediction_rows(pd.read_parquet(target), test, features),
+    )
+
+
+def _write_csv(frame: pd.DataFrame, path: Path) -> None:
+    _checkpoint(
+        path,
+        lambda target: frame.to_csv(target, index=False),
+        lambda target: pd.read_csv(target),
+    )
+
+
+def _write_json(values: dict[str, object], path: Path) -> None:
+    _checkpoint(
+        path,
+        lambda target: target.write_text(json.dumps(values, indent=2, sort_keys=True) + "\n"),
+        lambda target: json.loads(target.read_text()),
+    )
+
+
+def _settings_signature(settings: dict[str, object]) -> str:
+    encoded = json.dumps(settings, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _ensure_settings(path: Path, settings: dict[str, object], label: str) -> str:
+    expected = {"signature": _settings_signature(settings), "settings": settings}
+    _write_json(expected, path)
+    actual = json.loads(path.read_text())
+    if actual != expected:
+        raise RuntimeError(f"{label} settings mismatch at {path}")
+    return expected["signature"]
+
+
+def _specification_table(
+    specifications: list[Specification], aliases: dict[str, str],
+) -> pd.DataFrame:
+    return pd.DataFrame([
+        {
+            "specification": spec.name, "kind": spec.kind, "variable": spec.variable,
+            "reference": spec.reference, "feature_count": len(spec.features),
+            "artifact": aliases.get(spec.name, spec.name),
+        }
+        for spec in specifications
+    ])
+
+
+def _fold_settings(
+    config: AnalysisConfig,
+    fold_index: int,
+    features: list[str],
+    specifications: pd.DataFrame,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "processed_matrix_manifest_sha256": config.processed_matrix_manifest_sha256,
+        "source_hf_repo": config.source_hf_repo,
+        "source_hf_revision": config.source_hf_revision,
+        "fold_index": fold_index,
+        "model_folds": [[name, list(models)] for name, models in config.model_folds],
+        "item_folds": config.item_folds,
+        "feature_blocks": list(config.feature_blocks),
+        "regressors": list(config.regressors),
+        "features": features,
+        "judges": list(config.judges),
+        "benchmarks": list(config.benchmarks),
+        "splits": list(config.splits),
+        "inner_folds": config.inner_folds,
+        "fit_n_jobs": config.fit_n_jobs,
+        "ridge_cs": list(config.ridge_cs),
+        "judge_deviation_penalty": config.judge_deviation_penalty,
+        "benchmark_deviation_penalty": config.benchmark_deviation_penalty,
+        "cell_deviation_penalty": config.cell_deviation_penalty,
+        "item_intercept_penalty": config.item_intercept_penalty,
+        "glm_max_iter": config.glm_max_iter,
+        "random_seed": config.random_seed,
+        "lesion_backends": list(config.lesion_backends),
+        "lesion_feature_scope": config.lesion_feature_scope,
+        "lesion_families": [
+            [name, list(blocks)] for name, blocks in config.lesion_families
+        ],
+        "specifications": specifications.to_dict(orient="records"),
+    }
+
+
+def run_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
+    """Tune once and checkpoint every fixed-C reference and specification for one outer fold."""
+    config = config.validate()
+    _guard_execution(config)
+    if tuple(config.lesion_backends) != ("frequentist",):
+        raise ValueError("judge-verdict lesions require lesion_backends=('frequentist',)")
+    rows, dictionary = _load_rows(config)
     if config.execution_target == "local_test" and len(rows) > config.local_test_max_rows:
-        raise RuntimeError("refusing local lesions above local_test_max_rows; use SWC HPC or RunPod")
-    lesion_rows = []
-    for fold_name, train, test in fit._outer_folds(rows, config):
-        for backend in config.lesion_backends:
-            if backend != "frequentist":
-                raise NotImplementedError("fixed-selection lesions currently require the frequentist backend")
-            ridge_c, _ = tune_ridge(train, features, config)
-            full_fit = fit_fixed_ridge(train, test, features, config, ridge_c)
-            lesion_rows.append(lesion_fold(full_fit, train, test, config))
-    combined = pd.concat(lesion_rows, ignore_index=True) if lesion_rows else pd.DataFrame()
-    _write_lesions(combined, _bootstrap_summary(combined, config), config)
+        raise RuntimeError("refusing local lesions above local_test_max_rows; use SWC HPC")
+    fold, train, test = _select_outer_fold(rows, fold_index, config)
+    fold_dir = config.lesion_dir / "folds" / fold
+    completion = fold_dir / "manifest.json"
+    specifications = build_specifications(dictionary, config)
+    unique, aliases = unique_specifications(specifications)
+    if (len(specifications), len(unique)) != (262, 260):
+        raise ValueError(
+            f"expected 262 labelled and 260 unique specifications, got "
+            f"{len(specifications)} and {len(unique)}")
+    features = dictionary.feature.astype(str).tolist()
+    table = _specification_table(specifications, aliases)
+    fold_settings = _fold_settings(config, fold_index, features, table)
+    plan_settings = dict(fold_settings)
+    plan_settings.pop("fold_index")
+    plan_signature = _settings_signature(plan_settings)
+    settings_signature = _ensure_settings(
+        fold_dir / "settings.json", fold_settings, "fold")
+    table_path = fold_dir / "specifications.csv"
+    _write_csv(table, table_path)
+    if not pd.read_csv(table_path, keep_default_na=False).equals(table):
+        raise RuntimeError(f"fold settings mismatch at {table_path}")
+    if completion.exists():
+        manifest = json.loads(completion.read_text())
+        if (manifest.get("state"), manifest.get("settings_signature")) != (
+            "completed", settings_signature,
+        ):
+            raise RuntimeError(f"invalid fold completion manifest: {completion}")
+        return fold_dir
+
+    ridge_path = fold_dir / "ridge.json"
+    read_json = lambda path: json.loads(path.read_text())
+    if _resume_checkpoint(ridge_path, read_json):
+        ridge = json.loads(ridge_path.read_text())
+        if ridge.get("features") != features:
+            raise RuntimeError(f"fold settings mismatch at {ridge_path}")
+        ridge_c = float(ridge["ridge_C"])
+    else:
+        ridge_c, tuning = tune_ridge(train, features, config)
+        _write_json(
+            {"ridge_C": float(ridge_c), "features": features,
+             "tuning": tuning.to_dict(orient="records")},
+            ridge_path,
+        )
+
+    for specification in reference_specifications(dictionary):
+        path = fold_dir / "references" / f"{specification.name}.parquet"
+        read_prediction = lambda target: _validate_prediction_rows(
+            pd.read_parquet(target), test, features)
+        if not _resume_checkpoint(path, read_prediction):
+            result = fit_fixed_ridge(
+                train, test, list(specification.features), config, ridge_c)
+            _write_prediction(
+                _prediction_rows(result.predictions, features), path, test, features)
+
+    specification_dir = fold_dir / "specifications"
+    for specification in unique:
+        path = specification_dir / f"{specification.name}.parquet"
+        if _resume_checkpoint(path, read_prediction):
+            continue
+        result = fit_fixed_ridge(
+            train, test, list(specification.features), config, ridge_c)
+        _write_prediction(
+            _prediction_rows(result.predictions, features), path, test, features)
+
+    _write_json({
+        "state": "completed", "backend": "frequentist", "fold": fold,
+        "fold_index": fold_index, "ridge_C": ridge_c,
+        "settings_signature": settings_signature, "plan_signature": plan_signature,
+        "labelled_specifications": len(specifications),
+        "unique_specifications": len(unique), "aliases": aliases,
+        "train_rows": len(train), "test_rows": len(test),
+    }, completion)
+    return fold_dir
 
 
-def main() -> None:
-    """Run the configuration-owned fixed-selection lesion entry point."""
-    run_lesions()
+def _fold_names(config: AnalysisConfig) -> list[str]:
+    return [
+        f"{model_name}__item-{item_fold}"
+        for model_name, _ in config.model_folds
+        for item_fold in range(config.item_folds)
+    ]
+
+
+def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
+    """Aggregate completed fold shards without holding the full lesion grid in memory."""
+    config = config.validate()
+    output = config.lesion_dir / "lesions.csv"
+    completion = config.lesion_dir / "summary-manifest.json"
+    fold_names = _fold_names(config)
+    fold_dirs = [config.lesion_dir / "folds" / fold for fold in fold_names]
+    specification_table: pd.DataFrame | None = None
+    fold_signatures = []
+    plan_signatures = set()
+    for fold_dir in fold_dirs:
+        manifest = fold_dir / "manifest.json"
+        values = json.loads(manifest.read_text()) if manifest.exists() else {}
+        if (
+            values.get("state") != "completed"
+            or not values.get("settings_signature")
+            or not values.get("plan_signature")
+        ):
+            raise RuntimeError(f"fold is not complete: {fold_dir}")
+        fold_signatures.append(values["settings_signature"])
+        plan_signatures.add(values["plan_signature"])
+        current = pd.read_csv(fold_dir / "specifications.csv", keep_default_na=False)
+        if specification_table is None:
+            specification_table = current
+        elif not current.equals(specification_table):
+            raise ValueError(f"fold specification table differs: {fold_dir}")
+    assert specification_table is not None
+    if len(plan_signatures) != 1:
+        raise RuntimeError("completed folds do not share one common plan")
+    summary_settings = {
+        "schema_version": 1,
+        "fold_signatures": fold_signatures,
+        "plan_signature": plan_signatures.pop(),
+        "lesion_metric": config.lesion_metric,
+        "bootstrap_iterations": config.bootstrap_iterations,
+        "random_seed": config.random_seed,
+        "specifications": specification_table.to_dict(orient="records"),
+    }
+    settings_signature = _ensure_settings(
+        config.lesion_dir / "summary-settings.json", summary_settings, "summary")
+    if completion.exists():
+        values = json.loads(completion.read_text())
+        if (values.get("state"), values.get("settings_signature")) != (
+            "completed", settings_signature,
+        ):
+            raise RuntimeError(f"summary settings mismatch at {completion}")
+        pd.read_csv(output)
+        return output
+
+    summaries = []
+    for row in specification_table.itertuples(index=False):
+        specification = Specification(
+            row.specification, row.kind, row.variable, row.reference, (),
+        )
+        paired = []
+        for fold, fold_dir in zip(fold_names, fold_dirs):
+            candidate = pd.read_parquet(
+                fold_dir / "specifications" / f"{row.artifact}.parquet")
+            reference = pd.read_parquet(
+                fold_dir / "references" / f"{row.reference}.parquet")
+            paired.append(_paired_predictions(candidate, reference, specification, fold))
+        summaries.append(_bootstrap_summary(pd.concat(paired, ignore_index=True), config))
+    summary = pd.concat(summaries, ignore_index=True) if summaries else _bootstrap_summary(
+        pd.DataFrame(), config)
+    _write_csv(summary, output)
+    _write_json({
+        "state": "completed", "backend": "frequentist",
+        "fold_count": len(fold_dirs), "labelled_specifications": len(specification_table),
+        "settings_signature": settings_signature,
+        "plan_signature": summary_settings["plan_signature"],
+        "lesion_metric": config.lesion_metric,
+        "bootstrap_iterations": config.bootstrap_iterations,
+        "random_seed": config.random_seed, "summary": output.name,
+    }, completion)
+    return output
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    fold = commands.add_parser("fold", help="run one model-by-item outer fold")
+    fold.add_argument("--fold-index", type=int, required=True)
+    fold.add_argument("--processed-matrix-root", type=Path, required=True)
+    fold.add_argument("--results-dir", type=Path, required=True)
+    summarize = commands.add_parser("summarize", help="aggregate all completed folds")
+    summarize.add_argument("--results-dir", type=Path, required=True)
+    args = parser.parse_args(argv)
+    if args.command == "fold":
+        run_fold(args.fold_index, replace(
+            CONFIG, processed_matrix_root=args.processed_matrix_root,
+            results_dir=args.results_dir, execution_mode="execute", execution_target="swc_hpc",
+        ))
+    else:
+        aggregate_lesions(replace(CONFIG, results_dir=args.results_dir))
 
 
 if __name__ == "__main__":

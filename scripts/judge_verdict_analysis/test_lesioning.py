@@ -1,15 +1,31 @@
 from dataclasses import replace
+import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from . import fit, lesioning
+from . import lesioning
 from .config import CONFIG
 from .fit_common import FitResult
-from .fit_frequentist import select_features
-from .hierarchy import HierarchyLevels
-from .lesioning import _bootstrap_summary, lesion_fold
+from .fit_frequentist import fit_fixed_ridge
+from .lesioning import (
+    _bootstrap_summary,
+    _guard_execution,
+    _paired_predictions,
+    _prediction_rows,
+    _resume_checkpoint,
+    _validate_prediction_rows,
+    aggregate_lesions,
+    build_specifications,
+    lesion_fold,
+    main,
+    reference_specifications,
+    run_fold,
+    unique_specifications,
+)
 
 
 def _rows() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -29,6 +45,18 @@ def _rows() -> tuple[pd.DataFrame, pd.DataFrame]:
         frame[~frame.item.isin(("item-10", "item-11"))].reset_index(drop=True),
         frame[frame.item.isin(("item-10", "item-11"))].reset_index(drop=True),
     )
+
+
+def _dictionary() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"feature": f"{block}-{index}", "block": block}
+        for block, count in (
+            ("surface", 13), ("structure", 18), ("rubric", 12),
+            ("exposition", 8), ("derivation", 9), ("intermediate-errors", 9),
+            ("clause-descriptors", 21), ("clause-motifs", 24), ("clause-plan", 3),
+        )
+        for index in range(count)
+    ])
 
 
 def test_fixed_selection_lesion_pairs_each_refit_with_the_full_predictions() -> None:
@@ -59,55 +87,64 @@ def test_fixed_selection_lesion_pairs_each_refit_with_the_full_predictions() -> 
         )
 
 
-def test_lesions_keep_all_regressors_when_elastic_net_drops_one(tmp_path, monkeypatch) -> None:
-    """Fails if lesions use saved elastic-net selection rather than every regressor."""
+def test_fold_runner_tunes_once_reuses_c_and_resumes_completed_specs(tmp_path, monkeypatch) -> None:
+    """Fails if a resumed fold retunes, refits aliases, or loses completed checkpoints."""
     train, test = _rows()
+    train = train.drop(columns=["signal", "noise", "dropped"])
+    test = test.drop(columns=["signal", "noise", "dropped"])
+    dictionary = _dictionary()
+    features = dictionary.feature.tolist()
+    train = pd.concat([train, pd.DataFrame(0.0, index=train.index, columns=features)], axis=1)
+    test = pd.concat([test, pd.DataFrame(0.0, index=test.index, columns=features)], axis=1)
     config = replace(
         CONFIG, results_dir=tmp_path / "results", execution_mode="execute", execution_target="local_test",
-        inner_folds=3, elastic_net_cs=(0.1,), elastic_net_l1_ratios=(1.0,), ridge_cs=(1.0,),
-        bootstrap_iterations=2,
+        local_test_max_rows=1_000, ridge_cs=(0.1,), bootstrap_iterations=2,
+        model_folds=(("model-fold-0", ("held",)),), item_folds=1,
     )
-    features = ["signal", "noise", "dropped"]
-    selected, _ = select_features(train, features, config, HierarchyLevels.from_training(train))
-    assert "dropped" not in selected
     calls: list[tuple[str, ...]] = []
     ridge_calls: list[float] = []
     tuning_calls: list[tuple[str, ...]] = []
-    captured = []
 
     def fixed_ridge(train_rows, test_rows, names, _, ridge_c):
         calls.append(tuple(names))
         ridge_calls.append(ridge_c)
-        predictions = test_rows.drop(columns=features + ["pick_left"]).copy()
+        predictions = test_rows[["bench", "judge", "item", "fold"]].copy()
         predictions["observed"] = test_rows.pick_left
         predictions["probability"] = np.where(test_rows.pick_left == 1, 0.99, 0.01)
         return FitResult(
-            backend="frequentist", fold="synthetic", selected_features=tuple(names),
+            backend="frequentist", fold="model-fold-0__item-0", selected_features=tuple(names),
             predictions=predictions, coefficients=pd.DataFrame(), tuning=pd.DataFrame(),
             metrics=pd.DataFrame(), diagnostics={"ridge_C": ridge_c},
         )
 
     def tune(rows, names, *_):
         tuning_calls.append(tuple(names))
-        return 1.0, pd.DataFrame()
+        return 0.1, pd.DataFrame({"C": [0.1], "selected": [True]})
 
-    monkeypatch.setattr(fit, "_guard_execution", lambda _: None)
-    monkeypatch.setattr(fit, "_load_rows", lambda _: (pd.concat([train, test], ignore_index=True), features))
-    monkeypatch.setattr(fit, "_outer_folds", lambda *_: [("synthetic", train, test)])
+    monkeypatch.setattr(lesioning, "_load_rows", lambda _: (pd.concat([train, test]), dictionary))
+    monkeypatch.setattr(
+        lesioning, "_select_outer_fold",
+        lambda *_: ("model-fold-0__item-0", train, test),
+    )
     monkeypatch.setattr(lesioning, "tune_ridge", tune)
     monkeypatch.setattr(lesioning, "fit_fixed_ridge", fixed_ridge)
-    monkeypatch.setattr(lesioning, "_write_lesions", lambda rows, *_: captured.append(rows))
 
-    lesioning.run_lesions(config)
+    run_fold(0, config)
+    run_fold(0, config)
 
     assert tuning_calls == [tuple(features)]
     assert calls[0] == tuple(features)
-    assert set(calls[1:]) == {
-        ("noise", "dropped"), ("signal", "dropped"), ("signal", "noise"),
-    }
-    assert ridge_calls == [1.0] * (len(features) + 1)
-    assert set(captured[0].feature) == set(features)
-    assert len(captured[0]) == len(test) * len(features)
+    assert calls[1] == ()
+    assert len(calls) == 262  # full + intercept-only + 260 unique requested feature sets
+    assert ridge_calls == [0.1] * 262
+    fold_dir = config.lesion_dir / "folds/model-fold-0__item-0"
+    specifications = pd.read_csv(fold_dir / "specifications.csv")
+    assert len(specifications) == 262
+    assert specifications.artifact.nunique() == 260
+    assert len(list((fold_dir / "specifications").glob("*.parquet"))) == 260
+    assert (fold_dir / "manifest.json").exists()
+    with pytest.raises(RuntimeError, match="settings"):
+        run_fold(0, replace(config, ridge_cs=(1.0,)))
 
 
 def test_clustered_summary_reports_both_deltas_and_the_configured_primary_metric() -> None:
@@ -128,19 +165,257 @@ def test_clustered_summary_reports_both_deltas_and_the_configured_primary_metric
     assert summary.lesion_metric == "accuracy"
     assert summary.estimate == summary.delta_accuracy == 0.2
     assert summary.delta_log_loss == pytest.approx(0.25)
-    assert summary.lower == summary.delta_log_loss_lower
-    assert summary.upper == summary.delta_log_loss_upper
+    assert summary.lower == summary.delta_accuracy_lower
+    assert summary.upper == summary.delta_accuracy_upper
     assert summary.fold_count == 2
     assert summary.row_count == 4
     assert summary.delta_accuracy_lower == summary.delta_accuracy_upper == 0.2
     assert summary.delta_log_loss_lower <= summary.delta_log_loss <= summary.delta_log_loss_upper
 
 
-def test_remote_lesion_guard_rejects_before_loading_rows(monkeypatch) -> None:
-    """Fails if lesions bypass the fit facade's unavailable-target guard."""
+def test_remote_lesion_guard_requires_a_non_gateway_slurm_job(monkeypatch) -> None:
+    """Fails if a Ceph-mounted gateway can pass as an SWC compute allocation."""
     config = replace(CONFIG, execution_mode="execute", execution_target="swc_hpc")
-    monkeypatch.setattr(fit, "_active_remote_target", lambda _: False)
-    monkeypatch.setattr(fit, "_load_rows", lambda _: pytest.fail("guard loaded rows"))
+    monkeypatch.delenv("SLURM_JOB_ID", raising=False)
 
-    with pytest.raises(RuntimeError, match="refusing heavy local fit"):
-        lesioning.run_lesions(config)
+    with pytest.raises(RuntimeError, match="Slurm allocation"):
+        _guard_execution(config)
+
+
+def test_remote_lesion_guard_requires_the_configured_matrix_manifest_hash(
+    tmp_path, monkeypatch,
+) -> None:
+    matrix = tmp_path / "matrix"
+    matrix.mkdir()
+    (matrix / "design-matrix.yaml").write_text(f"output_root: {matrix}\n")
+    (matrix / "manifest.json").write_text('{"source":"wrong"}\n')
+    config = replace(
+        CONFIG, execution_mode="execute", execution_target="swc_hpc",
+        processed_matrix_root=matrix, processed_matrix_manifest_sha256="0" * 64,
+    )
+    monkeypatch.setenv("SLURM_JOB_ID", "123")
+    monkeypatch.setattr(lesioning.os, "uname", lambda: SimpleNamespace(nodename="compute-1"))
+
+    with pytest.raises(RuntimeError, match="manifest hash"):
+        _guard_execution(config)
+
+
+def test_specifications_cover_every_requested_label_and_deduplicate_planning() -> None:
+    dictionary = _dictionary()
+
+    specifications = build_specifications(dictionary)
+    unique, aliases = unique_specifications(specifications)
+    references = reference_specifications(dictionary)
+
+    assert len(specifications) == 262
+    assert len(unique) == 260
+    assert {spec.name for spec in references} == {"full", "intercept-only"}
+    assert {spec.name for spec in specifications if spec.kind == "lesion-block"} == {
+        f"lesion-block-{block}" for block in dictionary.block.unique()
+    }
+    assert {spec.name for spec in specifications if spec.kind == "singular-block"} == {
+        f"singular-block-{block}" for block in dictionary.block.unique()
+    }
+    assert aliases == {
+        "lesion-family-planning": "lesion-block-clause-plan",
+        "singular-family-planning": "singular-block-clause-plan",
+    }
+    no_annotations = next(spec for spec in specifications if spec.name == "no-annotations")
+    annotations_only = next(
+        spec for spec in specifications if spec.name == "singular-family-annotations"
+    )
+    assert len(no_annotations.features) == 96
+    assert len(annotations_only.features) == 21
+    assert no_annotations.reference == "full"
+    assert annotations_only.reference == "intercept-only"
+
+
+def test_specification_families_come_from_analysis_config() -> None:
+    config = replace(CONFIG, lesion_families=(("surface-only", ("surface",)),))
+
+    specifications = build_specifications(_dictionary(), config)
+    families = [spec for spec in specifications if "family" in spec.kind]
+
+    assert [(spec.kind, spec.variable) for spec in families] == [
+        ("lesion-family", "surface-only"),
+        ("singular-family", "surface-only"),
+    ]
+
+
+def test_bootstrap_primary_interval_matches_configured_metric() -> None:
+    rows = pd.DataFrame({
+        "backend": ["frequentist"] * 4,
+        "specification": ["singular-feature-signal"] * 4,
+        "kind": ["singular-feature"] * 4,
+        "variable": ["signal"] * 4,
+        "reference": ["intercept-only"] * 4,
+        "bench": ["a", "a", "b", "b"],
+        "item": ["i0", "i0", "i1", "i1"],
+        "fold": ["f0", "f1", "f0", "f1"],
+        "delta_log_loss": [0.1, 0.5, 0.2, 0.2],
+        "delta_accuracy": [0.0, 0.4, 0.2, 0.2],
+    })
+
+    summary = _bootstrap_summary(
+        rows, replace(CONFIG, lesion_metric="accuracy", bootstrap_iterations=20, random_seed=7)
+    ).iloc[0]
+
+    assert summary.specification == "singular-feature-signal"
+    assert summary.kind == "singular-feature"
+    assert summary.variable == "signal"
+    assert summary.reference == "intercept-only"
+    assert summary.estimate == summary.delta_accuracy == 0.2
+    assert summary.lower == summary.delta_accuracy_lower
+    assert summary.upper == summary.delta_accuracy_upper
+
+
+def test_paired_predictions_use_full_for_lesions_and_null_for_singulars() -> None:
+    metadata = pd.DataFrame({
+        "bench": ["a", "a"], "item": ["i0", "i1"], "observed": [1, 0],
+    })
+    full = metadata.assign(probability=[0.9, 0.1])
+    null = metadata.assign(probability=[0.5, 0.5])
+    lesion = metadata.assign(probability=[0.6, 0.4])
+    singular = metadata.assign(probability=[0.8, 0.2])
+    lesion_spec = lesioning.Specification(
+        "lesion-feature-x", "lesion-feature", "x", "full", ("y",)
+    )
+    singular_spec = lesioning.Specification(
+        "singular-feature-x", "singular-feature", "x", "intercept-only", ("x",)
+    )
+
+    lesion_rows = _paired_predictions(lesion, full, lesion_spec, "fold-0")
+    singular_rows = _paired_predictions(singular, null, singular_spec, "fold-0")
+
+    assert lesion_rows.delta_log_loss.gt(0).all()
+    assert singular_rows.delta_log_loss.gt(0).all()
+    assert lesion_rows.reference.eq("full").all()
+    assert singular_rows.reference.eq("intercept-only").all()
+    assert lesion_rows.delta_accuracy.eq(0).all()
+    assert singular_rows.delta_accuracy.tolist() == [0.0, 1.0]
+
+
+def test_real_fixed_fits_normalize_reference_and_singular_prediction_columns() -> None:
+    train, test = _rows()
+    features = ["signal", "noise", "dropped"]
+    config = replace(CONFIG, glm_max_iter=2_000, random_seed=4)
+    intercept_only = fit_fixed_ridge(train, test, [], config, ridge_c=1.0)
+    singular = fit_fixed_ridge(train, test, ["signal"], config, ridge_c=1.0)
+    specification = lesioning.Specification(
+        "singular-feature-signal", "singular-feature", "signal", "intercept-only", ("signal",)
+    )
+
+    reference_rows = _prediction_rows(intercept_only.predictions, features)
+    singular_rows = _prediction_rows(singular.predictions, features)
+    paired = _paired_predictions(singular_rows, reference_rows, specification, "synthetic")
+
+    assert not set(features) & set(reference_rows)
+    assert reference_rows.columns.tolist() == singular_rows.columns.tolist()
+    assert len(paired) == len(test)
+
+
+def test_aggregation_pairs_every_fold_with_the_declared_reference(tmp_path) -> None:
+    config = replace(
+        CONFIG, results_dir=tmp_path / "results", model_folds=(("model-fold-0", ("held",)),),
+        item_folds=2, lesion_metric="accuracy", bootstrap_iterations=20,
+    )
+    specifications = pd.DataFrame([
+        {"specification": "lesion-feature-x", "kind": "lesion-feature", "variable": "x",
+         "reference": "full", "feature_count": 1, "artifact": "lesion-feature-x"},
+        {"specification": "singular-feature-x", "kind": "singular-feature", "variable": "x",
+         "reference": "intercept-only", "feature_count": 1, "artifact": "singular-feature-x"},
+    ])
+    for item_fold in range(2):
+        fold = f"model-fold-0__item-{item_fold}"
+        fold_dir = config.lesion_dir / "folds" / fold
+        (fold_dir / "references").mkdir(parents=True)
+        (fold_dir / "specifications").mkdir()
+        specifications.to_csv(fold_dir / "specifications.csv", index=False)
+        metadata = pd.DataFrame({
+            "bench": ["a", "a"], "item": [f"i{item_fold}-0", f"i{item_fold}-1"],
+            "observed": [1, 0],
+        })
+        metadata.assign(probability=[0.9, 0.1]).to_parquet(
+            fold_dir / "references/full.parquet", index=False)
+        metadata.assign(probability=[0.5, 0.5]).to_parquet(
+            fold_dir / "references/intercept-only.parquet", index=False)
+        metadata.assign(probability=[0.6, 0.4]).to_parquet(
+            fold_dir / "specifications/lesion-feature-x.parquet", index=False)
+        metadata.assign(probability=[0.8, 0.2]).to_parquet(
+            fold_dir / "specifications/singular-feature-x.parquet", index=False)
+        (fold_dir / "manifest.json").write_text(
+            f'{{"state":"completed","settings_signature":"fold-{item_fold}",'
+            '"plan_signature":"shared-plan"}\n')
+
+    output = aggregate_lesions(config)
+    summary = pd.read_csv(output).set_index("specification")
+
+    assert set(summary.index) == {"lesion-feature-x", "singular-feature-x"}
+    assert summary.fold_count.eq(2).all()
+    assert summary.delta_log_loss.gt(0).all()
+    assert summary.loc["lesion-feature-x", "reference"] == "full"
+    assert summary.loc["singular-feature-x", "reference"] == "intercept-only"
+    assert (summary.lower == summary.delta_accuracy_lower).all()
+    assert (summary.upper == summary.delta_accuracy_upper).all()
+    assert (config.lesion_dir / "summary-manifest.json").exists()
+    with pytest.raises(RuntimeError, match="summary settings"):
+        aggregate_lesions(replace(config, lesion_metric="log_loss"))
+    mixed = config.lesion_dir / "folds/model-fold-0__item-1/manifest.json"
+    values = json.loads(mixed.read_text())
+    values["plan_signature"] = "different-plan"
+    mixed.write_text(json.dumps(values))
+    with pytest.raises(RuntimeError, match="common plan"):
+        aggregate_lesions(config)
+
+
+def test_cli_scopes_fold_execution_and_summary_to_explicit_paths(tmp_path, monkeypatch) -> None:
+    calls = []
+    matrix = tmp_path / "matrix"
+    results = tmp_path / "results"
+    monkeypatch.setattr(
+        lesioning, "run_fold",
+        lambda fold_index, config: calls.append(("fold", fold_index, config)),
+    )
+    monkeypatch.setattr(
+        lesioning, "aggregate_lesions",
+        lambda config: calls.append(("summarize", None, config)),
+    )
+
+    main([
+        "fold", "--fold-index", "3", "--processed-matrix-root", str(matrix),
+        "--results-dir", str(results),
+    ])
+    main(["summarize", "--results-dir", str(results)])
+
+    assert [(mode, index) for mode, index, _ in calls] == [("fold", 3), ("summarize", None)]
+    fold_config = calls[0][2]
+    assert fold_config.execution_mode == "execute"
+    assert fold_config.execution_target == "swc_hpc"
+    assert fold_config.processed_matrix_root == Path(matrix)
+    assert fold_config.results_dir == Path(results)
+    assert calls[1][2].results_dir == Path(results)
+
+
+def test_resume_promotes_a_valid_deterministic_partial_without_rewriting(tmp_path) -> None:
+    output = tmp_path / "candidate.parquet"
+    partial = tmp_path / ".candidate.parquet.partial"
+    expected = pd.DataFrame({"observed": [1], "probability": [0.75]})
+    expected.to_parquet(partial, index=False)
+
+    assert _resume_checkpoint(output, pd.read_parquet)
+    pd.testing.assert_frame_equal(pd.read_parquet(output), expected)
+    assert not partial.exists()
+
+
+def test_resumed_prediction_rows_must_match_the_held_out_schema() -> None:
+    test = pd.DataFrame({
+        "bench": ["a"], "item": ["i0"], "fold": ["f0"], "pick_left": [1],
+        "signal": [0.5],
+    })
+    stale = pd.DataFrame({
+        "bench": ["a"], "item": ["i0"], "fold": ["f0"], "observed": [1],
+        "probability": [0.75], "signal": [0.5],
+    })
+
+    with pytest.raises(RuntimeError, match="prediction schema"):
+        _validate_prediction_rows(stale, test, ["signal"])
