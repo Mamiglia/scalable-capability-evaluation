@@ -15,6 +15,7 @@ uv.lock
 .agents
 .codex
 .claude
+.superpowers/
 
 # logs
 logs/
