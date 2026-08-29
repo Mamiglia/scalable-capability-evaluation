@@ -1,0 +1,32 @@
+# Lean predictor set: surface counts, two surprisal levels (local-window mean, full-context bits per
+# character), and the 12 shared SAE features with a verified description in at least two benchmarks
+# (descriptions-qwen-k8/feature_descriptions_verified.csv).
+- log_chars
+- n_words
+- personal_pronouns_count
+- hedging_count
+- backtracking_count
+- uncertainty_count
+- confidence_count
+- questions_count
+- verification_count
+- connectives_count
+- contrast_count
+- numbered_steps_count
+- bullets_count
+- code_chars
+- latex_chars
+- surprisal_local_mean__llama
+- surprisal_full_bpc__llama
+- sae_shared_6
+- sae_shared_1
+- sae_shared_3
+- sae_shared_4
+- sae_shared_7
+- sae_shared_9
+- sae_shared_0
+- sae_shared_2
+- sae_shared_28
+- sae_shared_23
+- sae_shared_19
+- sae_shared_15
