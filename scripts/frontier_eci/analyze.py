@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from inspect_ai.log import read_eval_log_samples
+from matplotlib.legend_handler import HandlerTuple
 from scipy.optimize import curve_fit
 from scipy.stats import spearmanr
 
@@ -248,8 +249,8 @@ def diagnostics(verdicts, new_verdicts, features, quartiles):
 
 
 def save(fig, path):
-    fig.savefig(path.with_suffix(".png"), dpi=300, bbox_inches="tight")
-    fig.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
+    fig.savefig(f"{path}.png", dpi=300, bbox_inches="tight")
+    fig.savefig(f"{path}.pdf", bbox_inches="tight")
     plt.close(fig)
 
 
@@ -342,6 +343,50 @@ def plot_visibility(summary, model_errors, candidates, benches, out):
     save(fig, out / "visibility_vs_prediction_error")
 
 
+def plot_frontier_style(table, judge, bench, quartile, out, style,
+                        prediction_label="predicted", filename_prefix=""):
+    """Original frontier figure grammar: release time, judge cutoff, actual vs prediction."""
+    table = table.sort_values("target_release").copy()
+    table["target_release"] = pd.to_datetime(table.target_release)
+    judge_date = pd.Timestamp(table.judge_release.dropna().iloc[0])
+    predicted = table.dropna(subset=["predicted"])
+    actual = table.dropna(subset=["actual"])
+    fig, ax = plt.subplots(figsize=(3.6, 2.4))
+    ax.axvspan(judge_date, table.target_release.max() + pd.Timedelta(days=400),
+               color="#f2f2f2", lw=0, zorder=0)
+    for row in predicted.itertuples():
+        ax.plot([row.target_release, row.target_release], [row.actual, row.predicted],
+                ":", color="k", lw=0.8)
+    if style == "band":
+        band = ax.fill_between(predicted.target_release, predicted.predicted_low,
+                               predicted.predicted_high, color="#2a78d6", alpha=0.18, lw=0)
+        line, = ax.plot(predicted.target_release, predicted.predicted, color="#2a78d6", lw=1)
+        prediction_handle = (band, line)
+    else:
+        prediction_handle, = ax.plot(predicted.target_release, predicted.predicted, "o",
+                                     ms=3, color="#2a78d6", clip_on=False)
+    actual_handle, = ax.plot(actual.target_release, actual.actual, "o", ms=3,
+                             color="#333333", clip_on=False)
+    ax.axvline(judge_date, color="grey", lw=0.8, ls="--")
+    ax.text(judge_date, 1.0, f" {JUDGE_LABELS[judge]} released", color="grey",
+            fontsize=6, va="top", ha="left")
+    first, last = min(table.target_release.min(), judge_date), max(table.target_release.max(), judge_date)
+    ticks = pd.date_range(first.replace(month=1, day=1), last + pd.DateOffset(months=6), freq="6MS")
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([tick.strftime("%b %Y") for tick in ticks])
+    ax.set_xlim(ticks[0] - pd.Timedelta(days=30), ticks[-1] + pd.Timedelta(days=30))
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_yticks([0, 0.5, 1])
+    ax.set_ylabel(f"Q{quartile} hard-item accuracy")
+    ax.set_xlabel(f"{'GPQA' if bench == 'gpqa' else 'SWE-mini'}: model release date")
+    ax.spines["left"].set_bounds(0, 1)
+    ax.legend([actual_handle, prediction_handle],
+              ["actual (best model per quarter)", prediction_label],
+              handler_map={tuple: HandlerTuple(ndivide=1)}, loc="lower left",
+              bbox_to_anchor=(0, 1.02), frameon=False, handletextpad=0.5)
+    save(fig, out / f"{filename_prefix}{judge}_{bench}_q{quartile}_frontier_{style}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--new-tables", type=Path, required=True)
@@ -430,6 +475,12 @@ def main():
                      args.benches, figures, "frontier_predictions_bridge_judges")
     plot_error_heatmap(predictions, candidates, judges, args.benches, figures)
     plot_visibility(feature_summary, model_errors, candidates, args.benches, figures)
+    frontier_figures = figures / "frontier_style"
+    frontier_figures.mkdir(exist_ok=True)
+    for (bench, judge, quartile), table in predictions[predictions.judge != "consensus"].groupby(
+            ["bench", "judge", "target_quartile"]):
+        for style in ("band", "points"):
+            plot_frontier_style(table, judge, bench, quartile, frontier_figures, style)
     (args.out / "summary.json").write_text(json.dumps({
         "verdicts": len(verdicts), "q1_verdicts": len(q1_verdicts),
         "judges": judges, "consensus": "equal judge weight per exact verdict cell",

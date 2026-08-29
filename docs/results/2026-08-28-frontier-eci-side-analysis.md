@@ -51,6 +51,19 @@ Every mean residual is negative. The equal-judge consensus has MAE 0.125/0.379/0
 beat GPT-5.2. Ranking is more successful than magnitude on Q3/Q4: Gemini and GPT-5.2 reach
 Spearman 0.94 on Q3, while every judge gets the Q2 ordering wrong (Spearman −0.56 to −0.68).
 
+### Epoch capability-trend baseline
+
+A deliberately dumb baseline uses no judge verdicts. For each frontier model it fits a linear
+regression of hard-item accuracy on Epoch ECI using only earlier frontier models, then predicts the
+current model from its ECI. It therefore has the same rolling no-future-target rule as the main
+analysis, but only captures the capability trend.
+
+On GPQA its Q2/Q3/Q4 MAE is **0.030/0.098/0.093**, substantially better than GPT-5.2's
+0.079/0.249/0.218 and every other judge. Q3/Q4 Spearman is 0.90/0.75; Q2 ordering remains poor
+(−0.57). The release-time plot's visually persuasive upward shape is therefore mostly reproducible
+from Epoch capability growth alone. This is strong evidence that the plot is not, by itself,
+evidence that transcript judging adds information.
+
 Consensus mean error by answer model is: GPT-5 −0.317, Kimi K3 −0.287, Opus 4.7 −0.280, o3
 −0.265, Gemini 3 Pro −0.256, and Opus 4.6 −0.094. Thus the corrected experiment does **not** find
 uniform Opus downrating: Opus 4.7 is strongly underrated, but Opus 4.6 is the best-calibrated
@@ -98,6 +111,10 @@ reported here.
   `judge_results/frontier/eci-semiannual/analysis/`.
 - Partial SWE predictions, metrics, and figures:
   `judge_results/frontier/eci-semiannual/analysis-swe-partial/`.
+- Original release-time figure style (one judge and quartile per band/points plot):
+  `<analysis>/figures/frontier_style/`.
+- Rolling Epoch-ECI regression baselines in the same style:
+  `<analysis>/capability_baseline/`.
 - API provenance and cost: `judge_results/frontier/eci-semiannual/provenance/`.
 - Paid-run ledger and 20-minute monitors:
   `judge_results/frontier/eci-semiannual/run-local/`.
