@@ -1,4 +1,5 @@
 """Build the representative readable-feature design matrix."""
+from collections.abc import Sequence
 import hashlib
 import json
 import os
@@ -6,6 +7,7 @@ from pathlib import Path
 from tempfile import mkdtemp
 
 import pandas as pd
+import pyarrow.parquet as pq
 import yaml
 
 from .config import AnalysisConfig, CONFIG
@@ -182,6 +184,171 @@ def build_design_matrix(config: AnalysisConfig = CONFIG) -> dict[str, pd.DataFra
         "source_hf_revision": config.source_hf_revision,
         "source_status": "resolved" if config.source_hf_revision else "unresolved/test-only",
     }, sort_keys=False)
+    return tables
+
+
+def _expanded_table(
+    baseline_root: Path,
+    source_root: Path,
+    level: str,
+    baseline_features: list[str],
+    additions: list[str],
+) -> pd.DataFrame:
+    prefix = "d_" if level == "pair" else ""
+    baseline = pd.read_parquet(baseline_root / f"{level}.parquet")
+    baseline_columns = {f"{prefix}{feature}" for feature in baseline_features}
+    metadata = [column for column in baseline if column not in baseline_columns]
+    source_path = source_root / f"{level}.parquet"
+    source_schema = pq.read_schema(source_path).names
+    added_columns = [f"{prefix}{feature}" for feature in additions]
+    if missing := [column for column in added_columns if column not in source_schema]:
+        raise ValueError(f"source {level} matrix missing additions: {missing}")
+    if missing := [column for column in metadata if column not in source_schema]:
+        raise ValueError(f"source {level} matrix missing baseline metadata: {missing}")
+    source = pd.read_parquet(source_path, columns=metadata + added_columns)
+    if not source[metadata].equals(baseline[metadata]):
+        raise ValueError(f"source {level} rows/metadata do not match baseline")
+    return pd.concat([baseline, source[added_columns]], axis=1)
+
+
+def _expanded_scaling(
+    baseline_root: Path,
+    source_root: Path,
+    filename: str,
+    additions: list[str],
+    prefix: str,
+) -> pd.DataFrame:
+    baseline = pd.read_parquet(baseline_root / filename)
+    source = pd.read_parquet(source_root / filename)
+    names = [f"{prefix}{feature}" for feature in additions]
+    added = source[source.feature.isin(names)].copy()
+    if missing := [feature for feature in names if feature not in set(added.feature)]:
+        raise ValueError(f"source {filename} missing additions: {missing}")
+    if added.duplicated(["benchmark", "feature"]).any():
+        raise ValueError(f"source {filename} has duplicate benchmark/feature rows")
+    benchmark_order = baseline.benchmark.drop_duplicates().tolist()
+    benchmarks = set(benchmark_order)
+    incomplete = [
+        feature for feature in names
+        if set(added.loc[added.feature == feature, "benchmark"]) != benchmarks
+    ]
+    if incomplete:
+        raise ValueError(f"source {filename} additions lack baseline benchmark coverage: {incomplete}")
+    added = (added.assign(
+        _benchmark_order=added.benchmark.map({name: i for i, name in enumerate(benchmark_order)}),
+        _feature_order=added.feature.map({name: i for i, name in enumerate(names)}),
+    ).sort_values(["_benchmark_order", "_feature_order"])
+        .drop(columns=["_benchmark_order", "_feature_order"]))
+    return pd.concat([baseline, added], ignore_index=True, sort=False)
+
+
+def build_expanded_design_matrix(
+    baseline_config: str | Path,
+    source_config: str | Path,
+    additions: Sequence[str],
+    output_root: str | Path,
+) -> dict[str, pd.DataFrame | dict[str, object] | str]:
+    """Append exact canonical features to a processed baseline without regrouping them."""
+    baseline_config, source_config = Path(baseline_config), Path(source_config)
+    baseline_root, source_root = _source_root(baseline_config), _source_root(source_config)
+    output_root = Path(output_root)
+    additions = list(additions)
+    if len(additions) != len(set(additions)):
+        raise ValueError("additions must be unique")
+
+    baseline_dictionary = pd.read_parquet(baseline_root / "feature-dictionary.parquet")
+    source_dictionary = pd.read_parquet(source_root / "feature-dictionary.parquet")
+    baseline_features = baseline_dictionary.feature.tolist()
+    if overlap := [feature for feature in additions if feature in set(baseline_features)]:
+        raise ValueError(f"additions already present in baseline: {overlap}")
+    source_index = source_dictionary.set_index("feature")
+    if missing := [feature for feature in additions if feature not in source_index.index]:
+        raise ValueError(f"source feature dictionary missing additions: {missing}")
+    added_dictionary = source_index.loc[additions].reset_index()
+    added_dictionary = added_dictionary.assign(
+        correlation_group=pd.NA,
+        representative=additions,
+        retained=True,
+        original_block=added_dictionary.block,
+        group_size=1,
+        processed_name=additions,
+    )
+    output_dictionary = pd.concat(
+        [baseline_dictionary, added_dictionary], ignore_index=True, sort=False)
+
+    transcript = _expanded_table(
+        baseline_root, source_root, "transcript", baseline_features, additions)
+    pair = _expanded_table(
+        baseline_root, source_root, "pair", baseline_features, additions)
+    transcript_scaling = _expanded_scaling(
+        baseline_root, source_root, "scaling-transcript.parquet", additions, "")
+    pair_scaling = _expanded_scaling(
+        baseline_root, source_root, "scaling-pair.parquet", additions, "d_")
+
+    representative_map = pd.read_csv(baseline_root / "representative-map.csv")
+    addition_map = pd.DataFrame({
+        "feature": additions,
+        "status": "retained",
+        "correlation_group": pd.NA,
+        "representative": additions,
+        "retained": True,
+        "original_block": added_dictionary.block.tolist(),
+        "group_size": 1,
+        "processed_name": additions,
+    })
+    representative_map = pd.concat(
+        [representative_map, addition_map], ignore_index=True, sort=False)
+
+    source_files = {
+        "baseline_config": baseline_config,
+        "canonical_config": source_config,
+        "baseline_manifest": baseline_root / "manifest.json",
+        "baseline_representative_map": baseline_root / "representative-map.csv",
+        **{
+            f"baseline_{name.removesuffix('.parquet').replace('-', '_')}": baseline_root / name
+            for name in ARTIFACTS[:5]
+        },
+        **{
+            f"canonical_{name.removesuffix('.parquet').replace('-', '_')}": source_root / name
+            for name in ARTIFACTS[:5]
+        },
+    }
+    baseline_manifest = json.loads((baseline_root / "manifest.json").read_text())
+    inventory = baseline_features + additions
+    manifest = {
+        **{
+            key: baseline_manifest.get(key)
+            for key in ("source_hf_repo", "source_hf_revision", "source_status")
+        },
+        "source_paths": {key: str(path) for key, path in source_files.items()},
+        "source_sha256": {key: _sha256(path) for key, path in source_files.items()},
+        "settings": {
+            "construction": "processed-baseline-plus-explicit-additions",
+            "additions": additions,
+            "correlation_grouping": False,
+        },
+        "rows": {"transcript": len(transcript), "pair": len(pair)},
+        "features": {
+            "baseline": len(baseline_features), "added": len(additions),
+            "retained": len(inventory), "inventory": inventory,
+            "additions": additions,
+        },
+    }
+    tables: dict[str, pd.DataFrame | dict[str, object] | str] = {
+        "transcript.parquet": transcript,
+        "pair.parquet": pair,
+        "feature-dictionary.parquet": output_dictionary,
+        "scaling-transcript.parquet": transcript_scaling,
+        "scaling-pair.parquet": pair_scaling,
+        "representative-map.csv": representative_map,
+        "manifest.json": manifest,
+        "design-matrix.yaml": yaml.safe_dump({
+            "output_root": str(output_root),
+            "source_hf_repo": manifest["source_hf_repo"],
+            "source_hf_revision": manifest["source_hf_revision"],
+            "source_status": manifest["source_status"],
+        }, sort_keys=False),
+    }
     return tables
 
 

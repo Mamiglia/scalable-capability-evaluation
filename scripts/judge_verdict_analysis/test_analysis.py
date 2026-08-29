@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 import matplotlib
@@ -18,7 +19,11 @@ from .basic_eda import (
     duplicate_features,
     feature_summary,
 )
-from .build_dm import build_design_matrix, write_design_matrix
+from .build_dm import (
+    build_design_matrix,
+    build_expanded_design_matrix,
+    write_design_matrix,
+)
 from .config import AnalysisConfig, CONFIG
 from .data import list_blocks, load_features
 from .feature_definitions import definitions_for
@@ -91,6 +96,270 @@ def _matrix_with_scaling(tmp_path: Path) -> Path:
             for bench in ("a", "b") for feature in ("common", "duplicate", "domain_only")
         ]).to_parquet(matrix / f"{name}.parquet", index=False)
     return config
+
+
+HISTORICAL_SURPRISAL = (
+    "surprisal_local_mean__llama",
+    "surprisal_full_bpc__llama",
+    "surprisal_question_gain_bpc__llama",
+    "surprisal_total_context_gain_bpc__llama",
+    "surprisal_long_context_gain_bpc__llama",
+    "surprisal_rolling_short_position_adjusted_mean__llama",
+    "surprisal_rolling_long_position_adjusted_mean__llama",
+    "surprisal_rolling_long_question_position_adjusted_mean__llama",
+    "surprisal_rolling_context_gain_position_adjusted_mean__llama",
+    "surprisal_rolling_question_gain_position_adjusted_mean__llama",
+)
+SHARED_SAE = tuple(f"sae_shared_{index}" for index in range(32))
+
+
+def _expanded_matrix_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    baseline_root, source_root = tmp_path / "baseline", tmp_path / "source"
+    baseline_root.mkdir()
+    source_root.mkdir()
+    baseline_features = ("readable_a", "readable_b")
+    additions = HISTORICAL_SURPRISAL + SHARED_SAE
+    blocks = {
+        feature: ("embedding-sae-shared" if feature.startswith("sae_")
+                  else "surprisal-position-adjusted" if "position_adjusted" in feature
+                  else "surprisal-llama")
+        for feature in additions
+    }
+    dictionary = pd.DataFrame([
+        {"feature": feature, "block": "surface", "source": "readable", "transform": "none", "n_missing": 0}
+        for feature in baseline_features
+    ] + [
+        {"feature": feature, "block": blocks[feature], "source": "canonical", "transform": "none", "n_missing": 0}
+        for feature in additions
+    ])
+    dictionary.iloc[:2].assign(
+        retained=True, original_block="surface", representative=baseline_features,
+        processed_name=baseline_features,
+    ).to_parquet(baseline_root / "feature-dictionary.parquet", index=False)
+    dictionary.to_parquet(source_root / "feature-dictionary.parquet", index=False)
+
+    transcript_metadata = pd.DataFrame({
+        "bench": ["a", "b"], "model": ["m1", "m2"], "item": ["i1", "i2"],
+        "split": ["representation_train"] * 2, "model_accuracy": [0.6, 0.7],
+    })
+    baseline_transcript = transcript_metadata.assign(readable_a=[1.0, 2.0], readable_b=[3.0, 4.0])
+    source_transcript = baseline_transcript.assign(**{
+        feature: [float(index), float(index + 1)] for index, feature in enumerate(additions)
+    })
+    baseline_transcript.to_parquet(baseline_root / "transcript.parquet", index=False)
+    source_transcript.to_parquet(source_root / "transcript.parquet", index=False)
+
+    pair_metadata = pd.DataFrame({
+        "bench": ["a", "b"], "judge": ["j1", "j2"], "item": ["i1", "i2"],
+        "model_left": ["m1", "m2"], "model_right": ["m2", "m1"],
+        "split": ["representation_train"] * 2, "pick_left": [1, 0],
+    })
+    baseline_pair = pair_metadata.assign(d_readable_a=[1.0, -1.0], d_readable_b=[2.0, -2.0])
+    source_pair = baseline_pair.assign(**{
+        f"d_{feature}": [float(index), -float(index)] for index, feature in enumerate(additions)
+    })
+    baseline_pair.to_parquet(baseline_root / "pair.parquet", index=False)
+    source_pair.to_parquet(source_root / "pair.parquet", index=False)
+
+    for filename, prefix in (("scaling-transcript.parquet", ""), ("scaling-pair.parquet", "d_")):
+        scaling = pd.DataFrame([
+            {"benchmark": bench, "feature": f"{prefix}{feature}", "mean": 0.0, "sd": 1.0}
+            for bench in ("a", "b") for feature in baseline_features + additions
+        ])
+        scaling[scaling.feature.isin([f"{prefix}{feature}" for feature in baseline_features])].to_parquet(
+            baseline_root / filename, index=False)
+        scaling.to_parquet(source_root / filename, index=False)
+
+    pd.DataFrame({
+        "feature": baseline_features, "status": ["retained"] * 2,
+        "correlation_group": ["group-001", "group-002"],
+        "representative": baseline_features, "retained": [True] * 2,
+        "original_block": ["surface"] * 2, "group_size": [1] * 2,
+        "processed_name": baseline_features,
+    }).to_csv(baseline_root / "representative-map.csv", index=False)
+    (baseline_root / "manifest.json").write_text(
+        '{"source_hf_repo":"example/judging","source_hf_revision":"' + "a" * 40
+        + '","source_status":"resolved"}\n')
+    baseline_config = tmp_path / "baseline.yaml"
+    source_config = tmp_path / "source.yaml"
+    baseline_config.write_text(yaml.safe_dump({"output_root": str(baseline_root)}))
+    source_config.write_text(yaml.safe_dump({"output_root": str(source_root)}))
+    return baseline_config, source_config
+
+
+@pytest.mark.parametrize("additions", [
+    HISTORICAL_SURPRISAL,
+    SHARED_SAE,
+    HISTORICAL_SURPRISAL + SHARED_SAE,
+])
+def test_expanded_dm_preserves_baseline_and_appends_exact_features(
+    tmp_path: Path, additions: tuple[str, ...],
+) -> None:
+    baseline_config, source_config = _expanded_matrix_fixture(tmp_path)
+    baseline_root = Path(yaml.safe_load(baseline_config.read_text())["output_root"])
+    output_root = tmp_path / "expanded"
+
+    outputs = build_expanded_design_matrix(
+        baseline_config, source_config, additions, output_root)
+
+    inventory = ["readable_a", "readable_b", *additions]
+    output_dictionary = outputs["feature-dictionary.parquet"]
+    assert output_dictionary.feature.tolist() == inventory
+    added_dictionary = output_dictionary.tail(len(additions))
+    assert added_dictionary.retained.eq(True).all()
+    assert added_dictionary.representative.tolist() == list(additions)
+    assert added_dictionary.processed_name.tolist() == list(additions)
+    assert added_dictionary.original_block.tolist() == added_dictionary.block.tolist()
+    assert outputs["transcript.parquet"].columns.tolist() == [
+        "bench", "model", "item", "split", "model_accuracy", *inventory]
+    assert outputs["pair.parquet"].columns.tolist() == [
+        "bench", "judge", "item", "model_left", "model_right", "split", "pick_left",
+        *[f"d_{feature}" for feature in inventory],
+    ]
+    pd.testing.assert_frame_equal(
+        outputs["transcript.parquet"].iloc[:, :7],
+        pd.read_parquet(baseline_root / "transcript.parquet"),
+    )
+    pd.testing.assert_frame_equal(
+        outputs["pair.parquet"].iloc[:, :9],
+        pd.read_parquet(baseline_root / "pair.parquet"),
+    )
+    assert outputs["scaling-transcript.parquet"].feature.tolist() == [
+        "readable_a", "readable_b", "readable_a", "readable_b",
+        *additions, *additions,
+    ]
+    assert outputs["scaling-pair.parquet"].feature.str.removeprefix("d_").tolist() == \
+        outputs["scaling-transcript.parquet"].feature.tolist()
+    manifest = outputs["manifest.json"]
+    assert manifest["features"] == {
+        "baseline": 2, "added": len(additions), "retained": len(inventory),
+        "inventory": inventory, "additions": list(additions),
+    }
+    assert manifest["source_hf_revision"] == "a" * 40
+    assert manifest["source_sha256"]["canonical_config"] == hashlib.sha256(
+        source_config.read_bytes()).hexdigest()
+    assert manifest["source_sha256"]["baseline_manifest"] == hashlib.sha256(
+        (baseline_root / "manifest.json").read_bytes()).hexdigest()
+    assert manifest["source_sha256"]["baseline_representative_map"] == hashlib.sha256(
+        (baseline_root / "representative-map.csv").read_bytes()).hexdigest()
+    assert Path(yaml.safe_load(outputs["design-matrix.yaml"])["output_root"]) == output_root
+    assert outputs["representative-map.csv"].tail(len(additions)).feature.tolist() == list(additions)
+    assert outputs["representative-map.csv"].tail(len(additions)).status.eq("retained").all()
+
+    write_design_matrix(outputs, output_root)
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        write_design_matrix(outputs, output_root)
+
+
+@pytest.mark.parametrize(("artifact", "column", "message"), [
+    ("feature-dictionary.parquet", "feature", "feature dictionary missing additions"),
+    ("transcript.parquet", HISTORICAL_SURPRISAL[0], "transcript matrix missing additions"),
+    ("pair.parquet", f"d_{HISTORICAL_SURPRISAL[0]}", "pair matrix missing additions"),
+    ("scaling-transcript.parquet", HISTORICAL_SURPRISAL[0],
+     "scaling-transcript.parquet missing additions"),
+    ("scaling-pair.parquet", f"d_{HISTORICAL_SURPRISAL[0]}",
+     "scaling-pair.parquet missing additions"),
+])
+def test_expanded_dm_rejects_additions_missing_from_any_source_artifact(
+    tmp_path: Path, artifact: str, column: str, message: str,
+) -> None:
+    baseline_config, source_config = _expanded_matrix_fixture(tmp_path)
+    source_root = Path(yaml.safe_load(source_config.read_text())["output_root"])
+    table = pd.read_parquet(source_root / artifact)
+    if artifact == "feature-dictionary.parquet":
+        table = table[table.feature != HISTORICAL_SURPRISAL[0]]
+    elif artifact.startswith("scaling-"):
+        table = table[table.feature != column]
+    else:
+        table = table.drop(columns=column)
+    table.to_parquet(source_root / artifact, index=False)
+
+    with pytest.raises(ValueError, match=message):
+        build_expanded_design_matrix(
+            baseline_config, source_config, [HISTORICAL_SURPRISAL[0]], tmp_path / "expanded")
+
+
+@pytest.mark.parametrize("level", ["transcript", "pair"])
+def test_expanded_dm_rejects_source_row_or_metadata_mismatch(
+    tmp_path: Path, level: str,
+) -> None:
+    baseline_config, source_config = _expanded_matrix_fixture(tmp_path)
+    source_root = Path(yaml.safe_load(source_config.read_text())["output_root"])
+    path = source_root / f"{level}.parquet"
+    table = pd.read_parquet(path)
+    table.loc[0, "bench"] = "wrong"
+    table.to_parquet(path, index=False)
+
+    with pytest.raises(ValueError, match=f"source {level} rows/metadata do not match baseline"):
+        build_expanded_design_matrix(
+            baseline_config, source_config, [HISTORICAL_SURPRISAL[0]], tmp_path / "expanded")
+
+
+@pytest.mark.parametrize(("artifact", "feature"), [
+    ("scaling-transcript.parquet", HISTORICAL_SURPRISAL[0]),
+    ("scaling-pair.parquet", f"d_{HISTORICAL_SURPRISAL[0]}"),
+])
+def test_expanded_dm_requires_each_addition_scaled_for_every_baseline_benchmark(
+    tmp_path: Path, artifact: str, feature: str,
+) -> None:
+    baseline_config, source_config = _expanded_matrix_fixture(tmp_path)
+    source_root = Path(yaml.safe_load(source_config.read_text())["output_root"])
+    path = source_root / artifact
+    scaling = pd.read_parquet(path)
+    scaling = scaling[~((scaling.benchmark == "b") & (scaling.feature == feature))]
+    scaling.to_parquet(path, index=False)
+
+    with pytest.raises(ValueError, match="additions lack baseline benchmark coverage"):
+        build_expanded_design_matrix(
+            baseline_config, source_config, [HISTORICAL_SURPRISAL[0]], tmp_path / "expanded")
+
+
+@pytest.mark.parametrize(("additions", "message"), [
+    ((HISTORICAL_SURPRISAL[0], HISTORICAL_SURPRISAL[0]), "additions must be unique"),
+    (("readable_a",), "additions already present in baseline"),
+])
+def test_expanded_dm_rejects_duplicate_output_features(
+    tmp_path: Path, additions: tuple[str, ...], message: str,
+) -> None:
+    baseline_config, source_config = _expanded_matrix_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match=message):
+        build_expanded_design_matrix(
+            baseline_config, source_config, additions, tmp_path / "expanded")
+
+
+@pytest.mark.parametrize(("artifact", "prefix"), [
+    ("scaling-transcript.parquet", ""),
+    ("scaling-pair.parquet", "d_"),
+])
+def test_expanded_dm_rejects_duplicate_scaling_rows(
+    tmp_path: Path, artifact: str, prefix: str,
+) -> None:
+    baseline_config, source_config = _expanded_matrix_fixture(tmp_path)
+    source_root = Path(yaml.safe_load(source_config.read_text())["output_root"])
+    path = source_root / artifact
+    scaling = pd.read_parquet(path)
+    row = scaling[
+        (scaling.benchmark == "a")
+        & (scaling.feature == f"{prefix}{HISTORICAL_SURPRISAL[0]}")
+    ]
+    pd.concat([scaling, row], ignore_index=True).to_parquet(path, index=False)
+
+    with pytest.raises(ValueError, match="duplicate benchmark/feature rows"):
+        build_expanded_design_matrix(
+            baseline_config, source_config, [HISTORICAL_SURPRISAL[0]], tmp_path / "expanded")
+
+
+def test_expanded_dm_scaling_follows_requested_feature_order(tmp_path: Path) -> None:
+    baseline_config, source_config = _expanded_matrix_fixture(tmp_path)
+    additions = [HISTORICAL_SURPRISAL[1], HISTORICAL_SURPRISAL[0]]
+
+    outputs = build_expanded_design_matrix(
+        baseline_config, source_config, additions, tmp_path / "expanded")
+
+    expected = additions + additions
+    assert outputs["scaling-transcript.parquet"].tail(4).feature.tolist() == expected
+    assert outputs["scaling-pair.parquet"].tail(4).feature.str.removeprefix("d_").tolist() == expected
 
 
 def test_build_dm_writes_source_compatible_representative_matrix(tmp_path: Path) -> None:
