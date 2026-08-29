@@ -96,6 +96,26 @@ def _lesions(path: Path) -> tuple[Path, Path]:
     pd.DataFrame({
         "feature": ["signal", "noise"], "block": ["rubric", "clause-plan"],
     }).to_parquet(dictionary_path, index=False)
+    artifact_rows = []
+    for fold_index in range(2):
+        coefficient_path = path / "lesion-folds" / f"fold-{fold_index}" / "full.parquet"
+        coefficient_path.parent.mkdir(parents=True)
+        pd.DataFrame([
+            {
+                "feature": feature, "judge": judge, "benchmark": benchmark,
+                "effective": base + fold_index + judge_index / 10 + benchmark_index / 100,
+            }
+            for feature, base in (("signal", 1.0), ("noise", -1.0))
+            for judge_index, judge in enumerate(("j1", "j2"))
+            for benchmark_index, benchmark in enumerate(
+                ("aime", "gpqa", "intercode", "swe_bench_mini")
+            )
+        ]).to_parquet(coefficient_path, index=False)
+        artifact_rows.append({
+            "fold": f"fold-{fold_index}", "specification": "full",
+            "coefficients": str(coefficient_path),
+        })
+    pd.DataFrame(artifact_rows).to_csv(path / "artifact-index.csv", index=False)
     return lesion_path, dictionary_path
 
 
@@ -110,8 +130,10 @@ def _stability_files(path: Path) -> tuple[list[Path], list[Path]]:
         selection_path, coefficient_path = fold_dir / "selection.csv", fold_dir / "coefficients.csv"
         pd.DataFrame({"feature": selected}).to_csv(selection_path, index=False)
         pd.DataFrame([
-            {"feature": feature, "judge": judge, "benchmark": "a", "effective": effective}
+            {"feature": feature, "judge": judge, "benchmark": benchmark,
+             "effective": effective}
             for feature, pair in values.items()
+            for benchmark in ("aime", "gpqa", "intercode", "swe_bench_mini")
             for judge, effective in zip(("j1", "j2"), pair)
         ]).to_csv(coefficient_path, index=False)
         selections.append(selection_path)
@@ -128,7 +150,7 @@ def _item_deltas(path: Path) -> Path:
             "variable": feature, "row_count": 1,
             "delta_log_loss": base + model_fold / 1000,
         }
-        for bench in ("a", "b")
+        for bench in ("aime", "gpqa", "intercode", "swe_bench_mini")
         for model_fold in range(3)
         for item_fold in range(3)
         for feature, kind, base in (
@@ -138,6 +160,16 @@ def _item_deltas(path: Path) -> Path:
             ("noise", "lesion-feature", 0.002),
         )
     ]).to_parquet(output, index=False)
+    return output
+
+
+def _judge_item_deltas(path: Path) -> Path:
+    output = path / "judge-item-deltas.parquet"
+    rows = pd.read_parquet(_item_deltas(path)).merge(
+        pd.DataFrame({"judge": ["j1", "j2"]}), how="cross",
+    )
+    rows["delta_log_loss"] += rows.judge.map({"j1": 0.001, "j2": -0.001})
+    rows.to_parquet(output, index=False)
     return output
 
 
@@ -307,14 +339,17 @@ def test_result_plots_are_compact_editable_and_unclipped(tmp_path: Path) -> None
     lesion_path, dictionary_path = _lesions(tmp_path)
     lesions = load_lesion_summary(lesion_path, dictionary_path)
     features, groups = feature_effects(lesions), group_effects(lesions)
+    coefficients = result_plots.summarize_effective_coefficients(
+        result_plots.load_lesion_coefficients(lesion_path.with_name("artifact-index.csv")),
+    )
     selection_paths, coefficient_paths = _stability_files(tmp_path)
     stability, fold_coefficients = coefficient_selection_stability(selection_paths, coefficient_paths)
     output_dir = tmp_path / "figures"
 
     outputs = {
         **plot_accuracy_comparison(summary, fold_scores, output_dir),
-        "feature-effects-overview": plot_feature_overview(features, output_dir),
-        **plot_feature_blocks(features, output_dir),
+        "feature-effects-overview": plot_feature_overview(features, coefficients, output_dir),
+        **plot_feature_blocks(features, coefficients, output_dir),
         "feature-scatter": plot_feature_scatter(features, output_dir, top_labels=1),
         "group-effects": plot_group_effects(groups, output_dir),
         "annotation-comparison": plot_annotation_comparison(groups, output_dir),
@@ -351,14 +386,14 @@ def test_result_plots_are_compact_editable_and_unclipped(tmp_path: Path) -> None
     assert "rotate(-90" in readable_tick.attrib.get("transform", "")
     assert 'id="legend_1"' in outputs["feature-scatter"][1].read_text()
     overview_svg = outputs["feature-effects-overview"][1].read_text()
-    assert overview_svg.count('id="axes_') == 2
-    assert ">Singular</text>" in overview_svg and ">Unique</text>" in overview_svg
-    assert ">−.1</text>" in overview_svg and ">.3</text>" in overview_svg
-    assert ">−.05</text>" in overview_svg and ">.15</text>" in overview_svg
+    assert overview_svg.count('id="axes_') == 3
+    assert all(label in overview_svg for label in ("Singular", "Unique", "Coefficient"))
+    assert ">−.05</text>" in overview_svg and ">.2</text>" in overview_svg
+    assert ">.08</text>" in overview_svg and ">−1.6</text>" in overview_svg
     for name, feature in (("feature-effects-rubric", "signal"),
                           ("feature-effects-clause-plan", "noise")):
         block_svg = outputs[name][1].read_text()
-        assert block_svg.count('id="axes_') == 2 and feature in block_svg
+        assert block_svg.count('id="axes_') == 3 and feature in block_svg
     assert "planning (clause-plan)" in outputs["group-effects"][1].read_text()
     assert "Singular" in outputs["annotation-comparison"][1].read_text()
     assert "Unique removal" in outputs["annotation-comparison"][1].read_text()
@@ -391,6 +426,11 @@ def test_dense_legends_and_scatter_labels_stay_inside_canvas_without_overlap(
         )
         for name in names
     ])
+    coefficients = pd.DataFrame({
+        "feature": features.feature, "estimate": np.linspace(-0.5, 0.5, len(features)),
+        "lower": np.linspace(-0.6, 0.4, len(features)),
+        "upper": np.linspace(-0.4, 0.6, len(features)), "fold_count": 2,
+    })
 
     def checked_save(fig, output_dir, name):
         fig.canvas.draw()
@@ -410,8 +450,8 @@ def test_dense_legends_and_scatter_labels_stay_inside_canvas_without_overlap(
     monkeypatch.setattr(result_plots, "_save", checked_save)
 
     result_plots.plot_feature_scatter(features, tmp_path, top_labels=3)
-    result_plots.plot_feature_overview(features, tmp_path, top=len(features))
-    result_plots.plot_feature_blocks(features, tmp_path)
+    result_plots.plot_feature_overview(features, coefficients, tmp_path, top=len(features))
+    result_plots.plot_feature_blocks(features, coefficients, tmp_path)
     result_plots.plot_group_effects(groups, tmp_path)
 
 
@@ -424,10 +464,14 @@ def test_feature_scatter_and_overview_panels_use_independent_rounded_scales(
         "singular_upper": [-0.006, 0.064], "unique": [-0.0019, 0.0045],
         "unique_lower": [-0.0050, 0.0024], "unique_upper": [-0.0009, 0.0070],
     })
+    coefficients = pd.DataFrame({
+        "feature": ["low", "high"], "estimate": [-0.4, 0.6],
+        "lower": [-0.5, 0.5], "upper": [-0.3, 0.7], "fold_count": [2, 2],
+    })
     scales = {}
 
     def capture_scale(fig, output_dir, name):
-        for suffix, axis in zip(("singular", "unique"), fig.axes):
+        for suffix, axis in zip(("singular", "unique", "coefficient"), fig.axes):
             key = f"{name}-{suffix}" if len(fig.axes) > 1 else name
             scales[key] = (axis.get_xlim(), axis.get_ylim(), axis.get_xticks(), axis.get_yticks())
         plt.close(fig)
@@ -436,13 +480,72 @@ def test_feature_scatter_and_overview_panels_use_independent_rounded_scales(
     monkeypatch.setattr(result_plots, "_save", capture_scale)
 
     result_plots.plot_feature_scatter(features, tmp_path, top_labels=0)
-    result_plots.plot_feature_overview(features, tmp_path, top=2)
+    result_plots.plot_feature_overview(features, coefficients, tmp_path, top=2)
 
-    assert scales["feature-scatter"][:2] == ((-0.02, 0.08), (-0.005, 0.01))
-    assert scales["feature-scatter"][2].tolist() == [-0.02, 0.0, 0.08]
-    assert scales["feature-scatter"][3].tolist() == [-0.005, 0.0, 0.01]
-    assert scales["feature-effects-overview-singular"][0] == (-0.02, 0.08)
-    assert scales["feature-effects-overview-unique"][0] == (-0.005, 0.01)
+    assert scales["feature-scatter"][:2] == ((-0.01, 0.06), (-0.002, 0.005))
+    assert scales["feature-scatter"][2].tolist() == [-0.01, 0.0, 0.06]
+    assert scales["feature-scatter"][3].tolist() == [-0.002, 0.0, 0.005]
+    assert scales["feature-effects-overview-singular"][0] == (-0.01, 0.06)
+    assert scales["feature-effects-overview-unique"][0] == (-0.002, 0.005)
+    assert scales["feature-effects-overview-coefficient"][0] == (-0.6, 0.6)
+
+
+def test_scatter_labels_requested_features_outward_without_overlap(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    values = (
+        ("hedging_count", "surface", 0.003868, 0.003361),
+        ("think_aloud_per_100_words", "exposition", 0.009888, 0.003379),
+        ("bare_answer", "structure", 0.033129, -0.000135),
+        ("tool_errors", "structure", 0.015287, 0.001644),
+        ("rigour", "rubric", 0.053963, 0.001151),
+        ("depth", "rubric", 0.041681, 0.002910),
+        ("self_corrections", "rubric", 0.020767, 0.004508),
+        ("efficiency", "rubric", 0.043386, 0.001868),
+        ("clarity", "rubric", 0.045217, -0.000037),
+    )
+    features = pd.DataFrame([
+        {
+            "feature": feature, "block": block, "singular": singular,
+            "singular_lower": singular - 0.02, "singular_upper": singular + 0.02,
+            "unique": unique, "unique_lower": unique - 0.004,
+            "unique_upper": unique + 0.004,
+        }
+        for feature, block, singular, unique in values
+    ])
+    expected = {feature.replace("_", " ") for feature, *_ in values[:-1]}
+    placements = []
+    real_save = result_plots._save
+
+    def inspect_and_save(fig, output_dir, name):
+        fig.canvas.draw()
+        renderer, ax = fig.canvas.get_renderer(), fig.axes[0]
+        annotations = [artist for artist in fig.findobj(Annotation)
+                       if artist.get_visible() and artist.get_text()]
+        assert {artist.get_text().replace("\n", " ") for artist in annotations} == expected
+        boxes = [artist.get_window_extent(renderer) for artist in annotations]
+        assert not any(left.overlaps(right) for index, left in enumerate(boxes)
+                       for right in boxes[index + 1:])
+        assert all(fig.bbox.contains(box.x0, box.y0) and fig.bbox.contains(box.x1, box.y1)
+                   for box in boxes)
+        inverse = ax.transAxes.inverted()
+        origin = inverse.transform(ax.transData.transform((0, 0)))
+        positions = []
+        for artist in annotations:
+            point = inverse.transform(ax.transData.transform(artist.xy))
+            label = np.asarray(artist.get_position(), dtype=float)
+            assert np.dot(label - point, point - origin) > 0
+            positions.append((artist.get_text(), *np.round(label, 6)))
+        placements.append(positions)
+        return real_save(fig, output_dir, name)
+
+    monkeypatch.setattr(result_plots, "_save", inspect_and_save)
+
+    _, svg = plot_feature_scatter(features, tmp_path)
+    plot_feature_scatter(features, tmp_path)
+
+    assert placements[0] == placements[1]
+    assert "<text" in svg.read_text()
 
 
 def test_dense_source_block_labels_do_not_wrap_or_overlap(tmp_path: Path, monkeypatch) -> None:
@@ -455,6 +558,11 @@ def test_dense_source_block_labels_do_not_wrap_or_overlap(tmp_path: Path, monkey
         "unique": np.linspace(-0.002, 0.002, 24),
         "unique_lower": np.linspace(-0.0025, 0.0015, 24),
         "unique_upper": np.linspace(-0.0015, 0.0025, 24),
+    })
+    coefficients = pd.DataFrame({
+        "feature": features.feature, "estimate": np.linspace(-0.5, 0.5, len(features)),
+        "lower": np.linspace(-0.6, 0.4, len(features)),
+        "upper": np.linspace(-0.4, 0.6, len(features)), "fold_count": 2,
     })
 
     def inspect_labels(fig, output_dir, name):
@@ -470,7 +578,7 @@ def test_dense_source_block_labels_do_not_wrap_or_overlap(tmp_path: Path, monkey
 
     monkeypatch.setattr(result_plots, "_save", inspect_labels)
 
-    plot_feature_blocks(features, tmp_path)
+    plot_feature_blocks(features, coefficients, tmp_path)
 
 
 def test_top_level_map_prioritizes_capability_grammar_and_marks_scatter_secondary(tmp_path: Path) -> None:
@@ -483,6 +591,7 @@ def test_top_level_map_prioritizes_capability_grammar_and_marks_scatter_secondar
         prediction_paths, rejudge_path, lesion_path, dictionary_path,
         selection_paths, coefficient_paths, tmp_path / "outputs",
         item_deltas_path=_item_deltas(tmp_path),
+        judge_item_deltas_path=_judge_item_deltas(tmp_path),
     )["figures"]
 
     keys = list(outputs)
@@ -491,21 +600,146 @@ def test_top_level_map_prioritizes_capability_grammar_and_marks_scatter_secondar
     assert "feature-scatter" not in outputs
     assert {"feature-effects-rubric", "feature-effects-clause-plan"} <= set(outputs)
     assert {"feature-effects-by-benchmark", "annotation-comparison"} <= set(outputs)
+    assert {"feature-effects-j1-by-benchmark", "feature-effects-j2-by-benchmark"} <= set(outputs)
+    assert outputs["feature-effects-overview"][0].parent.name == "overview"
+    assert outputs["feature-effects-rubric"][0].parent.name == "by-feature-group"
+    assert outputs["feature-effects-by-benchmark"][0].parent.name == "by-benchmark"
+    assert outputs["feature-effects-j1-by-benchmark"][0].parent.name == "by-judge"
+    assert outputs["feature-scatter-secondary"][0].parent.name == "secondary"
+    assert {path.name for path in (tmp_path / "outputs").iterdir() if path.is_dir()} == {
+        "overview", "by-feature-group", "by-benchmark", "by-judge", "secondary",
+    }
 
 
-def test_saved_item_deltas_support_two_column_benchmark_small_multiples(tmp_path: Path) -> None:
+def test_saved_item_deltas_write_editable_four_by_three_benchmark_grid(
+    tmp_path: Path,
+) -> None:
     lesion_path, dictionary_path = _lesions(tmp_path)
-    del lesion_path
     effects = load_benchmark_feature_effects(_item_deltas(tmp_path), dictionary_path)
+    raw_coefficients = result_plots.load_lesion_coefficients(
+        lesion_path.with_name("artifact-index.csv"),
+    )
+    coefficients = result_plots.summarize_effective_coefficients(
+        raw_coefficients, by=("benchmark",),
+    )
 
     assert set(effects.effect) == {"singular", "unique"}
-    assert set(effects.benchmark) == {"a", "b"}
+    assert set(effects.benchmark) == {"aime", "gpqa", "intercode", "swe_bench_mini"}
     assert effects.model_fold_count.eq(3).all() and effects.item_fold_count.eq(3).all()
-    output = plot_benchmark_feature_grid(effects, tmp_path)
-    svg = output[1].read_text()
-    assert svg.count('id="axes_') == 4
-    assert all(label in svg for label in ("a", "b", "Singular", "Unique"))
-    assert "Coefficient" not in svg
+    assert coefficients.loc[
+        (coefficients.benchmark == "aime") & (coefficients.feature == "signal"),
+        ["estimate", "lower", "upper", "fold_count"],
+    ].iloc[0].tolist() == pytest.approx([1.55, 1.05, 2.05, 2])
+
+    png, svg = plot_benchmark_feature_grid(effects, coefficients, tmp_path)
+
+    assert png.exists() and svg.exists()
+    source = svg.read_text()
+    assert source.count('id="axes_') == 12
+    assert all(label in source for label in (
+        "AIME", "GPQA", "InterCode", "SWE", "Singular", "Unique", "Coefficient",
+    ))
+    assert "<text" in source and "β (1 SD)" in source
+
+
+def test_judge_grids_use_exact_judge_by_benchmark_coefficients(tmp_path: Path) -> None:
+    lesion_path, dictionary_path = _lesions(tmp_path)
+    effects = load_benchmark_feature_effects(
+        _judge_item_deltas(tmp_path), dictionary_path, by_judge=True,
+    )
+    coefficients = result_plots.summarize_effective_coefficients(
+        result_plots.load_lesion_coefficients(
+            lesion_path.with_name("artifact-index.csv"),
+        ),
+        by=("judge", "benchmark"),
+    )
+
+    signal = coefficients[
+        (coefficients.judge == "j1") & (coefficients.benchmark == "aime")
+        & (coefficients.feature == "signal")
+    ].iloc[0]
+    assert signal[["estimate", "lower", "upper", "fold_count"]].tolist() == pytest.approx(
+        [1.5, 1.0, 2.0, 2],
+    )
+
+    outputs = result_plots.plot_judge_benchmark_grids(effects, coefficients, tmp_path)
+
+    assert set(outputs) == {
+        "feature-effects-j1-by-benchmark", "feature-effects-j2-by-benchmark",
+    }
+    for png, svg in outputs.values():
+        assert png.exists() and svg.exists()
+        source = svg.read_text()
+        assert source.count('id="axes_') == 12 and "<text" in source
+        assert all(label in source for label in ("AIME", "GPQA", "InterCode", "SWE"))
+
+
+def test_benchmark_grid_uses_shared_support_rows_and_keeps_labels_apart(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    rows = []
+    benchmarks = ("aime", "gpqa", "intercode", "swe_bench_mini")
+    features = [f"long_feature_label_{index:02d}" for index in range(12)]
+    for benchmark in benchmarks:
+        for index, feature in enumerate(features):
+            for effect in ("singular", "unique"):
+                if effect == "singular":
+                    estimate = 0.07 - index * 0.01
+                    spread = 0.006
+                else:
+                    estimate = 0.008 - index * 0.001
+                    spread = 0.0007
+                rows.append({
+                    "benchmark": benchmark, "feature": feature,
+                    "block": "surface" if index % 2 else "rubric", "effect": effect,
+                    "estimate": estimate, "lower": estimate - spread,
+                    "upper": estimate + spread,
+                })
+    effects = pd.DataFrame(rows)
+    coefficients = pd.DataFrame([
+        {
+            "benchmark": benchmark, "feature": feature,
+            "estimate": index / 10 - 0.5, "lower": index / 10 - 0.6,
+            "upper": index / 10 - 0.4, "fold_count": 2,
+        }
+        for benchmark in benchmarks
+        for index, feature in enumerate(features)
+    ])
+
+    def inspect(fig, output_dir, name):
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        assert fig.get_size_inches().tolist() == pytest.approx([4.0, 5.6])
+        assert len(fig.axes) == 12
+        for axis_index, ax in enumerate(fig.axes):
+            labels = [label for label in ax.get_yticklabels()
+                      if label.get_visible() and label.get_text()]
+            assert len(labels) == (10 if axis_index % 3 == 0 else 0)
+            boxes = [label.get_window_extent(renderer) for label in labels]
+            assert not any(left.overlaps(right) for index, left in enumerate(boxes)
+                           for right in boxes[index + 1:])
+            assert all(fig.bbox.contains(box.x0, box.y0)
+                       and fig.bbox.contains(box.x1, box.y1) for box in boxes)
+            x_boxes = [label.get_window_extent(renderer) for label in ax.get_xticklabels()
+                       if label.get_visible() and label.get_text()]
+            assert not any(left.overlaps(right) for index, left in enumerate(x_boxes)
+                           for right in x_boxes[index + 1:])
+        for column in range(3):
+            assert len({fig.axes[row * 3 + column].get_xlim() for row in range(4)}) == 1
+        assert [ax.get_title(loc="left") for ax in fig.axes[:3]] == [
+            "Singular", "Unique", "Coefficient",
+        ]
+        plt.close(fig)
+        return Path(output_dir) / f"{name}.png", Path(output_dir) / f"{name}.svg"
+
+    monkeypatch.setattr(result_plots, "_save", inspect)
+
+    output = plot_benchmark_feature_grid(effects, coefficients, tmp_path, top=10)
+
+    assert output == (
+        tmp_path / "feature-effects-by-benchmark.png",
+        tmp_path / "feature-effects-by-benchmark.svg",
+    )
 
 
 def test_loaders_reject_incomplete_or_invalid_saved_artifacts(tmp_path: Path) -> None:

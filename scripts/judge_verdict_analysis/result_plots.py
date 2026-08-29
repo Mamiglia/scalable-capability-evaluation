@@ -222,12 +222,16 @@ def load_lesion_summary(
 
 def load_benchmark_feature_effects(
     item_deltas_path: str | Path, feature_dictionary_path: str | Path,
+    *, by_judge: bool = False,
 ) -> pd.DataFrame:
     """Summarize saved item deltas by benchmark with two-way fold uncertainty."""
     rows = _read_table(item_deltas_path)
-    _require(rows, {
+    required = {
         "bench", "fold", "kind", "variable", "row_count", "delta_log_loss",
-    }, item_deltas_path)
+    }
+    if by_judge:
+        required.add("judge")
+    _require(rows, required, item_deltas_path)
     rows = rows[rows.kind.isin(("singular-feature", "lesion-feature"))].copy()
     if rows.empty:
         raise ValueError("item deltas contain no feature effects")
@@ -242,7 +246,13 @@ def load_benchmark_feature_effects(
     if rows.block.isna().any():
         raise ValueError("feature dictionary is missing item-delta features")
     summaries = []
-    for keys, frame in rows.groupby(["bench", "variable", "block", "effect"], sort=False):
+    group_columns = ["bench", "variable", "block", "effect"]
+    if by_judge:
+        group_columns.insert(0, "judge")
+    for keys, frame in rows.groupby(group_columns, sort=False):
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+        values_by_key = dict(zip(group_columns, keys))
         weights = frame.row_count.to_numpy(float)
         estimate = float(np.average(frame.delta_log_loss, weights=weights))
         dimensions = []
@@ -256,13 +266,57 @@ def load_benchmark_feature_effects(
             lower, upper = min(value[0] for value in intervals), max(value[1] for value in intervals)
         else:
             lower, upper = np.nan, np.nan
-        summaries.append({
-            "benchmark": keys[0], "feature": keys[1], "block": keys[2],
-            "effect": keys[3], "estimate": estimate, "lower": lower, "upper": upper,
+        summary = {
+            "benchmark": values_by_key["bench"], "feature": values_by_key["variable"],
+            "block": values_by_key["block"], "effect": values_by_key["effect"],
+            "estimate": estimate, "lower": lower, "upper": upper,
             "model_fold_count": len(dimensions[0]), "item_fold_count": len(dimensions[1]),
             "row_count": int(weights.sum()),
-        })
+        }
+        if by_judge:
+            summary["judge"] = values_by_key["judge"]
+        summaries.append(summary)
     return pd.DataFrame(summaries)
+
+
+def load_lesion_coefficients(artifact_index_path: str | Path) -> pd.DataFrame:
+    """Load the complete full-reference coefficient checkpoint for every lesion fold."""
+    artifact_index_path = Path(artifact_index_path)
+    index = _read_table(artifact_index_path)
+    _require(index, {"fold", "specification", "coefficients"}, artifact_index_path)
+    index = index[index.specification == "full"]
+    if index.empty or index.fold.duplicated().any():
+        raise ValueError("artifact index must contain one full coefficient checkpoint per fold")
+    frames = []
+    for row in index.itertuples(index=False):
+        path = Path(row.coefficients)
+        if not path.is_absolute():
+            path = artifact_index_path.parent / path
+        table = _read_table(path)
+        _require(table, {"feature", "judge", "benchmark", "effective"}, path)
+        effective = table.effective.to_numpy(float)
+        if not np.isfinite(effective).all():
+            raise ValueError("effective coefficients must be finite")
+        frames.append(table.assign(fold=str(row.fold), effective=effective)[[
+            "fold", "feature", "judge", "benchmark", "effective",
+        ]])
+    output = pd.concat(frames, ignore_index=True)
+    if output.duplicated(["fold", "feature", "judge", "benchmark"]).any():
+        raise ValueError("full coefficient checkpoints contain duplicate cells")
+    return output
+
+
+def summarize_effective_coefficients(
+    coefficients: pd.DataFrame, *, by: Sequence[str] = (),
+) -> pd.DataFrame:
+    """Average requested cells within fold, then report mean and range over folds."""
+    _require(coefficients, {"fold", "feature", "effective", *by}, "coefficients")
+    keys = [*by, "feature"]
+    per_fold = coefficients.groupby(
+        [*keys, "fold"], sort=False, as_index=False,
+    ).effective.mean()
+    return (per_fold.groupby(keys, sort=False, as_index=False).effective
+            .agg(estimate="mean", lower="min", upper="max", fold_count="size"))
 
 
 def _paired_effects(
@@ -445,6 +499,19 @@ def _rounded_limits(
     return (lower, upper), list(dict.fromkeys((lower, 0.0, upper)))
 
 
+def _estimate_limits(values: pd.Series) -> tuple[tuple[float, float], list[float]]:
+    values = values.to_numpy(float)
+    values = values[np.isfinite(values)]
+    lower, upper = min(0.0, float(values.min())), max(0.0, float(values.max()))
+    span = upper - lower
+    step = 0.05 if span == 0 else 10 ** np.floor(np.log10(span / 4))
+    lower = float(np.round(np.floor(lower / step) * step, 12))
+    upper = float(np.round(np.ceil(upper / step) * step, 12))
+    if lower == upper:
+        upper = float(np.round(lower + step, 12))
+    return (lower, upper), list(dict.fromkeys((lower, 0.0, upper)))
+
+
 def _format_tick(value: float) -> str:
     if value == 0:
         return "0"
@@ -585,7 +652,7 @@ def _block_legend(fig: Figure, blocks: Sequence[object]) -> None:
 
 
 def plot_feature_scatter(
-    features: pd.DataFrame, output_dir: str | Path, *, top_labels: int = 3,
+    features: pd.DataFrame, output_dir: str | Path, *, top_labels: int = 8,
 ) -> tuple[Path, Path]:
     """Plot paired singular-vs-unique feature effects, colored by feature block."""
     _require(features, {
@@ -593,29 +660,14 @@ def plot_feature_scatter(
         "unique", "unique_lower", "unique_upper",
     }, "features")
     _style()
-    xlim, xticks = _rounded_limits(
-        features, ("singular_lower", "singular", "singular_upper"),
-    )
-    ylim, yticks = _rounded_limits(
-        features, ("unique_lower", "unique", "unique_upper"),
-    )
-    fig, ax = plt.subplots(figsize=(2.6, 3.2), layout="constrained")
+    xlim, xticks = _estimate_limits(features.singular)
+    ylim, yticks = _estimate_limits(features.unique)
+    fig, ax = plt.subplots(figsize=(3.0, 3.2), layout="constrained")
     for block, frame in features.groupby("block", sort=False):
         ax.scatter(frame.singular, frame.unique, s=15, color=_block_color(block),
                    clip_on=False, label=str(block))
     ax.axhline(0, color="#999999", lw=0.8, ls="--")
     ax.axvline(0, color="#999999", lw=0.8, ls="--")
-    labelled = features.assign(rank=features[["singular", "unique"]].abs().max(axis=1)).nlargest(
-        min(top_labels, 3), "rank"
-    )
-    offsets = (-12, 3, 18)
-    for index, row in enumerate(labelled.itertuples()):
-        x_offset = -6 if row.singular >= 0 else 6
-        ax.annotate(textwrap.shorten(str(row.feature).replace("_", " "), width=22, placeholder="…"),
-                    (row.singular, row.unique), xytext=(x_offset, offsets[index]),
-                    textcoords="offset points", ha="right" if x_offset < 0 else "left",
-                    va="center", fontsize=6, color="#444444", annotation_clip=False,
-                    arrowprops={"arrowstyle": "-", "color": "#888888", "lw": 0.5})
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
     ax.set_xticks(xticks, [_format_tick(value) for value in xticks])
@@ -624,6 +676,64 @@ def plot_feature_scatter(
     ax.set_ylabel("Unique removal loss")
     _ordinary(ax)
     _block_legend(fig, features.block)
+    priority = (
+        "hedging_count", "think_aloud_per_100_words", "bare_answer", "tool_errors",
+        "rigour", "depth", "self_corrections", "efficiency",
+    )
+    preferred = features[features.feature.isin(priority)].assign(
+        order=lambda frame: frame.feature.map({value: index for index, value in enumerate(priority)}),
+    ).sort_values("order")
+    fallback = features[~features.feature.isin(priority)].assign(
+        order=lambda frame: frame.unique.abs(),
+    ).sort_values(["order", "singular"], ascending=False, kind="stable")
+    labelled = pd.concat([preferred, fallback], ignore_index=True).head(top_labels)
+    origin = np.array([(-xlim[0]) / (xlim[1] - xlim[0]),
+                       (-ylim[0]) / (ylim[1] - ylim[0])])
+    points = np.column_stack((
+        (labelled.singular - xlim[0]) / (xlim[1] - xlim[0]),
+        (labelled.unique - ylim[0]) / (ylim[1] - ylim[0]),
+    ))
+    radial = points - origin
+    norms = np.linalg.norm(radial, axis=1)
+    radial = radial / np.where(norms[:, None] == 0, 1, norms[:, None])
+    angles = np.arctan2(radial[:, 1], radial[:, 0])
+    stagger = np.empty(len(labelled))
+    stagger[np.argsort(angles, kind="stable")] = (
+        np.arange(len(labelled)) - (len(labelled) - 1) / 2
+    ) * 0.045
+    annotations = []
+    geometry = []
+    for index, row in enumerate(labelled.itertuples()):
+        direction = radial[index] if norms[index] else np.array([1.0, 0.0])
+        tangent = np.array([-direction[1], direction[0]])
+        label_position = points[index] + direction * 0.06 + tangent * stagger[index]
+        leader = label_position - points[index]
+        annotation = ax.annotate(
+            textwrap.fill(str(row.feature).replace("_", " "), width=16),
+            (row.singular, row.unique), xytext=label_position,
+            textcoords="axes fraction", ha="left" if leader[0] >= 0 else "right",
+            va="bottom" if leader[1] >= 0 else "top", fontsize=6,
+            color="#444444", annotation_clip=False,
+            arrowprops={"arrowstyle": "-", "color": "#888888", "lw": 0.5},
+        )
+        annotations.append(annotation)
+        geometry.append((points[index], direction, tangent, stagger[index]))
+    accepted = []
+    for annotation, (point, direction, tangent, initial) in zip(annotations, geometry):
+        for delta in (0, 0.04, -0.04, 0.08, -0.08, 0.12, -0.12, 0.16, -0.16):
+            position = point + direction * 0.06 + tangent * (initial + delta)
+            leader = position - point
+            annotation.set_position(position)
+            annotation.set_ha("left" if leader[0] >= 0 else "right")
+            annotation.set_va("bottom" if leader[1] >= 0 else "top")
+            fig.canvas.draw()
+            box = annotation.get_window_extent(fig.canvas.get_renderer())
+            if (not any(box.overlaps(other.get_window_extent(fig.canvas.get_renderer()))
+                        for other in accepted)
+                    and fig.bbox.contains(box.x0, box.y0)
+                    and fig.bbox.contains(box.x1, box.y1)):
+                break
+        accepted.append(annotation)
     return _save(fig, output_dir, "feature-scatter")
 
 
@@ -634,12 +744,16 @@ def _plot_feature_axis(
     point = values[effect].to_numpy(float)
     lower, upper = values[f"{effect}_lower"].to_numpy(float), values[f"{effect}_upper"].to_numpy(float)
     y = np.arange(len(values))
-    color = "#2a78d6" if effect == "singular" else "#eb6834"
+    color = {"singular": "#2a78d6", "unique": "#eb6834", "coefficient": "#4a3aa7"}[effect]
     ax.errorbar(point, y, xerr=np.vstack((point - lower, upper - point)),
                 fmt="none", color=color, lw=1, capsize=0)
     ax.scatter(point, y, s=12, color=color, clip_on=False, zorder=3)
     ax.axvline(0, color="#999999", lw=0.8, ls="--")
-    limits, ticks = _rounded_limits(values, (f"{effect}_lower", effect, f"{effect}_upper"))
+    if effect == "coefficient":
+        limit = _symmetric_limit(values, columns=(effect,))
+        limits, ticks = (-limit, limit), [-limit, 0, limit]
+    else:
+        limits, ticks = _estimate_limits(values[effect])
     ax.set_xlim(limits)
     ax.set_xticks(ticks, [_format_tick(value) for value in ticks])
     if labels:
@@ -653,43 +767,61 @@ def _plot_feature_axis(
     ax.set_ylim(-0.5, len(values) - 0.5)
     ax.tick_params(axis="y", labelsize=label_size, length=0, pad=1)
     ax.set_title(effect.capitalize(), loc="left", color="#666666", fontsize=8, pad=2)
-    ax.set_xlabel("Δ log loss")
+    ax.set_xlabel("β (1 SD)" if effect == "coefficient" else "Δ log loss")
     _ordinary(ax)
 
 
+def _attach_coefficients(features: pd.DataFrame, coefficients: pd.DataFrame) -> pd.DataFrame:
+    _require(coefficients, {"feature", "estimate", "lower", "upper"}, "coefficients")
+    renamed = coefficients[["feature", "estimate", "lower", "upper"]].rename(columns={
+        "estimate": "coefficient", "lower": "coefficient_lower",
+        "upper": "coefficient_upper",
+    })
+    output = features.merge(renamed, on="feature", how="left", validate="one_to_one")
+    if output.coefficient.isna().any():
+        raise ValueError("coefficient summary is missing feature rows")
+    return output
+
+
 def plot_feature_overview(
-    features: pd.DataFrame, output_dir: str | Path, *, top: int = 12,
+    features: pd.DataFrame, coefficients: pd.DataFrame, output_dir: str | Path,
+    *, top: int = 12,
 ) -> tuple[Path, Path]:
-    """Plot compact independent-axis singular and unique feature overviews."""
+    """Plot shared feature rows by singular, unique, and effective coefficient."""
     required = {
         "feature", "block", "singular", "singular_lower", "singular_upper",
         "unique", "unique_lower", "unique_upper",
     }
     _require(features, required, "features")
+    features = _attach_coefficients(features, coefficients)
+    rank = features[["singular", "unique", "coefficient"]].abs().rank(pct=True).max(axis=1)
+    values = features.assign(rank=rank).nlargest(min(top, len(features)), "rank").sort_values("rank")
     _style()
-    fig, axes = plt.subplots(1, 2, figsize=(3.5, 2.65), layout="constrained")
-    for ax, effect in zip(axes, ("singular", "unique")):
-        values = features.nlargest(min(top, len(features)), effect).sort_values(effect)
-        _plot_feature_axis(ax, values, effect)
+    fig, axes = plt.subplots(1, 3, figsize=(4.0, 2.65), sharey=True, layout="constrained")
+    for index, effect in enumerate(("singular", "unique", "coefficient")):
+        _plot_feature_axis(axes[index], values, effect, labels=index == 0)
     return _save(fig, output_dir, "feature-effects-overview")
 
 
 def plot_feature_blocks(
-    features: pd.DataFrame, output_dir: str | Path,
+    features: pd.DataFrame, coefficients: pd.DataFrame, output_dir: str | Path,
 ) -> dict[str, tuple[Path, Path]]:
-    """Plot one shared-row singular/unique figure for every source block."""
+    """Plot one shared-row three-column figure for every source block."""
     required = {
         "feature", "block", "singular", "singular_lower", "singular_upper",
         "unique", "unique_lower", "unique_upper",
     }
     _require(features, required, "features")
+    features = _attach_coefficients(features, coefficients)
     outputs = {}
     for block, frame in features.groupby("block", sort=False):
-        frame = frame.assign(rank=frame[["singular", "unique"]].abs().max(axis=1)).sort_values("rank")
+        frame = frame.assign(
+            rank=frame[["singular", "unique", "coefficient"]].abs().rank(pct=True).max(axis=1),
+        ).sort_values("rank")
         height = min(3.2, max(1.4, 0.105 * len(frame) + 0.75))
         _style()
-        fig, axes = plt.subplots(1, 2, figsize=(3.5, height), sharey=True, layout="constrained")
-        for index, effect in enumerate(("singular", "unique")):
+        fig, axes = plt.subplots(1, 3, figsize=(4.0, height), sharey=True, layout="constrained")
+        for index, effect in enumerate(("singular", "unique", "coefficient")):
             _plot_feature_axis(
                 axes[index], frame, effect, labels=index == 0,
                 wrap_width=None, label_size=5,
@@ -745,38 +877,56 @@ def plot_group_effects(
     return _save(fig, output_dir, "group-effects")
 
 
-def plot_benchmark_feature_grid(
-    effects: pd.DataFrame, output_dir: str | Path, *, top: int = 10,
+def _plot_benchmark_grid(
+    effects: pd.DataFrame, coefficients: pd.DataFrame, output_dir: str | Path,
+    *, name: str, top: int = 10,
 ) -> tuple[Path, Path]:
-    """Plot benchmark rows by singular and unique verdict effects."""
+    """Plot four benchmarks by singular, unique, and coefficient columns."""
     _require(effects, {
         "benchmark", "feature", "block", "effect", "estimate", "lower", "upper",
     }, "benchmark effects")
+    _require(coefficients, {
+        "benchmark", "feature", "estimate", "lower", "upper", "fold_count",
+    }, "benchmark coefficients")
     benchmarks = [value for value in ("aime", "gpqa", "intercode", "swe_bench_mini")
                   if value in set(effects.benchmark)]
-    benchmarks += [value for value in effects.benchmark.drop_duplicates()
-                   if value not in benchmarks]
-    rank = (effects[effects.effect == "unique"].groupby("feature").estimate.mean()
-            .nlargest(top).index.tolist())
-    variables = list(reversed(rank))
-    if not benchmarks or not variables:
+    if not benchmarks:
         raise ValueError("benchmark effects contain no plottable rows")
-    labels = {"aime": "AIME", "gpqa": "GPQA", "intercode": "InterCode",
-              "swe_bench_mini": "SWE"}
-    height = min(3.2, max(1.8, 0.68 * len(benchmarks) + 0.7))
+    unique = effects[effects.effect == "unique"]
+    support = []
+    for feature, frame in unique.groupby("feature", sort=False):
+        positive = frame[frame.lower > 0]
+        support.append({
+            "feature": feature, "positive_support": len(positive),
+            "mean_positive": positive.estimate.mean(), "peak": frame.estimate.max(),
+        })
+    variables = (pd.DataFrame(support).fillna({"mean_positive": -np.inf}).sort_values(
+        ["positive_support", "mean_positive", "peak", "feature"],
+        ascending=[False, False, False, True], kind="stable",
+    ).head(top).feature.tolist())
+    variables.reverse()
+    if not variables:
+        raise ValueError("benchmark effects contain no plottable rows")
     _style()
     fig, axes = plt.subplots(
-        len(benchmarks), 2, figsize=(3.5, height), layout="constrained", squeeze=False,
+        len(benchmarks), 3, figsize=(4.0, 1.4 * len(benchmarks)),
+        layout="constrained", squeeze=False,
     )
+    column_points = [[], [], []]
     used_blocks = []
+    benchmark_labels = {
+        "aime": "AIME", "gpqa": "GPQA", "intercode": "InterCode",
+        "swe_bench_mini": "SWE",
+    }
     for row_index, benchmark in enumerate(benchmarks):
         benchmark_rows = effects[effects.benchmark == benchmark]
         block_map = benchmark_rows.drop_duplicates("feature").set_index("feature").block.to_dict()
+        y = np.arange(len(variables))
         for column, effect in enumerate(("singular", "unique")):
             ax = axes[row_index, column]
             values = (benchmark_rows[benchmark_rows.effect == effect]
                       .set_index("feature").reindex(variables))
-            for y, value in enumerate(values.itertuples()):
+            for point_y, value in enumerate(values.itertuples()):
                 if pd.isna(value.estimate):
                     continue
                 block = block_map[value.Index]
@@ -784,38 +934,87 @@ def plot_benchmark_feature_grid(
                     used_blocks.append(block)
                 color = _block_color(block)
                 if np.isfinite(value.lower) and np.isfinite(value.upper):
-                    ax.errorbar(value.estimate, y,
+                    ax.errorbar(value.estimate, point_y,
                                 xerr=[[value.estimate - value.lower], [value.upper - value.estimate]],
                                 fmt="none", color=color, lw=0.8, capsize=0)
-                ax.scatter(value.estimate, y, s=7, color=color, clip_on=False, zorder=3)
+                ax.plot(value.estimate, point_y, "o", ms=2.2, color=color,
+                        clip_on=False, zorder=3)
+            column_points[column].append(values.estimate.to_numpy(float))
+        values = (coefficients[coefficients.benchmark == benchmark]
+                  .set_index("feature").reindex(variables))
+        ax = axes[row_index, 2]
+        for point_y, value in enumerate(values.itertuples()):
+            if pd.isna(value.estimate):
+                continue
+            color = _block_color(block_map[value.Index])
+            ax.errorbar(value.estimate, point_y,
+                        xerr=[[value.estimate - value.lower], [value.upper - value.estimate]],
+                        fmt="none", color=color, lw=0.8, capsize=0)
+            ax.plot(value.estimate, point_y, "o", ms=2.2, color=color,
+                    clip_on=False, zorder=3)
+        column_points[2].append(values.estimate.to_numpy(float))
+        tick_labels = [value.replace("_", " ") for value in variables]
+        for column, ax in enumerate(axes[row_index]):
             ax.axvline(0, color="#999999", lw=0.6, ls="--")
-            ax.set_yticks(range(len(variables)),
-                          [value.replace("_", " ") for value in variables] if column == 0 else [],
-                          fontsize=4)
-            ax.set_ylim(-0.5, len(variables) - 0.5)
+            ax.set_yticks(y, tick_labels if column == 0 else [], fontsize=3.8)
+            ax.set_ylim(0, len(variables) - 1)
             ax.tick_params(axis="y", length=0, pad=1)
+            ax.tick_params(axis="x", labelsize=5.5, length=2, width=0.6, pad=1)
             if row_index < len(benchmarks) - 1:
                 ax.tick_params(axis="x", labelbottom=False)
             _ordinary(ax)
         axes[row_index, 0].text(
-            -0.03, 1.02, labels.get(benchmark, str(benchmark)),
+            -0.03, 1.02, benchmark_labels[benchmark],
             transform=axes[row_index, 0].transAxes, ha="right", va="bottom",
             fontsize=5.5, color="#666666",
         )
-    for column, effect in enumerate(("singular", "unique")):
-        frame = effects[(effects.effect == effect) & effects.feature.isin(variables)]
-        limits, ticks = _rounded_limits(frame, ("lower", "estimate", "upper"))
+    for column, title in enumerate(("Singular", "Unique", "Coefficient")):
+        axes[0, column].set_title(title, loc="left", color="#666666", fontsize=7, pad=10)
+        points = pd.Series(np.concatenate(column_points[column]))
+        if column == 2:
+            limit = _symmetric_limit(pd.DataFrame({"value": points}), columns=("value",))
+            limits, ticks = (-limit, limit), [-limit, 0, limit]
+        else:
+            limits, ticks = _estimate_limits(points)
         for ax in axes[:, column]:
             ax.set_xlim(limits)
             ax.set_xticks(ticks, [_format_tick(value) for value in ticks])
-        axes[0, column].set_title(effect.capitalize(), loc="left", color="#666666", fontsize=7, pad=8)
-        axes[-1, column].set_xlabel("Δ log loss")
+    axes[-1, 0].set_xlabel("Δ log loss")
+    axes[-1, 1].set_xlabel("Δ log loss")
+    axes[-1, 2].set_xlabel("β (1 SD)")
     fig.legend(handles=[
         Line2D([], [], marker="o", ls="none", ms=3, color=_block_color(block),
-               label=textwrap.fill(str(block).replace("-", " "), 13))
+               label=str(block).replace("-", " "))
         for block in used_blocks
-    ], loc="outside lower center", ncol=min(3, len(used_blocks)), frameon=False, fontsize=5.5)
-    return _save(fig, output_dir, "feature-effects-by-benchmark")
+    ], loc="outside lower center", ncol=3, frameon=False, fontsize=5.5)
+    return _save(fig, output_dir, name)
+
+
+def plot_benchmark_feature_grid(
+    effects: pd.DataFrame, coefficients: pd.DataFrame, output_dir: str | Path,
+    *, top: int = 10,
+) -> tuple[Path, Path]:
+    """Plot pooled-judge benchmark effects in the capability contribution grammar."""
+    return _plot_benchmark_grid(
+        effects, coefficients, output_dir, name="feature-effects-by-benchmark", top=top,
+    )
+
+
+def plot_judge_benchmark_grids(
+    effects: pd.DataFrame, coefficients: pd.DataFrame, output_dir: str | Path,
+    *, top: int = 10,
+) -> dict[str, tuple[Path, Path]]:
+    """Plot each judge's available benchmarks with exact cell coefficients."""
+    _require(effects, {"judge"}, "judge benchmark effects")
+    _require(coefficients, {"judge"}, "judge benchmark coefficients")
+    outputs = {}
+    for judge, frame in effects.groupby("judge", sort=False):
+        name = f"feature-effects-{str(judge).replace('/', '-')}-by-benchmark"
+        outputs[name] = _plot_benchmark_grid(
+            frame, coefficients[coefficients.judge == judge], output_dir,
+            name=name, top=top,
+        )
+    return outputs
 
 
 def plot_annotation_comparison(groups: pd.DataFrame, output_dir: str | Path) -> tuple[Path, Path]:
@@ -914,6 +1113,7 @@ def write_result_plots(
     output_dir: str | Path,
     *,
     item_deltas_path: str | Path | None = None,
+    judge_item_deltas_path: str | Path | None = None,
 ) -> dict[str, dict[str, Path | tuple[Path, Path]]]:
     """Write all requested tables and figures without fitting or discovering inputs."""
     if set(prediction_paths) != set(VARIANT_LABELS):
@@ -923,15 +1123,32 @@ def write_result_plots(
         )
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    figure_dirs = {
+        name: output_dir / name
+        for name in ("overview", "by-feature-group", "by-benchmark", "by-judge", "secondary")
+    }
+    for path in figure_dirs.values():
+        path.mkdir(parents=True, exist_ok=True)
     predictions = load_prediction_artifacts(prediction_paths)
     summary, fold_scores = accuracy_comparison(predictions, load_rejudge_summary(rejudge_path))
     lesions = load_lesion_summary(lesion_path, feature_dictionary_path)
     features, groups = feature_effects(lesions), group_effects(lesions)
     stability, fold_coefficients = coefficient_selection_stability(selection_paths, coefficient_paths)
+    lesion_coefficients = load_lesion_coefficients(Path(lesion_path).with_name("artifact-index.csv"))
+    overall_coefficients = summarize_effective_coefficients(lesion_coefficients)
+    benchmark_coefficients = summarize_effective_coefficients(
+        lesion_coefficients, by=("benchmark",),
+    )
+    cell_coefficients = summarize_effective_coefficients(
+        lesion_coefficients, by=("judge", "benchmark"),
+    )
     tables = {
         "accuracy-comparison": summary, "fold-accuracy": fold_scores,
         "feature-effects": features, "group-effects": groups,
         "coefficient-selection-stability": stability,
+        "coefficient-effects": overall_coefficients,
+        "benchmark-coefficients": benchmark_coefficients,
+        "judge-benchmark-coefficients": cell_coefficients,
     }
     benchmark_effects = None
     if item_deltas_path is not None:
@@ -939,22 +1156,40 @@ def write_result_plots(
             item_deltas_path, feature_dictionary_path,
         )
         tables["benchmark-feature-effects"] = benchmark_effects
+    judge_effects = None
+    if judge_item_deltas_path is not None:
+        judge_effects = load_benchmark_feature_effects(
+            judge_item_deltas_path, feature_dictionary_path, by_judge=True,
+        )
+        tables["judge-benchmark-feature-effects"] = judge_effects
     table_paths = {}
     for name, table in tables.items():
         path = output_dir / f"{name}.csv"
         table.to_csv(path, index=False)
         table_paths[name] = path
     figures = {
-        **plot_accuracy_comparison(summary, fold_scores, output_dir),
-        "stability": plot_stability(stability, fold_coefficients, output_dir),
-        "feature-effects-overview": plot_feature_overview(features, output_dir),
-        "group-effects": plot_group_effects(groups, output_dir),
-        **plot_feature_blocks(features, output_dir),
+        **plot_accuracy_comparison(summary, fold_scores, figure_dirs["overview"]),
+        "stability": plot_stability(stability, fold_coefficients, figure_dirs["overview"]),
+        "feature-effects-overview": plot_feature_overview(
+            features, overall_coefficients, figure_dirs["overview"],
+        ),
+        "group-effects": plot_group_effects(groups, figure_dirs["overview"]),
+        **plot_feature_blocks(
+            features, overall_coefficients, figure_dirs["by-feature-group"],
+        ),
     }
     if benchmark_effects is not None:
         figures["feature-effects-by-benchmark"] = plot_benchmark_feature_grid(
-            benchmark_effects, output_dir,
+            benchmark_effects, benchmark_coefficients, figure_dirs["by-benchmark"],
         )
-    figures["annotation-comparison"] = plot_annotation_comparison(groups, output_dir)
-    figures["feature-scatter-secondary"] = plot_feature_scatter(features, output_dir)
+    if judge_effects is not None:
+        figures.update(plot_judge_benchmark_grids(
+            judge_effects, cell_coefficients, figure_dirs["by-judge"],
+        ))
+    figures["annotation-comparison"] = plot_annotation_comparison(
+        groups, figure_dirs["overview"],
+    )
+    figures["feature-scatter-secondary"] = plot_feature_scatter(
+        features, figure_dirs["secondary"],
+    )
     return {"tables": table_paths, "figures": figures}
