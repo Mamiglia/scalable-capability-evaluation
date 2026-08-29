@@ -251,12 +251,13 @@ def save(fig, path):
     plt.close(fig)
 
 
-def plot_predictions(predictions, candidates, releases, judges, out, name):
-    fig, axes = plt.subplots(2, 3, figsize=(7.2, 4.2), sharex=True, sharey=True)
+def plot_predictions(predictions, candidates, releases, judges, benches, out, name):
+    fig, axes = plt.subplots(len(benches), 3, figsize=(7.2, 2.2 * len(benches)),
+                             sharex=True, sharey=True, squeeze=False)
     x = np.arange(len(candidates))
     labels = [f"{str(pd.Timestamp(releases[m]).year)[2:]}Q{pd.Timestamp(releases[m]).quarter}\n{SHORT[m]}"
               for m in candidates]
-    for row, bench in enumerate(("gpqa", "swe_bench_mini")):
+    for row, bench in enumerate(benches):
         for col, quartile in enumerate((2, 3, 4)):
             ax = axes[row, col]
             block = predictions.query("bench == @bench and target_quartile == @quartile")
@@ -273,8 +274,8 @@ def plot_predictions(predictions, candidates, releases, judges, out, name):
             if col == 0:
                 ax.set_ylabel("Accuracy")
             ax.set_xticks(x)
-            ax.set_xticklabels(labels if row == 1 else [])
-            if row == 1:
+            ax.set_xticklabels(labels if row == len(benches) - 1 else [])
+            if row == len(benches) - 1:
                 ax.tick_params(axis="x", labelrotation=55)
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, ncol=3, frameon=False, loc="upper center", bbox_to_anchor=(0.5, 1.02))
@@ -282,13 +283,15 @@ def plot_predictions(predictions, candidates, releases, judges, out, name):
     save(fig, out / name)
 
 
-def plot_error_heatmap(predictions, candidates, judges, out):
+def plot_error_heatmap(predictions, candidates, judges, benches, out):
     errors = (predictions.assign(error=lambda d: d.predicted - d.actual)
               .groupby(["bench", "judge", "model"]).error.mean())
     values = [abs(float(x)) for x in errors.dropna()]
     limit = max(0.1, min(0.5, max(values)))
-    fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.7), sharey=True)
-    for ax, bench in zip(axes, ("gpqa", "swe_bench_mini")):
+    fig, axes = plt.subplots(1, len(benches), figsize=(3.6 * len(benches), 2.7),
+                             sharey=True, squeeze=False)
+    axes = axes[0]
+    for ax, bench in zip(axes, benches):
         matrix = errors.loc[bench].unstack("model").reindex(index=judges, columns=candidates)
         image = ax.imshow(matrix, cmap="RdBu_r", vmin=-limit, vmax=limit, aspect="auto")
         for y in range(len(judges)):
@@ -304,10 +307,12 @@ def plot_error_heatmap(predictions, candidates, judges, out):
     save(fig, out / "frontier_error_heatmap")
 
 
-def plot_visibility(summary, model_errors, candidates, out):
+def plot_visibility(summary, model_errors, candidates, benches, out):
     table = summary.merge(model_errors, on=["bench", "model"], validate="one_to_one")
-    fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.7), sharey=True)
-    for ax, bench in zip(axes, ("gpqa", "swe_bench_mini")):
+    fig, axes = plt.subplots(1, len(benches), figsize=(3.6 * len(benches), 2.7),
+                             sharey=True, squeeze=False)
+    axes = axes[0]
+    for ax, bench in zip(axes, benches):
         block = table[table.bench == bench].set_index("model").reindex(candidates).reset_index()
         block = block.dropna(subset=["visible_chars_median", "mean_error"])
         encrypted = block.redacted_reasoning_share > 0.5
@@ -335,6 +340,8 @@ def main():
     parser.add_argument("--new-tables", type=Path, required=True)
     parser.add_argument("--resamples", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--benches", nargs="+", choices=("gpqa", "swe_bench_mini"),
+                        default=("gpqa", "swe_bench_mini"))
     parser.add_argument("--out", type=Path, default=ROOT / "judge_results/frontier/eci-semiannual/analysis")
     args = parser.parse_args()
     experiment = yaml.safe_load((ROOT / "configs/frontier_eci/experiment.yaml").read_text())
@@ -344,6 +351,7 @@ def main():
     bridge = [slug.split("/")[-1] for slug in experiment["judges"]["bridge"]]
     judges = checkpoint + bridge
     quartiles = pd.read_csv(ROOT / "configs/frontier_eci/item_quartiles.csv", dtype={"item": str})
+    quartiles = quartiles[quartiles.bench.isin(args.benches)]
     hf = pd.read_parquet(ROOT / "judge_results/frontier/eci-semiannual/hf/verdicts.parquet")
     new_verdicts = pd.read_parquet(args.new_tables / "verdicts.parquet")
     verdicts = combine_verdicts(hf, new_verdicts, judges)
@@ -362,7 +370,7 @@ def main():
 
     rng = np.random.default_rng(args.seed)
     predictions = []
-    for bench in ("gpqa", "swe_bench_mini"):
+    for bench in args.benches:
         for judge in analysis_judges:
             judged = q1_verdicts.query("bench == @bench and judge == @judge")
             if judged.empty:
@@ -410,11 +418,11 @@ def main():
     feature_summary.to_csv(args.out / "transcript_visibility.csv", index=False)
     judge_diagnostics.to_csv(args.out / "judge_diagnostics.csv", index=False)
     plot_predictions(predictions, candidates, experiment["releases"], checkpoint + ["consensus"],
-                     figures, "frontier_predictions_checkpoint_judges")
+                     args.benches, figures, "frontier_predictions_checkpoint_judges")
     plot_predictions(predictions, candidates, experiment["releases"], bridge + ["consensus"],
-                     figures, "frontier_predictions_bridge_judges")
-    plot_error_heatmap(predictions, candidates, judges, figures)
-    plot_visibility(feature_summary, model_errors, candidates, figures)
+                     args.benches, figures, "frontier_predictions_bridge_judges")
+    plot_error_heatmap(predictions, candidates, judges, args.benches, figures)
+    plot_visibility(feature_summary, model_errors, candidates, args.benches, figures)
     (args.out / "summary.json").write_text(json.dumps({
         "verdicts": len(verdicts), "q1_verdicts": len(q1_verdicts),
         "judges": judges, "consensus": "equal judge weight per exact verdict cell",
