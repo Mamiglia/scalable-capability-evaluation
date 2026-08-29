@@ -42,6 +42,20 @@ def _require(table: pd.DataFrame, required: set[str], path: str | Path) -> None:
         raise ValueError(f"{path} missing columns: {missing}")
 
 
+def _with_fold_dimensions(table: pd.DataFrame, path: str | Path) -> pd.DataFrame:
+    parsed = table.fold.astype(str).str.rsplit("__item-", n=1, expand=True)
+    if parsed.shape[1] != 2 or parsed.isna().any().any() or (parsed == "").any().any():
+        raise ValueError(f"{path} fold values must use MODEL_FOLD__item-ITEM_FOLD")
+    output = table.copy()
+    for column, values in (("model_fold", parsed[0]), ("item_fold", parsed[1])):
+        if column in output and not output[column].astype(str).reset_index(drop=True).equals(
+            values.astype(str).reset_index(drop=True)
+        ):
+            raise ValueError(f"{path} has inconsistent fold and {column} values")
+        output[column] = values.astype(str).to_numpy()
+    return output
+
+
 def load_prediction_artifacts(
     paths: Mapping[str, Sequence[str | Path] | str | Path],
 ) -> pd.DataFrame:
@@ -63,7 +77,14 @@ def load_prediction_artifacts(
             _require(table, {"judge", "benchmark", "observed", "probability"}, path)
             if "fold" not in table:
                 table.insert(0, "fold", path.parent.name)
-            output = table[["fold", "judge", "benchmark", "observed", "probability"]].copy()
+            table = _with_fold_dimensions(table, path)
+            for column in ("item", "model_left", "model_right"):
+                if column not in table:
+                    table[column] = ""
+            output = table[[
+                "fold", "model_fold", "item_fold", "judge", "benchmark",
+                "item", "model_left", "model_right", "observed", "probability",
+            ]].copy()
             output.insert(0, "variant", str(variant))
             frames.append(output)
     if not frames:
@@ -118,40 +139,57 @@ def accuracy_comparison(
         "predictions",
     )
     _require(rejudge, {"judge", "benchmark", "wilson_95_low"}, "rejudge")
-    rows = predictions.copy()
-    rows["correct"] = ((rows.probability >= 0.5) == rows.observed).astype(float)
-    overall = rows.groupby(["variant", "fold"], sort=False, as_index=False).agg(
-        accuracy=("correct", "mean"), row_count=("correct", "size"),
+    rows = _with_fold_dimensions(predictions, "predictions").merge(
+        rejudge, on=["judge", "benchmark"], how="left", validate="many_to_one",
     )
-    overall.insert(2, "scope", "overall")
-    overall["judge"] = ""
-    overall["benchmark"] = ""
-    cells = rows.groupby(
-        ["variant", "fold", "judge", "benchmark"], sort=False, as_index=False,
-    ).agg(accuracy=("correct", "mean"), row_count=("correct", "size"))
-    cells.insert(2, "scope", "judge×benchmark")
-    fold_scores = pd.concat([overall, cells], ignore_index=True)[[
-        "variant", "fold", "scope", "judge", "benchmark", "accuracy", "row_count",
-    ]]
-    summaries = []
-    for keys, frame in fold_scores.groupby(
-        ["variant", "scope", "judge", "benchmark"], sort=False, dropna=False,
-    ):
-        lower, upper = _fold_interval(frame.accuracy)
-        summaries.append({
-            "variant": keys[0], "scope": keys[1], "judge": keys[2],
-            "benchmark": keys[3], "estimate": float(frame.accuracy.mean()),
-            "lower": lower, "upper": upper, "fold_count": frame.fold.nunique(),
-            "row_count": int(frame.row_count.sum()),
-        })
-    summary = pd.DataFrame(summaries)
-    lookup = rejudge.rename(columns={"wilson_95_low": "exact_floor"})
-    summary = summary.merge(lookup, on=["judge", "benchmark"], how="left", validate="many_to_one")
-    summary.loc[summary.scope == "overall", "exact_floor"] = rejudge.wilson_95_low.mean()
-    if summary.exact_floor.isna().any():
-        missing = summary.loc[summary.exact_floor.isna(), ["judge", "benchmark"]].drop_duplicates()
+    if rows.wilson_95_low.isna().any():
+        missing = rows.loc[rows.wilson_95_low.isna(), ["judge", "benchmark"]].drop_duplicates()
         raise ValueError(f"rejudge summary is missing prediction cells: {missing.to_dict('records')}")
-    return summary, fold_scores
+    rows["correct"] = ((rows.probability >= 0.5) == rows.observed).astype(float)
+    scoped = pd.concat([
+        rows.assign(scope="overall", group_judge="", group_benchmark=""),
+        rows.assign(scope="judge×benchmark", group_judge=rows.judge,
+                    group_benchmark=rows.benchmark),
+    ], ignore_index=True)
+    keys = ["variant", "scope", "group_judge", "group_benchmark"]
+    summary = scoped.groupby(keys, sort=False, as_index=False).agg(
+        estimate=("correct", "mean"), exact_floor=("wilson_95_low", "mean"),
+        row_count=("correct", "size"), model_fold_count=("model_fold", "nunique"),
+        item_fold_count=("item_fold", "nunique"),
+    )
+    points = []
+    for dimension in ("model_fold", "item_fold"):
+        frame = scoped.groupby([*keys, dimension], sort=False, as_index=False).agg(
+            accuracy=("correct", "mean"), exact_floor=("wilson_95_low", "mean"),
+            row_count=("correct", "size"),
+        ).rename(columns={dimension: "replicate"})
+        frame.insert(2, "replication_dimension", dimension)
+        points.append(frame)
+    replication_scores = pd.concat(points, ignore_index=True).rename(columns={
+        "group_judge": "judge", "group_benchmark": "benchmark",
+    })
+    intervals = []
+    for group, frame in replication_scores.groupby(
+        ["variant", "scope", "judge", "benchmark"], sort=False,
+    ):
+        model_values = frame.loc[frame.replication_dimension == "model_fold", "accuracy"]
+        item_values = frame.loc[frame.replication_dimension == "item_fold", "accuracy"]
+        if len(model_values) >= 3 and len(item_values) >= 3:
+            model_interval, item_interval = _fold_interval(model_values), _fold_interval(item_values)
+            lower, upper = min(model_interval[0], item_interval[0]), max(model_interval[1], item_interval[1])
+            method = "conservative union of model-fold/item-fold t95"
+        else:
+            lower, upper = np.nan, np.nan
+            method = "model-fold/item-fold points"
+        intervals.append((*group, lower, upper, method))
+    interval_table = pd.DataFrame(intervals, columns=[
+        "variant", "scope", "group_judge", "group_benchmark", "lower", "upper",
+        "uncertainty_method",
+    ])
+    summary = summary.merge(interval_table, on=keys, validate="one_to_one").rename(columns={
+        "group_judge": "judge", "group_benchmark": "benchmark",
+    })
+    return summary, replication_scores
 
 
 def load_lesion_summary(
@@ -190,7 +228,13 @@ def _paired_effects(
     })
     if singular[key].duplicated().any() or unique[key].duplicated().any():
         raise ValueError(f"duplicate saved effects for {singular_kind} or {unique_kind}")
-    return singular.merge(unique, on=key, how="inner", validate="one_to_one")
+    paired = singular.merge(
+        unique, on=key, how="outer", validate="one_to_one", indicator=True,
+    )
+    if not paired._merge.eq("both").all():
+        missing = paired.loc[paired._merge != "both", [key, "_merge"]].to_dict("records")
+        raise ValueError(f"incomplete paired effects for {singular_kind}/{unique_kind}: {missing}")
+    return paired.drop(columns="_merge")
 
 
 def feature_effects(lesions: pd.DataFrame) -> pd.DataFrame:
@@ -255,12 +299,22 @@ def coefficient_selection_stability(
         coefficient_frames.append(table[["fold", "feature", "effective"]])
     if not coefficient_frames:
         raise ValueError("no readable coefficient artifacts supplied")
+    if set(selections) != seen_folds:
+        raise ValueError(
+            f"selection and coefficient fold sets differ: {sorted(selections)} != {sorted(seen_folds)}"
+        )
     fold_coefficients = pd.concat(coefficient_frames, ignore_index=True).groupby(
         ["fold", "feature"], sort=False, as_index=False,
     ).effective.mean()
     features = sorted(
         set().union(*selections.values()) | set(fold_coefficients.feature.astype(str))
     )
+    full_index = pd.MultiIndex.from_product(
+        [list(selections), features], names=["fold", "feature"],
+    )
+    fold_coefficients = fold_coefficients.set_index(["fold", "feature"]).reindex(
+        full_index, fill_value=0.0,
+    ).reset_index()
     rows = []
     for feature in features:
         values = fold_coefficients.loc[fold_coefficients.feature == feature, "effective"]
@@ -332,21 +386,28 @@ def plot_accuracy_comparison(
     _style()
     variants = _variant_order(summary.variant)
     overall = summary[summary.scope == "overall"].set_index("variant").reindex(variants)
-    fig, ax = plt.subplots(figsize=(3.0, 3.0), layout="constrained")
+    fig, ax = plt.subplots(figsize=(1.8, 2.8), layout="constrained")
     x = np.arange(len(variants))
     for index, variant in enumerate(variants):
         row = overall.loc[variant]
-        if row.fold_count >= 3:
+        if row.model_fold_count >= 3 and row.item_fold_count >= 3:
             ax.errorbar(index, row.estimate, yerr=[[row.estimate - row.lower], [row.upper - row.estimate]],
                         fmt="none", color="#2a78d6", lw=1, capsize=0, clip_on=False)
         else:
-            values = fold_scores[(fold_scores.scope == "overall") & (fold_scores.variant == variant)].accuracy
-            ax.scatter(np.linspace(index - 0.07, index + 0.07, len(values)), values,
-                       s=7, facecolors="none", edgecolors="#2a78d6", lw=0.7,
-                       clip_on=False, zorder=2)
+            points = fold_scores[
+                (fold_scores.scope == "overall") & (fold_scores.variant == variant)
+            ]
+            for dimension, offset, marker in (
+                ("model_fold", -0.06, "o"), ("item_fold", 0.06, "x"),
+            ):
+                values = points[points.replication_dimension == dimension].accuracy
+                colors = ({"facecolors": "none", "edgecolors": "#2a78d6"}
+                          if marker == "o" else {"color": "#2a78d6"})
+                ax.scatter(np.full(len(values), index + offset), values, marker=marker,
+                           s=7, lw=0.7, clip_on=False, zorder=2, **colors)
         ax.scatter(index, row.estimate, s=16, color="#2a78d6", clip_on=False, zorder=3)
-    floor = float(overall.exact_floor.iloc[0])
-    ax.axhline(floor, color="#888888", ls="--", lw=0.8)
+    ax.scatter(x, overall.exact_floor, marker="D", s=10, facecolors="none",
+               edgecolors="#777777", lw=0.8, clip_on=False, zorder=3)
     ax.set_xlim(-0.5, len(variants) - 0.5)
     _ordinary(ax)
     ax.set_xticks(x)
@@ -361,8 +422,10 @@ def plot_accuracy_comparison(
         Line2D([], [], marker="o", color="none", markerfacecolor="#2a78d6",
                markeredgecolor="#2a78d6", label="Mean"),
         Line2D([], [], marker="o", color="none", markerfacecolor="none",
-               markeredgecolor="#2a78d6", label="Per fold (N < 3)"),
-        Line2D([], [], color="#888888", ls="--", lw=0.8, label="Rejudge floor"),
+               markeredgecolor="#2a78d6", label="Model fold"),
+        Line2D([], [], marker="x", color="#2a78d6", lw=0, label="Item fold"),
+        Line2D([], [], marker="D", color="none", markerfacecolor="none",
+               markeredgecolor="#777777", label="Rejudge\nfloor"),
     ], loc="outside upper center", ncol=2, frameon=False)
     outputs = {"oof-accuracy-overall": _save(fig, output_dir, "oof-accuracy-overall")}
 
@@ -378,18 +441,22 @@ def plot_accuracy_comparison(
         frame = cells[cells.variant == variant]
         for row in frame.itertuples():
             y = cell_index[(row.judge, row.benchmark)] + dodges[variant]
-            if row.fold_count >= 3:
+            if row.model_fold_count >= 3 and row.item_fold_count >= 3:
                 ax.errorbar(row.estimate, y, xerr=[[row.estimate - row.lower], [row.upper - row.estimate]],
                             fmt="none", color=color, lw=1, capsize=0, clip_on=False)
             else:
-                values = fold_scores[
+                points = fold_scores[
                     (fold_scores.scope == "judge×benchmark")
                     & (fold_scores.variant == variant)
                     & (fold_scores.judge == row.judge)
                     & (fold_scores.benchmark == row.benchmark)
-                ].accuracy
-                ax.scatter(values, np.full(len(values), y), s=5, facecolors="none",
-                           edgecolors=color, lw=0.6, clip_on=False)
+                ]
+                for dimension, marker in (("model_fold", "o"), ("item_fold", "x")):
+                    values = points[points.replication_dimension == dimension].accuracy
+                    colors = ({"facecolors": "none", "edgecolors": color}
+                              if marker == "o" else {"color": color})
+                    ax.scatter(values, np.full(len(values), y), marker=marker, s=5,
+                               lw=0.6, clip_on=False, **colors)
             ax.scatter(row.estimate, y, s=12, color=color, clip_on=False, zorder=3)
     floor_rows = cells.drop_duplicates(["judge", "benchmark"])
     ax.scatter(floor_rows.exact_floor, [cell_index[(row.judge, row.benchmark)] for row in floor_rows.itertuples()],
@@ -414,7 +481,8 @@ def plot_accuracy_comparison(
     handles.append(Line2D([], [], marker="D", color="none", markerfacecolor="none",
                           markeredgecolor="#555555", label="Rejudge floor"))
     handles.append(Line2D([], [], marker="o", color="none", markerfacecolor="none",
-                          markeredgecolor="#777777", label="Per fold (N < 3)"))
+                          markeredgecolor="#777777", label="Model fold"))
+    handles.append(Line2D([], [], marker="x", color="#777777", lw=0, label="Item fold"))
     fig.legend(handles=handles, loc="outside lower center", ncol=2, frameon=False)
     outputs["oof-accuracy-by-cell"] = _save(fig, output_dir, "oof-accuracy-by-cell")
     return outputs
@@ -632,6 +700,11 @@ def write_result_plots(
     output_dir: str | Path,
 ) -> dict[str, dict[str, Path | tuple[Path, Path]]]:
     """Write all requested tables and figures without fitting or discovering inputs."""
+    if set(prediction_paths) != set(VARIANT_LABELS):
+        raise ValueError(
+            "top-level workflow requires exactly the five requested variants: "
+            f"{list(VARIANT_LABELS)}"
+        )
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions = load_prediction_artifacts(prediction_paths)
