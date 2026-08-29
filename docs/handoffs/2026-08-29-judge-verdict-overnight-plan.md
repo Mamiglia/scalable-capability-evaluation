@@ -1,7 +1,7 @@
 # Judge-verdict interpretation — overnight execution plan
 
-Date: 2026-08-29  
-Repo: `/Users/moriohamada/PycharmProjects/ai_safety/small-judge`  
+Date: 2026-08-29
+Repo: `/Users/moriohamada/PycharmProjects/ai_safety/small-judge`
 Branch: `judge-dissect`
 
 ## Objective
