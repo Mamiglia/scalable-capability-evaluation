@@ -17,14 +17,17 @@ from .result_plots import (
     coefficient_selection_stability,
     feature_effects,
     group_effects,
+    load_benchmark_feature_effects,
     load_lesion_summary,
     load_prediction_artifacts,
     load_rejudge_summary,
     plot_accuracy_comparison,
-    plot_annotation_removal,
+    plot_annotation_comparison,
     plot_feature_scatter,
+    plot_feature_overview,
+    plot_feature_blocks,
+    plot_benchmark_feature_grid,
     plot_group_effects,
-    plot_ranked_features,
     plot_stability,
     write_result_plots,
 )
@@ -114,6 +117,28 @@ def _stability_files(path: Path) -> tuple[list[Path], list[Path]]:
         selections.append(selection_path)
         coefficients.append(coefficient_path)
     return selections, coefficients
+
+
+def _item_deltas(path: Path) -> Path:
+    output = path / "item-deltas.parquet"
+    pd.DataFrame([
+        {
+            "bench": bench, "item": f"{bench}-item-{item_fold}",
+            "fold": f"model-{model_fold}__item-{item_fold}", "kind": kind,
+            "variable": feature, "row_count": 1,
+            "delta_log_loss": base + model_fold / 1000,
+        }
+        for bench in ("a", "b")
+        for model_fold in range(3)
+        for item_fold in range(3)
+        for feature, kind, base in (
+            ("signal", "singular-feature", 0.04),
+            ("signal", "lesion-feature", 0.008),
+            ("noise", "singular-feature", -0.01),
+            ("noise", "lesion-feature", 0.002),
+        )
+    ]).to_parquet(output, index=False)
+    return output
 
 
 def test_saved_prediction_comparison_uses_fold_clusters_and_rejudge_floor(tmp_path: Path) -> None:
@@ -276,7 +301,7 @@ def test_top_level_workflow_requires_exactly_the_five_variants(
         )
 
 
-def test_result_plots_are_compact_editable_shared_scale_and_unclipped(tmp_path: Path) -> None:
+def test_result_plots_are_compact_editable_and_unclipped(tmp_path: Path) -> None:
     predictions = load_prediction_artifacts(_prediction_files(tmp_path))
     summary, fold_scores = accuracy_comparison(predictions, load_rejudge_summary(_rejudge(tmp_path)))
     lesion_path, dictionary_path = _lesions(tmp_path)
@@ -288,17 +313,18 @@ def test_result_plots_are_compact_editable_shared_scale_and_unclipped(tmp_path: 
 
     outputs = {
         **plot_accuracy_comparison(summary, fold_scores, output_dir),
+        "feature-effects-overview": plot_feature_overview(features, output_dir),
+        **plot_feature_blocks(features, output_dir),
         "feature-scatter": plot_feature_scatter(features, output_dir, top_labels=1),
-        **plot_ranked_features(features, output_dir),
         "group-effects": plot_group_effects(groups, output_dir),
-        "annotation-removal": plot_annotation_removal(groups, output_dir),
+        "annotation-comparison": plot_annotation_comparison(groups, output_dir),
         "stability": plot_stability(stability, fold_coefficients, output_dir),
     }
 
     assert set(outputs) == {
         "oof-accuracy-overall", "oof-accuracy-by-cell", "feature-scatter",
-        "feature-singular-ranked", "feature-unique-ranked", "group-effects",
-        "annotation-removal", "stability",
+        "feature-effects-overview", "feature-effects-rubric", "feature-effects-clause-plan",
+        "group-effects", "annotation-comparison", "stability",
     }
     svgs = []
     for png, svg in outputs.values():
@@ -324,10 +350,18 @@ def test_result_plots_are_compact_editable_shared_scale_and_unclipped(tmp_path: 
     )
     assert "rotate(-90" in readable_tick.attrib.get("transform", "")
     assert 'id="legend_1"' in outputs["feature-scatter"][1].read_text()
-    singular_svg = outputs["feature-singular-ranked"][1].read_text()
-    unique_svg = outputs["feature-unique-ranked"][1].read_text()
-    assert ">−0.3</text>" in singular_svg and ">0.3</text>" in singular_svg
-    assert ">−0.3</text>" in unique_svg and ">0.3</text>" in unique_svg
+    overview_svg = outputs["feature-effects-overview"][1].read_text()
+    assert overview_svg.count('id="axes_') == 2
+    assert ">Singular</text>" in overview_svg and ">Unique</text>" in overview_svg
+    assert ">−.1</text>" in overview_svg and ">.3</text>" in overview_svg
+    assert ">−.05</text>" in overview_svg and ">.15</text>" in overview_svg
+    for name, feature in (("feature-effects-rubric", "signal"),
+                          ("feature-effects-clause-plan", "noise")):
+        block_svg = outputs[name][1].read_text()
+        assert block_svg.count('id="axes_') == 2 and feature in block_svg
+    assert "planning (clause-plan)" in outputs["group-effects"][1].read_text()
+    assert "Singular" in outputs["annotation-comparison"][1].read_text()
+    assert "Unique removal" in outputs["annotation-comparison"][1].read_text()
     assert not any("suptitle" in source.lower() for source in svgs)
 
 
@@ -376,8 +410,102 @@ def test_dense_legends_and_scatter_labels_stay_inside_canvas_without_overlap(
     monkeypatch.setattr(result_plots, "_save", checked_save)
 
     result_plots.plot_feature_scatter(features, tmp_path, top_labels=3)
-    result_plots.plot_ranked_features(features, tmp_path, top=len(features))
+    result_plots.plot_feature_overview(features, tmp_path, top=len(features))
+    result_plots.plot_feature_blocks(features, tmp_path)
     result_plots.plot_group_effects(groups, tmp_path)
+
+
+def test_feature_scatter_and_overview_panels_use_independent_rounded_scales(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    features = pd.DataFrame({
+        "feature": ["low", "high"], "block": ["surface", "rubric"],
+        "singular": [-0.008, 0.054], "singular_lower": [-0.014, 0.044],
+        "singular_upper": [-0.006, 0.064], "unique": [-0.0019, 0.0045],
+        "unique_lower": [-0.0050, 0.0024], "unique_upper": [-0.0009, 0.0070],
+    })
+    scales = {}
+
+    def capture_scale(fig, output_dir, name):
+        for suffix, axis in zip(("singular", "unique"), fig.axes):
+            key = f"{name}-{suffix}" if len(fig.axes) > 1 else name
+            scales[key] = (axis.get_xlim(), axis.get_ylim(), axis.get_xticks(), axis.get_yticks())
+        plt.close(fig)
+        return Path(output_dir) / f"{name}.png", Path(output_dir) / f"{name}.svg"
+
+    monkeypatch.setattr(result_plots, "_save", capture_scale)
+
+    result_plots.plot_feature_scatter(features, tmp_path, top_labels=0)
+    result_plots.plot_feature_overview(features, tmp_path, top=2)
+
+    assert scales["feature-scatter"][:2] == ((-0.02, 0.08), (-0.005, 0.01))
+    assert scales["feature-scatter"][2].tolist() == [-0.02, 0.0, 0.08]
+    assert scales["feature-scatter"][3].tolist() == [-0.005, 0.0, 0.01]
+    assert scales["feature-effects-overview-singular"][0] == (-0.02, 0.08)
+    assert scales["feature-effects-overview-unique"][0] == (-0.005, 0.01)
+
+
+def test_dense_source_block_labels_do_not_wrap_or_overlap(tmp_path: Path, monkeypatch) -> None:
+    features = pd.DataFrame({
+        "feature": [f"long_clause_motif_feature_{index:02d}" for index in range(24)],
+        "block": ["clause-motifs"] * 24,
+        "singular": np.linspace(-0.01, 0.04, 24),
+        "singular_lower": np.linspace(-0.012, 0.038, 24),
+        "singular_upper": np.linspace(-0.008, 0.042, 24),
+        "unique": np.linspace(-0.002, 0.002, 24),
+        "unique_lower": np.linspace(-0.0025, 0.0015, 24),
+        "unique_upper": np.linspace(-0.0015, 0.0025, 24),
+    })
+
+    def inspect_labels(fig, output_dir, name):
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        labels = [label for label in fig.axes[0].get_yticklabels() if label.get_visible()]
+        assert all("\n" not in label.get_text() for label in labels)
+        boxes = [label.get_window_extent(renderer) for label in labels]
+        assert not any(left.overlaps(right) for index, left in enumerate(boxes)
+                       for right in boxes[index + 1:])
+        plt.close(fig)
+        return Path(output_dir) / f"{name}.png", Path(output_dir) / f"{name}.svg"
+
+    monkeypatch.setattr(result_plots, "_save", inspect_labels)
+
+    plot_feature_blocks(features, tmp_path)
+
+
+def test_top_level_map_prioritizes_capability_grammar_and_marks_scatter_secondary(tmp_path: Path) -> None:
+    prediction_paths = _prediction_files(tmp_path / "predictions")
+    rejudge_path = _rejudge(tmp_path)
+    lesion_path, dictionary_path = _lesions(tmp_path)
+    selection_paths, coefficient_paths = _stability_files(tmp_path)
+
+    outputs = write_result_plots(
+        prediction_paths, rejudge_path, lesion_path, dictionary_path,
+        selection_paths, coefficient_paths, tmp_path / "outputs",
+        item_deltas_path=_item_deltas(tmp_path),
+    )["figures"]
+
+    keys = list(outputs)
+    assert keys.index("feature-effects-overview") < keys.index("group-effects")
+    assert keys.index("group-effects") < keys.index("feature-scatter-secondary")
+    assert "feature-scatter" not in outputs
+    assert {"feature-effects-rubric", "feature-effects-clause-plan"} <= set(outputs)
+    assert {"feature-effects-by-benchmark", "annotation-comparison"} <= set(outputs)
+
+
+def test_saved_item_deltas_support_two_column_benchmark_small_multiples(tmp_path: Path) -> None:
+    lesion_path, dictionary_path = _lesions(tmp_path)
+    del lesion_path
+    effects = load_benchmark_feature_effects(_item_deltas(tmp_path), dictionary_path)
+
+    assert set(effects.effect) == {"singular", "unique"}
+    assert set(effects.benchmark) == {"a", "b"}
+    assert effects.model_fold_count.eq(3).all() and effects.item_fold_count.eq(3).all()
+    output = plot_benchmark_feature_grid(effects, tmp_path)
+    svg = output[1].read_text()
+    assert svg.count('id="axes_') == 4
+    assert all(label in svg for label in ("a", "b", "Singular", "Unique"))
+    assert "Coefficient" not in svg
 
 
 def test_loaders_reject_incomplete_or_invalid_saved_artifacts(tmp_path: Path) -> None:
