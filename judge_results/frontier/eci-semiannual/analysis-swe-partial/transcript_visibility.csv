@@ -1,0 +1,8 @@
+bench,model,n_correct_q1,visible_chars_median,cot_added_chars_median,reasoning_block_share,redacted_reasoning_share
+swe_bench_mini,claude-3.7-sonnet,12,55040.0,0.0,0.0,0.0
+swe_bench_mini,claude-opus-4.6,12,7879.5,0.0,0.0,0.0
+swe_bench_mini,claude-opus-4.7,12,5482.0,0.0,0.0,0.0
+swe_bench_mini,gpt-4o-1120,8,35453.0,0.0,0.0,0.0
+swe_bench_mini,gpt-5,12,43901.0,3476.5,1.0,1.0
+swe_bench_mini,kimi-k3,12,49905.0,20068.0,1.0,0.0
+swe_bench_mini,o3,9,53668.0,2170.0,1.0,1.0

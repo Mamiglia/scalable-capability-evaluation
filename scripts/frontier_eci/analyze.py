@@ -191,6 +191,8 @@ def transcript_features(config_root, quartiles, candidates):
         cfg = yaml.safe_load((config_root / bench / "gpt-4o-2024-11-20.yaml").read_text())
         q1 = set(quartiles.query("bench == @bench and item_quartile == 1").item.astype(str))
         for model, path in cfg["transcripts"].items():
+            if not Path(path).exists():
+                continue
             parts = Path(path).parts
             epoch = int(parts[4])
             for sample in read_eval_log_samples(path, all_samples_required=False):
@@ -252,10 +254,10 @@ def save(fig, path):
 
 
 def plot_predictions(predictions, candidates, releases, judges, benches, out, name):
-    fig, axes = plt.subplots(len(benches), 3, figsize=(7.2, 2.2 * len(benches)),
+    fig, axes = plt.subplots(len(benches), 3, figsize=(7.2, 2.55 * len(benches)),
                              sharex=True, sharey=True, squeeze=False)
     x = np.arange(len(candidates))
-    labels = [f"{str(pd.Timestamp(releases[m]).year)[2:]}Q{pd.Timestamp(releases[m]).quarter}\n{SHORT[m]}"
+    labels = [f"{str(pd.Timestamp(releases[m]).year)[2:]}Q{pd.Timestamp(releases[m]).quarter}"
               for m in candidates]
     for row, bench in enumerate(benches):
         for col, quartile in enumerate((2, 3, 4)):
@@ -276,10 +278,10 @@ def plot_predictions(predictions, candidates, releases, judges, benches, out, na
             ax.set_xticks(x)
             ax.set_xticklabels(labels if row == len(benches) - 1 else [])
             if row == len(benches) - 1:
-                ax.tick_params(axis="x", labelrotation=55)
+                ax.tick_params(axis="x", labelrotation=45)
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, ncol=3, frameon=False, loc="upper center", bbox_to_anchor=(0.5, 1.02))
-    fig.subplots_adjust(top=0.84, wspace=0.24, hspace=0.28)
+    fig.subplots_adjust(top=0.72, bottom=0.2, wspace=0.24, hspace=0.28)
     save(fig, out / name)
 
 
@@ -288,22 +290,27 @@ def plot_error_heatmap(predictions, candidates, judges, benches, out):
               .groupby(["bench", "judge", "model"]).error.mean())
     values = [abs(float(x)) for x in errors.dropna()]
     limit = max(0.1, min(0.5, max(values)))
-    fig, axes = plt.subplots(1, len(benches), figsize=(3.6 * len(benches), 2.7),
+    shown = [model for model in candidates
+             if model in errors.index.get_level_values("model")]
+    fig, axes = plt.subplots(1, len(benches), figsize=(5.2 * len(benches), 2.9),
                              sharey=True, squeeze=False)
     axes = axes[0]
     for ax, bench in zip(axes, benches):
-        matrix = errors.loc[bench].unstack("model").reindex(index=judges, columns=candidates)
-        image = ax.imshow(matrix, cmap="RdBu_r", vmin=-limit, vmax=limit, aspect="auto")
+        matrix = errors.loc[bench].unstack("model").reindex(index=judges, columns=shown)
+        cmap = plt.get_cmap("RdBu_r").copy()
+        cmap.set_bad("#f2f2f2")
+        image = ax.imshow(matrix, cmap=cmap, vmin=-limit, vmax=limit, aspect="auto")
         for y in range(len(judges)):
-            for x in range(len(candidates)):
+            for x in range(len(shown)):
                 value = matrix.iloc[y, x]
-                ax.text(x, y, "" if pd.isna(value) else f"{value:+.2f}",
+                ax.text(x, y, "—" if pd.isna(value) else f"{value:+.2f}",
                         ha="center", va="center", fontsize=5.5)
         ax.set_title("GPQA" if bench == "gpqa" else "SWE-mini")
-        ax.set_xticks(range(len(candidates)), [SHORT[m] for m in candidates], rotation=55, ha="right")
+        ax.set_xticks(range(len(shown)), [SHORT[m] for m in shown], rotation=45, ha="right")
         ax.set_yticks(range(len(judges)), [JUDGE_LABELS[j] for j in judges])
-    fig.colorbar(image, ax=axes, label="Predicted − actual accuracy", shrink=0.78, pad=0.02)
-    fig.subplots_adjust(wspace=0.08, bottom=0.3)
+    fig.subplots_adjust(left=0.27, right=0.82, bottom=0.28, top=0.84, wspace=0.12)
+    cax = fig.add_axes([0.86, 0.25, 0.025, 0.52])
+    fig.colorbar(image, cax=cax, label="Predicted − actual accuracy")
     save(fig, out / "frontier_error_heatmap")
 
 
@@ -327,7 +334,7 @@ def plot_visibility(summary, model_errors, candidates, benches, out):
         ax.text(0.03, 0.96, f"Spearman ρ = {rho:.2f}", transform=ax.transAxes, va="top")
         ax.axhline(0, color="#999999", lw=0.7)
         ax.set_title("GPQA" if bench == "gpqa" else "SWE-mini")
-        ax.set_xlabel("Median visible transcript length (log₁₀ chars)")
+        ax.set_xlabel("Median visible transcript length (log10 chars)")
     axes[0].set_ylabel("Mean prediction error")
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, ncol=2, frameon=False, loc="upper center", bbox_to_anchor=(0.5, 1.03))

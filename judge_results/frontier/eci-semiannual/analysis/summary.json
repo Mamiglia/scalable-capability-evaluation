@@ -1,0 +1,23 @@
+{
+  "verdicts": 43153,
+  "q1_verdicts": 25217,
+  "judges": [
+    "gpt-4o-2024-11-20",
+    "gemini-2.5-pro",
+    "gpt-5.2",
+    "o4-mini",
+    "deepseek-v4-flash-0731"
+  ],
+  "consensus": "equal judge weight per exact verdict cell",
+  "candidates": [
+    "gpt-4o-1120",
+    "claude-3.7-sonnet",
+    "o3",
+    "gpt-5",
+    "gemini-3-pro-preview",
+    "claude-opus-4.6",
+    "claude-opus-4.7",
+    "kimi-k3"
+  ],
+  "resamples": 100
+}

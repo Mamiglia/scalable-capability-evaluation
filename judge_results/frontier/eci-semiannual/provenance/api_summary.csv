@@ -1,0 +1,6 @@
+source,judge,provider,calls,cost,input_tokens,output_tokens,reasoning_tokens
+frontier-eci,deepseek-v4-flash-0731,DeepInfra,2220,1.136183704,9095895,2520642,2398800
+frontier-eci,gemini-2.5-pro,Google AI Studio,2374,45.288409125,10645418,3319322,3089858
+frontier-eci,gpt-4o-2024-11-20,OpenAI,2374,24.418485,9281134,240525,0
+frontier-eci,gpt-5.2,OpenAI,2374,23.4995516,9278760,680176,408610
+frontier-eci,o4-mini,OpenAI,2220,15.0429378,8765830,1387568,1149504
