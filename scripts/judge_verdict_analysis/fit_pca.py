@@ -263,37 +263,76 @@ def _validate_fold(path: Path, settings: dict[str, object]) -> dict[str, object]
         or any(len(tables[name]) != expected_rows[name] for name in CSV_COLUMNS)
     ):
         raise RuntimeError(f"PCA fold checkpoint settings or schema mismatch: {path}")
-    observed = predictions.observed.to_numpy(dtype=int)
-    probability = predictions.probability.to_numpy(dtype=float)
+    observed = predictions.observed.to_numpy()
     metrics, coefficients = tables["metrics.csv"], tables["coefficients.csv"]
     tuning = tables["tuning.csv"]
     loadings = tables["svd-loadings.csv"]
     variance = tables["svd-explained-variance.csv"]
+    try:
+        probability = predictions.probability.to_numpy(dtype=float)
+        metric_values = metrics.set_index("metric").value.astype(float)
+        coefficient_values = coefficients[
+            CSV_COLUMNS["coefficients.csv"][3:]
+        ].to_numpy(float)
+        tuning_loss = tuning.mean_log_loss.to_numpy(float)
+        tuning_iterations = tuning.max_n_iter.to_numpy(float)
+        loading_values = loadings.loading.to_numpy(float)
+        explained = variance.explained_variance.to_numpy(float)
+        ratios = variance.explained_variance_ratio.to_numpy(float)
+        cumulative = variance.cumulative_explained_variance_ratio.to_numpy(float)
+        singular = variance.singular_value.to_numpy(float)
+        diagnostic_ratio = float(diagnostics["svd_explained_variance_ratio_sum"])
+        ridge_iterations = int(diagnostics["ridge_n_iter"])
+        ridge_c = float(diagnostics["ridge_C"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(f"invalid PCA fold artifact contents: {path}") from error
+    tolerance = 1e-10
     if (
         not np.isin(observed, [0, 1]).all()
         or not np.isfinite(probability).all()
         or np.any((probability < 0) | (probability > 1))
         or set(metrics.metric) != {"accuracy", "log_loss"}
-        or not np.isfinite(metrics.value.to_numpy(float)).all()
+        or not np.isfinite(metric_values).all()
+        or not 0 <= metric_values["accuracy"] <= 1
+        or metric_values["log_loss"] < 0
         or set(coefficients.feature) != set(components)
-        or not np.isfinite(coefficients.select_dtypes(include="number")).all().all()
+        or not np.isfinite(coefficient_values).all()
         or set(tuning.stage) != {"ridge"}
         or set(tuning.record_type) != {"tuning"}
         or set(tuning.C.to_numpy(float)) != set(settings["ridge_cs"])
+        or not set(tuning.converged) <= {True, False}
+        or not set(tuning.selected) <= {True, False}
         or tuning.selected.sum() != 1
-        or not np.isfinite(tuning[["C", "mean_log_loss", "max_n_iter"]]).all().all()
+        or not np.isfinite(tuning_loss).all()
+        or np.any(tuning_loss < 0)
+        or not np.isfinite(tuning_iterations).all()
+        or np.any((tuning_iterations < 1) | (tuning_iterations > settings["glm_max_iter"]))
         or set(loadings.component) != set(components)
         or set(loadings.feature) != set(features)
         or loadings[["component", "feature"]].duplicated().any()
-        or not np.isfinite(loadings.loading.to_numpy(float)).all()
+        or not np.isfinite(loading_values).all()
         or variance.component.tolist() != components
-        or not np.isfinite(variance.select_dtypes(include="number")).all().all()
+        or not np.isfinite(explained).all()
+        or np.any(explained < -tolerance)
+        or not np.isfinite(ratios).all()
+        or np.any((ratios < -tolerance) | (ratios > 1 + tolerance))
+        or not np.isfinite(cumulative).all()
+        or np.any((cumulative < -tolerance) | (cumulative > 1 + tolerance))
+        or np.any(np.diff(cumulative) < -tolerance)
+        or not np.allclose(cumulative, np.cumsum(ratios), atol=tolerance, rtol=0)
+        or not np.isfinite(singular).all()
+        or np.any(singular < -tolerance)
         or not isinstance(diagnostics, dict)
         or not DIAGNOSTIC_KEYS <= set(diagnostics)
         or diagnostics["svd_algorithm"] != settings["fit_pca_algorithm"]
         or diagnostics["svd_components"] != len(components)
         or diagnostics["svd_input_features"] != len(features)
-        or float(diagnostics["ridge_C"]) not in settings["ridge_cs"]
+        or ridge_c not in settings["ridge_cs"]
+        or not isinstance(diagnostics["ridge_converged"], bool)
+        or not 1 <= ridge_iterations <= settings["glm_max_iter"]
+        or not np.isfinite(diagnostic_ratio)
+        or not -tolerance <= diagnostic_ratio <= 1 + tolerance
+        or not np.isclose(diagnostic_ratio, ratios.sum(), atol=tolerance, rtol=0)
     ):
         raise RuntimeError(f"invalid PCA fold artifact contents: {path}")
     return manifest
@@ -461,9 +500,17 @@ def aggregate(config: AnalysisConfig = CONFIG) -> Path:
         ):
             raise RuntimeError(f"invalid PCA fold feature inventory: {path}")
         manifests.append(_validate_fold(path, _settings(config, index, features)))
+    inventories = [
+        (manifest["input_features"], manifest["settings"]["feature_inventory_sha256"])
+        for manifest in manifests
+    ]
+    if any(inventory != inventories[0] for inventory in inventories[1:]):
+        raise RuntimeError("completed PCA folds do not share one ordered feature inventory")
     settings = {
         "schema_version": 1,
         "fold_settings_signatures": [manifest["settings_signature"] for manifest in manifests],
+        "features": inventories[0][0],
+        "feature_inventory_sha256": inventories[0][1],
     }
     completion = output / "manifest.json"
     if completion.exists():

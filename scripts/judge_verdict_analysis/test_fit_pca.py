@@ -1,4 +1,5 @@
 from dataclasses import replace
+import hashlib
 import json
 
 import numpy as np
@@ -212,3 +213,67 @@ def test_aggregate_resume_rejects_content_that_differs_from_fold_shards(
 
     with pytest.raises(RuntimeError, match="aggregate"):
         fit_pca.aggregate(config)
+
+
+@pytest.mark.parametrize("features", [
+    list(reversed(FEATURES)), [*FEATURES, "f3"],
+])
+def test_aggregate_rejects_mixed_ordered_feature_inventories(
+    tmp_path, monkeypatch, features,
+) -> None:
+    config = _config(tmp_path)
+    rows = _rows().drop(columns="fold")
+    inventory = [rows, FEATURES]
+    monkeypatch.setattr(fit_pca, "_guard_execution", lambda _: None)
+    monkeypatch.setattr(fit_pca, "_load_rows", lambda _: tuple(inventory))
+    fit_pca.run_fold(0, config)
+    inventory[0] = rows.assign(f3=rows.f0 * rows.f2)
+    inventory[1] = features
+    fit_pca.run_fold(1, config)
+
+    with pytest.raises(RuntimeError, match="feature inventory"):
+        fit_pca.aggregate(config)
+
+
+@pytest.mark.parametrize(("artifact", "column", "value"), [
+    ("predictions.parquet", "observed", 0.5),
+    ("predictions.parquet", "probability", 1.1),
+    ("metrics.csv", "accuracy", 1.1),
+    ("metrics.csv", "log_loss", -0.1),
+    ("tuning.csv", "mean_log_loss", -0.1),
+    ("svd-explained-variance.csv", "explained_variance", -0.1),
+    ("diagnostics.json", "svd_explained_variance_ratio_sum", 1.1),
+])
+def test_resume_rejects_coherent_but_impossible_artifact_values(
+    tmp_path, monkeypatch, artifact, column, value,
+) -> None:
+    config = _config(tmp_path)
+    rows = _rows().drop(columns="fold")
+    monkeypatch.setattr(fit_pca, "_guard_execution", lambda _: None)
+    monkeypatch.setattr(fit_pca, "_load_rows", lambda _: (rows, FEATURES))
+    fold_dir = fit_pca.run_fold(0, config)
+    path = fold_dir / artifact
+    if artifact == "predictions.parquet":
+        table = pd.read_parquet(path)
+        if column == "observed":
+            table[column] = table[column].astype(float)
+        table.loc[0, column] = value
+        table.to_parquet(path, index=False)
+    elif artifact == "diagnostics.json":
+        values = json.loads(path.read_text())
+        values[column] = value
+        path.write_text(json.dumps(values))
+    else:
+        table = pd.read_csv(path)
+        if artifact == "metrics.csv":
+            table.loc[table.metric == column, "value"] = value
+        else:
+            table.loc[0, column] = value
+        table.to_csv(path, index=False)
+    manifest_path = fold_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["artifact_sha256"][artifact] = hashlib.sha256(path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(RuntimeError, match="artifact contents"):
+        fit_pca.run_fold(0, config)
