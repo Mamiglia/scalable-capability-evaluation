@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import json
 import os
@@ -17,6 +19,20 @@ from .data import load_features
 from .fit_common import FitResult
 from .fit_frequentist import fit_fixed_ridge, tune_ridge
 from .hierarchy import outer_roles
+
+
+COEFFICIENT_COLUMNS = (
+    "feature", "judge", "benchmark", "population", "judge_deviation",
+    "benchmark_deviation", "cell_deviation", "effective",
+)
+ITEM_METRIC_COLUMNS = ("bench", "item", "log_loss", "accuracy", "row_count")
+EXPECTED_BLOCKS = frozenset({
+    "surface", "structure", "rubric", "exposition", "derivation",
+    "intermediate-errors", "clause-descriptors", "clause-motifs", "clause-plan",
+})
+EXPECTED_FAMILIES = frozenset({
+    "annotations", "hand-engineered-text", "clause", "clause-structure", "planning",
+})
 
 
 @dataclass(frozen=True)
@@ -111,6 +127,34 @@ def unique_specifications(
     return list(by_features.values()), aliases
 
 
+def _validate_specification_inventory(
+    dictionary: pd.DataFrame,
+    specifications: list[Specification],
+    unique: list[Specification],
+    aliases: dict[str, str],
+    config: AnalysisConfig,
+) -> None:
+    if len(dictionary) != 117:
+        raise ValueError(f"production lesions require exactly 117 features, found {len(dictionary)}")
+    blocks = set(dictionary.block.astype(str))
+    if blocks != EXPECTED_BLOCKS:
+        raise ValueError(f"production lesions require the exact nine blocks, found {sorted(blocks)}")
+    families = {name for name, _ in config.lesion_families}
+    if families != EXPECTED_FAMILIES:
+        raise ValueError(
+            f"production lesions require the exact five families, found {sorted(families)}")
+    expected_aliases = {
+        "lesion-family-planning": "lesion-block-clause-plan",
+        "singular-family-planning": "singular-block-clause-plan",
+    }
+    if aliases != expected_aliases:
+        raise ValueError(f"production lesions require the exact two planning aliases, found {aliases}")
+    if (len(specifications), len(unique)) != (262, 260):
+        raise ValueError(
+            f"expected 262 labelled and 260 unique specifications, got "
+            f"{len(specifications)} and {len(unique)}")
+
+
 def _log_losses(observed: np.ndarray, probabilities: np.ndarray) -> np.ndarray:
     probability = np.clip(probabilities, 1e-12, 1 - 1e-12)
     return -(observed * np.log(probability) + (1 - observed) * np.log1p(-probability))
@@ -179,6 +223,46 @@ def _paired_predictions(
     return output
 
 
+def _paired_item_metrics(
+    candidate: pd.DataFrame,
+    reference: pd.DataFrame,
+    specification: Specification,
+    fold: str,
+) -> pd.DataFrame:
+    """Pair saved per-item metric inputs without reopening model predictions."""
+    if candidate.columns.tolist() != list(ITEM_METRIC_COLUMNS) or (
+        reference.columns.tolist() != list(ITEM_METRIC_COLUMNS)
+    ):
+        raise RuntimeError("item-metric schema is not recoverable")
+    merged = candidate.merge(
+        reference, on=["bench", "item"], suffixes=("_candidate", "_reference"),
+        validate="one_to_one",
+    )
+    if not merged.row_count_candidate.equals(merged.row_count_reference):
+        raise RuntimeError("candidate and reference item metrics have different row counts")
+    output = merged[["bench", "item"]].copy()
+    output["backend"] = "frequentist"
+    output["fold"] = fold
+    output["specification"] = specification.name
+    output["kind"] = specification.kind
+    output["variable"] = specification.variable
+    output["reference"] = specification.reference
+    output["candidate_log_loss"] = merged.log_loss_candidate
+    output["reference_log_loss"] = merged.log_loss_reference
+    output["candidate_accuracy"] = merged.accuracy_candidate
+    output["reference_accuracy"] = merged.accuracy_reference
+    output["row_count"] = merged.row_count_candidate.astype(int)
+    if specification.reference == "full":
+        output["delta_log_loss"] = output.candidate_log_loss - output.reference_log_loss
+        output["delta_accuracy"] = output.reference_accuracy - output.candidate_accuracy
+    elif specification.reference == "intercept-only":
+        output["delta_log_loss"] = output.reference_log_loss - output.candidate_log_loss
+        output["delta_accuracy"] = output.candidate_accuracy - output.reference_accuracy
+    else:
+        raise ValueError(f"unknown specification reference: {specification.reference}")
+    return output
+
+
 def _prediction_rows(predictions: pd.DataFrame, features: list[str]) -> pd.DataFrame:
     """Keep the common held-out metadata and probabilities, never inactive regressors."""
     if missing := {"observed", "probability"} - set(predictions):
@@ -205,6 +289,50 @@ def _validate_prediction_rows(
     if not np.isfinite(probability).all() or np.any((probability < 0) | (probability > 1)):
         raise RuntimeError("checkpoint probabilities must be finite values in [0, 1]")
     return predictions
+
+
+def _validate_coefficient_rows(
+    coefficients: pd.DataFrame, features: tuple[str, ...] | list[str],
+) -> pd.DataFrame:
+    """Require a recoverable effective-coefficient table for the fitted feature set."""
+    coefficients = coefficients.reset_index(drop=True)
+    if coefficients.columns.tolist() != list(COEFFICIENT_COLUMNS):
+        raise RuntimeError("coefficient schema does not match the fitted model")
+    if set(coefficients.feature.astype(str)) != set(features):
+        raise RuntimeError("coefficient features do not match the fitted model")
+    numeric = coefficients[list(COEFFICIENT_COLUMNS[3:])].to_numpy(dtype=float)
+    if not np.isfinite(numeric).all():
+        raise RuntimeError("coefficients must be finite")
+    return coefficients
+
+
+def _item_metric_rows(predictions: pd.DataFrame) -> pd.DataFrame:
+    observed = predictions.observed.to_numpy(dtype=int)
+    probability = predictions.probability.to_numpy(dtype=float)
+    rows = predictions[["bench", "item"]].copy()
+    rows["log_loss"] = _log_losses(observed, probability)
+    rows["accuracy"] = ((probability >= 0.5) == observed).astype(float)
+    return rows.groupby(["bench", "item"], sort=False, as_index=False).agg(
+        log_loss=("log_loss", "mean"), accuracy=("accuracy", "mean"),
+        row_count=("accuracy", "size"),
+    )
+
+
+def _validate_item_metric_rows(metrics: pd.DataFrame, test: pd.DataFrame) -> pd.DataFrame:
+    metrics = metrics.reset_index(drop=True)
+    if metrics.columns.tolist() != list(ITEM_METRIC_COLUMNS):
+        raise RuntimeError("item-metric schema does not match the held-out fold")
+    expected = test.groupby(["bench", "item"], sort=False).size().reset_index(name="row_count")
+    actual = metrics[["bench", "item", "row_count"]]
+    if not actual.equals(expected):
+        raise RuntimeError("item metrics do not match the held-out fold")
+    if (
+        not np.isfinite(metrics[["log_loss", "accuracy"]].to_numpy(dtype=float)).all()
+        or (metrics.log_loss < 0).any()
+        or ((metrics.accuracy < 0) | (metrics.accuracy > 1)).any()
+    ):
+        raise RuntimeError("item metrics contain invalid values")
+    return metrics
 
 
 def lesion_fold(
@@ -267,12 +395,19 @@ def _bootstrap_summary(rows: pd.DataFrame, config: AnalysisConfig) -> pd.DataFra
     rng = np.random.default_rng(config.random_seed)
     summaries = []
     for keys, group in rows.groupby(metadata, sort=True):
-        estimates = {name: float(group[name].mean()) for name in ("delta_log_loss", "delta_accuracy")}
-        clusters = group.groupby(["bench", "item"], sort=False).agg(
-            count=("delta_log_loss", "size"),
-            delta_log_loss=("delta_log_loss", "sum"),
-            delta_accuracy=("delta_accuracy", "sum"),
+        weights = (
+            group.row_count.to_numpy(dtype=int)
+            if "row_count" in group else np.ones(len(group), dtype=int)
         )
+        estimates = {
+            name: float(np.average(group[name].to_numpy(float), weights=weights))
+            for name in ("delta_log_loss", "delta_accuracy")
+        }
+        weighted = group[["bench", "item"]].copy()
+        weighted["count"] = weights
+        for name in estimates:
+            weighted[name] = group[name].to_numpy(float) * weights
+        clusters = weighted.groupby(["bench", "item"], sort=False).sum()
         draws = rng.integers(
             len(clusters), size=(config.bootstrap_iterations, len(clusters)))
         counts = clusters["count"].to_numpy()[draws].sum(axis=1)
@@ -290,7 +425,7 @@ def _bootstrap_summary(rows: pd.DataFrame, config: AnalysisConfig) -> pd.DataFra
             "delta_accuracy": estimates["delta_accuracy"],
             "delta_accuracy_lower": intervals["delta_accuracy"][0],
             "delta_accuracy_upper": intervals["delta_accuracy"][1],
-            "fold_count": group.fold.nunique(), "row_count": len(group),
+            "fold_count": group.fold.nunique(), "row_count": int(weights.sum()),
         })
     return pd.DataFrame(summaries)
 
@@ -362,19 +497,38 @@ def _checkpoint(
     read,
 ) -> None:
     """Publish one deterministic artifact atomically; preserve failed partials."""
-    if _resume_checkpoint(path, read):
-        return
     path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.with_name(f".{path.name}.partial")
-    write(partial)
-    read(partial)
-    if path.exists():
-        raise FileExistsError(f"refusing to overwrite checkpoint created concurrently: {path}")
-    os.replace(partial, path)
+    with _checkpoint_lock(path):
+        if _resume_checkpoint_unlocked(path, read):
+            return
+        partial = path.with_name(f".{path.name}.partial")
+        write(partial)
+        read(partial)
+        if path.exists():
+            raise FileExistsError(f"refusing to overwrite checkpoint created concurrently: {path}")
+        os.replace(partial, path)
 
 
 def _resume_checkpoint(path: Path, read) -> bool:
     """Validate a final checkpoint or promote its valid deterministic partial."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _checkpoint_lock(path):
+        return _resume_checkpoint_unlocked(path, read)
+
+
+@contextmanager
+def _checkpoint_lock(path: Path):
+    """Serialize check/write/publish for one target; lock files intentionally remain."""
+    lock_path = path.with_name(f".{path.name}.lock")
+    with lock_path.open("a+") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _resume_checkpoint_unlocked(path: Path, read) -> bool:
     if path.exists():
         read(path)
         return True
@@ -399,6 +553,95 @@ def _write_prediction(
         lambda target: frame.to_parquet(target, index=False),
         lambda target: _validate_prediction_rows(pd.read_parquet(target), test, features),
     )
+
+
+def _write_coefficients(
+    frame: pd.DataFrame, path: Path, features: tuple[str, ...] | list[str],
+) -> None:
+    _checkpoint(
+        path,
+        lambda target: frame.to_parquet(target, index=False),
+        lambda target: _validate_coefficient_rows(pd.read_parquet(target), features),
+    )
+
+
+def _write_item_metrics(frame: pd.DataFrame, path: Path, test: pd.DataFrame) -> None:
+    _checkpoint(
+        path,
+        lambda target: frame.to_parquet(target, index=False),
+        lambda target: _validate_item_metric_rows(pd.read_parquet(target), test),
+    )
+
+
+def _write_parquet(frame: pd.DataFrame, path: Path) -> None:
+    _checkpoint(
+        path,
+        lambda target: frame.to_parquet(target, index=False),
+        lambda target: pd.read_parquet(target),
+    )
+
+
+def _artifact_paths(
+    fold_dir: Path, name: str, *, reference: bool,
+) -> tuple[Path, Path, Path]:
+    if reference:
+        return (
+            fold_dir / "references" / f"{name}.parquet",
+            fold_dir / "reference-coefficients" / f"{name}.parquet",
+            fold_dir / "reference-item-metrics" / f"{name}.parquet",
+        )
+    return (
+        fold_dir / "specifications" / f"{name}.parquet",
+        fold_dir / "coefficients" / f"{name}.parquet",
+        fold_dir / "item-metrics" / f"{name}.parquet",
+    )
+
+
+def _artifacts_ready(
+    paths: tuple[Path, Path, Path],
+    test: pd.DataFrame,
+    all_features: list[str],
+    fitted_features: tuple[str, ...],
+) -> bool:
+    prediction_path, coefficient_path, item_metric_path = paths
+    readers = (
+        lambda target: _validate_prediction_rows(
+            pd.read_parquet(target), test, all_features),
+        lambda target: _validate_coefficient_rows(
+            pd.read_parquet(target), fitted_features),
+        lambda target: _validate_item_metric_rows(pd.read_parquet(target), test),
+    )
+    return all(
+        _resume_checkpoint(path, read)
+        for path, read in zip(paths, readers)
+    )
+
+
+def _write_fit_artifacts(
+    result: FitResult,
+    paths: tuple[Path, Path, Path],
+    test: pd.DataFrame,
+    all_features: list[str],
+    fitted_features: tuple[str, ...],
+) -> None:
+    predictions = _prediction_rows(result.predictions, all_features)
+    _write_prediction(predictions, paths[0], test, all_features)
+    _write_coefficients(result.coefficients, paths[1], fitted_features)
+    _write_item_metrics(_item_metric_rows(predictions), paths[2], test)
+
+
+def _require_fit_artifacts(
+    paths: tuple[Path, Path, Path],
+    test: pd.DataFrame,
+    all_features: list[str],
+    fitted_features: tuple[str, ...],
+) -> None:
+    if any(not path.exists() for path in paths):
+        missing = [str(path) for path in paths if not path.exists()]
+        raise RuntimeError(f"missing completed checkpoint: {missing}")
+    _validate_prediction_rows(pd.read_parquet(paths[0]), test, all_features)
+    _validate_coefficient_rows(pd.read_parquet(paths[1]), fitted_features)
+    _validate_item_metric_rows(pd.read_parquet(paths[2]), test)
 
 
 def _write_csv(frame: pd.DataFrame, path: Path) -> None:
@@ -482,6 +725,31 @@ def _fold_settings(
     }
 
 
+def _require_completed_fold(
+    fold_dir: Path,
+    test: pd.DataFrame,
+    features: list[str],
+    references: tuple[Specification, Specification],
+    specifications: list[Specification],
+) -> None:
+    ridge_path = fold_dir / "ridge.json"
+    if not ridge_path.exists():
+        raise RuntimeError(f"missing completed checkpoint: {ridge_path}")
+    ridge = json.loads(ridge_path.read_text())
+    if ridge.get("features") != features:
+        raise RuntimeError(f"fold settings mismatch at {ridge_path}")
+    for specification in references:
+        _require_fit_artifacts(
+            _artifact_paths(fold_dir, specification.name, reference=True),
+            test, features, specification.features,
+        )
+    for specification in specifications:
+        _require_fit_artifacts(
+            _artifact_paths(fold_dir, specification.name, reference=False),
+            test, features, specification.features,
+        )
+
+
 def run_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
     """Tune once and checkpoint every fixed-C reference and specification for one outer fold."""
     config = config.validate()
@@ -496,10 +764,7 @@ def run_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
     completion = fold_dir / "manifest.json"
     specifications = build_specifications(dictionary, config)
     unique, aliases = unique_specifications(specifications)
-    if (len(specifications), len(unique)) != (262, 260):
-        raise ValueError(
-            f"expected 262 labelled and 260 unique specifications, got "
-            f"{len(specifications)} and {len(unique)}")
+    _validate_specification_inventory(dictionary, specifications, unique, aliases, config)
     features = dictionary.feature.astype(str).tolist()
     table = _specification_table(specifications, aliases)
     fold_settings = _fold_settings(config, fold_index, features, table)
@@ -518,6 +783,8 @@ def run_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
             "completed", settings_signature,
         ):
             raise RuntimeError(f"invalid fold completion manifest: {completion}")
+        _require_completed_fold(
+            fold_dir, test, features, reference_specifications(dictionary), unique)
         return fold_dir
 
     ridge_path = fold_dir / "ridge.json"
@@ -535,25 +802,27 @@ def run_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
             ridge_path,
         )
 
-    for specification in reference_specifications(dictionary):
-        path = fold_dir / "references" / f"{specification.name}.parquet"
-        read_prediction = lambda target: _validate_prediction_rows(
-            pd.read_parquet(target), test, features)
-        if not _resume_checkpoint(path, read_prediction):
+    references = reference_specifications(dictionary)
+    for specification in references:
+        paths = _artifact_paths(fold_dir, specification.name, reference=True)
+        if not _artifacts_ready(
+            paths, test, features, specification.features,
+        ):
             result = fit_fixed_ridge(
                 train, test, list(specification.features), config, ridge_c)
-            _write_prediction(
-                _prediction_rows(result.predictions, features), path, test, features)
+            _write_fit_artifacts(
+                result, paths, test, features, specification.features)
 
-    specification_dir = fold_dir / "specifications"
     for specification in unique:
-        path = specification_dir / f"{specification.name}.parquet"
-        if _resume_checkpoint(path, read_prediction):
+        paths = _artifact_paths(fold_dir, specification.name, reference=False)
+        if _artifacts_ready(paths, test, features, specification.features):
             continue
         result = fit_fixed_ridge(
             train, test, list(specification.features), config, ridge_c)
-        _write_prediction(
-            _prediction_rows(result.predictions, features), path, test, features)
+        _write_fit_artifacts(
+            result, paths, test, features, specification.features)
+
+    _require_completed_fold(fold_dir, test, features, references, unique)
 
     _write_json({
         "state": "completed", "backend": "frequentist", "fold": fold,
@@ -574,10 +843,37 @@ def _fold_names(config: AnalysisConfig) -> list[str]:
     ]
 
 
+def _artifact_index(
+    fold_names: list[str], fold_dirs: list[Path], specifications: pd.DataFrame,
+) -> pd.DataFrame:
+    rows = []
+    references = specifications.reference.drop_duplicates().tolist()
+    for fold, fold_dir in zip(fold_names, fold_dirs):
+        for reference in references:
+            paths = _artifact_paths(fold_dir, reference, reference=True)
+            rows.append({
+                "fold": fold, "specification": reference, "kind": "reference",
+                "variable": reference, "reference": "", "artifact": reference,
+                "predictions": str(paths[0]), "coefficients": str(paths[1]),
+                "item_metrics": str(paths[2]),
+            })
+        for row in specifications.itertuples(index=False):
+            paths = _artifact_paths(fold_dir, row.artifact, reference=False)
+            rows.append({
+                "fold": fold, "specification": row.specification, "kind": row.kind,
+                "variable": row.variable, "reference": row.reference,
+                "artifact": row.artifact, "predictions": str(paths[0]),
+                "coefficients": str(paths[1]), "item_metrics": str(paths[2]),
+            })
+    return pd.DataFrame(rows)
+
+
 def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
     """Aggregate completed fold shards without holding the full lesion grid in memory."""
     config = config.validate()
     output = config.lesion_dir / "lesions.csv"
+    item_delta_output = config.lesion_dir / "item-deltas.parquet"
+    artifact_index_output = config.lesion_dir / "artifact-index.csv"
     completion = config.lesion_dir / "summary-manifest.json"
     fold_names = _fold_names(config)
     fold_dirs = [config.lesion_dir / "folds" / fold for fold in fold_names]
@@ -621,9 +917,12 @@ def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
         ):
             raise RuntimeError(f"summary settings mismatch at {completion}")
         pd.read_csv(output)
+        pd.read_parquet(item_delta_output)
+        pd.read_csv(artifact_index_output, keep_default_na=False)
         return output
 
     summaries = []
+    item_deltas = []
     for row in specification_table.itertuples(index=False):
         specification = Specification(
             row.specification, row.kind, row.variable, row.reference, (),
@@ -631,14 +930,19 @@ def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
         paired = []
         for fold, fold_dir in zip(fold_names, fold_dirs):
             candidate = pd.read_parquet(
-                fold_dir / "specifications" / f"{row.artifact}.parquet")
+                fold_dir / "item-metrics" / f"{row.artifact}.parquet")
             reference = pd.read_parquet(
-                fold_dir / "references" / f"{row.reference}.parquet")
-            paired.append(_paired_predictions(candidate, reference, specification, fold))
+                fold_dir / "reference-item-metrics" / f"{row.reference}.parquet")
+            paired.append(_paired_item_metrics(candidate, reference, specification, fold))
+        item_deltas.extend(paired)
         summaries.append(_bootstrap_summary(pd.concat(paired, ignore_index=True), config))
     summary = pd.concat(summaries, ignore_index=True) if summaries else _bootstrap_summary(
         pd.DataFrame(), config)
+    combined_item_deltas = pd.concat(item_deltas, ignore_index=True) if item_deltas else pd.DataFrame()
+    artifact_index = _artifact_index(fold_names, fold_dirs, specification_table)
     _write_csv(summary, output)
+    _write_parquet(combined_item_deltas, item_delta_output)
+    _write_csv(artifact_index, artifact_index_output)
     _write_json({
         "state": "completed", "backend": "frequentist",
         "fold_count": len(fold_dirs), "labelled_specifications": len(specification_table),
@@ -647,6 +951,7 @@ def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
         "lesion_metric": config.lesion_metric,
         "bootstrap_iterations": config.bootstrap_iterations,
         "random_seed": config.random_seed, "summary": output.name,
+        "item_deltas": item_delta_output.name, "artifact_index": artifact_index_output.name,
     }, completion)
     return output
 

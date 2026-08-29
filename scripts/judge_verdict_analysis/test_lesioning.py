@@ -1,6 +1,8 @@
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import numpy as np
@@ -13,11 +15,13 @@ from .fit_common import FitResult
 from .fit_frequentist import fit_fixed_ridge
 from .lesioning import (
     _bootstrap_summary,
+    _checkpoint,
     _guard_execution,
     _paired_predictions,
     _prediction_rows,
     _resume_checkpoint,
     _validate_prediction_rows,
+    _validate_specification_inventory,
     aggregate_lesions,
     build_specifications,
     lesion_fold,
@@ -111,9 +115,14 @@ def test_fold_runner_tunes_once_reuses_c_and_resumes_completed_specs(tmp_path, m
         predictions = test_rows[["bench", "judge", "item", "fold"]].copy()
         predictions["observed"] = test_rows.pick_left
         predictions["probability"] = np.where(test_rows.pick_left == 1, 0.99, 0.01)
+        coefficients = pd.DataFrame({
+            "feature": list(names), "judge": "j1", "benchmark": "a",
+            "population": 0.0, "judge_deviation": 0.0,
+            "benchmark_deviation": 0.0, "cell_deviation": 0.0, "effective": 0.0,
+        })
         return FitResult(
             backend="frequentist", fold="model-fold-0__item-0", selected_features=tuple(names),
-            predictions=predictions, coefficients=pd.DataFrame(), tuning=pd.DataFrame(),
+            predictions=predictions, coefficients=coefficients, tuning=pd.DataFrame(),
             metrics=pd.DataFrame(), diagnostics={"ridge_C": ridge_c},
         )
 
@@ -142,9 +151,17 @@ def test_fold_runner_tunes_once_reuses_c_and_resumes_completed_specs(tmp_path, m
     assert len(specifications) == 262
     assert specifications.artifact.nunique() == 260
     assert len(list((fold_dir / "specifications").glob("*.parquet"))) == 260
+    assert len(list((fold_dir / "coefficients").glob("*.parquet"))) == 260
+    assert len(list((fold_dir / "item-metrics").glob("*.parquet"))) == 260
+    assert len(list((fold_dir / "reference-coefficients").glob("*.parquet"))) == 2
+    assert len(list((fold_dir / "reference-item-metrics").glob("*.parquet"))) == 2
     assert (fold_dir / "manifest.json").exists()
     with pytest.raises(RuntimeError, match="settings"):
         run_fold(0, replace(config, ridge_cs=(1.0,)))
+    missing = fold_dir / "coefficients" / f"{specifications.artifact.iloc[0]}.parquet"
+    missing.unlink()
+    with pytest.raises(RuntimeError, match="missing completed checkpoint"):
+        run_fold(0, config)
 
 
 def test_clustered_summary_reports_both_deltas_and_the_configured_primary_metric() -> None:
@@ -228,6 +245,29 @@ def test_specifications_cover_every_requested_label_and_deduplicate_planning() -
     assert len(annotations_only.features) == 21
     assert no_annotations.reference == "full"
     assert annotations_only.reference == "intercept-only"
+
+
+def test_production_inventory_requires_exact_features_blocks_families_and_aliases() -> None:
+    dictionary = _dictionary()
+    specifications = build_specifications(dictionary)
+    unique, aliases = unique_specifications(specifications)
+
+    _validate_specification_inventory(dictionary, specifications, unique, aliases, CONFIG)
+    with pytest.raises(ValueError, match="117 features"):
+        _validate_specification_inventory(
+            dictionary.iloc[:-1], specifications, unique, aliases, CONFIG)
+    wrong_block = dictionary.copy()
+    wrong_block.loc[0, "block"] = "wrong"
+    with pytest.raises(ValueError, match="nine blocks"):
+        _validate_specification_inventory(
+            wrong_block, specifications, unique, aliases, CONFIG)
+    wrong_families = replace(
+        CONFIG,
+        lesion_families=(("wrong", ("surface",)), *CONFIG.lesion_families[1:]),
+    )
+    with pytest.raises(ValueError, match="five families"):
+        _validate_specification_inventory(
+            dictionary, specifications, unique, aliases, wrong_families)
 
 
 def test_specification_families_come_from_analysis_config() -> None:
@@ -330,19 +370,41 @@ def test_aggregation_pairs_every_fold_with_the_declared_reference(tmp_path) -> N
         fold_dir = config.lesion_dir / "folds" / fold
         (fold_dir / "references").mkdir(parents=True)
         (fold_dir / "specifications").mkdir()
+        (fold_dir / "reference-coefficients").mkdir()
+        (fold_dir / "coefficients").mkdir()
+        (fold_dir / "reference-item-metrics").mkdir()
+        (fold_dir / "item-metrics").mkdir()
         specifications.to_csv(fold_dir / "specifications.csv", index=False)
         metadata = pd.DataFrame({
             "bench": ["a", "a"], "item": [f"i{item_fold}-0", f"i{item_fold}-1"],
             "observed": [1, 0],
         })
-        metadata.assign(probability=[0.9, 0.1]).to_parquet(
-            fold_dir / "references/full.parquet", index=False)
-        metadata.assign(probability=[0.5, 0.5]).to_parquet(
-            fold_dir / "references/intercept-only.parquet", index=False)
-        metadata.assign(probability=[0.6, 0.4]).to_parquet(
-            fold_dir / "specifications/lesion-feature-x.parquet", index=False)
-        metadata.assign(probability=[0.8, 0.2]).to_parquet(
-            fold_dir / "specifications/singular-feature-x.parquet", index=False)
+        predictions = {
+            "references/full": metadata.assign(probability=[0.9, 0.1]),
+            "references/intercept-only": metadata.assign(probability=[0.5, 0.5]),
+            "specifications/lesion-feature-x": metadata.assign(probability=[0.6, 0.4]),
+            "specifications/singular-feature-x": metadata.assign(probability=[0.8, 0.2]),
+        }
+        for name, frame in predictions.items():
+            frame.to_parquet(fold_dir / f"{name}.parquet", index=False)
+            prefix, artifact = name.split("/")
+            coefficient_dir = "reference-coefficients" if prefix == "references" else "coefficients"
+            item_dir = "reference-item-metrics" if prefix == "references" else "item-metrics"
+            coefficient_features = [] if artifact == "intercept-only" else ["x"]
+            pd.DataFrame({
+                "feature": coefficient_features, "judge": "j1", "benchmark": "a",
+                "population": 0.0, "judge_deviation": 0.0,
+                "benchmark_deviation": 0.0, "cell_deviation": 0.0, "effective": 0.0,
+            }).to_parquet(fold_dir / coefficient_dir / f"{artifact}.parquet", index=False)
+            observed = frame.observed.to_numpy(int)
+            probability = frame.probability.to_numpy(float)
+            pd.DataFrame({
+                "bench": frame.bench, "item": frame.item,
+                "log_loss": -(observed * np.log(probability)
+                              + (1 - observed) * np.log1p(-probability)),
+                "accuracy": ((probability >= 0.5) == observed).astype(float),
+                "row_count": 1,
+            }).to_parquet(fold_dir / item_dir / f"{artifact}.parquet", index=False)
         (fold_dir / "manifest.json").write_text(
             f'{{"state":"completed","settings_signature":"fold-{item_fold}",'
             '"plan_signature":"shared-plan"}\n')
@@ -358,6 +420,14 @@ def test_aggregation_pairs_every_fold_with_the_declared_reference(tmp_path) -> N
     assert (summary.lower == summary.delta_accuracy_lower).all()
     assert (summary.upper == summary.delta_accuracy_upper).all()
     assert (config.lesion_dir / "summary-manifest.json").exists()
+    item_deltas = pd.read_parquet(config.lesion_dir / "item-deltas.parquet")
+    artifact_index = pd.read_csv(config.lesion_dir / "artifact-index.csv")
+    assert len(item_deltas) == 8
+    assert {"specification", "kind", "variable", "reference", "delta_log_loss",
+            "delta_accuracy", "row_count"} <= set(item_deltas)
+    assert len(artifact_index) == 8  # two references + two labelled specs, across two folds
+    assert artifact_index.coefficients.map(Path).map(Path.exists).all()
+    assert artifact_index.item_metrics.map(Path).map(Path.exists).all()
     with pytest.raises(RuntimeError, match="summary settings"):
         aggregate_lesions(replace(config, lesion_metric="log_loss"))
     mixed = config.lesion_dir / "folds/model-fold-0__item-1/manifest.json"
@@ -405,6 +475,44 @@ def test_resume_promotes_a_valid_deterministic_partial_without_rewriting(tmp_pat
     assert _resume_checkpoint(output, pd.read_parquet)
     pd.testing.assert_frame_equal(pd.read_parquet(output), expected)
     assert not partial.exists()
+
+
+def test_checkpoint_lock_serializes_duplicate_writers_and_keeps_the_lock_file(tmp_path) -> None:
+    output = tmp_path / "artifact.txt"
+    entered = Event()
+    release = Event()
+    second_done = Event()
+    writes = []
+
+    def first_writer(path):
+        writes.append("first")
+        entered.set()
+        assert release.wait(2)
+        path.write_text("first")
+
+    def second_writer(path):
+        writes.append("second")
+        path.write_text("second")
+
+    def second_checkpoint():
+        try:
+            _checkpoint(output, second_writer, lambda path: path.read_text())
+        finally:
+            second_done.set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            _checkpoint, output, first_writer, lambda path: path.read_text())
+        assert entered.wait(2)
+        second = executor.submit(second_checkpoint)
+        assert not second_done.wait(0.05)
+        release.set()
+        first.result()
+        second.result()
+
+    assert output.read_text() == "first"
+    assert writes == ["first"]
+    assert (tmp_path / ".artifact.txt.lock").exists()
 
 
 def test_resumed_prediction_rows_must_match_the_held_out_schema() -> None:
