@@ -67,10 +67,32 @@ On GPQA its Q2/Q3/Q4 MAE is **0.030/0.098/0.093**, substantially better than GPT
 from Epoch capability growth alone. This is strong evidence that the plot is not, by itself,
 evidence that transcript judging adds information.
 
+### Calibration-function audit
+
+The headline calibration is fitted separately for each held-out target and quartile:
+`predicted_accuracy = scale / (1 + exp(-(slope * BT_ability + offset)))`. The target's true
+accuracy is excluded; allowed historical models provide the anchor accuracies. Fits are unweighted
+nonlinear least squares, and Q1 items are bootstrapped while anchor accuracies stay fixed.
+
+Replacing this three-parameter scaled sigmoid does not remove the systematic target bias:
+
+| Calibrator | Held-out MAE | Held-out bias | Anchor MAE |
+|---|---:|---:|---:|
+| Scaled sigmoid | 0.214 | −0.165 | 0.113 |
+| Unit-ceiling sigmoid | 0.212 | −0.162 | 0.114 |
+| Clipped linear | **0.211** | **−0.150** | 0.117 |
+
+Linear regression has zero mean residual on its anchor points by construction, yet held-out targets
+remain 0.150 low on average. Twenty percent of targets lie outside their anchors' BT-ability range;
+scaled-sigmoid bias is −0.270 there versus −0.139 inside the range. The dominant problem is
+therefore not the sigmoid formula: Q1 both-correct BT ability does not transfer stably to absolute
+hard-item accuracy, especially for frontier targets. The full audit is in
+`judge_results/frontier/eci-semiannual/calibration-audit/`.
+
 Consensus mean error by answer model is: Kimi K3 −0.315, GPT-5 −0.299, Opus 4.7 −0.281, o3
 −0.264, Gemini 3 Pro −0.223, Claude 3.7 −0.119, Opus 4.6 −0.100, and GPT-4o +0.038. Thus the experiment does **not** find
 uniform Opus downrating: Opus 4.7 is strongly underrated, but Opus 4.6 is the best-calibrated
-frontier model on GPQA. GPT-5 is worst.
+frontier model on GPQA. Kimi K3 is worst, closely followed by GPT-5.
 
 Counterbalancing is present in the inputs but does not remove judge behavior: first-position rates
 range from 0.37 (o4-mini) to 0.48 (GPT-4o), and judges pick the longer transcript 61–84% of the
@@ -91,13 +113,13 @@ The same underprediction appears: checkpoint MAE on Q2/Q3/Q4 is 0.302/0.370/0.19
 
 The protocol strips explicit reasoning blocks and inline `<think>` content. On GPQA, mean residual
 has Spearman 0.74 with visible transcript length: models exposing more text are generally less
-underpredicted. Opus 4.7 exposes a median 22 characters and is underrated by 0.280; GPT-5 exposes
-421 characters and is underrated by 0.317. o3, GPT-5, Gemini 3 Pro, and Opus 4.6 have redacted or
+underpredicted. Opus 4.7 exposes a median 22 characters and is underrated by 0.281; GPT-5 exposes
+421 characters and is underrated by 0.299. o3, GPT-5, Gemini 3 Pro, and Opus 4.6 have redacted or
 encrypted reasoning on essentially every correct Q1 sample, so the judge is calibrating from a
 surface that systematically omits their private computation.
 
-This is not the whole explanation. Opus 4.6 is only 0.094 low on GPQA despite redacted reasoning,
-and Kimi K3 is 0.287 low despite a longer visible answer. On partial SWE, Opus 4.6/4.7 are by far
+This is not the whole explanation. Opus 4.6 is only 0.100 low on GPQA despite redacted reasoning,
+and Kimi K3 is 0.315 low despite a longer visible answer. On partial SWE, Opus 4.6/4.7 are by far
 the shortest visible transcripts (7.9k/5.5k versus 35k–55k for the others) and both are about 0.26
 low, but length–error Spearman over the four forecastable models is −0.20. The evidence supports a
 visibility/style channel, not a claim that stripping CoT alone causes the error.
