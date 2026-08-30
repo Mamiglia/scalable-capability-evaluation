@@ -36,7 +36,6 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "item_folds": config.item_folds,
         "inner_folds": config.inner_folds,
         "fit_n_jobs": config.fit_n_jobs,
-        "resume_completed_folds": config.resume_completed_folds,
         "feature_space": config.feature_space,
         "penalty": config.penalty,
         "fit_pca_components": config.fit_pca_components,
@@ -184,10 +183,12 @@ def _resume_existing(output: Path, required: tuple[str, ...], config: AnalysisCo
     manifest = json.loads((output / "manifest.json").read_text())
     backend = f"{config.feature_space}-{config.penalty}"
     hashes = manifest.get("artifact_sha256")
+    saved_settings = dict(manifest.get("settings", {}))
+    saved_settings.pop("resume_completed_folds", None)  # Operational, not scientific.
     if (
         manifest.get("state") != "completed"
         or manifest.get("backend") != backend
-        or manifest.get("settings") != _manifest_settings(config)
+        or saved_settings != _manifest_settings(config)
         or not isinstance(hashes, dict)
         or set(hashes) != set(required) - {"manifest.json"}
         or any(_file_sha256(output / name) != digest for name, digest in hashes.items())
