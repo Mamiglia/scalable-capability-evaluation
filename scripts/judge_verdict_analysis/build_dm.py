@@ -1,29 +1,35 @@
-"""Build the representative readable-feature design matrix."""
+"""Build the readable-feature composite design matrix."""
+import argparse
 from collections.abc import Sequence
+from dataclasses import replace
 import hashlib
 import json
 import os
 from pathlib import Path
 from tempfile import mkdtemp
 
+import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 import yaml
 
 from .config import AnalysisConfig, CONFIG
 from .preprocessing import (
-    common_support,
-    correlation_groups,
-    feature_correlations,
-    select_representatives,
+    apply_composites,
+    fit_composites,
 )
 
 
-ARTIFACTS = (
+SOURCE_ARTIFACTS = (
     "transcript.parquet", "pair.parquet", "feature-dictionary.parquet",
-    "scaling-transcript.parquet", "scaling-pair.parquet", "representative-map.csv",
-    "manifest.json", "design-matrix.yaml",
+    "scaling-transcript.parquet", "scaling-pair.parquet",
 )
+PROCESSED_ARTIFACTS = SOURCE_ARTIFACTS + (
+    "composite-provenance.json", "manifest.json", "design-matrix.yaml",
+)
+ARTIFACTS = SOURCE_ARTIFACTS + (
+    "representative-map.csv", "manifest.json", "design-matrix.yaml",
+)  # Historical expanded-matrix contract.
 
 
 def _sha256(path: Path) -> str:
@@ -71,33 +77,70 @@ def _selected_dictionary(dictionary: pd.DataFrame, config: AnalysisConfig) -> pd
     return selected
 
 
-def _scaling_rows(scaling: pd.DataFrame, names: list[str], label: str) -> pd.DataFrame:
-    if "feature" not in scaling:
-        raise ValueError(f"{label} scaling metadata has no feature column")
-    result = scaling[scaling.feature.isin(names)].copy()
-    if missing := set(names) - set(result.feature):
-        raise ValueError(f"{label} scaling metadata missing retained features: {sorted(missing)}")
-    return result
+def _scale_composites(
+    frame: pd.DataFrame,
+    features: list[str],
+    splits: tuple[str, ...],
+    *,
+    centre: bool,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Scale final composites per benchmark on the designated training rows."""
+    if "split" not in frame:
+        raise ValueError("composite matrix has no split column for scaling")
+    values = frame[features].to_numpy(dtype=float, copy=True)
+    training = frame.split.isin(splits).to_numpy()
+    rows = []
+    for benchmark in pd.unique(frame.bench):
+        mask = (frame.bench == benchmark).to_numpy()
+        reference = values[mask & training]
+        if not len(reference):
+            raise ValueError(f"no composite scaling rows for benchmark {benchmark!r}")
+        count = np.isfinite(reference).sum(axis=0)
+        observed_mean = np.divide(
+            np.nansum(reference, axis=0), count,
+            out=np.zeros(len(features)), where=count > 0,
+        )
+        mean = observed_mean if centre else np.zeros(len(features))
+        squared_deviation = np.nansum((reference - observed_mean) ** 2, axis=0)
+        sd = np.sqrt(np.divide(
+            squared_deviation, count - 1,
+            out=np.ones(len(features)), where=count > 1,
+        ))
+        sd = np.where(np.isfinite(sd) & (sd > 0), sd, 1.0)
+        values[mask] = (values[mask] - mean) / sd
+        rows.extend({
+            "benchmark": benchmark,
+            "feature": feature,
+            "mean": float(feature_mean),
+            "sd": float(feature_sd),
+        } for feature, feature_mean, feature_sd in zip(features, mean, sd))
+    output = frame.copy()
+    output.loc[:, features] = np.nan_to_num(values)
+    return output, pd.DataFrame(rows)
 
 
 def _manifest(
     config: AnalysisConfig,
     source_config: Path,
     source_root: Path,
-    tables: dict[str, pd.DataFrame],
+    tables: dict[str, object],
     original_features: int,
 ) -> dict[str, object]:
-    source_files = [source_config] + [source_root / name for name in ARTIFACTS[:5]]
+    source_files = [source_config] + [source_root / name for name in SOURCE_ARTIFACTS]
+    provenance = tables["composite-provenance.json"]
+    provenance_hash = hashlib.sha256(json.dumps(
+        provenance, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    output_dictionary = tables["feature-dictionary.parquet"]
+    assert isinstance(output_dictionary, pd.DataFrame)
     settings = {
         "feature_blocks": list(config.feature_blocks), "regressors": list(config.regressors),
         "benchmarks": list(config.benchmarks), "splits": list(config.splits),
         "correlation_method": config.correlation_method,
         "correlation_threshold": config.correlation_threshold,
-        "correlation_transitive": config.correlation_transitive,
-        "common_support": config.common_support, "support_splits": list(config.support_splits),
-        "representative_rule": config.representative_rule,
-        "representative_overrides": [list(pair) for pair in config.representative_overrides],
-        "processed_aliases": [list(pair) for pair in config.processed_aliases],
+        "correlation_threshold_inclusive": True,
+        "correlation_grouping": "greedy-maximum-correlation-hierarchical-mean",
+        "support_splits": list(config.support_splits),
     }
     return {
         "source_hf_repo": config.source_hf_repo,
@@ -105,23 +148,27 @@ def _manifest(
         "source_status": "resolved" if config.source_hf_revision else "unresolved/test-only",
         "source_paths": {path.name: str(path) for path in source_files},
         "source_sha256": {path.name: _sha256(path) for path in source_files if path.exists()},
+        "composite_provenance_sha256": provenance_hash,
         "settings": settings,
         "rows": {"transcript": len(tables["transcript.parquet"]), "pair": len(tables["pair.parquet"])},
-        "features": {"selected_original": original_features,
-                     "retained": len(tables["feature-dictionary.parquet"])},
+        "features": {
+            "selected_original": original_features,
+            "retained": len(output_dictionary),
+            "inventory": output_dictionary.feature.astype(str).tolist(),
+        },
     }
 
 
 def build_design_matrix(config: AnalysisConfig = CONFIG) -> dict[str, pd.DataFrame | dict[str, object] | str]:
-    """Materialize a source-compatible matrix containing one feature per correlation group."""
+    """Materialize a source-compatible matrix containing hierarchical composites."""
     config = config.validate()
     source_config = Path(config.design_matrix_config)
     source_root = _source_root(source_config)
     dictionary = pd.read_parquet(source_root / "feature-dictionary.parquet")
     transcript = pd.read_parquet(source_root / "transcript.parquet")
     pair = pd.read_parquet(source_root / "pair.parquet")
-    transcript_scaling = pd.read_parquet(source_root / "scaling-transcript.parquet")
-    pair_scaling = pd.read_parquet(source_root / "scaling-pair.parquet")
+    transcript = transcript[transcript.bench.isin(config.benchmarks)].copy()
+    pair = pair[pair.bench.isin(config.benchmarks)].copy()
     selected = _selected_dictionary(dictionary, config)
     names = selected.feature.tolist()
     if missing := set(names) - set(transcript):
@@ -130,52 +177,44 @@ def build_design_matrix(config: AnalysisConfig = CONFIG) -> dict[str, pd.DataFra
     if missing := set(pair_names) - set(pair):
         raise ValueError(f"pair matrix missing selected features: {sorted(missing)}")
 
-    supported = (common_support(transcript, selected, config.benchmarks, config.support_splits)
-                 if config.common_support else selected.copy())
-    support_names = supported.feature.tolist()
-    pair_dictionary = supported.assign(column=supported.feature.map(lambda name: f"d_{name}"))
+    pair_dictionary = selected.assign(column=selected.feature.map(lambda name: f"d_{name}"))
     correlation_input = pair[pair.bench.isin(config.benchmarks)].copy()
     if "split" in correlation_input:
-        correlation_input = correlation_input[correlation_input.split.isin(config.splits)]
-    correlations = feature_correlations(
-        _deduplicate_judges(correlation_input), pair_dictionary, config.correlation_method)
-    groups = correlation_groups(correlations, supported, config.correlation_threshold, config.correlation_transitive)
-    representatives = select_representatives(
-        groups, config.representative_rule, dict(config.representative_overrides), dict(config.processed_aliases))
-    retained = representatives[representatives.retained].feature.tolist()
-
-    representative_map = selected[["feature", "block"]].rename(columns={"block": "original_block"})
-    representative_map = representative_map.merge(
-        representatives, on=["feature", "original_block"], how="left", validate="one_to_one")
-    retained_mask = representative_map.retained.fillna(False).astype(bool)
-    representative_map["status"] = "outside_common_support"
-    representative_map.loc[representative_map.feature.isin(support_names) & ~retained_mask, "status"] = "grouped_out"
-    representative_map.loc[retained_mask, "status"] = "retained"
-    representative_map["retained"] = retained_mask
-    representative_map = representative_map[[
-        "feature", "status", "correlation_group", "representative", "retained", "original_block",
-        "group_size", "processed_name",
-    ]]
-    if representative_map.feature.duplicated().any() or len(representative_map) != len(selected):
-        raise ValueError("representative map must cover each selected feature exactly once")
-    if not representatives.groupby("correlation_group").retained.sum().eq(1).all():
-        raise ValueError("every correlation group must have exactly one representative")
-
+        correlation_input = correlation_input[
+            correlation_input.split.isin(config.support_splits)
+        ]
+    _, output_dictionary, provenance = fit_composites(
+        _deduplicate_judges(correlation_input), pair_dictionary,
+        config.correlation_threshold, config.correlation_method,
+    )
+    final_features = output_dictionary.feature.astype(str).tolist()
     source_features = set(dictionary.feature)
-    transcript_output = transcript[[column for column in transcript if column not in source_features or column in retained]].copy()
+    transcript_metadata = transcript[[column for column in transcript if column not in source_features]]
+    transcript_values = apply_composites(
+        transcript, selected, provenance, neutralize=False,
+    )
+    transcript_output = pd.concat([transcript_metadata, transcript_values], axis=1)
     pair_source_features = {f"d_{feature}" for feature in source_features}
-    pair_output = pair[[column for column in pair if column not in pair_source_features or column in {f"d_{name}" for name in retained}]].copy()
-    output_dictionary = dictionary[dictionary.feature.isin(retained)].copy()
-    output_dictionary = output_dictionary.merge(
-        representative_map[representative_map.retained].drop(columns="status"), on="feature", how="left",
-        validate="one_to_one")
+    pair_metadata = pair[[column for column in pair if column not in pair_source_features]]
+    pair_values = apply_composites(
+        pair, pair_dictionary, provenance, neutralize=False,
+    ).rename(columns=lambda feature: f"d_{feature}")
+    pair_output = pd.concat([pair_metadata, pair_values], axis=1)
+    transcript_output, transcript_scaling = _scale_composites(
+        transcript_output, final_features, config.support_splits, centre=True,
+    )
+    pair_features = [f"d_{feature}" for feature in final_features]
+    pair_output, pair_scaling = _scale_composites(
+        pair_output, pair_features, config.support_splits, centre=False,
+    )
+    output_dictionary = output_dictionary.drop(columns="column", errors="ignore")
     tables: dict[str, pd.DataFrame | dict[str, object] | str] = {
         "transcript.parquet": transcript_output,
         "pair.parquet": pair_output,
         "feature-dictionary.parquet": output_dictionary,
-        "scaling-transcript.parquet": _scaling_rows(transcript_scaling, retained, "transcript"),
-        "scaling-pair.parquet": _scaling_rows(pair_scaling, [f"d_{name}" for name in retained], "pair"),
-        "representative-map.csv": representative_map,
+        "scaling-transcript.parquet": transcript_scaling,
+        "scaling-pair.parquet": pair_scaling,
+        "composite-provenance.json": provenance,
     }
     tables["manifest.json"] = _manifest(config, source_config, source_root, tables, len(selected))
     tables["design-matrix.yaml"] = yaml.safe_dump({
@@ -369,8 +408,7 @@ def write_design_matrix(tables: dict[str, pd.DataFrame | dict[str, object] | str
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(mkdtemp(prefix=f".{output_dir.name}-", dir=output_dir.parent))
     try:
-        for name in ARTIFACTS:
-            value = tables[name]
+        for name, value in tables.items():
             path = stage / name
             if name.endswith(".parquet"):
                 assert isinstance(value, pd.DataFrame)
@@ -391,12 +429,23 @@ def write_design_matrix(tables: dict[str, pd.DataFrame | dict[str, object] | str
         raise
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Build the configured processed design matrix."""
-    tables = build_design_matrix(CONFIG)
-    write_design_matrix(tables, CONFIG.processed_matrix_dir)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-config", type=Path, required=True)
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--source-repo", default=CONFIG.source_hf_repo)
+    parser.add_argument("--source-revision", default=CONFIG.source_hf_revision)
+    args = parser.parse_args(argv)
+    config = replace(
+        CONFIG, design_matrix_config=args.source_config,
+        processed_matrix_root=args.output_root,
+        source_hf_repo=args.source_repo, source_hf_revision=args.source_revision,
+    ).validate()
+    tables = build_design_matrix(config)
+    write_design_matrix(tables, config.processed_matrix_dir)
     print(f"transcripts={len(tables['transcript.parquet'])} pairs={len(tables['pair.parquet'])} "
-          f"features={len(tables['feature-dictionary.parquet'])} -> {CONFIG.processed_matrix_dir}")
+          f"features={len(tables['feature-dictionary.parquet'])} -> {config.processed_matrix_dir}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """Safe orchestration for the joint judge-verdict fitting backends."""
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -9,22 +10,24 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import mkdtemp
 
+import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 import yaml
 
 from .config import AnalysisConfig, CONFIG
 from .data import load_features
-from .fit_common import FitResult
-from .fit_frequentist import fit_frequentist, select_features
-from .hierarchy import HierarchyLevels, outer_roles
+from .fit_common import FitResult, prepare_features
+from .fit_frequentist import fit_sparse, tune_sparse
+from .hierarchy import outer_roles
 
 
 ARTIFACTS = (
     "predictions.parquet", "metrics.csv", "coefficients.csv", "selection.csv",
-    "tuning.csv", "diagnostics.json", "manifest.json",
+    "tuning.csv", "diagnostics.json", "feature-dictionary.parquet",
+    "feature-provenance.json", "loadings.csv", "explained-variance.csv",
+    "manifest.json",
 )
-_COMPLETED_ARTIFACTS = tuple(name for name in ARTIFACTS if name != "manifest.json")
 
 
 def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
@@ -34,32 +37,18 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "inner_folds": config.inner_folds,
         "fit_n_jobs": config.fit_n_jobs,
         "resume_completed_folds": config.resume_completed_folds,
+        "feature_space": config.feature_space,
+        "penalty": config.penalty,
+        "fit_pca_components": config.fit_pca_components,
+        "fit_pca_algorithm": config.fit_pca_algorithm,
         "elastic_net_cs": list(config.elastic_net_cs),
-        "elastic_net_l1_ratios": list(config.elastic_net_l1_ratios),
-        "selection_min_fold_share": config.selection_min_fold_share,
         "ridge_cs": list(config.ridge_cs),
         "judge_deviation_penalty": config.judge_deviation_penalty,
         "benchmark_deviation_penalty": config.benchmark_deviation_penalty,
         "cell_deviation_penalty": config.cell_deviation_penalty,
         "item_intercept_penalty": config.item_intercept_penalty,
         "glm_max_iter": config.glm_max_iter,
-        "glm_c": config.glm_c,
         "random_seed": config.random_seed,
-        "mcmc_warmup": config.mcmc_warmup,
-        "mcmc_samples": config.mcmc_samples,
-        "mcmc_chains": config.mcmc_chains,
-        "mcmc_method": config.mcmc_method,
-        "mcmc_target_accept": config.mcmc_target_accept,
-        "mcmc_max_tree_depth": config.mcmc_max_tree_depth,
-        "mcmc_init_strategy": config.mcmc_init_strategy,
-        "mcmc_chain_method": config.mcmc_chain_method,
-        "mcmc_device_type": config.mcmc_device_type,
-        "mcmc_gpu_memory_fraction": config.mcmc_gpu_memory_fraction,
-        "hibayes_population_prior_scale": config.hibayes_population_prior_scale,
-        "hibayes_judge_prior_scale": config.hibayes_judge_prior_scale,
-        "hibayes_benchmark_prior_scale": config.hibayes_benchmark_prior_scale,
-        "hibayes_cell_prior_scale": config.hibayes_cell_prior_scale,
-        "hibayes_item_prior_scale": config.hibayes_item_prior_scale,
         "require_pinned_source_for_fit": config.require_pinned_source_for_fit,
         "processed_matrix_manifest_sha256": config.processed_matrix_manifest_sha256,
     }
@@ -78,28 +67,6 @@ def _active_remote_target(target: str) -> bool:
             and not hostname.startswith(("gateway", "sgw"))
         )
     return target == "runpod" and bool(os.environ.get("RUNPOD_POD_ID"))
-
-
-def write_hibayes_job(
-    train_path: Path,
-    test_path: Path,
-    selected_features: list[str],
-    fold: str,
-    config: AnalysisConfig,
-) -> Path:
-    """Load HiBayes only for an explicitly requested Bayesian job."""
-    from .fit_hibayes import write_hibayes_job as implementation
-
-    return implementation(train_path, test_path, selected_features, fold, config)
-
-
-def evaluate_hibayes(
-    job_dir: Path, test_rows: pd.DataFrame, config: AnalysisConfig
-) -> FitResult:
-    """Load HiBayes only when evaluating an explicitly requested Bayesian job."""
-    from .fit_hibayes import evaluate_hibayes as implementation
-
-    return implementation(job_dir, test_rows, config)
 
 
 def _guard_execution(config: AnalysisConfig) -> None:
@@ -158,7 +125,7 @@ def _prepared_manifest(backend: str, fold: str, config: AnalysisConfig) -> dict[
 
 
 def _write_plan_descriptor(config: AnalysisConfig) -> None:
-    output = config.fit_dir / "prepared"
+    output = config.fit_dir / "prepared" / f"{config.feature_space}-{config.penalty}"
     if output.exists():
         raise FileExistsError(f"refusing to overwrite {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -168,8 +135,8 @@ def _write_plan_descriptor(config: AnalysisConfig) -> None:
     manifest.pop("fold")
     manifest["scope"] = "full_plan"
     manifest["jobs"] = [
-        {"backend": backend, "fold": f"{model_name}__item-{item_fold}"}
-        for backend in config.fit_backends
+        {"backend": f"{config.feature_space}-{config.penalty}",
+         "fold": f"{model_name}__item-{item_fold}"}
         for model_name, _ in config.model_folds
         for item_fold in range(config.item_folds)
     ]
@@ -186,7 +153,7 @@ def _write_plan_descriptor(config: AnalysisConfig) -> None:
         raise
 
 
-def _load_rows(config: AnalysisConfig) -> tuple[pd.DataFrame, list[str]]:
+def _load_rows(config: AnalysisConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows, dictionary = load_features(
         "pair", config.feature_blocks,
         features=config.regressors or None,
@@ -203,20 +170,136 @@ def _load_rows(config: AnalysisConfig) -> tuple[pd.DataFrame, list[str]]:
         raise ValueError(f"pair matrix missing fitting columns: {missing}")
     if rows.empty:
         raise ValueError("no pair rows remain after configured judge and benchmark filtering")
-    return rows, features
+    return rows, dictionary.drop(columns="column", errors="ignore")
 
 
-def _resume_existing(
-    output: Path, required: tuple[str, ...], config: AnalysisConfig
-) -> bool:
-    """Skip a complete output only when explicit resume mode is enabled."""
+def _resume_existing(output: Path, required: tuple[str, ...], config: AnalysisConfig) -> bool:
+    """Resume only a complete, hash-valid fold with identical settings."""
     if not output.exists():
         return False
     if not config.resume_completed_folds:
         raise FileExistsError(f"refusing to overwrite {output}")
     if missing := [name for name in required if not (output / name).exists()]:
         raise RuntimeError(f"cannot resume partial output {output}; missing {missing}")
+    manifest = json.loads((output / "manifest.json").read_text())
+    backend = f"{config.feature_space}-{config.penalty}"
+    hashes = manifest.get("artifact_sha256")
+    if (
+        manifest.get("state") != "completed"
+        or manifest.get("backend") != backend
+        or manifest.get("settings") != _manifest_settings(config)
+        or not isinstance(hashes, dict)
+        or set(hashes) != set(required) - {"manifest.json"}
+        or any(_file_sha256(output / name) != digest for name, digest in hashes.items())
+    ):
+        raise RuntimeError(f"cannot resume stale or corrupt output {output}")
     return True
+
+
+def run_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
+    """Fit one model-by-item outer fold for a configured sparse variant."""
+    config = config.validate()
+    _guard_execution(config)
+    fold_names = [
+        f"{model_name}__item-{item_fold}"
+        for model_name, _ in config.model_folds for item_fold in range(config.item_folds)
+    ]
+    if not 0 <= fold_index < len(fold_names):
+        raise ValueError(f"fold_index must be in range({len(fold_names)})")
+    output = config.fit_dir / f"{config.feature_space}-{config.penalty}" / fold_names[fold_index]
+    if _resume_existing(output, ARTIFACTS, replace(config, resume_completed_folds=True)):
+        return output
+    rows, dictionary = _load_rows(config)
+    fold, train, test = list(_outer_folds(rows, config))[fold_index]
+    result, prepared_dictionary, provenance = fit_fold(train, test, dictionary, config)
+    _write_result(
+        result, train, test, config,
+        prepared_dictionary=prepared_dictionary, provenance=provenance,
+    )
+    return config.fit_dir / result.backend / fold
+
+
+def aggregate_fits(config: AnalysisConfig = CONFIG) -> Path:
+    """Aggregate all 16 full-fit checkpoints for one sparse variant."""
+    config = config.validate()
+    backend = f"{config.feature_space}-{config.penalty}"
+    fold_names = [
+        f"{model_name}__item-{item_fold}"
+        for model_name, _ in config.model_folds for item_fold in range(config.item_folds)
+    ]
+    fold_dirs = [config.fit_dir / backend / fold for fold in fold_names]
+    for fold_dir in fold_dirs:
+        _resume_existing(fold_dir, ARTIFACTS, replace(config, resume_completed_folds=True))
+    fold_hashes = {
+        fold: _file_sha256(fold_dir / "manifest.json")
+        for fold, fold_dir in zip(fold_names, fold_dirs)
+    }
+    aggregate_artifacts = {
+        "predictions.parquet", "metrics.csv", "judge-benchmark.csv",
+        "fold-metrics.csv", "uncertainty.csv", "coefficients.csv",
+        "selection.csv", "tuning.csv", "artifact-index.csv",
+    }
+    output = config.fit_dir / backend / "aggregate"
+    if output.exists():
+        manifest = json.loads((output / "manifest.json").read_text())
+        hashes = manifest.get("artifact_sha256")
+        if (
+            manifest.get("state") != "completed"
+            or manifest.get("backend") != backend
+            or manifest.get("settings") != _manifest_settings(config)
+            or manifest.get("fold_manifest_sha256") != fold_hashes
+            or not isinstance(hashes, dict)
+            or set(hashes) != aggregate_artifacts
+            or any(not (output / name).is_file() or _file_sha256(output / name) != digest
+                   for name, digest in hashes.items())
+        ):
+            raise RuntimeError(f"invalid fit aggregate: {output}")
+        return output
+
+    predictions, coefficients, selections, tuning, index_rows = [], [], [], [], []
+    for fold, fold_dir in zip(fold_names, fold_dirs):
+        predictions.append(pd.read_parquet(fold_dir / "predictions.parquet").assign(fold=fold))
+        coefficients.append(pd.read_csv(fold_dir / "coefficients.csv").assign(fold=fold))
+        selections.append(pd.read_csv(fold_dir / "selection.csv").assign(fold=fold))
+        tuning.append(pd.read_csv(fold_dir / "tuning.csv").assign(fold=fold))
+        index_rows.append({
+            "fold": fold,
+            **{name.removesuffix(Path(name).suffix).replace("-", "_"): str(fold_dir / name)
+               for name in ARTIFACTS},
+        })
+    all_predictions = pd.concat(predictions, ignore_index=True)
+    metrics, judge_benchmark, fold_metrics, uncertainty = summarize_predictions(
+        all_predictions, config,
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(mkdtemp(prefix=".aggregate-", dir=output.parent))
+    try:
+        all_predictions.to_parquet(stage / "predictions.parquet", index=False)
+        metrics.to_csv(stage / "metrics.csv", index=False)
+        judge_benchmark.to_csv(stage / "judge-benchmark.csv", index=False)
+        fold_metrics.to_csv(stage / "fold-metrics.csv", index=False)
+        uncertainty.to_csv(stage / "uncertainty.csv", index=False)
+        pd.concat(coefficients, ignore_index=True).to_csv(stage / "coefficients.csv", index=False)
+        pd.concat(selections, ignore_index=True).to_csv(stage / "selection.csv", index=False)
+        pd.concat(tuning, ignore_index=True).to_csv(stage / "tuning.csv", index=False)
+        pd.DataFrame(index_rows).to_csv(stage / "artifact-index.csv", index=False)
+        manifest = {
+            "state": "completed", "backend": backend,
+            "settings": _manifest_settings(config),
+            "fold_manifest_sha256": fold_hashes,
+            "artifact_sha256": {
+                path.name: _file_sha256(path) for path in stage.iterdir()
+            },
+        }
+        (stage / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        os.replace(stage, output)
+    except BaseException:
+        for path in stage.iterdir() if stage.exists() else ():
+            path.unlink()
+        if stage.exists():
+            stage.rmdir()
+        raise
+    return output
 
 
 def _outer_folds(frame: pd.DataFrame, config: AnalysisConfig):
@@ -235,28 +318,112 @@ def _json_default(value: object) -> object:
     return value.item() if hasattr(value, "item") else str(value)
 
 
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def summarize_predictions(
+    predictions: pd.DataFrame,
+    config: AnalysisConfig,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Summarize OOF predictions with item and crossed-fold uncertainty."""
+    required = {"fold", "bench", "judge", "item", "observed", "probability"}
+    if missing := required - set(predictions):
+        raise ValueError(f"predictions missing aggregation columns: {sorted(missing)}")
+    rows = predictions.copy()
+    probability = np.clip(rows.probability.to_numpy(float), 1e-12, 1 - 1e-12)
+    observed = rows.observed.to_numpy(int)
+    rows["accuracy"] = ((probability >= 0.5) == observed).astype(float)
+    rows["log_loss"] = -(
+        observed * np.log(probability) + (1 - observed) * np.log1p(-probability)
+    )
+    metrics = pd.DataFrame({
+        "metric": ["accuracy", "log_loss"],
+        "value": [rows.accuracy.mean(), rows.log_loss.mean()],
+    })
+    judge_benchmark = rows.groupby(["judge", "bench"], as_index=False).agg(
+        accuracy=("accuracy", "mean"), log_loss=("log_loss", "mean"),
+        row_count=("accuracy", "size"),
+    )
+    fold_metrics = rows.groupby("fold", as_index=False).agg(
+        accuracy=("accuracy", "mean"), log_loss=("log_loss", "mean"),
+        row_count=("accuracy", "size"),
+    )
+    parts = fold_metrics.fold.str.rsplit("__item-", n=1, expand=True)
+    fold_metrics["model_fold"] = parts[0]
+    fold_metrics["item_fold"] = parts[1]
+
+    clusters = rows.groupby(["bench", "item"], as_index=False).agg(
+        accuracy=("accuracy", "sum"), log_loss=("log_loss", "sum"),
+        row_count=("accuracy", "size"),
+    )
+    rng = np.random.default_rng(config.random_seed)
+    draws = rng.integers(
+        len(clusters), size=(config.bootstrap_iterations, len(clusters)),
+    )
+    counts = clusters.row_count.to_numpy()[draws].sum(axis=1)
+    uncertainty = []
+    for metric in ("accuracy", "log_loss"):
+        samples = clusters[metric].to_numpy()[draws].sum(axis=1) / counts
+        item_interval = np.percentile(samples, [2.5, 97.5])
+        dimensions = {}
+        for dimension in ("model_fold", "item_fold"):
+            values = np.array([
+                np.average(group[metric], weights=group.row_count)
+                for _, group in fold_metrics.groupby(dimension, sort=False)
+            ])
+            dimensions[dimension] = [float(values.min()), float(values.max())]
+        estimate = float(metrics.loc[metrics.metric == metric, "value"].item())
+        uncertainty.extend([
+            {"metric": metric, "method": "item_clustered", "estimate": estimate,
+             "lower": item_interval[0], "upper": item_interval[1]},
+            {"metric": metric, "method": "model_fold", "estimate": estimate,
+             "lower": dimensions["model_fold"][0], "upper": dimensions["model_fold"][1]},
+            {"metric": metric, "method": "item_fold", "estimate": estimate,
+             "lower": dimensions["item_fold"][0], "upper": dimensions["item_fold"][1]},
+            {"metric": metric, "method": "conservative_fold", "estimate": estimate,
+             "lower": min(dimensions["model_fold"][0], dimensions["item_fold"][0]),
+             "upper": max(dimensions["model_fold"][1], dimensions["item_fold"][1])},
+        ])
+    return metrics, judge_benchmark, fold_metrics, pd.DataFrame(uncertainty)
+
+
+def fit_fold(
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    dictionary: pd.DataFrame,
+    config: AnalysisConfig,
+) -> tuple[FitResult, pd.DataFrame, dict[str, object]]:
+    """Prepare, tune once, and fit one complete outer-fold variant."""
+    config = config.validate()
+    prepared_train, prepared_test, prepared_dictionary, provenance = prepare_features(
+        train, test, dictionary, config.feature_space, config,
+    )
+    features = prepared_dictionary.feature.astype(str).tolist()
+    frozen, tuning = tune_sparse(prepared_train, features, config.penalty, config)
+    result = fit_sparse(
+        prepared_train, prepared_test, features, config.penalty,
+        frozen, config, tuning,
+    )
+    return result, prepared_dictionary, provenance | {
+        "frozen_hyperparameters": frozen,
+    }
+
+
 def _write_result(
     result: FitResult,
     train: pd.DataFrame,
     test: pd.DataFrame,
     config: AnalysisConfig,
     *,
-    existing_job: bool = False,
+    prepared_dictionary: pd.DataFrame,
+    provenance: dict[str, object],
 ) -> None:
     output = config.fit_dir / result.backend / result.fold
-    if output.exists() and (not existing_job or any((output / name).exists() for name in _COMPLETED_ARTIFACTS)):
+    if output.exists():
         raise FileExistsError(f"refusing to overwrite {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(mkdtemp(prefix=f".{result.fold}-", dir=output.parent))
-    manifest = {
-        "state": "completed",
-        "backend": result.backend, "fold": result.fold,
-        "train_rows": len(train), "test_rows": len(test),
-        "source_hf_repo": config.source_hf_repo,
-        "source_hf_revision": config.source_hf_revision,
-        "source_status": "resolved" if config.source_hf_revision else "unresolved/test-only",
-        "settings": _manifest_settings(config),
-    }
     try:
         result.predictions.to_parquet(stage / "predictions.parquet", index=False)
         result.metrics.to_csv(stage / "metrics.csv", index=False)
@@ -266,13 +433,33 @@ def _write_result(
         (stage / "diagnostics.json").write_text(
             json.dumps(result.diagnostics, indent=2, sort_keys=True, default=_json_default) + "\n"
         )
+        prepared_dictionary.to_parquet(stage / "feature-dictionary.parquet", index=False)
+        loadings = provenance["loadings"]
+        variance = provenance["explained_variance"]
+        assert isinstance(loadings, pd.DataFrame) and isinstance(variance, pd.DataFrame)
+        loadings.to_csv(stage / "loadings.csv", index=False)
+        variance.to_csv(stage / "explained-variance.csv", index=False)
+        json_provenance = {
+            key: value for key, value in provenance.items()
+            if key not in {"loadings", "explained_variance"}
+        }
+        (stage / "feature-provenance.json").write_text(
+            json.dumps(json_provenance, indent=2, sort_keys=True, default=_json_default) + "\n"
+        )
+        manifest = {
+            "state": "completed",
+            "backend": result.backend, "fold": result.fold,
+            "train_rows": len(train), "test_rows": len(test),
+            "source_hf_repo": config.source_hf_repo,
+            "source_hf_revision": config.source_hf_revision,
+            "source_status": "resolved" if config.source_hf_revision else "unresolved/test-only",
+            "settings": _manifest_settings(config),
+            "artifact_sha256": {
+                path.name: _file_sha256(path) for path in stage.iterdir()
+            },
+        }
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-        if existing_job:
-            for path in stage.iterdir():
-                os.replace(path, output / path.name)
-            stage.rmdir()
-        else:
-            os.replace(stage, output)
+        os.replace(stage, output)
     except BaseException:
         for path in stage.iterdir() if stage.exists() else ():
             path.unlink()
@@ -281,77 +468,26 @@ def _write_result(
         raise
 
 
-def _prepare_hibayes(
-    fold: str,
-    train: pd.DataFrame,
-    test: pd.DataFrame,
-    selected_features: list[str],
-    tuning: pd.DataFrame,
-    config: AnalysisConfig,
-) -> None:
-    output = config.fit_dir / "hibayes" / fold
-    if output.exists():
-        raise FileExistsError(f"refusing to overwrite {output}")
-    stage = Path(mkdtemp(prefix=f".{fold}-"))
-    try:
-        train_path, test_path = stage / "train.parquet", stage / "test.parquet"
-        train.to_parquet(train_path, index=False)
-        test.to_parquet(test_path, index=False)
-        job_dir = write_hibayes_job(train_path, test_path, selected_features, fold, config)
-        pd.DataFrame({"feature": selected_features}).to_csv(job_dir / "screen-selection.csv", index=False)
-        tuning.to_csv(job_dir / "screen-tuning.csv", index=False)
-        manifest = _prepared_manifest("hibayes", fold, config)
-        manifest["selected_features"] = selected_features
-        (job_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-    finally:
-        for path in stage.iterdir():
-            path.unlink()
-        stage.rmdir()
-
-
 def run_fits(config: AnalysisConfig = CONFIG) -> None:
-    """Run approved fits, or prepare external HiBayes jobs without sampling."""
+    """Run one configured raw/PC and L1/elastic variant across outer folds."""
     config = config.validate()
     if config.execution_mode == "prepare":
         _write_plan_descriptor(config)
         return
     _guard_execution(config)
-    rows, features = _load_rows(config)
+    rows, dictionary = _load_rows(config)
 
     for fold, train, test in _outer_folds(rows, config):
-        selected: list[str] | None = None
-        tuning: pd.DataFrame | None = None
-        if "frequentist" in config.fit_backends:
-            output = config.fit_dir / "frequentist" / fold
-            if _resume_existing(output, ARTIFACTS, config):
-                selected = pd.read_csv(output / "selection.csv").feature.tolist()
-                tuning = pd.read_csv(output / "tuning.csv")
-            else:
-                frequentist = fit_frequentist(train, test, features, config)
-                _write_result(frequentist, train, test, config)
-                selected = list(frequentist.selected_features)
-                tuning = frequentist.tuning
-        if "hibayes" in config.fit_backends:
-            if config.hibayes_action == "prepare":
-                output = config.fit_dir / "hibayes" / fold
-                if _resume_existing(output, (
-                    "config.yaml", "train.parquet", "test.parquet",
-                    "screen-selection.csv", "screen-tuning.csv", "manifest.json",
-                ), config):
-                    continue
-                if selected is None or tuning is None:
-                    selected, tuning = select_features(
-                        train, features, config, HierarchyLevels.from_training(train)
-                    )
-                _prepare_hibayes(fold, train, test, selected, tuning, config)
-            else:
-                output = config.fit_dir / "hibayes" / fold
-                if config.resume_completed_folds and all(
-                    (output / name).exists() for name in ARTIFACTS
-                ):
-                    continue
-                result = evaluate_hibayes(config.fit_dir / "hibayes" / fold, test, config)
-                _write_result(result, train, test, config, existing_job=True)
+        output = config.fit_dir / f"{config.feature_space}-{config.penalty}" / fold
+        if _resume_existing(output, ARTIFACTS, config):
+            continue
+        result, prepared_dictionary, provenance = fit_fold(
+            train, test, dictionary, config,
+        )
+        _write_result(
+            result, train, test, config,
+            prepared_dictionary=prepared_dictionary, provenance=provenance,
+        )
 
 
 def run_remote_fits(config: AnalysisConfig = CONFIG) -> None:
@@ -359,9 +495,31 @@ def run_remote_fits(config: AnalysisConfig = CONFIG) -> None:
     run_fits(replace(config, execution_mode="execute"))
 
 
-def main() -> None:
-    """Run the configuration-owned prepare-only fitting entry point."""
-    run_fits()
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("fold", "aggregate"):
+        command = commands.add_parser(name)
+        command.add_argument("--results-dir", type=Path, required=True)
+        command.add_argument("--feature-space", choices=("raw", "pc"), required=True)
+        command.add_argument("--penalty", choices=("l1", "ridge"), required=True)
+        command.add_argument("--manifest-sha256", required=True)
+        if name == "fold":
+            command.add_argument("--fold-index", type=int, required=True)
+            command.add_argument("--processed-matrix-root", type=Path, required=True)
+    args = parser.parse_args(argv)
+    config = replace(
+        CONFIG, results_dir=args.results_dir,
+        feature_space=args.feature_space, penalty=args.penalty,
+        processed_matrix_manifest_sha256=args.manifest_sha256,
+    )
+    if args.command == "fold":
+        run_fold(args.fold_index, replace(
+            config, processed_matrix_root=args.processed_matrix_root,
+            execution_mode="execute", execution_target="swc_hpc",
+        ))
+    else:
+        aggregate_fits(config)
 
 
 if __name__ == "__main__":

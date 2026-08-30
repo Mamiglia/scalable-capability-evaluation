@@ -108,6 +108,8 @@ class AnalysisConfig:
     top_capability_features: int = 20  # Rows displayed in the benchmark-score heatmap.
 
     # Frequentist and resampling fits.
+    feature_space: str = "raw"  # "raw" composites or fold-local "pc" components.
+    penalty: str = "l1"  # Sparse L1 or L2/ridge.
     fit_backends: tuple[str, ...] = ("frequentist", "hibayes")  # Joint-model backends to run.
     execution_mode: str = "prepare"  # "prepare" writes jobs only; "execute" runs an approved target.
     execution_target: str = "swc_hpc"  # Full-data fits run only on "swc_hpc" or "runpod".
@@ -201,12 +203,12 @@ class AnalysisConfig:
     @property
     def lesion_dir(self) -> Path:
         """Directory for paired held-out feature-lesion results."""
-        return self.results_dir / "lesions"
+        return self.results_dir / "lesions" / f"{self.feature_space}-{self.penalty}"
 
     @property
     def model_figure_dir(self) -> Path:
         """Directory for figures derived from saved fit and lesion artifacts."""
-        return self.figure_dir / "models"
+        return self.figure_dir / "models" / f"{self.feature_space}-{self.penalty}"
 
     def validate(self) -> Self:
         """Validate editable options early and return this immutable config."""
@@ -277,6 +279,10 @@ class AnalysisConfig:
             raise ValueError("support_splits cannot be empty")
         if not self.fit_backends or not set(self.fit_backends) <= {"frequentist", "hibayes"}:
             raise ValueError("fit_backends must contain only 'frequentist' or 'hibayes'")
+        if self.feature_space not in {"raw", "pc"}:
+            raise ValueError("feature_space must be 'raw' or 'pc'")
+        if self.penalty not in {"l1", "ridge"}:
+            raise ValueError("penalty must be 'l1' or 'ridge'")
         if self.execution_mode not in {"prepare", "execute"}:
             raise ValueError("execution_mode must be 'prepare' or 'execute'")
         if self.execution_target not in {"swc_hpc", "runpod", "local_test"}:
