@@ -1,6 +1,8 @@
 from pathlib import Path
 from runpy import run_path
 
+import json
+
 import pandas as pd
 
 
@@ -10,6 +12,8 @@ eligible_models = module["eligible_models"]
 canonical_anchor_models = module["canonical_anchor_models"]
 stable_items = module["stable_items"]
 choose_pairs = module["choose_pairs"]
+coverage_blocks = module["coverage_blocks"]
+pair_items = module["pair_items"]
 
 
 def test_anchor_is_eligible_when_older_than_target_or_judge():
@@ -39,3 +43,48 @@ def test_target_truth_is_not_an_anchor():
                 "frontier": "2024-01-01", "judge": "2024-01-01"}
     anchors = canonical_anchor_models(["a", "b", "frontier"], "frontier", "judge", releases)
     assert anchors == ["a", "b"]
+
+
+def test_coverage_uses_q1_verdicts_and_rejects_zero_item_topups():
+    config = {"releases": {"target": "2024-01-01", "judge": "2025-01-01",
+                           "q1-anchor": "2023-01-01", "q2-only": "2023-01-01",
+                           "zero-item": "2023-01-01"},
+              "candidates": ["target"], "judges": {"checkpoint": ["judge"]},
+              "desired_direct_anchors": 3, "minimum_anchors": 3}
+    quartiles = pd.DataFrame({"bench": ["b", "b"], "item": ["q1", "q2"],
+                              "item_quartile": [1, 2]})
+    rollouts = pd.DataFrame({
+        "bench": ["b"] * 8,
+        "model": ["target", "target", "q1-anchor", "q1-anchor", "q2-only", "q2-only", "zero-item", "zero-item"],
+        "item": ["q1", "q2"] * 4,
+        "correct": [True, True, True, True, True, True, False, True],
+        "is_canonical": [True] * 8,
+    })
+    verdicts = pd.DataFrame({"bench": ["b", "b"], "judge": ["judge", "judge"],
+                             "item": ["q1", "q2"], "model_left": ["target", "target"],
+                             "model_right": ["q1-anchor", "q2-only"], "pick_left": [True, True]})
+    block = coverage_blocks(config, rollouts, verdicts, quartiles).iloc[0]
+    assert json.loads(block.direct_anchors) == ["q1-anchor"]
+    assert "q2-only" not in json.loads(block.connected_anchors)
+    assert "zero-item" not in json.loads(block.recommended_anchors)
+    assert block.status == "needs_historical_backfill"
+
+
+def test_pair_items_require_both_models_correct_on_q1():
+    blocks = pd.DataFrame({"bench": ["b"], "judge": ["judge"], "target": ["target"],
+                           "recommended_anchors": [json.dumps(["anchor"])]})
+    rollouts = pd.DataFrame({"bench": ["b"] * 4, "model": ["target", "target", "anchor", "anchor"],
+                             "item": ["q1", "q2", "q1", "q2"],
+                             "correct": [True, True, True, False], "is_canonical": [True] * 4,
+                             "item_quartile": [1, 2, 1, 2]})
+    selected = pair_items(blocks, rollouts, pd.DataFrame(), limit=8)
+    assert selected.item.tolist() == ["q1"]
+
+
+def test_pair_items_reject_item_with_any_incorrect_duplicate_rollout():
+    blocks = pd.DataFrame({"bench": ["b"], "judge": ["judge"], "target": ["target"],
+                           "recommended_anchors": [json.dumps(["anchor"])]})
+    rollouts = pd.DataFrame({"bench": ["b"] * 3, "model": ["target", "target", "anchor"],
+                             "item": ["q1"] * 3, "correct": [True, False, True],
+                             "is_canonical": [True] * 3, "item_quartile": [1] * 3})
+    assert pair_items(blocks, rollouts, pd.DataFrame(), limit=8).empty

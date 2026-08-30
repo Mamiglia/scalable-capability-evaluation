@@ -81,15 +81,29 @@ def _names(value: list[str]) -> str:
     return json.dumps(sorted(value))
 
 
+def _joint_correct_items(rollouts: pd.DataFrame, bench: str, target: str,
+                         opponent: str) -> set[str]:
+    rows = rollouts[rollouts.bench == bench]
+    def correct_items(model: str) -> set[str]:
+        return set(rows[rows.model == model].groupby("item").correct.all().loc[lambda x: x].index.astype(str))
+    return correct_items(target) & correct_items(opponent)
+
+
 def coverage_blocks(config: dict, rollouts: pd.DataFrame, verdicts: pd.DataFrame,
                     quartiles: pd.DataFrame) -> pd.DataFrame:
     releases = config["releases"]
     canonical = sorted(rollouts.loc[rollouts.is_canonical, "model"].dropna().unique())
     targets = config["candidates"]
     judges = [judge.split("/")[-1] for group in config["judges"].values() for judge in group]
-    valid_items = set(quartiles.item.astype(str))
-    verdicts = verdicts[verdicts.item.astype(str).isin(valid_items)].copy()
-    accuracy = rollouts[rollouts.item.astype(str).isin(valid_items)].groupby(
+    q1 = quartiles[quartiles.item_quartile == 1][["bench", "item"]].copy()
+    q1["item"] = q1.item.astype(str)
+    verdicts = verdicts.copy()
+    verdicts["item"] = verdicts.item.astype(str)
+    verdicts = verdicts.merge(q1, on=["bench", "item"], how="inner")
+    q1_rollouts = rollouts.copy()
+    q1_rollouts["item"] = q1_rollouts.item.astype(str)
+    q1_rollouts = q1_rollouts.merge(q1, on=["bench", "item"], how="inner")
+    accuracy = q1_rollouts.groupby(
         ["bench", "model"]).correct.mean().to_dict()
     rows = []
     for bench in sorted(quartiles.bench.unique()):
@@ -117,7 +131,8 @@ def coverage_blocks(config: dict, rollouts: pd.DataFrame, verdicts: pd.DataFrame
                                            "hard_accuracy": [accuracy.get((bench, anchor), float("nan"))
                                                              for anchor in anchors if anchor != target]})
                 recommended = choose_pairs(existing, candidates, config["desired_direct_anchors"])
-                recommendations = recommended.opponent.tolist()
+                recommendations = [opponent for opponent in recommended.opponent
+                                   if _joint_correct_items(q1_rollouts, bench, target, opponent)]
                 attainable = len(set(direct) | set(recommendations))
                 accuracies = [accuracy.get((bench, model)) for model in connected]
                 accuracies = [value for value in accuracies if pd.notna(value)]
@@ -154,11 +169,10 @@ def pair_items(blocks: pd.DataFrame, rollouts: pd.DataFrame, verdicts: pd.DataFr
     rows = []
     for block in blocks.itertuples(index=False):
         anchors = json.loads(block.recommended_anchors)
-        bench = rollouts[rollouts.bench == block.bench]
+        bench = rollouts[(rollouts.bench == block.bench)
+                         & (rollouts.item_quartile == 1)]
         for opponent in anchors:
-            target_items = set(bench.loc[bench.model == block.target, "item"].astype(str))
-            opponent_items = set(bench.loc[bench.model == opponent, "item"].astype(str))
-            common = target_items & opponent_items
+            common = _joint_correct_items(bench, block.bench, block.target, opponent)
             ordered = sorted(common, key=lambda item: hashlib.sha256(
                 f"{block.bench}|{block.target}|{opponent}|{item}".encode()).hexdigest())[:limit]
             rows.extend({"bench": block.bench, "judge": block.judge, "target": block.target,
@@ -204,6 +218,8 @@ def main() -> None:
     rollouts = pd.concat([canonical, frontier[~frontier_keys.isin(present)]], ignore_index=True)
     verdicts = pd.concat([pd.read_parquet(_path(path)) for path in config["verdicts"]], ignore_index=True)
     quartiles = pd.read_csv(_path(config["quartiles"]), dtype={"item": str})
+    rollouts["item"] = rollouts.item.astype(str)
+    rollouts = rollouts.merge(quartiles[["bench", "item", "item_quartile"]], on=["bench", "item"], how="inner")
     blocks = coverage_blocks(config, rollouts, verdicts, quartiles)
     items = pair_items(blocks, rollouts, verdicts, config["pair_item_cap"])
     out = _path(config["results"]) / "coverage"
