@@ -39,7 +39,7 @@ def _matrix_fixture(tmp_path: Path) -> Path:
     root.mkdir()
     features = ("common", "duplicate", "domain_only")
     pd.DataFrame([
-        {"feature": feature, "block": "surface", "source": "fixture",
+        {"feature": feature, "block": "rubric" if feature == "domain_only" else "surface", "source": "fixture",
          "transform": "none", "n_missing": 0}
         for feature in features
     ]).to_parquet(root / "feature-dictionary.parquet", index=False)
@@ -55,8 +55,11 @@ def _matrix_fixture(tmp_path: Path) -> Path:
     pair = pd.DataFrame({
         "bench": np.repeat(["a", "b", "outside"], 4),
         "judge": ["j1", "j2"] * 6,
+        "item": ["q0", "q0", "q1", "q1"] * 3,
         "pair_id": ["a1", "a1", "a2", "a2", "b1", "b1", "b2", "b2",
                     "o1", "o1", "o2", "o2"],
+        "model_left": ["m1"] * 12,
+        "model_right": ["m2"] * 12,
         "split": ["representation_train"] * 12,
         "pick_left": [1, 0] * 6,
         "d_common": [1, 1, 2, 2, -1, -1, -2, -2, -1, -1, -2, -2],
@@ -160,14 +163,15 @@ def test_build_load_write_filter_scale_and_provenance_are_one_matrix_contract(tm
     source_config = _matrix_fixture(tmp_path)
     config = AnalysisConfig(
         design_matrix_config=source_config, results_dir=tmp_path / "results",
-        feature_blocks=("surface",), benchmarks=("a", "b"),
+        feature_blocks=("surface", "rubric"), benchmarks=("a", "b"),
+        judges=("j1", "j2"),
     ).validate()
 
     outputs = build_design_matrix(config)
     provenance = outputs["composite-provenance.json"]
     assert set(outputs["pair.parquet"].bench) == {"a", "b"}
     assert outputs["feature-dictionary.parquet"][["feature", "block", "group_size"]].values.tolist() == [
-        ["composite-002", "surface", 3],
+        ["composite-002", "mixed", 3],
     ]
     assert outputs["transcript.parquet"].groupby("bench")["composite-002"].std().round(12).eq(1).all()
     digest = hashlib.sha256(json.dumps(
@@ -179,6 +183,9 @@ def test_build_load_write_filter_scale_and_provenance_are_one_matrix_contract(tm
     table, dictionary = load_features("pair", config=config.processed_matrix_config)
     assert dictionary.feature.tolist() == ["composite-002"]
     assert "d_composite-002" in table
+    fit_rows, fit_dictionary = fit._load_rows(config)
+    assert fit_dictionary[["feature", "block"]].values.tolist() == [["composite-002", "mixed"]]
+    assert "composite-002" in fit_rows
     with pytest.raises(FileExistsError):
         write_design_matrix(outputs, config.processed_matrix_dir)
 

@@ -457,6 +457,31 @@ def test_prepare_capability_fold_matches_shared_outer_roles_after_deduplication(
         pd.testing.assert_frame_equal(observed, expected)
 
 
+@pytest.mark.parametrize(
+    ("side", "model_left", "model_right"),
+    (("left", "missing", "mid"), ("right", "high", "missing")),
+)
+def test_prepare_capability_fold_rejects_missing_overall_accuracy(
+    side, model_left, model_right,
+) -> None:
+    pairs = pd.DataFrame([{
+        "bench": "b", "item": "i00", "model_left": model_left,
+        "model_right": model_right, "d_signal": 1.0,
+    }])
+    supported = model_right if side == "left" else model_left
+    responses = pd.DataFrame([{
+        "bench": "b", "model": supported, "item": "i00", "correct": 1,
+    }])
+    dictionary = pd.DataFrame({"feature": ["signal"], "block": ["surface"]})
+
+    with pytest.raises(ValueError, match=f"missing overall accuracy for {side}") as error:
+        prepare_capability_fold(
+            pairs, responses, dictionary, {model_left}, 0, _config(),
+        )
+
+    assert "{'bench': 'b', 'model': 'missing'}" in str(error.value)
+
+
 def test_capability_design_is_antisymmetric_and_coefficients_are_natural_scale() -> None:
     frame = pd.DataFrame({
         "bench": ["a", "b"], "item": ["i", "j"],

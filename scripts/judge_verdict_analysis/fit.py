@@ -154,7 +154,7 @@ def _write_plan_descriptor(config: AnalysisConfig) -> None:
 
 def _load_rows(config: AnalysisConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows, dictionary = load_features(
-        "pair", config.feature_blocks,
+        "pair", None,  # The processed matrix already embodies block selection, including mixed composites.
         features=config.regressors or None,
         splits=config.splits,
         config=config.processed_matrix_config,

@@ -170,9 +170,25 @@ def prepare_capability_fold(
     held_out_models = set(held_out_models)
     if not held_out_models:
         raise ValueError("held_out_models must contain at least one model")
-    pairs = deduplicate_feature_pairs(pairs)
-    roles = outer_roles(pairs, held_out_models, item_fold, config.item_folds)
+    pairs = deduplicate_feature_pairs(pairs).drop(columns=[
+        "accuracy_left", "accuracy_right", "accuracy_difference", "left_stronger",
+    ], errors="ignore")
     accuracies = overall_model_accuracy(responses)
+    for side in ("left", "right"):
+        model_column, accuracy_column = f"model_{side}", f"accuracy_{side}"
+        pairs = pairs.merge(
+            accuracies.rename(columns={"model": model_column, "accuracy": accuracy_column}),
+            on=["bench", model_column], how="left", validate="many_to_one",
+        )
+        missing = (pairs.loc[pairs[accuracy_column].isna(), ["bench", model_column]]
+                   .drop_duplicates().rename(columns={model_column: "model"})
+                   .sort_values(["bench", "model"]))
+        if not missing.empty:
+            raise ValueError(
+                f"missing overall accuracy for {side} benchmark/model keys: "
+                f"{missing.to_dict('records')}"
+            )
+    roles = outer_roles(pairs, held_out_models, item_fold, config.item_folds)
 
     rename = {f"d_{feature}": feature for feature in features}
     if missing := sorted(set(rename) - set(pairs)):
@@ -180,16 +196,7 @@ def prepare_capability_fold(
     fold = f"{'+'.join(sorted(held_out_models))}__item-{item_fold}"
     prepared = []
     for role in ("train", "test"):
-        output = pairs.loc[roles == role].drop(columns=[
-            "accuracy_left", "accuracy_right", "accuracy_difference", "left_stronger",
-        ], errors="ignore").copy()
-        for side in ("left", "right"):
-            target = accuracies.rename(columns={
-                "model": f"model_{side}", "accuracy": f"accuracy_{side}",
-            })
-            output = output.merge(
-                target, on=["bench", f"model_{side}"], how="inner", validate="many_to_one",
-            )
+        output = pairs.loc[roles == role].copy()
         output = output[output.accuracy_left != output.accuracy_right].copy()
         output["left_stronger"] = (output.accuracy_left > output.accuracy_right).astype(int)
         output = _drop_judge_metadata(output).rename(columns=rename).reset_index(drop=True)
