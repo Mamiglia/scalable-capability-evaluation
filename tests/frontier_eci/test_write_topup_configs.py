@@ -95,3 +95,17 @@ def test_extra_transcripts_complete_missing_manifest_pair(tmp_path):
     assert len(outputs) == 1
     assert config["transcripts"]["model-c"] == "c.eval"
     assert config["comparisons"] == [["openrouter/openai/gpt-5.2", "model-a", "model-c"]]
+
+
+def test_regeneration_removes_obsolete_pair_configs(tmp_path):
+    bases = base_configs()
+    bases[("gpqa", "gpt-5.2")]["transcripts"]["model-c"] = "c.eval"
+    first = manifest_frame().iloc[:1].copy()
+    second = first.copy()
+    second.loc[0, ["target", "opponent"]] = ["model-a", "model-c"]
+
+    stale = write_configs(first, bases, tmp_path)[0]
+    current = write_configs(second, bases, tmp_path)[0]
+
+    assert not stale.exists()
+    assert current.exists()

@@ -21,6 +21,8 @@ def write_configs(manifest: pd.DataFrame, base_configs: dict, output_root: Path,
                   *, extra_transcripts: dict | None = None) -> list[Path]:
     """Write one-pair configs with the item order frozen by ``manifest``."""
     outputs = []
+    for path in output_root.rglob("*.yaml"):
+        path.unlink()
     extra_transcripts = extra_transcripts or {}
     base_configs = {
         (bench, judge): config | {
