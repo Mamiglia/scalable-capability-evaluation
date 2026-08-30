@@ -16,6 +16,7 @@ uv.lock
 .codex
 .claude
 .superpowers/
+.worktrees/
 
 # logs
 logs/
