@@ -13,7 +13,7 @@ from .build_dm import build_design_matrix, write_design_matrix
 from .config import AnalysisConfig, CONFIG
 from .data import load_features
 from .fit_common import FitResult, prepare_features
-from .fit_frequentist import fit_sparse
+from .fit_frequentist import JUDGE_TASK, fit_sparse
 from .hierarchy import HierarchyLevels, hierarchical_design, outer_roles
 from .lesioning import (
     Specification,
@@ -248,6 +248,9 @@ def test_pc_basis_is_fitted_without_outer_test_rows() -> None:
 
 
 def test_outer_fold_uses_shared_preparation_and_sparse_fit_for_both_axes(tmp_path: Path) -> None:
+    assert JUDGE_TASK.outcome == "pick_left"
+    assert JUDGE_TASK.group_columns == ("bench", "item")
+
     train, test, features, config = _fit_rows()
     config = replace(config, results_dir=tmp_path / "results")
     dictionary = pd.DataFrame({"feature": features, "block": "surface"})
