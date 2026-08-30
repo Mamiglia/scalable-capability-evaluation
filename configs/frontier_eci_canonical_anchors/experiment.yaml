@@ -1,0 +1,12 @@
+base_experiment: configs/frontier_eci/experiment.yaml
+quartiles: configs/frontier_eci/item_quartiles.csv
+canonical_identity: judge_results/frontier/eci-semiannual/canonical-source/identity.parquet
+frontier_rollouts: judge_results/frontier/eci-semiannual/new-tables/rollouts.parquet
+verdicts:
+  - judge_results/frontier/eci-semiannual/hf/verdicts.parquet
+  - judge_results/frontier/eci-semiannual/new-tables/verdicts.parquet
+pair_item_cap: 8
+minimum_anchors: 4
+desired_direct_anchors: 6
+historical_backfill: []
+results: judge_results/frontier/eci-semiannual-canonical-anchors
