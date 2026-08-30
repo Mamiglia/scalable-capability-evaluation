@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 import yaml
 
-from . import fit
+from . import fit, lesioning
 from .build_dm import build_design_matrix, write_design_matrix
 from .config import AnalysisConfig, CONFIG
 from .data import load_features
@@ -227,6 +227,68 @@ def test_feature_space_and_penalty_are_independent_config_axes(monkeypatch) -> N
             CONFIG, execution_mode="execute", execution_target="swc_hpc",
         ))
 
+    fit_calls = []
+    monkeypatch.setattr(
+        fit, "run_fold", lambda fold_index, config: fit_calls.append(config),
+    )
+    fit_common = [
+        "fold", "--fold-index", "0", "--processed-matrix-root", "/matrix",
+        "--results-dir", "/results", "--penalty", "ridge",
+        "--manifest-sha256", "a" * 64,
+    ]
+    with pytest.raises(SystemExit):
+        fit.main([
+            *fit_common, "--feature-space", "pc", "--pc-basis-root", "/basis",
+        ])
+    with pytest.raises(SystemExit):
+        fit.main([
+            *fit_common, "--feature-space", "pc", "--pc-basis-root", "/basis",
+            "--pc-components", "0",
+        ])
+    fit.main([
+        *fit_common, "--feature-space", "pc", "--pc-basis-root", "/basis",
+        "--pc-components", "2",
+    ])
+    assert fit_calls[-1].fit_pca_components == 2
+    assert fit._manifest_settings(fit_calls[-1])["pc_basis_root"] == "/basis"
+    with pytest.raises(SystemExit):
+        fit.main([
+            *fit_common, "--feature-space", "raw", "--pc-basis-root", "/basis",
+            "--pc-components", "2",
+        ])
+    fit.main([*fit_common, "--feature-space", "raw"])
+    assert {"fit_pca_components", "fit_pca_algorithm", "pc_basis_root"}.isdisjoint(
+        fit._manifest_settings(fit_calls[-1])
+    )
+
+    lesion_calls = []
+    monkeypatch.setattr(
+        lesioning, "prepare_fold",
+        lambda fold_index, config: lesion_calls.append(config),
+    )
+    lesion_common = [
+        "prepare", "--fold-index", "0", "--processed-matrix-root", "/matrix",
+        "--results-dir", "/results", "--penalty", "ridge",
+        "--manifest-sha256", "a" * 64,
+    ]
+    with pytest.raises(SystemExit):
+        lesioning.main([
+            *lesion_common, "--feature-space", "pc", "--pc-basis-root", "/basis",
+        ])
+    lesioning.main([
+        *lesion_common, "--feature-space", "pc", "--pc-basis-root", "/basis",
+        "--pc-components", "2",
+    ])
+    assert lesion_calls[-1].fit_pca_components == 2
+    with pytest.raises(SystemExit):
+        lesioning.main([
+            *lesion_common, "--feature-space", "raw", "--pc-components", "2",
+        ])
+    lesioning.main([*lesion_common, "--feature-space", "raw"])
+    assert {"fit_pca_components", "fit_pca_algorithm", "pc_basis_root"}.isdisjoint(
+        lesioning._config_settings(lesion_calls[-1])
+    )
+
 
 def test_outer_folds_and_hierarchy_keep_only_item_intercepts() -> None:
     roles = pd.DataFrame({
@@ -280,6 +342,27 @@ def test_pc_basis_is_loaded_once_and_shared_across_outer_folds(tmp_path: Path) -
     np.testing.assert_allclose(prepared_train.pc_001, train.f0)
     np.testing.assert_allclose(prepared_train.pc_002, 0.6 * train.f1 + 0.8 * train.f2)
 
+    variance_path = config.pc_basis_root / "explained-variance.csv"
+    variance = pd.read_csv(variance_path)
+    variance.drop(columns="singular_value").to_csv(variance_path, index=False)
+    with pytest.raises(ValueError, match="schema"):
+        prepare_features(train, test, dictionary, "pc", config)
+    pd.concat([variance, variance.iloc[[2]]], ignore_index=True).to_csv(
+        variance_path, index=False,
+    )
+    with pytest.raises(ValueError, match="duplicate component"):
+        prepare_features(train, test, dictionary, "pc", config)
+    invalid = variance.copy()
+    invalid.loc[2, "explained_variance"] = np.inf
+    invalid.to_csv(variance_path, index=False)
+    with pytest.raises(ValueError, match="finite numeric"):
+        prepare_features(train, test, dictionary, "pc", config)
+    inconsistent = variance.copy()
+    inconsistent.loc[0, "component"] = "pc_missing"
+    inconsistent.to_csv(variance_path, index=False)
+    with pytest.raises(ValueError, match="selected components"):
+        prepare_features(train, test, dictionary, "pc", config)
+
 
 def test_outer_fold_uses_shared_preparation_and_sparse_fit_for_both_axes(tmp_path: Path) -> None:
     assert JUDGE_TASK.outcome == "pick_left"
@@ -315,14 +398,26 @@ def test_outer_fold_uses_shared_preparation_and_sparse_fit_for_both_axes(tmp_pat
         assert prepared_dictionary.feature.tolist() == (
             features if feature_space == "raw" else ["pc_001", "pc_002"]
         )
+        extra_manifest = (
+            {"source_paths": {"fixture": "/fixture"}, "source_sha256": {"fixture": "a" * 64}}
+            if feature_space == "pc" else None
+        )
         fit._write_result(
             result, train, test, variant,
             prepared_dictionary=prepared_dictionary, provenance=provenance,
+            manifest_provenance=extra_manifest,
         )
         output = variant.fit_dir / result.backend / result.fold
         manifest = json.loads((output / "manifest.json").read_text())
         if feature_space == "pc":
             assert manifest["settings"]["pc_basis_root"] == str(variant.pc_basis_root)
+            assert manifest["source_paths"] == {"fixture": "/fixture"}
+            assert manifest["source_sha256"] == {"fixture": "a" * 64}
+        else:
+            assert "source_paths" not in manifest and "source_sha256" not in manifest
+            assert {"fit_pca_components", "fit_pca_algorithm", "pc_basis_root"}.isdisjoint(
+                manifest["settings"]
+            )
         assert set(manifest["artifact_sha256"]) == {
             path.name for path in output.iterdir() if path.name != "manifest.json"
         }

@@ -5,8 +5,14 @@ results_dir=${2:?missing RESULTS_DIR}
 feature_space=${3:?missing raw|pc}
 penalty=${4:?missing l1|ridge}
 pc_basis_root=${5:-}
-pc_components=${6:-30}
+pc_components=${6:-}
 repo=${JV_CODE_DIR:?set JV_CODE_DIR}
+if [[ $feature_space == pc ]]; then
+  [[ $pc_components =~ ^[1-9][0-9]*$ ]] || { echo "PC_COMPONENTS must be explicit and positive" >&2; exit 2; }
+elif [[ -n $pc_basis_root || -n $pc_components ]]; then
+  echo "PC arguments require feature space pc" >&2
+  exit 2
+fi
 fold_root="$results_dir/lesions/$feature_space-$penalty/folds"
 first=$(find "$fold_root" -name run-specifications.csv -type f | sort | head -1)
 [[ -n $first ]] || { echo "no prepared lesion folds" >&2; exit 2; }

@@ -3,6 +3,7 @@
 import argparse
 from dataclasses import replace
 from pathlib import Path
+import re
 
 import numpy as np
 import pandas as pd
@@ -22,6 +23,7 @@ from scripts.judge_verdict_analysis.fit_frequentist import (
 )
 from scripts.judge_verdict_analysis.hierarchy import outer_roles
 
+from .data import _sha256
 from .preprocessing import _model_item_rates, deduplicate_feature_pairs
 
 
@@ -79,6 +81,9 @@ CAPABILITY_TASK = SparseTask(
 
 def overall_model_accuracy(responses: pd.DataFrame) -> pd.DataFrame:
     """Return equal-item canonical accuracy for every benchmark and model."""
+    required = {"bench", "model", "item", "correct", "is_canonical"}
+    if missing := required - set(responses):
+        raise ValueError(f"response table missing columns: {sorted(missing)}")
     return (_model_item_rates(responses)
             .groupby(["bench", "model"], as_index=False, sort=False).correct_rate.mean()
             .rename(columns={"correct_rate": "accuracy"}))
@@ -166,12 +171,28 @@ def _positive_int(value: str) -> int:
     return number
 
 
+def _sha256_arg(value: str) -> str:
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+        raise argparse.ArgumentTypeError("must be a 64-character SHA-256")
+    return value.lower()
+
+
+def _verify_sha256(path: Path, expected: str) -> None:
+    if not path.is_file():
+        raise ValueError(f"missing pinned input: {path}")
+    actual = _sha256(path)
+    if actual != expected:
+        raise ValueError(f"SHA-256 mismatch for {path}: expected {expected}, found {actual}")
+
+
 def fit_fold(
     pairs: pd.DataFrame,
     responses: pd.DataFrame,
     dictionary: pd.DataFrame,
     fold_index: int,
     config: AnalysisConfig = CONFIG,
+    *,
+    manifest_provenance: dict[str, object] | None = None,
 ) -> Path:
     """Fit and write one configured model-by-item capability fold."""
     config = config.validate()
@@ -205,6 +226,7 @@ def fit_fold(
         result, train, test, config,
         prepared_dictionary=prepared_dictionary,
         provenance=provenance | {"frozen_hyperparameters": frozen},
+        manifest_provenance=manifest_provenance,
     )
     return config.fit_dir / result.backend / result.fold
 
@@ -212,8 +234,9 @@ def fit_fold(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matrix", type=Path, required=True)
-    parser.add_argument("--matrix-manifest-sha256", required=True)
+    parser.add_argument("--matrix-manifest-sha256", type=_sha256_arg, required=True)
     parser.add_argument("--responses", type=Path, required=True)
+    parser.add_argument("--responses-sha256", type=_sha256_arg, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--fold-index", type=int, required=True)
     parser.add_argument("--feature-space", choices=("raw", "pc"), required=True)
@@ -221,20 +244,58 @@ def main(argv: list[str] | None = None) -> None:
                         help="L1 or ridge (L2)")
     parser.add_argument("--max-iter", type=_positive_int, default=20_000)
     parser.add_argument("--pc-basis-root", type=Path)
-    parser.add_argument("--pc-components", type=_positive_int, default=30)
+    parser.add_argument("--pc-components", type=_positive_int)
+    parser.add_argument("--pc-loadings-sha256", type=_sha256_arg)
+    parser.add_argument("--pc-explained-variance-sha256", type=_sha256_arg)
     args = parser.parse_args(argv)
-    if args.feature_space == "pc" and args.pc_basis_root is None:
-        parser.error("--pc-basis-root is required for PC features")
+    pc_arguments = {
+        "--pc-basis-root": args.pc_basis_root,
+        "--pc-components": args.pc_components,
+        "--pc-loadings-sha256": args.pc_loadings_sha256,
+        "--pc-explained-variance-sha256": args.pc_explained_variance_sha256,
+    }
+    if args.feature_space == "pc":
+        if missing := [name for name, value in pc_arguments.items() if value is None]:
+            parser.error(f"{', '.join(missing)} required for PC features")
+    elif any(value is not None for value in pc_arguments.values()):
+        parser.error("PC-only arguments require --feature-space pc")
     config = replace(
         CONFIG, processed_matrix_root=args.matrix, results_dir=args.output,
         processed_matrix_manifest_sha256=args.matrix_manifest_sha256,
         feature_space=args.feature_space, penalty=args.penalty, glm_max_iter=args.max_iter,
-        pc_basis_root=args.pc_basis_root, fit_pca_components=args.pc_components,
         execution_mode="execute", execution_target="swc_hpc",
     )
+    if args.feature_space == "pc":
+        config = replace(
+            config, pc_basis_root=args.pc_basis_root,
+            fit_pca_components=args.pc_components,
+        )
     _guard_execution(config)
+    _verify_sha256(args.responses, args.responses_sha256)
+    source_paths = {"responses": str(args.responses)}
+    source_sha256 = {"responses": args.responses_sha256}
+    if args.feature_space == "pc":
+        loadings = args.pc_basis_root / "loadings.parquet"
+        variance = args.pc_basis_root / "explained-variance.csv"
+        _verify_sha256(loadings, args.pc_loadings_sha256)
+        _verify_sha256(variance, args.pc_explained_variance_sha256)
+        source_paths.update({
+            "pc_basis": str(args.pc_basis_root),
+            "pc_loadings": str(loadings),
+            "pc_explained_variance": str(variance),
+        })
+        source_sha256.update({
+            "pc_loadings": args.pc_loadings_sha256,
+            "pc_explained_variance": args.pc_explained_variance_sha256,
+        })
     pairs, dictionary = _load_rows(config)
-    fit_fold(pairs, pd.read_parquet(args.responses), dictionary, args.fold_index, config)
+    fit_fold(
+        pairs, pd.read_parquet(args.responses), dictionary, args.fold_index, config,
+        manifest_provenance={
+            "source_paths": source_paths,
+            "source_sha256": source_sha256,
+        },
+    )
 
 
 if __name__ == "__main__":

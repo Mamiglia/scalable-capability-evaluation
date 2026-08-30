@@ -1,4 +1,6 @@
 from dataclasses import replace
+import hashlib
+import json
 from pathlib import Path
 
 import numpy as np
@@ -71,6 +73,10 @@ def _pc_basis(tmp_path: Path) -> Path:
     return root
 
 
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _config(tmp_path: Path, feature_space: str = "raw", penalty: str = "ridge"):
     return replace(
         CONFIG, results_dir=tmp_path, benchmarks=("b",), judges=("j0", "j1"),
@@ -96,6 +102,9 @@ def test_overall_accuracy_is_canonical_and_equal_item_weighted() -> None:
         {"bench": "b", "model": "a", "accuracy": 0.5},
         {"bench": "b", "model": "b", "accuracy": 1.0},
     ]
+    for column in ("bench", "model", "item", "correct", "is_canonical"):
+        with pytest.raises(ValueError, match="response table missing columns"):
+            overall_model_accuracy(responses.drop(columns=column))
 
 
 def test_preparation_deduplicates_judges_checks_support_and_uses_shared_roles(tmp_path) -> None:
@@ -152,13 +161,38 @@ def test_fit_fold_runs_every_supported_variant(tmp_path, feature_space, penalty)
         "feature": ["signal", "other"], "block": ["surface", "surface"],
     })
     config = _config(tmp_path, feature_space, penalty)
+    manifest_provenance = {
+        "source_paths": {"responses": "/inputs/responses.parquet"},
+        "source_sha256": {"responses": "a" * 64},
+    }
+    if feature_space == "pc":
+        manifest_provenance["source_paths"].update({
+            "pc_basis": str(config.pc_basis_root),
+            "pc_loadings": str(config.pc_basis_root / "loadings.parquet"),
+            "pc_explained_variance": str(
+                config.pc_basis_root / "explained-variance.csv"
+            ),
+        })
+        manifest_provenance["source_sha256"].update({
+            "pc_loadings": "b" * 64,
+            "pc_explained_variance": "c" * 64,
+        })
 
-    output = fit_fold(_pairs(), _responses(), dictionary, 0, config)
+    output = fit_fold(
+        _pairs(), _responses(), dictionary, 0, config,
+        manifest_provenance=manifest_provenance,
+    )
 
     assert output == config.fit_dir / f"{feature_space}-{penalty}" / "model-fold-0__item-0"
     predictions = pd.read_parquet(output / "predictions.parquet")
+    manifest = json.loads((output / "manifest.json").read_text())
     assert predictions.probability.between(0, 1).all()
     assert {"judge", "pick_left"}.isdisjoint(predictions)
+    assert manifest["source_paths"] == manifest_provenance["source_paths"]
+    assert manifest["source_sha256"] == manifest_provenance["source_sha256"]
+    if feature_space == "raw":
+        assert not any(key.startswith("pc_") for key in manifest["source_paths"])
+        assert not any(key.startswith("pc_") for key in manifest["source_sha256"])
 
 
 def test_global_pc_projection_is_fixed_while_values_respond_to_rows(tmp_path) -> None:
@@ -196,53 +230,111 @@ def test_cli_passes_global_pc_settings_and_raw_needs_no_basis(
     monkeypatch, tmp_path,
 ) -> None:
     pin = "a" * 64
+    responses = tmp_path / "responses.parquet"
+    responses.write_bytes(b"pinned responses")
+    basis = _pc_basis(tmp_path)
     guarded, fitted = [], []
     monkeypatch.setattr(pairwise_wrapper, "_guard_execution", guarded.append)
     monkeypatch.setattr(
         pairwise_wrapper, "_load_rows",
         lambda config: (pd.DataFrame(), pd.DataFrame()),
     )
-    monkeypatch.setattr(pairwise_wrapper.pd, "read_parquet", lambda path: pd.DataFrame())
+    reads = []
+    monkeypatch.setattr(
+        pairwise_wrapper.pd, "read_parquet",
+        lambda path: reads.append(path) or pd.DataFrame(),
+    )
     monkeypatch.setattr(
         pairwise_wrapper, "fit_fold",
-        lambda pairs, responses, dictionary, fold_index, config: fitted.append(config),
+        lambda pairs, responses, dictionary, fold_index, config, **kwargs:
+        fitted.append((config, kwargs["manifest_provenance"])),
     )
 
     common = [
         "--matrix", str(tmp_path / "matrix"),
         "--matrix-manifest-sha256", pin,
-        "--responses", str(tmp_path / "responses.parquet"),
+        "--responses", str(responses),
+        "--responses-sha256", _sha256(responses),
         "--output", str(tmp_path / "output"),
         "--fold-index", "3",
     ]
     arguments = [
         *common, "--feature-space", "pc", "--penalty", "ridge",
-        "--pc-basis-root", str(tmp_path / "pc-basis"),
+        "--pc-basis-root", str(basis), "--pc-components", "2",
+        "--pc-loadings-sha256", _sha256(basis / "loadings.parquet"),
+        "--pc-explained-variance-sha256", _sha256(basis / "explained-variance.csv"),
     ]
     pairwise_wrapper.main(arguments)
 
     assert guarded[0].processed_matrix_manifest_sha256 == pin
     assert guarded[0].glm_max_iter == 20_000
-    assert guarded[0].pc_basis_root == tmp_path / "pc-basis"
-    assert guarded[0].fit_pca_components == 30
-    assert fitted[0] is guarded[0]
+    assert guarded[0].pc_basis_root == basis
+    assert guarded[0].fit_pca_components == 2
+    assert fitted[0][0] is guarded[0]
+    assert fitted[0][1] == {
+        "source_paths": {
+            "responses": str(responses),
+            "pc_basis": str(basis),
+            "pc_loadings": str(basis / "loadings.parquet"),
+            "pc_explained_variance": str(basis / "explained-variance.csv"),
+        },
+        "source_sha256": {
+            "responses": _sha256(responses),
+            "pc_loadings": _sha256(basis / "loadings.parquet"),
+            "pc_explained_variance": _sha256(basis / "explained-variance.csv"),
+        },
+    }
 
     pairwise_wrapper.main([
-        *arguments, "--max-iter", "25000", "--pc-components", "2",
+        *arguments, "--max-iter", "25000",
     ])
     assert guarded[1].glm_max_iter == 25_000
     assert guarded[1].fit_pca_components == 2
-    assert fitted[1] is guarded[1]
+    assert fitted[1][0] is guarded[1]
 
     with pytest.raises(SystemExit):
         pairwise_wrapper.main([*arguments, "--max-iter", "0"])
     with pytest.raises(SystemExit):
         pairwise_wrapper.main([
             *common, "--feature-space", "pc", "--penalty", "ridge",
+            "--pc-basis-root", str(basis),
         ])
+    for option in ("--pc-loadings-sha256", "--pc-explained-variance-sha256"):
+        mismatched_basis = arguments.copy()
+        mismatched_basis[mismatched_basis.index(option) + 1] = "d" * 64
+        with pytest.raises(ValueError, match="SHA-256 mismatch"):
+            pairwise_wrapper.main(mismatched_basis)
+    without_response_hash = [*common[:6], *common[8:]]
+    with pytest.raises(SystemExit):
+        pairwise_wrapper.main([
+            *without_response_hash,
+            "--feature-space", "raw", "--penalty", "ridge",
+        ])
+    mismatched_response = common.copy()
+    mismatched_response[7] = "d" * 64
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        pairwise_wrapper.main([
+            *mismatched_response,
+            "--feature-space", "raw", "--penalty", "ridge",
+        ])
+    assert reads == [responses, responses]
 
     pairwise_wrapper.main([
         *common, "--feature-space", "raw", "--penalty", "ridge",
     ])
-    assert guarded[2].pc_basis_root is None
-    assert fitted[2] is guarded[2]
+    assert guarded[-1].pc_basis_root is None
+    assert guarded[-1].fit_pca_components == pairwise_wrapper.CONFIG.fit_pca_components
+    assert fitted[-1][0] is guarded[-1]
+    assert fitted[-1][1] == {
+        "source_paths": {"responses": str(responses)},
+        "source_sha256": {"responses": _sha256(responses)},
+    }
+    with pytest.raises(SystemExit):
+        pairwise_wrapper.main([
+            *common, "--feature-space", "raw", "--penalty", "ridge",
+            "--pc-basis-root", str(basis), "--pc-components", "2",
+            "--pc-loadings-sha256", _sha256(basis / "loadings.parquet"),
+            "--pc-explained-variance-sha256", _sha256(
+                basis / "explained-variance.csv"
+            ),
+        ])
