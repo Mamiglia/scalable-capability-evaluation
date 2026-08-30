@@ -137,7 +137,7 @@ class AnalysisConfig:
     elastic_net_cs: tuple[float, ...] = (0.01, 0.1, 1.0, 10.0)  # Elastic-net inverse penalties.
     elastic_net_l1_ratios: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)  # Elastic-net L1 shares.
     selection_min_fold_share: float = 2 / 3  # Inner-fold share required to retain a base feature.
-    ridge_cs: tuple[float, ...] = (0.01, 0.1, 1.0, 10.0)  # Hierarchical-ridge inverse penalties.
+    ridge_cs: tuple[float, ...] = (0.001, 0.005, 0.01, 0.05)  # Ridge inverse penalties around the prior lower-bound choice.
     judge_deviation_penalty: float = 3.0  # Shrinkage penalty for judge slope deviations.
     benchmark_deviation_penalty: float = 3.0  # Shrinkage penalty for benchmark slope deviations.
     cell_deviation_penalty: float = 10.0  # Shrinkage penalty for judge-by-benchmark deviations.
