@@ -145,7 +145,7 @@ class AnalysisConfig:
     lesion_feature_scope: str = "all"  # Lesion every processed regressor, not elastic-net selections.
     lesion_metric: str = "log_loss"  # Primary held-out lesion metric.
     lesion_families: tuple[tuple[str, tuple[str, ...]], ...] = LESION_FAMILIES  # Named block families for grouped refits.
-    glm_max_iter: int = 3_000  # Optimiser iteration ceiling for the forthcoming logistic GLM.
+    glm_max_iter: int = 5_000  # Sparse-fit ceiling; selected/final fits must converge.
     glm_c: float = 0.1  # Inverse ridge penalty for the first frequentist GLM screen.
     bootstrap_iterations: int = 1_000  # Clustered resamples used for intervals.
     random_seed: int = 0  # Reproducible split, resampling and model seed.
