@@ -452,12 +452,16 @@ def prepare_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
         (stage / "predictions").mkdir()
         (stage / "coefficients").mkdir()
         (stage / "item-metrics").mkdir()
+        (stage / "diagnostics").mkdir()
         full_predictions.to_parquet(stage / "predictions/full.parquet", index=False)
         pd.read_csv(fit_dir / "coefficients.csv").to_parquet(
             stage / "coefficients/full.parquet", index=False,
         )
         _item_metrics(full_predictions).to_parquet(
             stage / "item-metrics/full.parquet", index=False,
+        )
+        (stage / "diagnostics/full.json").write_text(
+            (fit_dir / "diagnostics.json").read_text()
         )
         manifest_path = stage / "prepare-manifest.json"
         manifest = {
@@ -495,7 +499,8 @@ def run_specification(task_index: int, config: AnalysisConfig = CONFIG) -> Path 
         fold_dir / folder / f"{row.specification}.parquet"
         for folder in ("predictions", "coefficients", "item-metrics")
     ]
-    if all(path.is_file() for path in paths):
+    diagnostic_path = fold_dir / "diagnostics" / f"{row.specification}.json"
+    if all(path.is_file() for path in paths) and diagnostic_path.is_file():
         return paths[0]
     train = pd.read_parquet(fold_dir / "train.parquet")
     test = pd.read_parquet(fold_dir / "test.parquet")
@@ -503,10 +508,17 @@ def run_specification(task_index: int, config: AnalysisConfig = CONFIG) -> Path 
     features = json.loads(row.features)
     frozen = json.loads((fold_dir / "frozen-hyperparameters.json").read_text())
     result = fit_sparse(train, test, features, config.penalty, frozen, config)
+    if not result.diagnostics["converged"]:
+        raise RuntimeError(
+            f"lesion fit did not converge: {row.specification} {result.diagnostics}"
+        )
     predictions = result.predictions.drop(columns=all_features, errors="ignore")
     _atomic(paths[0], lambda path: predictions.to_parquet(path, index=False))
     _atomic(paths[1], lambda path: result.coefficients.to_parquet(path, index=False))
     _atomic(paths[2], lambda path: _item_metrics(predictions).to_parquet(path, index=False))
+    _atomic(diagnostic_path, lambda path: path.write_text(
+        json.dumps(result.diagnostics, indent=2, sort_keys=True) + "\n"
+    ))
     return paths[0]
 
 
@@ -525,8 +537,24 @@ def finalize_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
         for folder in ("predictions", "coefficients", "item-metrics")
         if not (fold_dir / folder / f"{specification}.parquet").is_file()
     ]
+    missing.extend(
+        str(fold_dir / "diagnostics" / f"{specification}.json")
+        for specification in table.specification
+        if not (fold_dir / "diagnostics" / f"{specification}.json").is_file()
+    )
     if missing:
         raise RuntimeError(f"lesion fold is missing {len(missing)} artifacts")
+    frozen = json.loads((fold_dir / "frozen-hyperparameters.json").read_text())
+    for specification in table.specification:
+        diagnostics = json.loads(
+            (fold_dir / "diagnostics" / f"{specification}.json").read_text()
+        )
+        if (
+            not diagnostics.get("converged")
+            or diagnostics.get("C") != frozen["C"]
+            or diagnostics.get("l1_ratio") != frozen["l1_ratio"]
+        ):
+            raise RuntimeError(f"invalid lesion diagnostics: {specification}")
     manifest_path = fold_dir / "manifest.json"
     manifest = {
         "state": "completed", "fold": _fold_names(config)[fold_index],
@@ -639,6 +667,7 @@ def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
                 "predictions": str(fold_dir / "predictions" / f"{reference}.parquet"),
                 "coefficients": str(fold_dir / "coefficients" / f"{reference}.parquet"),
                 "item_metrics": str(fold_dir / "item-metrics" / f"{reference}.parquet"),
+                "diagnostics": str(fold_dir / "diagnostics" / f"{reference}.json"),
             })
     for row in tables[0].itertuples(index=False):
         specification = Specification(
@@ -658,6 +687,7 @@ def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
                 "predictions": str(fold_dir / "predictions" / f"{row.artifact}.parquet"),
                 "coefficients": str(fold_dir / "coefficients" / f"{row.artifact}.parquet"),
                 "item_metrics": str(fold_dir / "item-metrics" / f"{row.artifact}.parquet"),
+                "diagnostics": str(fold_dir / "diagnostics" / f"{row.artifact}.json"),
             })
         combined = pd.concat(paired, ignore_index=True)
         item_deltas.append(combined)

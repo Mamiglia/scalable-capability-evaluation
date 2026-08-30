@@ -338,6 +338,7 @@ def test_feature_block_and_family_lesions_share_one_frozen_sparse_runner() -> No
     assert lesion_spec.features == ("f2",)
     assert full.diagnostics["C"] == lesion.diagnostics["C"] == plan["frozen_hyperparameters"]["C"]
     assert full.diagnostics["l1_ratio"] == lesion.diagnostics["l1_ratio"] == 1.0
+    assert full.diagnostics["converged"] and lesion.diagnostics["converged"]
     assert plan["tuning"].selected.sum() == 1
 
     pc_plan = prepare_lesions(train, test, dictionary, replace(config, feature_space="pc"))
