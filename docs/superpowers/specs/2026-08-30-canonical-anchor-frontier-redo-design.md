@@ -189,9 +189,11 @@ directory.
 
 ## Execution, cost, and completion criteria
 
-Large source-log downloads, trimming, judging, and full analysis run on SWC HPC. The laptop is
-limited to source inspection, small tests, file edits, and final figure inspection. API calls are
-resumable and run only after exact reuse coverage is computed.
+Large source-log downloads, trimming, judging, and full analysis run on a disposable RunPod
+CPU/GPU pod. The laptop is limited to source inspection, small tests, file edits, control-plane
+operations, and final figure inspection. API calls are resumable and run only after exact reuse
+coverage is computed. The pod is stopped whenever no job is active and is deleted after compact
+tables, provenance, and figures have been recovered.
 
 OpenRouter routes are hard-pinned where possible, fallbacks are disabled, data collection is
 denied, required parameters are enforced when compatible, endpoint metadata is snapshotted, and
