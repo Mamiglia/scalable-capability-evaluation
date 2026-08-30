@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=capability-sparse
 #SBATCH --partition=cpu
-#SBATCH --array=0-11%4
+#SBATCH --array=0-15%4
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=16G
 #SBATCH --time=24:00:00

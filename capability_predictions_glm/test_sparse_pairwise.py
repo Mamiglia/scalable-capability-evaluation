@@ -11,6 +11,7 @@ import pytest
 
 from scripts.judge_verdict_analysis.config import CONFIG
 from scripts.judge_verdict_analysis.fit_common import FitResult
+from scripts.judge_verdict_analysis.hierarchy import outer_roles
 
 from . import sparse_pairwise
 from .sparse_pairwise import (
@@ -23,7 +24,8 @@ from .sparse_pairwise import (
     capability_design,
     chance_predictions,
     fit_capability_cell,
-    prepare_capability_cell,
+    overall_model_accuracy,
+    prepare_capability_fold,
     run_cell,
     validate_response_source,
 )
@@ -33,8 +35,6 @@ def _responses() -> pd.DataFrame:
     models = ("low", "mid", "high", "held")
     rows = []
     for item_index in range(16):
-        # Four items per solve-rate quartile; the final quartile gives every
-        # model a distinct accuracy.
         correct = {
             "low": item_index < 12,
             "mid": item_index < 13,
@@ -51,8 +51,10 @@ def _responses() -> pd.DataFrame:
 
 def _pairs() -> pd.DataFrame:
     pairs = []
-    for item_index in range(4):
-        for left, right in (("low", "mid"), ("high", "mid"), ("held", "mid")):
+    for item_index in range(16):
+        for left, right in (
+            ("low", "mid"), ("low", "high"), ("high", "mid"), ("held", "mid"),
+        ):
             for judge in ("j1", "j2"):
                 value = {"low": -1.0, "mid": 0.0, "held": 1.0, "high": 2.0}
                 pairs.append({
@@ -170,7 +172,7 @@ def test_checkpoint_tunes_once_and_freezes_every_refit(
         prepared_dictionary, feature_space, config.lesion_families,
     )
 
-    assert output == tmp_path / f"output/all-readable/{feature_space}-{penalty}/cells/fold__Q4"
+    assert output == tmp_path / f"output/all-readable/{feature_space}-{penalty}/cells/fold__item-2"
     assert tuning_calls == 1
     assert {record["C"] for record in fit_calls} == {0.25}
     assert {record["l1_ratio"] for record in fit_calls} == {
@@ -211,6 +213,14 @@ def test_checkpoint_tunes_once_and_freezes_every_refit(
     assert {
         key: variant_settings[key] for key in expected_selection_settings
     } == expected_selection_settings
+    assert variant_settings["item_folds"] == 4
+    assert set(variant_settings) == {
+        "schema_version", "scope", "feature_space", "penalty", "feature_blocks",
+        "regressors", "splits", "judges", "benchmarks", "model_folds", "item_folds",
+        "inner_folds", "fit_n_jobs", "fit_pca_components", "fit_pca_algorithm", "l1_cs",
+        "ridge_cs", "benchmark_deviation_penalty", "glm_max_iter", "bootstrap_iterations",
+        "random_seed", "lesion_families", "matrix_source", "response_source",
+    }
     assert run_cell(
         2, "all-readable", config, responses_path, tmp_path / "output",
         response_manifest_path=manifest_path,
@@ -245,7 +255,13 @@ def test_checkpoint_tunes_once_and_freezes_every_refit(
         )
 
 
-def test_aggregate_requires_twelve_matching_hash_valid_cells(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("feature_space", "penalty"),
+    (("raw", "l1"), ("raw", "ridge"), ("pc", "l1"), ("pc", "ridge")),
+)
+def test_aggregate_requires_sixteen_matching_hash_valid_cells(
+    monkeypatch, tmp_path, feature_space, penalty,
+) -> None:
     pairs = _pairs().assign(d_other=lambda frame: -frame.d_signal)
     dictionary = pd.DataFrame({
         "feature": ["signal", "other"], "block": ["surface", "structure"],
@@ -260,10 +276,12 @@ def test_aggregate_requires_twelve_matching_hash_valid_cells(monkeypatch, tmp_pa
         processed_matrix_manifest_sha256=matrix_hash,
         resume_completed_folds=True,
         bootstrap_iterations=20,
+        feature_space=feature_space,
+        penalty=penalty,
     )
 
-    def fake_cell(pairs, responses, dictionary, model_fold, target, config):
-        fold = f"{next(iter(model_fold))}__{target}"
+    def fake_cell(pairs, responses, dictionary, held_out_models, item_fold, config):
+        fold = f"{next(iter(held_out_models))}__item-{item_fold}"
         train = pd.DataFrame({
             "bench": ["b", "b"], "item": ["i0", "i1"], "fold": [fold, fold],
             "signal": [-1.0, 1.0], "other": [1.0, -1.0], "left_stronger": [0, 1],
@@ -271,10 +289,10 @@ def test_aggregate_requires_twelve_matching_hash_valid_cells(monkeypatch, tmp_pa
         test = train.copy()
         frozen = {"C": 0.25, "l1_ratio": None}
         tuning = pd.DataFrame({"selected": [True], "C": [0.25]})
-        full = _fake_fit(train, test, ["signal", "other"], "ridge", frozen, config, tuning)
+        full = _fake_fit(train, test, ["signal", "other"], penalty, frozen, config, tuning)
         return CellResult(
             train, test, dictionary.copy(), {
-                "feature_space": "raw", "features": ["signal", "other"],
+                "feature_space": feature_space, "features": ["signal", "other"],
                 "loadings": pd.DataFrame(columns=["component", "feature", "loading"]),
                 "explained_variance": pd.DataFrame(columns=[
                     "component", "explained_variance", "explained_variance_ratio",
@@ -286,21 +304,34 @@ def test_aggregate_requires_twelve_matching_hash_valid_cells(monkeypatch, tmp_pa
     monkeypatch.setattr(sparse_pairwise, "_load_rows", lambda config: (pairs, dictionary))
     monkeypatch.setattr(sparse_pairwise, "fit_capability_cell", fake_cell)
     monkeypatch.setattr(sparse_pairwise, "fit_sparse", _fake_fit)
-    for index in range(12):
+    for index in range(16):
         run_cell(
             index, "all-readable", config, responses_path, tmp_path / "output",
             response_manifest_path=manifest_path,
         )
 
-    output = aggregate_variant("all-readable", "raw", "ridge", tmp_path / "output")
+    output = aggregate_variant(
+        "all-readable", feature_space, penalty, tmp_path / "output",
+    )
 
-    assert output == tmp_path / "output/all-readable/raw-ridge/aggregate"
-    assert {
-        "metrics.csv", "target-metrics.csv", "benchmark-metrics.csv",
+    assert output == tmp_path / f"output/all-readable/{feature_space}-{penalty}/aggregate"
+    assert {path.name for path in output.iterdir()} == {
+        "settings.json", "predictions.parquet", "item-metrics.parquet", "metrics.csv",
+        "benchmark-metrics.csv", "tuning.csv",
         "fold-metrics.csv", "paired-item-deltas.parquet", "delta-summary.csv",
         "selection.csv", "coefficients.csv", "artifact-index.csv", "manifest.json",
-    } <= {path.name for path in output.iterdir()}
-    assert len(pd.read_csv(output / "artifact-index.csv").cell.unique()) == 12
+    }
+    artifact_index = pd.read_csv(output / "artifact-index.csv")
+    expected_cells = {
+        f"fold-{model_fold}__item-{item_fold}"
+        for model_fold in range(4) for item_fold in range(4)
+    }
+    assert set(artifact_index.cell) == expected_cells
+    assert set(artifact_index) == {
+        "cell", "model_fold", "item_fold", "specification", "kind", "variable",
+        "reference", "artifact", "predictions", "coefficients", "item_metrics",
+        "cell_manifest",
+    }
     aggregate_manifest = json.loads((output / "manifest.json").read_text())
     assert aggregate_manifest["response_source"]["responses_path"] == str(responses_path)
     assert aggregate_manifest["matrix_source"]["matrix_manifest_sha256"] == matrix_hash
@@ -320,20 +351,27 @@ def test_aggregate_requires_twelve_matching_hash_valid_cells(monkeypatch, tmp_pa
             ).hexdigest(),
             "--output-root", str(tmp_path / "output"),
             "--scope", "all-readable",
-            "--feature-space", "raw",
-            "--penalty", "ridge",
+            "--feature-space", feature_space,
+            "--penalty", penalty,
         ])
     aggregate_manifest_path = output / "manifest.json"
     aggregate_manifest_text = aggregate_manifest_path.read_text()
     aggregate_manifest["matrix_source"] = {"invalid": "source"}
     aggregate_manifest_path.write_text(json.dumps(aggregate_manifest))
     with pytest.raises(RuntimeError, match="stale or corrupt"):
-        aggregate_variant("all-readable", "raw", "ridge", tmp_path / "output")
+        aggregate_variant(
+            "all-readable", feature_space, penalty, tmp_path / "output",
+        )
     aggregate_manifest_path.write_text(aggregate_manifest_text)
-    damaged = tmp_path / "output/all-readable/raw-ridge/cells/fold-0__Q2/predictions/full.parquet"
+    damaged = (
+        tmp_path / f"output/all-readable/{feature_space}-{penalty}"
+        / "cells/fold-0__item-0/predictions/full.parquet"
+    )
     damaged.write_bytes(damaged.read_bytes() + b"corrupt")
     with pytest.raises(RuntimeError, match="stale or corrupt"):
-        aggregate_variant("all-readable", "raw", "ridge", tmp_path / "output")
+        aggregate_variant(
+            "all-readable", feature_space, penalty, tmp_path / "output",
+        )
 
 
 def test_checkpoint_slurm_entrypoint_refuses_non_slurm_execution() -> None:
@@ -359,11 +397,31 @@ def test_checkpoint_slurm_entrypoint_refuses_non_slurm_execution() -> None:
     assert "skipping nonzero aggregate task" in aggregate.stdout
 
 
-def test_prepare_capability_cell_builds_judge_independent_targets() -> None:
-    dictionary = pd.DataFrame({"feature": ["signal"], "block": ["surface"]})
+def test_overall_model_accuracy_weights_benchmark_items_equally() -> None:
+    responses = pd.DataFrame([
+        {"bench": "b", "model": "a", "item": "i0", "correct": 1},
+        {"bench": "b", "model": "a", "item": "i0", "correct": 1},
+        {"bench": "b", "model": "a", "item": "i0", "correct": 1},
+        {"bench": "b", "model": "a", "item": "i1", "correct": 0},
+        {"bench": "b", "model": "b", "item": "i0", "correct": 1},
+        {"bench": "b", "model": "b", "item": "i1", "correct": 1},
+    ])
 
-    train, test, prepared_dictionary = prepare_capability_cell(
-        _pairs(), _responses(), dictionary, {"held"}, "Q4", _config(),
+    accuracy = overall_model_accuracy(responses)
+
+    assert accuracy.to_dict("records") == [
+        {"bench": "b", "model": "a", "accuracy": 0.5},
+        {"bench": "b", "model": "b", "accuracy": 1.0},
+    ]
+
+
+def test_prepare_capability_fold_uses_overall_accuracy_and_all_pair_items() -> None:
+    dictionary = pd.DataFrame({"feature": ["signal"], "block": ["surface"]})
+    responses = _responses()
+    responses.loc[(responses.model == "low") & (responses.item == "i12"), "correct"] = 1
+
+    train, test, prepared_dictionary = prepare_capability_fold(
+        _pairs(), responses, dictionary, {"held"}, 0, _config(),
     )
 
     judge_metadata = {"judge", "judge_log", "judge_sample", "judge_epoch", "pick_left"}
@@ -372,9 +430,31 @@ def test_prepare_capability_cell_builds_judge_independent_targets() -> None:
     assert train[["bench", "item", "model_left", "model_right"]].duplicated().sum() == 0
     assert set(train.left_stronger) == {0, 1}
     assert not (train.accuracy_left == train.accuracy_right).any()
+    assert not ((train.model_left == "low") & (train.model_right == "mid")).any()
     assert test.model_left.eq("held").any() or test.model_right.eq("held").any()
+    assert set(train.item) | set(test.item) == {f"i{index:02d}" for index in range(16)}
+    assert set(train) == set(test) == {
+        "bench", "item", "model_left", "model_right", "log_left", "log_right",
+        "signal", "accuracy_left", "accuracy_right", "left_stronger", "fold",
+    }
     assert "signal" in train and "d_signal" not in train
     pd.testing.assert_frame_equal(prepared_dictionary, dictionary)
+
+
+def test_prepare_capability_fold_matches_shared_outer_roles_after_deduplication() -> None:
+    dictionary = pd.DataFrame({"feature": ["signal"], "block": ["surface"]})
+    pairs = sparse_pairwise.deduplicate_feature_pairs(_pairs())
+    roles = outer_roles(pairs, {"held"}, item_fold=2, item_folds=4)
+
+    train, test, _ = prepare_capability_fold(
+        _pairs(), _responses(), dictionary, {"held"}, 2, _config(),
+    )
+
+    keys = ["bench", "item", "model_left", "model_right", "log_left", "log_right"]
+    for actual, role in ((train, "train"), (test, "test")):
+        expected = pairs.loc[roles == role, keys].sort_values(keys).reset_index(drop=True)
+        observed = actual[keys].sort_values(keys).reset_index(drop=True)
+        pd.testing.assert_frame_equal(observed, expected)
 
 
 def test_capability_design_is_antisymmetric_and_coefficients_are_natural_scale() -> None:
@@ -417,7 +497,7 @@ def test_fit_capability_cell_returns_one_prepared_frozen_fit() -> None:
     dictionary = pd.DataFrame({"feature": ["signal"], "block": ["surface"]})
 
     result = fit_capability_cell(
-        _pairs(), _responses(), dictionary, {"held"}, "Q4", _config(),
+        _pairs(), _responses(), dictionary, {"held"}, 0, _config(),
     )
 
     assert result.full.diagnostics["C"] == result.frozen_hyperparameters["C"]

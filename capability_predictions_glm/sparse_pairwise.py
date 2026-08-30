@@ -18,6 +18,7 @@ from scripts.judge_verdict_analysis.config import AnalysisConfig, CONFIG as JUDG
 from scripts.judge_verdict_analysis.fit import _guard_execution, _load_rows
 from scripts.judge_verdict_analysis.fit_common import FitResult, prepare_features
 from scripts.judge_verdict_analysis.fit_frequentist import SparseTask, fit_sparse, tune_sparse
+from scripts.judge_verdict_analysis.hierarchy import outer_roles
 from scripts.judge_verdict_analysis.lesioning import (
     Specification,
     _item_metrics,
@@ -27,13 +28,9 @@ from scripts.judge_verdict_analysis.lesioning import (
     unique_specifications,
 )
 
-from .config import TARGET_QUARTILES
 from .preprocessing import (
-    attach_pair_target,
+    _model_item_rates,
     deduplicate_feature_pairs,
-    item_quartiles,
-    quartile_accuracy,
-    split_pairs,
 )
 
 
@@ -151,36 +148,51 @@ def _drop_judge_metadata(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.drop(columns=columns)
 
 
-def prepare_capability_cell(
+def overall_model_accuracy(responses: pd.DataFrame) -> pd.DataFrame:
+    """Return equal-item source-model accuracy within each benchmark."""
+    return (_model_item_rates(responses)
+            .groupby(["bench", "model"], as_index=False, sort=False).correct_rate.mean()
+            .rename(columns={"correct_rate": "accuracy"}))
+
+
+def prepare_capability_fold(
     pairs: pd.DataFrame,
     responses: pd.DataFrame,
     dictionary: pd.DataFrame,
-    model_fold: set[str],
-    target_quartile: str,
+    held_out_models: set[str],
+    item_fold: int,
     config: AnalysisConfig,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Construct one held-out-model capability target cell from Q1 pairs."""
-    del config  # The target population is independent of fitting configuration.
+    """Construct one strict held-out-model by held-out-item capability fold."""
     features = dictionary.feature.astype(str).tolist()
     if not features or len(features) != len(set(features)):
         raise ValueError("capability features must be non-empty and unique")
-    held_out_models = set(model_fold)
+    held_out_models = set(held_out_models)
     if not held_out_models:
-        raise ValueError("model_fold must contain at least one model")
-    quartiles = item_quartiles(responses)
-    accuracies = quartile_accuracy(responses, quartiles)
-    train, test = split_pairs(pairs, quartiles, held_out_models)
-    train = attach_pair_target(deduplicate_feature_pairs(train), accuracies, target_quartile)
-    test = attach_pair_target(deduplicate_feature_pairs(test), accuracies, target_quartile)
+        raise ValueError("held_out_models must contain at least one model")
+    pairs = deduplicate_feature_pairs(pairs)
+    roles = outer_roles(pairs, held_out_models, item_fold, config.item_folds)
+    accuracies = overall_model_accuracy(responses)
 
     rename = {f"d_{feature}": feature for feature in features}
-    required = set(rename)
-    if missing := sorted(required - set(train) | required - set(test)):
+    if missing := sorted(set(rename) - set(pairs)):
         raise ValueError(f"capability pair table missing columns: {missing}")
-    fold = f"{'+'.join(sorted(held_out_models))}__{target_quartile}"
+    fold = f"{'+'.join(sorted(held_out_models))}__item-{item_fold}"
     prepared = []
-    for frame in (train, test):
-        output = _drop_judge_metadata(frame).rename(columns=rename)
+    for role in ("train", "test"):
+        output = pairs.loc[roles == role].drop(columns=[
+            "accuracy_left", "accuracy_right", "accuracy_difference", "left_stronger",
+        ], errors="ignore").copy()
+        for side in ("left", "right"):
+            target = accuracies.rename(columns={
+                "model": f"model_{side}", "accuracy": f"accuracy_{side}",
+            })
+            output = output.merge(
+                target, on=["bench", f"model_{side}"], how="inner", validate="many_to_one",
+            )
+        output = output[output.accuracy_left != output.accuracy_right].copy()
+        output["left_stronger"] = (output.accuracy_left > output.accuracy_right).astype(int)
+        output = _drop_judge_metadata(output).rename(columns=rename).reset_index(drop=True)
         output["fold"] = fold
         prepared.append(output)
     return prepared[0], prepared[1], dictionary.copy()
@@ -200,13 +212,13 @@ def fit_capability_cell(
     pairs: pd.DataFrame,
     responses: pd.DataFrame,
     dictionary: pd.DataFrame,
-    model_fold: set[str],
-    target_quartile: str,
+    held_out_models: set[str],
+    item_fold: int,
     config: AnalysisConfig,
 ) -> CellResult:
     """Prepare, tune once, and fit one complete capability cell."""
-    train, test, dictionary = prepare_capability_cell(
-        pairs, responses, dictionary, model_fold, target_quartile, config,
+    train, test, dictionary = prepare_capability_fold(
+        pairs, responses, dictionary, held_out_models, item_fold, config,
     )
     prepared_train, prepared_test, prepared_dictionary, provenance = prepare_features(
         train, test, dictionary, config.feature_space, config,
@@ -319,7 +331,7 @@ def _variant_settings(
     response_source: dict[str, str],
 ) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope": scope,
         "feature_space": config.feature_space,
         "penalty": config.penalty,
@@ -329,7 +341,7 @@ def _variant_settings(
         "judges": list(config.judges),
         "benchmarks": list(config.benchmarks),
         "model_folds": [[name, list(models)] for name, models in config.model_folds],
-        "targets": list(TARGET_QUARTILES),
+        "item_folds": config.item_folds,
         "inner_folds": config.inner_folds,
         "fit_n_jobs": config.fit_n_jobs,
         "fit_pca_components": config.fit_pca_components,
@@ -460,18 +472,18 @@ def run_cell(
     response_manifest_path: str | Path | None = None,
     response_manifest_sha256: str | None = None,
 ) -> Path:
-    """Write or validate one immutable model-fold by target checkpoint."""
+    """Write or validate one immutable model-fold by item-fold checkpoint."""
     config = config.validate()
     _guard_execution(config)
     if not scope.strip():
         raise ValueError("scope cannot be empty")
     cells = [
-        (name, set(models), target)
-        for name, models in config.model_folds for target in TARGET_QUARTILES
+        (name, set(models), item_fold)
+        for name, models in config.model_folds for item_fold in range(config.item_folds)
     ]
     if not 0 <= cell_index < len(cells):
         raise ValueError(f"cell_index must be in range({len(cells)})")
-    model_fold, held_out, target = cells[cell_index]
+    model_fold, held_out, item_fold = cells[cell_index]
     responses_path = Path(responses_path)
     response_manifest_path = (
         Path(response_manifest_path) if response_manifest_path is not None
@@ -487,8 +499,8 @@ def run_cell(
         "cell_index": cell_index,
         "model_fold": model_fold,
         "held_out_models": sorted(held_out),
-        "target_quartile": target,
-        "cell": f"{model_fold}__{target}",
+        "item_fold": item_fold,
+        "cell": f"{model_fold}__item-{item_fold}",
     }
     output = Path(output_root) / scope / f"{config.feature_space}-{config.penalty}" / "cells" / settings["cell"]
     if output.exists():
@@ -496,7 +508,7 @@ def run_cell(
         return output
 
     pairs, dictionary = _load_rows(config)
-    cell = fit_capability_cell(pairs, responses, dictionary, held_out, target, config)
+    cell = fit_capability_cell(pairs, responses, dictionary, held_out, item_fold, config)
     specifications, unique, aliases = _specification_plan(
         cell.prepared_dictionary, config.feature_space, config.lesion_families,
     )
@@ -550,7 +562,7 @@ def run_cell(
                     "l1_ratio": cell.frozen_hyperparameters["l1_ratio"],
                     "reference": "fixed-0.5",
                 }
-            predictions = predictions.assign(model_fold=model_fold, target_quartile=target)
+            predictions = predictions.assign(model_fold=model_fold, item_fold=item_fold)
             predictions.to_parquet(stage / f"predictions/{artifact}.parquet", index=False)
             coefficients.to_parquet(stage / f"coefficients/{artifact}.parquet", index=False)
             _item_metrics(predictions).to_parquet(
@@ -604,7 +616,7 @@ def _summarize_predictions(rows: pd.DataFrame, groups: list[str]) -> pd.DataFram
 
 def _paired_item_deltas(
     item_metrics: dict[str, pd.DataFrame], specifications: pd.DataFrame,
-    model_fold: str, target: str,
+    model_fold: str, item_fold: int,
 ) -> pd.DataFrame:
     rows = []
     for spec in specifications[specifications.kind != "reference"].itertuples(index=False):
@@ -613,9 +625,9 @@ def _paired_item_deltas(
         )
         rows.append(_paired_item_metrics(
             item_metrics[spec.artifact], item_metrics[spec.reference],
-            specification, model_fold, backend="capability",
-        ).drop(columns="backend").rename(columns={"fold": "model_fold"}).assign(
-            target_quartile=target,
+            specification, f"{model_fold}__item-{item_fold}", backend="capability",
+        ).drop(columns=["backend", "fold"]).assign(
+            model_fold=model_fold, item_fold=item_fold,
         ))
     return pd.concat(rows, ignore_index=True)
 
@@ -623,17 +635,12 @@ def _paired_item_deltas(
 def _delta_summary(rows: pd.DataFrame, iterations: int, seed: int) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     scoped = pd.concat([
-        rows.assign(scope="overall", group_target="all", group_benchmark="all"),
-        rows.assign(scope="target", group_target=rows.target_quartile, group_benchmark="all"),
-        rows.assign(scope="benchmark", group_target="all", group_benchmark=rows.bench),
-        rows.assign(
-            scope="target×benchmark", group_target=rows.target_quartile,
-            group_benchmark=rows.bench,
-        ),
+        rows.assign(scope="overall", group_benchmark="all"),
+        rows.assign(scope="benchmark", group_benchmark=rows.bench),
     ], ignore_index=True)
     keys = [
         "specification", "kind", "variable", "reference", "scope",
-        "group_target", "group_benchmark",
+        "group_benchmark",
     ]
     output = []
     for values, group in scoped.groupby(keys, sort=True):
@@ -661,8 +668,7 @@ def _delta_summary(rows: pd.DataFrame, iterations: int, seed: int) -> pd.DataFra
             "delta_accuracy_upper": intervals["delta_accuracy"][1],
             "delta_log_loss_lower": intervals["delta_log_loss"][0],
             "delta_log_loss_upper": intervals["delta_log_loss"][1],
-            "fold_count": group.model_fold.nunique(),
-            "target_count": group.target_quartile.nunique(),
+            "fold_count": len(group[["model_fold", "item_fold"]].drop_duplicates()),
             "item_count": len(clusters),
             "row_count": int(weights.sum()),
         })
@@ -684,7 +690,7 @@ def _validate_aggregate(
     }
     expected = {
         "settings.json", "predictions.parquet", "item-metrics.parquet", "metrics.csv",
-        "target-metrics.csv", "benchmark-metrics.csv", "fold-metrics.csv",
+        "benchmark-metrics.csv", "fold-metrics.csv",
         "paired-item-deltas.parquet", "delta-summary.csv", "selection.csv",
         "coefficients.csv", "tuning.csv", "artifact-index.csv",
     }
@@ -710,14 +716,14 @@ def aggregate_variant(
     matrix_source: dict[str, str] | None = None,
     response_source: dict[str, str] | None = None,
 ) -> Path:
-    """Aggregate exactly twelve compatible, hash-valid capability cells."""
+    """Aggregate exactly sixteen compatible, hash-valid capability cells."""
     if feature_space not in {"raw", "pc"} or penalty not in {"l1", "ridge"}:
         raise ValueError("variant must be raw|pc and l1|ridge")
     root = Path(output_root) / scope / f"{feature_space}-{penalty}"
     cells_root = root / "cells"
     cell_dirs = sorted(path for path in cells_root.iterdir() if path.is_dir()) if cells_root.is_dir() else []
-    if len(cell_dirs) != 12:
-        raise RuntimeError(f"aggregation requires exactly 12 cells, found {len(cell_dirs)}")
+    if len(cell_dirs) != 16:
+        raise RuntimeError(f"aggregation requires exactly 16 cells, found {len(cell_dirs)}")
     payloads = []
     for directory in cell_dirs:
         _validate_cell(directory)
@@ -737,22 +743,25 @@ def aggregate_variant(
     ):
         raise RuntimeError("supplied source provenance does not match cell provenance")
     expected_cells = {
-        f"{name}__{target}"
-        for name, _ in variant["model_folds"] for target in TARGET_QUARTILES
+        f"{name}__item-{item_fold}"
+        for name, _ in variant["model_folds"]
+        for item_fold in range(variant["item_folds"])
     }
     settings_rows = [payload["settings"] for payload in payloads]
     if (
-        len(expected_cells) != 12
+        len(variant["model_folds"]) != 4
+        or variant["item_folds"] != 4
+        or len(expected_cells) != 16
         or {settings["cell"] for settings in settings_rows} != expected_cells
-        or {settings["cell_index"] for settings in settings_rows} != set(range(12))
+        or {settings["cell_index"] for settings in settings_rows} != set(range(16))
         or {directory.name for directory in cell_dirs} != expected_cells
     ):
-        raise RuntimeError("capability cell inventory differs from the 12-cell plan")
+        raise RuntimeError("capability cell inventory differs from the 16-cell plan")
     cell_hashes = {
         directory.name: _sha256(directory / "manifest.json") for directory in cell_dirs
     }
     settings = {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope": scope,
         "feature_space": feature_space,
         "penalty": penalty,
@@ -772,21 +781,23 @@ def aggregate_variant(
         [], [], [], [], [], [], [],
     )
     for directory, cell_settings in zip(cell_dirs, settings_rows):
-        model_fold, target = cell_settings["model_fold"], cell_settings["target_quartile"]
+        model_fold, item_fold = cell_settings["model_fold"], cell_settings["item_fold"]
         specifications = pd.read_csv(directory / "specifications.csv", keep_default_na=False)
         item_by_artifact = {
             artifact: pd.read_parquet(directory / f"item-metrics/{artifact}.parquet")
             for artifact in specifications.artifact.unique()
         }
-        delta_rows.append(_paired_item_deltas(item_by_artifact, specifications, model_fold, target))
+        delta_rows.append(_paired_item_deltas(
+            item_by_artifact, specifications, model_fold, item_fold,
+        ))
         selection = pd.read_csv(directory / "selection.csv", keep_default_na=False)
         tuning = pd.read_csv(directory / "tuning.csv").assign(
-            model_fold=model_fold, target_quartile=target,
+            model_fold=model_fold, item_fold=item_fold,
         )
         tunings.append(tuning)
         for spec in specifications.itertuples(index=False):
             metadata = {
-                "model_fold": model_fold, "target_quartile": target,
+                "model_fold": model_fold, "item_fold": item_fold,
                 "specification": spec.specification, "kind": spec.kind,
                 "variable": spec.variable, "reference": spec.reference,
             }
@@ -821,13 +832,10 @@ def aggregate_variant(
         all_predictions.to_parquet(stage / "predictions.parquet", index=False)
         pd.concat(item_rows, ignore_index=True).to_parquet(stage / "item-metrics.parquet", index=False)
         _summarize_predictions(references, []).to_csv(stage / "metrics.csv", index=False)
-        _summarize_predictions(references, ["target_quartile"]).to_csv(
-            stage / "target-metrics.csv", index=False,
-        )
         _summarize_predictions(references, ["bench"]).rename(columns={"bench": "benchmark"}).to_csv(
             stage / "benchmark-metrics.csv", index=False,
         )
-        _summarize_predictions(references, ["model_fold"]).to_csv(
+        _summarize_predictions(references, ["model_fold", "item_fold"]).to_csv(
             stage / "fold-metrics.csv", index=False,
         )
         paired.to_parquet(stage / "paired-item-deltas.parquet", index=False)
