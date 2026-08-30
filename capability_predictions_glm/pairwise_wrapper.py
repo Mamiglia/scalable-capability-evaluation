@@ -220,11 +220,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--penalty", choices=("l1", "ridge"), required=True,
                         help="L1 or ridge (L2)")
     parser.add_argument("--max-iter", type=_positive_int, default=20_000)
+    parser.add_argument("--pc-basis-root", type=Path)
+    parser.add_argument("--pc-components", type=_positive_int, default=30)
     args = parser.parse_args(argv)
+    if args.feature_space == "pc" and args.pc_basis_root is None:
+        parser.error("--pc-basis-root is required for PC features")
     config = replace(
         CONFIG, processed_matrix_root=args.matrix, results_dir=args.output,
         processed_matrix_manifest_sha256=args.matrix_manifest_sha256,
         feature_space=args.feature_space, penalty=args.penalty, glm_max_iter=args.max_iter,
+        pc_basis_root=args.pc_basis_root, fit_pca_components=args.pc_components,
         execution_mode="execute", execution_target="swc_hpc",
     )
     _guard_execution(config)

@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from scripts.judge_verdict_analysis.config import CONFIG
+from scripts.judge_verdict_analysis.fit_common import prepare_features
 from scripts.judge_verdict_analysis.hierarchy import outer_roles
 
 from . import pairwise_wrapper
@@ -51,6 +52,25 @@ def _pairs() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _pc_basis(tmp_path: Path) -> Path:
+    root = tmp_path / "pc-basis"
+    root.mkdir(exist_ok=True)
+    pd.DataFrame([
+        {"component": "pc_001", "feature": "signal", "loading": 1.0},
+        {"component": "pc_001", "feature": "other", "loading": 0.0},
+        {"component": "pc_002", "feature": "signal", "loading": 0.0},
+        {"component": "pc_002", "feature": "other", "loading": 1.0},
+    ]).to_parquet(root / "loadings.parquet", index=False)
+    pd.DataFrame({
+        "component": ["pc_001", "pc_002"],
+        "explained_variance": [2.0, 1.0],
+        "explained_variance_ratio": [2 / 3, 1 / 3],
+        "cumulative_explained_variance_ratio": [2 / 3, 1.0],
+        "singular_value": [2.0, 1.0],
+    }).to_csv(root / "explained-variance.csv", index=False)
+    return root
+
+
 def _config(tmp_path: Path, feature_space: str = "raw", penalty: str = "ridge"):
     return replace(
         CONFIG, results_dir=tmp_path, benchmarks=("b",), judges=("j0", "j1"),
@@ -58,6 +78,7 @@ def _config(tmp_path: Path, feature_space: str = "raw", penalty: str = "ridge"):
         item_folds=4, inner_folds=2, fit_n_jobs=1, fit_pca_components=2,
         elastic_net_cs=(1.0,), ridge_cs=(1.0,), glm_max_iter=1_000,
         feature_space=feature_space, penalty=penalty, execution_mode="prepare",
+        pc_basis_root=_pc_basis(tmp_path) if feature_space == "pc" else None,
     )
 
 
@@ -140,7 +161,38 @@ def test_fit_fold_runs_every_supported_variant(tmp_path, feature_space, penalty)
     assert {"judge", "pick_left"}.isdisjoint(predictions)
 
 
-def test_cli_passes_manifest_pin_and_positive_max_iter_to_guard_and_fold(
+def test_global_pc_projection_is_fixed_while_values_respond_to_rows(tmp_path) -> None:
+    dictionary = pd.DataFrame({
+        "feature": ["signal", "other"], "block": ["surface", "surface"],
+    })
+    train = pd.DataFrame({"signal": [1.0, 2.0], "other": [3.0, 4.0]})
+    test = pd.DataFrame({"signal": [5.0], "other": [6.0]})
+    changed_train, changed_test = train * 10, test * -2
+    config = _config(tmp_path, "pc")
+
+    prepared_train, prepared_test, _, provenance = prepare_features(
+        train, test, dictionary, "pc", config,
+    )
+    changed_prepared_train, changed_prepared_test, _, changed_provenance = prepare_features(
+        changed_train, changed_test, dictionary, "pc", config,
+    )
+
+    pd.testing.assert_frame_equal(provenance["loadings"], changed_provenance["loadings"])
+    pd.testing.assert_frame_equal(
+        provenance["explained_variance"], changed_provenance["explained_variance"],
+    )
+    assert {
+        key: value for key, value in provenance.items()
+        if key not in {"loadings", "explained_variance"}
+    } == {
+        key: value for key, value in changed_provenance.items()
+        if key not in {"loadings", "explained_variance"}
+    }
+    assert not prepared_train.equals(changed_prepared_train)
+    assert not prepared_test.equals(changed_prepared_test)
+
+
+def test_cli_passes_global_pc_settings_and_raw_needs_no_basis(
     monkeypatch, tmp_path,
 ) -> None:
     pin = "a" * 64
@@ -156,22 +208,41 @@ def test_cli_passes_manifest_pin_and_positive_max_iter_to_guard_and_fold(
         lambda pairs, responses, dictionary, fold_index, config: fitted.append(config),
     )
 
-    arguments = [
+    common = [
         "--matrix", str(tmp_path / "matrix"),
         "--matrix-manifest-sha256", pin,
         "--responses", str(tmp_path / "responses.parquet"),
         "--output", str(tmp_path / "output"),
-        "--fold-index", "3", "--feature-space", "pc", "--penalty", "ridge",
+        "--fold-index", "3",
+    ]
+    arguments = [
+        *common, "--feature-space", "pc", "--penalty", "ridge",
+        "--pc-basis-root", str(tmp_path / "pc-basis"),
     ]
     pairwise_wrapper.main(arguments)
 
     assert guarded[0].processed_matrix_manifest_sha256 == pin
     assert guarded[0].glm_max_iter == 20_000
+    assert guarded[0].pc_basis_root == tmp_path / "pc-basis"
+    assert guarded[0].fit_pca_components == 30
     assert fitted[0] is guarded[0]
 
-    pairwise_wrapper.main([*arguments, "--max-iter", "25000"])
+    pairwise_wrapper.main([
+        *arguments, "--max-iter", "25000", "--pc-components", "2",
+    ])
     assert guarded[1].glm_max_iter == 25_000
+    assert guarded[1].fit_pca_components == 2
     assert fitted[1] is guarded[1]
 
     with pytest.raises(SystemExit):
         pairwise_wrapper.main([*arguments, "--max-iter", "0"])
+    with pytest.raises(SystemExit):
+        pairwise_wrapper.main([
+            *common, "--feature-space", "pc", "--penalty", "ridge",
+        ])
+
+    pairwise_wrapper.main([
+        *common, "--feature-space", "raw", "--penalty", "ridge",
+    ])
+    assert guarded[2].pc_basis_root is None
+    assert fitted[2] is guarded[2]
