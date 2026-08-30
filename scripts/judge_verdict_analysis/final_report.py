@@ -27,7 +27,7 @@ plt.rcParams.update({
     "font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
     "xtick.labelsize": 7, "ytick.labelsize": 7,
     "axes.linewidth": 0.8, "lines.linewidth": 1,
-    "svg.fonttype": "none",
+    "svg.fonttype": "none", "svg.hashsalt": "judge-verdict-20260831",
 })
 
 
@@ -42,7 +42,7 @@ def _save(figure, root: Path, name: str) -> None:
     output = root / "figures"
     output.mkdir(exist_ok=True)
     figure.savefig(output / f"{name}.png", dpi=300)
-    figure.savefig(output / f"{name}.svg")
+    figure.savefig(output / f"{name}.svg", metadata={"Date": None})
     plt.close(figure)
     if "<text" not in (output / f"{name}.svg").read_text():
         raise RuntimeError(f"{name}.svg does not contain editable text")
