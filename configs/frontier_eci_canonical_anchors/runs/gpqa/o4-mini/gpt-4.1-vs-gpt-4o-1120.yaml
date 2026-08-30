@@ -1,0 +1,37 @@
+log_root: logs/frontier-eci-canonical-anchors/gpqa
+system_prompt: assets/system_prompt/mcq.txt
+include_reasoning: false
+only_items:
+- recKcjTwONILZqHAX
+- recmI7EiLv72PxmYK
+- recXsuOHRBLcyenF2
+- recNFJjE5PPTqVJGv
+- recBtVK8rBVtIlXDq
+- recgI6tUQ7RLJRWGx
+- rechgQucGlrnt8KRV
+- rec2UlKqC6RFHdcro
+phase1_items: 8
+cache: false
+transcripts:
+  claude-3.7-sonnet: data/gpqa/frontier-eci/claude-3.7-sonnet/0/claude-3-7-sonnet-20250219.eval
+  claude-opus-4.6: data/gpqa/frontier-eci/claude-opus-4.6/0/claude-opus-4-6_32K.eval
+  claude-opus-4.7: data/gpqa/b0a0d9c9/claude-opus-4.7/0/2026-08-14T15-17-19-00-00_gpqa-diamond_4HT6PobhEXYjr9z7zCj89C.eval
+  claude-sonnet-4.5: data/gpqa/b0a0d9c9/claude-sonnet-4.5/0/2026-08-11T14-30-58-00-00_gpqa-diamond_2q5ksicxaEiKJhKvriJEct.eval
+  deepseek-r1-0528: data/gpqa/b0a0d9c9/deepseek-r1-0528/0/2026-08-21T09-33-10-00-00_gpqa-diamond_er69b5WxUZKX2muDcJZ5jD.eval
+  deepseek-v3.2: data/gpqa/b0a0d9c9/deepseek-v3.2/0/2026-08-19T19-29-50-00-00_gpqa-diamond_QeLSTDeesS23WkQXhrK7D8.eval
+  gemini-3-pro-preview: data/gpqa/frontier-eci/gemini-3-pro-preview/0/gemini-3-pro-preview.eval
+  gemini-3.5-flash: data/gpqa/b0a0d9c9/gemini-3.5-flash/0/2026-08-11T14-31-09-00-00_gpqa-diamond_HWFSnd2EScAHXFBnG2x3Tz.eval
+  gemma3-12b-it: data/gpqa/b0a0d9c9/gemma-3-12b-it/0/2026-08-12T14-22-19-00-00_gpqa-diamond_TVoY7XMmkaPqQ6JycP27Vv.eval
+  glm-4.6: data/gpqa/b0a0d9c9/glm-4.6/0/2026-08-13T11-02-11-00-00_gpqa-diamond_aGhTX5x8f799yPZ7geiKHr.eval
+  glm-5.2: data/gpqa/b0a0d9c9/glm-5.2/0/2026-08-11T14-31-10-00-00_gpqa-diamond_75dQtbTHvFMo9pU8G2xpRL.eval
+  gpt-4.1: data/gpqa/b0a0d9c9/gpt-4.1/0/2026-08-13T09-58-25-00-00_gpqa-diamond_4iP4ZHa5PGgenVYVByizR2.eval
+  gpt-4o-1120: data/gpqa/frontier-eci/gpt-4o-1120/0/gpt-4o-2024-11-20.eval
+  gpt-5: data/gpqa/b0a0d9c9/gpt-5/0/2026-08-11T14-31-09-00-00_gpqa-diamond_9WinP5zw8GgQXvvJgx49Nk.eval
+  kimi-k2.6: data/gpqa/b0a0d9c9/kimi-k2.6/0/2026-08-28T05-25-34+00-00_gpqa_diamond_BppMWX6eZgjcxeqzTwKc5D.eval
+  kimi-k3: data/gpqa/b0a0d9c9/kimi-k3/0/2026-08-12T14-22-20-00-00_gpqa-diamond_HG9QEEJBeoTCGpPwxNXZWX.eval
+  o3: data/gpqa/b0a0d9c9/o3/0/2026-08-11T14-31-03-00-00_gpqa-diamond_dCwsQoaEeS7WA45UyfMbJD.eval
+  qwen3-32b: data/gpqa/b0a0d9c9/qwen3-32b/0/2026-08-13T11-02-11-00-00_gpqa-diamond_8RphQCTbQjQXu6Rn3dYv8L.eval
+comparisons:
+- - openrouter/openai/o4-mini
+  - gpt-4.1
+  - gpt-4o-1120

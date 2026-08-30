@@ -1,0 +1,33 @@
+log_root: logs/frontier-eci-canonical-anchors/swe_bench_mini
+system_prompt: assets/system_prompt/default.txt
+include_reasoning: false
+only_items:
+- django__django-12050
+- django__django-9296
+- sphinx-doc__sphinx-9367
+- django__django-12155
+phase1_items: 8
+cache: false
+transcripts:
+  claude-3.7-sonnet: data/swe_bench_mini/epoch-bash-agent/claude-3.7-sonnet/0/claude-3.7-sonnet.eval
+  claude-opus-4.6: data/swe_bench_mini/epoch-bash-agent/claude-opus-4.6/0/claude-opus-4.6.eval
+  claude-opus-4.7: data/swe_bench_mini/477dc96c/claude-opus-4.7/0/2026-08-20T23-13-16-00-00_swe-bench-verified-mini_C23Xjrx4ncyHYoggcGydA3.eval
+  claude-sonnet-4.5: data/swe_bench_mini/477dc96c/claude-sonnet-4.5/0/2026-08-20T23-13-16-00-00_swe-bench-verified-mini_3c2xoQRAPfkoA8Leewu4es.eval
+  deepseek-r1-0528: data/swe_bench_mini/477dc96c/deepseek-r1-0528/0/2026-08-21T12-24-55-00-00_swe-bench-verified-mini_5kqiwTH7YMrW7sAMuyBLu4.eval
+  deepseek-v3.2: data/swe_bench_mini/477dc96c/deepseek-v3.2/0/2026-08-20T23-13-17-00-00_swe-bench-verified-mini_8DoHAifHUNNKzXEgDKsDHC.eval
+  gemini-3-pro-preview: data/swe_bench_mini/frontier-eci/gemini-3-pro-preview/0/gemini-3-pro-preview.eval
+  gemini-3.5-flash: data/swe_bench_mini/477dc96c/gemini-3.5-flash/0/2026-08-20T23-13-17-00-00_swe-bench-verified-mini_hPy8FCPmMGmJgY6fVnS268.eval
+  gemma3-12b-it: data/swe_bench_mini/477dc96c/gemma-3-12b-it/0/2026-08-21T00-22-38-00-00_swe-bench-verified-mini_VTJm5v9FHHtZazdwXNG3k3.eval
+  glm-4.6: data/swe_bench_mini/477dc96c/glm-4.6/0/2026-08-21T16-40-20-00-00_swe-bench-verified-mini_mUsS2eHmsTMm5LcKEsczXe.eval
+  glm-5.2: data/swe_bench_mini/477dc96c/glm-5.2/0/2026-08-21T17-49-34-00-00_swe-bench-verified-mini_3yPLfjEE3ZswAmPwDLS3He.eval
+  gpt-4.1: data/swe_bench_mini/477dc96c/gpt-4.1/0/2026-08-21T08-58-19-00-00_swe-bench-verified-mini_Fkt5fozx7mZYc6h8FbeSZM.eval
+  gpt-4o-1120: data/swe_bench_mini/epoch-bash-agent/gpt-4o-1120/0/gpt-4o-1120.eval
+  gpt-5: data/swe_bench_mini/477dc96c/gpt-5/0/2026-08-21T12-24-56-00-00_swe-bench-verified-mini_E52c3d7232wh8A5vSL8wZr.eval
+  kimi-k2.6: data/swe_bench_mini/477dc96c/kimi-k2.6/0/2026-08-21T04-40-13-00-00_swe-bench-verified-mini_LM6nMdwzUdzmWqn69XMYi5.eval
+  kimi-k3: data/swe_bench_mini/477dc96c/kimi-k3/0/2026-08-21T05-23-43-00-00_swe-bench-verified-mini_jsCrYwEZqwNNXuxu7xoWqK.eval
+  o3: data/swe_bench_mini/477dc96c/o3/0/2026-08-21T14-25-25-00-00_swe-bench-verified-mini_84VDAwfc386H9t6RLpU7J4.eval
+  qwen3-32b: data/swe_bench_mini/477dc96c/qwen3-32b/0/2026-08-22T23-41-24-00-00_swe-bench-verified-mini_CBpDSMerac7pBamx2dJ6An.eval
+comparisons:
+- - openrouter/google/gemini-2.5-pro
+  - gpt-4.1
+  - gpt-4o-1120
