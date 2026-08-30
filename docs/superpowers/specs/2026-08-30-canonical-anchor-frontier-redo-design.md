@@ -1,12 +1,13 @@
-# Fixed-anchor frontier judging redo
+# Canonical-anchor frontier judging redo
 
-**Status:** Approved design for a noncanonical side analysis. It does not modify the canonical
-pool, canonical verdicts, or frozen difficulty estimates.
+**Status:** Revised design awaiting written review. This is a noncanonical side analysis. It does
+not modify the canonical pool, canonical verdicts, or frozen difficulty estimates.
 
 ## Purpose
 
-Redo the quarterly-frontier analysis with a stable historical calibration panel so that missing
-early predictions and changing target-specific fits do not drive the result. The quarterly answer
+Redo the quarterly-frontier analysis using the existing canonical pool as the calibration set.
+Missing early predictions must be fixed by improving the eligible pair graph, with historical
+models added only when the canonical pool cannot identify an early block. The quarterly answer
 model frontier remains fixed across GPQA and SWE-mini. Judges see only Q1 items that both answer
 models solved correctly and predict accuracy separately on frozen Q2, Q3, and Q4.
 
@@ -22,10 +23,10 @@ Epoch-ECI baseline is required.
 
 This redo uses new side-analysis-only roots:
 
-- `configs/frontier_eci_fixed_anchors/`
-- `logs/frontier-eci-fixed-anchors/`
-- `data/<benchmark>/frontier-eci-fixed-anchors/`
-- `judge_results/frontier/eci-semiannual-fixed-anchors/`
+- `configs/frontier_eci_canonical_anchors/`
+- `logs/frontier-eci-canonical-anchors/`
+- `data/<benchmark>/frontier-eci-canonical-anchors/`
+- `judge_results/frontier/eci-semiannual-canonical-anchors/`
 
 The previous `judge_results/frontier/eci-semiannual/analysis*` figures are retained only as
 discarded provenance and are not overwritten. Frozen item quartiles from
@@ -53,24 +54,44 @@ The answer-model frontier is unchanged:
 `high` and `xhigh` answer variants remain excluded. The judges remain GPT-4o 2024-11-20,
 Gemini 2.5 Pro, GPT-5.2, o4-mini, and DeepSeek V4 Flash 0731.
 
-## Common historical anchor panel
+## Canonical anchor universe
 
-The same four answer models calibrate both benchmarks and every judge:
+The existing canonical pool is the main calibration set. A canonical model is usable as an anchor
+for a benchmark, judge, target, and hard quartile when it has:
 
-| Anchor | Release | Setting |
-|---|---:|---|
-| Claude 3.5 Sonnet 0620 | 2024-06-20 | default |
-| Claude 3.5 Sonnet 1022 | 2024-10-22 | default |
-| o3-mini | 2025-01-31 | medium |
-| Gemini 2.0 Flash 001 | 2025-02-05 | default |
+1. frozen canonical hard-quartile outcomes on that benchmark;
+2. a path to the target in that judge's eligible Q1 comparison graph; and
+3. a release date satisfying the temporal rule below.
 
-All source logs come from public Epoch benchmark artifacts. GPQA uses the Epoch multiple-choice
-protocol; SWE uses one internally consistent historical Epoch SWE scaffold. A source log from a
-different agent scaffold is not substituted merely to fill a cell.
+The target itself is always excluded. All otherwise eligible canonical models are retained; a new
+four-model panel does not replace or discard the existing pool.
 
-Each judge evaluates a counterbalanced star joining every anchor to GPT-4o 2024-11-20. Existing
-compatible star edges are reused. Only missing judge/anchor/benchmark/order cells are run. The
-existing frontier and pool edges connect later targets to that star, minimizing new API calls.
+Before paid calls, export a coverage audit for every benchmark/judge/target block: eligible
+canonical models, connected models, ability range, existing pair counts, and the exact reason for
+every exclusion. New historical source models are allowed only when a block has fewer than four
+connected canonical anchors after missing canonical-pool comparisons have been considered. Such
+models are labeled `historical_backfill` and never enter blocks where they violate the temporal
+rule. Logs from a different benchmark scaffold are not substituted merely to fill a cell.
+
+## Pair and item allocation
+
+The paid top-up prioritizes breadth of answer-model pairs over many repeated items on a few edges.
+For each underidentified block:
+
+1. Reuse every compatible existing canonical verdict.
+2. Add missing target-to-anchor or graph-bridging pairs, prioritizing anchors that widen the known
+   hard-accuracy and Q1-ability ranges.
+3. Freeze a deterministic sample of up to eight jointly-correct Q1 item IDs per new unordered
+   answer-model pair; use all available IDs when fewer than eight exist.
+4. Judge every selected item in both presentation orders and use the same selected item IDs for
+   all judges when their coverage permits.
+5. Add another pair before adding more items to a completed pair. Extra items are allowed only
+   when fewer than four reliable anchors remain or a fitted block is disconnected.
+
+Existing dense pairs remain in the provenance tables. To stop them dominating merely because they
+were judged more often, the primary Bradley-Terry objective caps each unordered answer-model pair's
+total weight at eight counterbalanced item IDs. A sensitivity fit uses all rows without this cap.
+The cap and deterministic item manifest are fixed before inspecting target errors.
 
 ## Temporal eligibility
 
@@ -82,10 +103,9 @@ models in that verdict were released no later than:
 Equivalently, a comparison model must predate the target or predate the judge. Models newer than
 both are excluded. The same rule applies to anchors used by the calibration fit.
 
-All four anchors are eligible for every target except GPT-4o judged by GPT-4o. Only two common
-anchors predate that exact checkpoint, so that one cell is reported as unidentified rather than
-filled with a two-point extrapolation. Later judges can predict GPT-4o because all four anchors
-predate those judges.
+The coverage audit, rather than an assumed common panel, determines which early cells are
+identifiable. A block with fewer than four eligible connected anchors is reported as unidentified
+unless protocol-compatible historical backfill can repair it within the approved cost limit.
 
 ## Ranking and calibration
 
@@ -93,7 +113,8 @@ For each benchmark, judge, and target:
 
 1. Fit Bradley-Terry abilities from eligible Q1 verdicts only.
 2. Exclude the target's Q2/Q3/Q4 outcomes from every fit.
-3. For each hard quartile separately, fit only the eligible members of the four-model fixed panel.
+3. For each hard quartile separately, fit the eligible, connected canonical anchors and any
+   explicitly labeled historical backfill.
 4. Predict the target from its Q1 Bradley-Terry ability.
 
 The headline calibration is a binomial logistic regression with an explicit free intercept:
@@ -101,15 +122,15 @@ The headline calibration is a binomial logistic regression with an explicit free
 `logit(p_hard) = intercept + slope * BT_ability`.
 
 The fit uses anchor success counts and quartile sizes, not unweighted percentages. There is no
-regularization, forced origin, fixed intercept, or target-dependent ceiling. The main fit is not
-allowed to add later pool models or other frontier models as calibration anchors.
+regularization, forced origin, fixed intercept, or target-dependent ceiling. Frontier targets do
+not become calibration anchors in the headline fit; the canonical pool remains the training set.
 
 ### Fit checks
 
 Every fitted judge/benchmark/quartile block must export:
 
-- intercept, slope, convergence status, anchor count, and target position relative to the anchor
-  ability range;
+- intercept, slope, convergence status, anchor identities and count, and target position relative
+  to the anchor ability range;
 - observed and fitted accuracy for every anchor;
 - raw and weighted anchor residuals;
 - held-out target residuals in a separate table.
@@ -140,10 +161,11 @@ number of successful refits and visibly marks intervals based on too few success
 ## Matched ECI baseline
 
 The dumb baseline replaces Bradley-Terry ability with the target and anchor Epoch ECI values, then
-uses the same fixed anchors, temporal eligibility, binomial-logit calibration, quartiles, target
-exclusion, uncertainty procedure, and release-time plot grammar. This makes the judge and generic
-capability-trend plots directly comparable. It does not use a target's true hard accuracy as a
-training point.
+uses the same eligible canonical anchors, temporal rule, binomial-logit calibration, quartiles,
+target exclusion, uncertainty procedure, and release-time plot grammar. Historical backfill enters
+the baseline only in the same blocks where it enters the judge fit. This makes the judge and
+generic capability-trend plots directly comparable. It does not use a target's true hard accuracy
+as a training point.
 
 ## Outputs and figure contract
 
@@ -181,7 +203,8 @@ Stop and report before exceeding that total unless the user gives new authorizat
 
 The redo is complete only when:
 
-1. the common anchor panel is present on both benchmarks for all five judges;
+1. every block has an exported canonical-anchor coverage audit and paid calls match its frozen
+   pair/item manifest;
 2. every temporally identifiable frontier cell has a prediction or an explicit validated failure;
 3. anchor-intercept validation passes for every reported headline fit;
 4. GPQA and SWE headline and ECI-baseline plots follow the figure contract;
