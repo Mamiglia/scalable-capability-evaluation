@@ -159,6 +159,13 @@ def chance_predictions(test: pd.DataFrame, features: list[str]) -> pd.DataFrame:
     return output
 
 
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return number
+
+
 def fit_fold(
     pairs: pd.DataFrame,
     responses: pd.DataFrame,
@@ -212,11 +219,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--feature-space", choices=("raw", "pc"), required=True)
     parser.add_argument("--penalty", choices=("l1", "ridge"), required=True,
                         help="L1 or ridge (L2)")
+    parser.add_argument("--max-iter", type=_positive_int, default=20_000)
     args = parser.parse_args(argv)
     config = replace(
         CONFIG, processed_matrix_root=args.matrix, results_dir=args.output,
         processed_matrix_manifest_sha256=args.matrix_manifest_sha256,
-        feature_space=args.feature_space, penalty=args.penalty,
+        feature_space=args.feature_space, penalty=args.penalty, glm_max_iter=args.max_iter,
         execution_mode="execute", execution_target="swc_hpc",
     )
     _guard_execution(config)

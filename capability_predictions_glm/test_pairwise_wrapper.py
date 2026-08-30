@@ -140,7 +140,7 @@ def test_fit_fold_runs_every_supported_variant(tmp_path, feature_space, penalty)
     assert {"judge", "pick_left"}.isdisjoint(predictions)
 
 
-def test_cli_passes_explicit_matrix_manifest_pin_to_guard_and_fold(
+def test_cli_passes_manifest_pin_and_positive_max_iter_to_guard_and_fold(
     monkeypatch, tmp_path,
 ) -> None:
     pin = "a" * 64
@@ -156,13 +156,22 @@ def test_cli_passes_explicit_matrix_manifest_pin_to_guard_and_fold(
         lambda pairs, responses, dictionary, fold_index, config: fitted.append(config),
     )
 
-    pairwise_wrapper.main([
+    arguments = [
         "--matrix", str(tmp_path / "matrix"),
         "--matrix-manifest-sha256", pin,
         "--responses", str(tmp_path / "responses.parquet"),
         "--output", str(tmp_path / "output"),
         "--fold-index", "3", "--feature-space", "pc", "--penalty", "ridge",
-    ])
+    ]
+    pairwise_wrapper.main(arguments)
 
     assert guarded[0].processed_matrix_manifest_sha256 == pin
+    assert guarded[0].glm_max_iter == 20_000
     assert fitted[0] is guarded[0]
+
+    pairwise_wrapper.main([*arguments, "--max-iter", "25000"])
+    assert guarded[1].glm_max_iter == 25_000
+    assert fitted[1] is guarded[1]
+
+    with pytest.raises(SystemExit):
+        pairwise_wrapper.main([*arguments, "--max-iter", "0"])
