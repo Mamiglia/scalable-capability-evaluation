@@ -48,8 +48,11 @@ def _pairs() -> pd.DataFrame:
                 value = {"low": -1.0, "mid": 0.0, "held": 1.0, "high": 2.0}
                 pairs.append({
                     "bench": "b", "item": f"i{item_index:02d}", "judge": judge,
+                    "judge_log": f"{judge}-log", "judge_sample": judge == "j2",
+                    "judge_epoch": 1 if judge == "j1" else 2,
                     "model_left": left, "model_right": right,
                     "log_left": left, "log_right": right,
+                    "pick_left": int(judge == "j1"),
                     "d_signal": value[left] - value[right],
                 })
     return pd.DataFrame(pairs)
@@ -72,7 +75,9 @@ def test_prepare_capability_cell_builds_judge_independent_targets() -> None:
         _pairs(), _responses(), dictionary, {"held"}, "Q4", _config(),
     )
 
-    assert "judge" not in train.columns
+    judge_metadata = {"judge", "judge_log", "judge_sample", "judge_epoch", "pick_left"}
+    assert judge_metadata.isdisjoint(train.columns)
+    assert judge_metadata.isdisjoint(test.columns)
     assert train[["bench", "item", "model_left", "model_right"]].duplicated().sum() == 0
     assert set(train.left_stronger) == {0, 1}
     assert not (train.accuracy_left == train.accuracy_right).any()
@@ -127,6 +132,9 @@ def test_fit_capability_cell_returns_one_prepared_frozen_fit() -> None:
     assert result.full.diagnostics["C"] == result.frozen_hyperparameters["C"]
     assert result.full.diagnostics["l1_ratio"] is result.frozen_hyperparameters["l1_ratio"] is None
     assert result.null.probability.eq(0.5).all()
+    judge_metadata = {"judge", "judge_log", "judge_sample", "judge_epoch", "pick_left"}
+    assert judge_metadata.isdisjoint(result.full.predictions.columns)
+    assert judge_metadata.isdisjoint(result.null.columns)
     assert result.prepared_dictionary.feature.tolist() == ["signal"]
     assert result.provenance["feature_space"] == "raw"
 

@@ -128,6 +128,14 @@ CAPABILITY_TASK = SparseTask(
 )
 
 
+def _drop_judge_metadata(frame: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        column for column in frame
+        if column == "pick_left" or column == "judge" or column.startswith("judge_")
+    ]
+    return frame.drop(columns=columns)
+
+
 def prepare_capability_cell(
     pairs: pd.DataFrame,
     responses: pd.DataFrame,
@@ -157,7 +165,7 @@ def prepare_capability_cell(
     fold = f"{'+'.join(sorted(held_out_models))}__{target_quartile}"
     prepared = []
     for frame in (train, test):
-        output = frame.rename(columns=rename).drop(columns="judge", errors="ignore")
+        output = _drop_judge_metadata(frame).rename(columns=rename)
         output["fold"] = fold
         prepared.append(output)
     return prepared[0], prepared[1], dictionary.copy()
