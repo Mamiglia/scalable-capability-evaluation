@@ -109,3 +109,15 @@ def test_regeneration_removes_obsolete_pair_configs(tmp_path):
 
     assert not stale.exists()
     assert current.exists()
+
+
+def test_failed_regeneration_preserves_existing_configs(tmp_path):
+    existing = write_configs(manifest_frame(), base_configs(), tmp_path)[0]
+    before = existing.read_text()
+    invalid = manifest_frame().iloc[:1].copy()
+    invalid.loc[0, ["target", "opponent"]] = ["model-a", "not-imported"]
+
+    with pytest.raises(ValueError, match="not-imported"):
+        write_configs(invalid, base_configs(), tmp_path)
+
+    assert existing.read_text() == before

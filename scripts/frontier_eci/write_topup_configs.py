@@ -20,9 +20,6 @@ def transcript_key(model: str, transcripts: dict) -> str:
 def write_configs(manifest: pd.DataFrame, base_configs: dict, output_root: Path,
                   *, extra_transcripts: dict | None = None) -> list[Path]:
     """Write one-pair configs with the item order frozen by ``manifest``."""
-    outputs = []
-    for path in output_root.rglob("*.yaml"):
-        path.unlink()
     extra_transcripts = extra_transcripts or {}
     base_configs = {
         (bench, judge): config | {
@@ -48,6 +45,7 @@ def write_configs(manifest: pd.DataFrame, base_configs: dict, output_root: Path,
         raise ValueError(f"unresolved manifest transcript sources: {detail}")
 
     manifest = manifest.assign(pair=pairs)
+    desired = []
     for (bench, judge, pair), rows in manifest.groupby(["bench", "judge", "pair"], sort=True):
         base = base_configs[(bench, judge)]
         judges = {comparison[0] for comparison in base["comparisons"]}
@@ -57,8 +55,7 @@ def write_configs(manifest: pd.DataFrame, base_configs: dict, output_root: Path,
         if len(items) > 8 or len(items) != len(set(items)):
             raise ValueError(f"{bench}/{judge}/{pair}: expected one to eight unique items")
         path = output_root / bench / judge / f"{pair[0]}-vs-{pair[1]}.yaml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(yaml.safe_dump({
+        text = yaml.safe_dump({
             "log_root": f"logs/frontier-eci-canonical-anchors/{bench}",
             "system_prompt": base["system_prompt"],
             "include_reasoning": False,
@@ -67,9 +64,24 @@ def write_configs(manifest: pd.DataFrame, base_configs: dict, output_root: Path,
             "cache": False,
             "transcripts": base["transcripts"],
             "comparisons": [[judges.pop(), *pair]],
-        }, sort_keys=False))
-        outputs.append(path)
-    return outputs
+        }, sort_keys=False)
+        desired.append((path, text))
+
+    temporary = []
+    try:
+        for path, text in desired:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_suffix(path.suffix + ".tmp")
+            temp.write_text(text)
+            temporary.append((path, temp))
+        for path in output_root.rglob("*.yaml"):
+            path.unlink()
+        for path, temp in temporary:
+            temp.replace(path)
+    finally:
+        for _, temp in temporary:
+            temp.unlink(missing_ok=True)
+    return [path for path, _ in desired]
 
 
 def main() -> int:
