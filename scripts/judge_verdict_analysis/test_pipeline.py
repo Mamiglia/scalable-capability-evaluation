@@ -106,6 +106,28 @@ def _fit_rows() -> tuple[pd.DataFrame, pd.DataFrame, list[str], AnalysisConfig]:
     )
 
 
+def _pc_basis(tmp_path: Path, features: list[str]) -> Path:
+    root = tmp_path / "pc-basis"
+    root.mkdir()
+    pd.DataFrame([
+        {"component": component, "feature": feature, "loading": loading}
+        for component, row in (
+            ("pc_001", (1.0, 0.0, 0.0)),
+            ("pc_002", (0.0, 0.6, 0.8)),
+            ("pc_003", (0.0, -0.8, 0.6)),
+        )
+        for feature, loading in zip(features, row)
+    ]).to_parquet(root / "loadings.parquet", index=False)
+    pd.DataFrame({
+        "component": ["pc_001", "pc_002", "pc_003"],
+        "explained_variance": [3.0, 2.0, 1.0],
+        "explained_variance_ratio": [0.5, 1 / 3, 1 / 6],
+        "cumulative_explained_variance_ratio": [0.5, 5 / 6, 1.0],
+        "singular_value": [3.0, 2.0, 1.0],
+    }).to_csv(root / "explained-variance.csv", index=False)
+    return root
+
+
 def test_grouping_is_greedy_recomputed_hierarchical_and_replayable() -> None:
     e1 = np.array([1, -1, 0, 0]) / np.sqrt(2)
     e2 = np.array([1, 1, -2, 0]) / np.sqrt(6)
@@ -231,32 +253,40 @@ def test_outer_folds_and_hierarchy_keep_only_item_intercepts() -> None:
     assert columns.loc[columns.block.str.endswith("slope"), "item"].isna().all()
 
 
-def test_pc_basis_is_fitted_without_outer_test_rows() -> None:
+def test_pc_basis_is_loaded_once_and_shared_across_outer_folds(tmp_path: Path) -> None:
     train, test, features, config = _fit_rows()
+    config = replace(config, pc_basis_root=_pc_basis(tmp_path, features))
     dictionary = pd.DataFrame({"feature": features, "block": "surface"})
-    changed = test.copy()
-    changed[features] = changed[features] * 1_000_000 + 12345
+    changed_train = train.copy()
+    changed_train[features] = changed_train[features] * 1_000_000 + 12345
 
     prepared_train, prepared_test, prepared_dictionary, provenance = prepare_features(
         train, test, dictionary, "pc", config,
     )
-    changed_train, changed_test, changed_dictionary, changed_provenance = prepare_features(
-        train, changed, dictionary, "pc", config,
+    changed_prepared_train, changed_test, changed_dictionary, changed_provenance = prepare_features(
+        changed_train, test, dictionary, "pc", config,
     )
 
-    pd.testing.assert_frame_equal(prepared_train, changed_train)
+    assert not prepared_train[["pc_001", "pc_002"]].equals(
+        changed_prepared_train[["pc_001", "pc_002"]]
+    )
+    pd.testing.assert_frame_equal(prepared_test, changed_test)
     pd.testing.assert_frame_equal(prepared_dictionary, changed_dictionary)
     pd.testing.assert_frame_equal(provenance["loadings"], changed_provenance["loadings"])
     pd.testing.assert_frame_equal(
         provenance["explained_variance"], changed_provenance["explained_variance"],
     )
-    assert prepared_dictionary.feature.tolist() == ["pc_01", "pc_02"]
-    assert not prepared_test[["pc_01", "pc_02"]].equals(changed_test[["pc_01", "pc_02"]])
+    assert prepared_dictionary.feature.tolist() == ["pc_001", "pc_002"]
+    np.testing.assert_allclose(prepared_train.pc_001, train.f0)
+    np.testing.assert_allclose(prepared_train.pc_002, 0.6 * train.f1 + 0.8 * train.f2)
 
 
 def test_outer_fold_uses_shared_preparation_and_sparse_fit_for_both_axes(tmp_path: Path) -> None:
     train, test, features, config = _fit_rows()
-    config = replace(config, results_dir=tmp_path / "results")
+    config = replace(
+        config, results_dir=tmp_path / "results",
+        pc_basis_root=_pc_basis(tmp_path, features),
+    )
     dictionary = pd.DataFrame({"feature": features, "block": "surface"})
 
     assert [field.name for field in fields(FitResult)] == [
@@ -280,7 +310,7 @@ def test_outer_fold_uses_shared_preparation_and_sparse_fit_for_both_axes(tmp_pat
             assert pd.isna(selected.l1_ratio)
             assert (result.diagnostics["sklearn_penalty"], result.diagnostics["solver"]) == ("l2", "lbfgs")
         assert prepared_dictionary.feature.tolist() == (
-            features if feature_space == "raw" else ["pc_01", "pc_02"]
+            features if feature_space == "raw" else ["pc_001", "pc_002"]
         )
         fit._write_result(
             result, train, test, variant,
@@ -288,6 +318,8 @@ def test_outer_fold_uses_shared_preparation_and_sparse_fit_for_both_axes(tmp_pat
         )
         output = variant.fit_dir / result.backend / result.fold
         manifest = json.loads((output / "manifest.json").read_text())
+        if feature_space == "pc":
+            assert manifest["settings"]["pc_basis_root"] == str(variant.pc_basis_root)
         assert set(manifest["artifact_sha256"]) == {
             path.name for path in output.iterdir() if path.name != "manifest.json"
         }
@@ -303,7 +335,7 @@ def test_outer_fold_uses_shared_preparation_and_sparse_fit_for_both_axes(tmp_pat
     assert provenance["feature_space"] == "pc"
 
 
-def test_feature_block_and_family_lesions_share_one_frozen_sparse_runner() -> None:
+def test_feature_block_and_family_lesions_share_one_frozen_sparse_runner(tmp_path: Path) -> None:
     train, test, features, config = _fit_rows()
     dictionary = pd.DataFrame({
         "feature": features,
@@ -315,6 +347,7 @@ def test_feature_block_and_family_lesions_share_one_frozen_sparse_runner() -> No
     config = replace(
         config, feature_space="raw", penalty="l1",
         lesion_families=(("annotations", ("rubric",)),),
+        pc_basis_root=_pc_basis(tmp_path, features),
     )
 
     specifications = build_specifications(dictionary, config)

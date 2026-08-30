@@ -17,11 +17,13 @@
 #     repo/scripts/judge_verdict_analysis/lesioning.sbatch summarize MATRIX_ROOT RESULTS_DIR raw l1
 set -euo pipefail
 
-mode=${1:?usage: lesioning.sbatch prepare|finalize|summarize MATRIX_ROOT RESULTS_DIR raw|pc l1|ridge}
+mode=${1:?usage: lesioning.sbatch prepare|finalize|summarize MATRIX_ROOT RESULTS_DIR raw|pc l1|ridge [PC_BASIS_ROOT] [PC_COMPONENTS]}
 matrix_root=${2:?missing MATRIX_ROOT}
 results_dir=${3:?missing RESULTS_DIR}
 feature_space=${4:?missing raw|pc}
 penalty=${5:?missing l1|ridge}
+pc_basis_root=${6:-}
+pc_components=${7:-30}
 staging=$SLURM_SUBMIT_DIR
 repo=${JV_CODE_DIR:-$staging/repo}
 python=${JV_PYTHON:-/ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge/staging/glm-ablations-20260826/venv/bin/python}
@@ -46,6 +48,10 @@ export MPLCONFIGDIR=${SLURM_TMPDIR:-/tmp}/matplotlib-$SLURM_JOB_ID
 cd "$repo"
 manifest_sha=$(sha256sum "$matrix_root/manifest.json" | cut -d' ' -f1)
 variant_args=(--feature-space "$feature_space" --penalty "$penalty" --manifest-sha256 "$manifest_sha")
+if [[ $feature_space == pc ]]; then
+  [[ -d $pc_basis_root ]] || { echo "missing global PC basis: $pc_basis_root" >&2; exit 2; }
+  variant_args+=(--pc-basis-root "$pc_basis_root" --pc-components "$pc_components")
+fi
 
 case "$mode" in
   prepare)

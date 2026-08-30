@@ -9,10 +9,12 @@
 #SBATCH --output=logs/%x-%A_%a.out
 
 set -euo pipefail
-matrix_root=${1:?usage: lesion_spec.sbatch MATRIX_ROOT RESULTS_DIR raw|pc l1|ridge}
+matrix_root=${1:?usage: lesion_spec.sbatch MATRIX_ROOT RESULTS_DIR raw|pc l1|ridge [PC_BASIS_ROOT] [PC_COMPONENTS]}
 results_dir=${2:?missing RESULTS_DIR}
 feature_space=${3:?missing raw|pc}
 penalty=${4:?missing l1|ridge}
+pc_basis_root=${5:-}
+pc_components=${6:-30}
 : "${SLURM_ARRAY_TASK_ID:?submit through submit_lesion_specs.sh}"
 [[ -n ${SLURM_JOB_ID:-} ]] || { echo "lesions require Slurm" >&2; exit 2; }
 [[ $(hostname) != gateway* && $(hostname) != sgw* ]] || { echo "refusing gateway execution" >&2; exit 2; }
@@ -25,9 +27,14 @@ export PYTHONPATH="$repo:$repo/src:$packages:${PYTHONPATH:-}"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 export XDG_CACHE_HOME=${SLURM_TMPDIR:-/tmp}/cache-$SLURM_JOB_ID
 cd "$repo"
+pc_args=()
+if [[ $feature_space == pc ]]; then
+  [[ -d $pc_basis_root ]] || { echo "missing global PC basis: $pc_basis_root" >&2; exit 2; }
+  pc_args=(--pc-basis-root "$pc_basis_root" --pc-components "$pc_components")
+fi
 "$python" -m scripts.judge_verdict_analysis.lesioning spec \
   --task-index "$SLURM_ARRAY_TASK_ID" \
   --processed-matrix-root "$matrix_root" \
   --results-dir "$results_dir" \
   --feature-space "$feature_space" --penalty "$penalty" \
-  --manifest-sha256 "$manifest_sha"
+  --manifest-sha256 "$manifest_sha" "${pc_args[@]}"

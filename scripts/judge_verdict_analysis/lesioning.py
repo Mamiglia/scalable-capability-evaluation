@@ -322,7 +322,7 @@ def _settings_signature(values: dict[str, object]) -> str:
 
 
 def _config_settings(config: AnalysisConfig, fold_index: int | None = None) -> dict[str, object]:
-    return {
+    settings = {
         "feature_space": config.feature_space,
         "penalty": config.penalty,
         "fold_index": fold_index,
@@ -341,6 +341,9 @@ def _config_settings(config: AnalysisConfig, fold_index: int | None = None) -> d
         "random_seed": config.random_seed,
         "source_manifest": config.processed_matrix_manifest_sha256,
     }
+    if config.feature_space == "pc":
+        settings["pc_basis_root"] = str(config.pc_basis_root)
+    return settings
 
 
 def _specification_table(plan: dict[str, object]) -> pd.DataFrame:
@@ -731,12 +734,21 @@ def main(argv: list[str] | None = None) -> None:
         command.add_argument("--feature-space", choices=("raw", "pc"), required=True)
         command.add_argument("--penalty", choices=("l1", "ridge"), required=True)
         command.add_argument("--manifest-sha256", required=True)
+        command.add_argument("--pc-basis-root", type=Path)
+        command.add_argument("--pc-components", type=int, default=30)
     args = parser.parse_args(argv)
     config = replace(
         CONFIG, results_dir=args.results_dir,
         feature_space=args.feature_space, penalty=args.penalty,
         processed_matrix_manifest_sha256=args.manifest_sha256,
     )
+    if args.feature_space == "pc":
+        if args.pc_basis_root is None:
+            parser.error("--pc-basis-root is required for PC features")
+        config = replace(
+            config, pc_basis_root=args.pc_basis_root,
+            fit_pca_components=args.pc_components,
+        )
     config = replace(
         config, processed_matrix_root=args.processed_matrix_root,
         execution_mode="execute", execution_target="swc_hpc",
