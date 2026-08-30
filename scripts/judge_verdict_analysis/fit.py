@@ -184,11 +184,14 @@ def _resume_existing(output: Path, required: tuple[str, ...], config: AnalysisCo
     backend = f"{config.feature_space}-{config.penalty}"
     hashes = manifest.get("artifact_sha256")
     saved_settings = dict(manifest.get("settings", {}))
-    saved_settings.pop("resume_completed_folds", None)  # Operational, not scientific.
+    expected_settings = _manifest_settings(config)
+    for operational in ("resume_completed_folds", "glm_max_iter"):
+        saved_settings.pop(operational, None)
+        expected_settings.pop(operational, None)
     if (
         manifest.get("state") != "completed"
         or manifest.get("backend") != backend
-        or saved_settings != _manifest_settings(config)
+        or saved_settings != expected_settings
         or not isinstance(hashes, dict)
         or set(hashes) != set(required) - {"manifest.json"}
         or any(_file_sha256(output / name) != digest for name, digest in hashes.items())

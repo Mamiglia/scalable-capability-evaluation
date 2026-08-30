@@ -295,7 +295,10 @@ def test_outer_fold_uses_shared_preparation_and_sparse_fit_for_both_axes(tmp_pat
         assert (output / "feature-dictionary.parquet").is_file()
         assert fit._resume_existing(
             output, fit.ARTIFACTS,
-            replace(variant, resume_completed_folds=True),
+            replace(
+                variant, resume_completed_folds=True,
+                glm_max_iter=variant.glm_max_iter + 1,
+            ),
         )
     assert provenance["feature_space"] == "pc"
 
