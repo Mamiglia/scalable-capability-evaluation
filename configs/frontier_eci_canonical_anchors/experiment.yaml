@@ -9,4 +9,11 @@ pair_item_cap: 8
 minimum_anchors: 4
 desired_direct_anchors: 6
 historical_backfill: []
+extra_transcripts:
+  gpqa:
+    mistral-medium-3: data/gpqa/b0a0d9c9/mistral-medium-3/0/2026-08-11T14-31-08-00-00_gpqa-diamond_mrxWhg6S5wT5nSn3qe2Wxi.eval
+    gemma-4-e2b-it: data/gpqa/b0a0d9c9/gemma-4-e2b-it/0/2026-08-13T12-58-49-00-00_gpqa-diamond_aE48MpXQuP9kG9mbVerjhH.eval
+  swe_bench_mini:
+    mistral-medium-3: data/swe_bench_mini/477dc96c/mistral-medium-3/0/2026-08-21T03-01-48-00-00_swe-bench-verified-mini_oE9eNfqZCQb4aUhG8DLcpA.eval
+    gemma-4-e2b-it: data/swe_bench_mini/477dc96c/gemma-4-e2b-it/0/2026-08-22T21-14-48-00-00_swe-bench-verified-mini_R723Wn6VS53QFJAgf5Cdem.eval
 results: judge_results/frontier/eci-semiannual-canonical-anchors

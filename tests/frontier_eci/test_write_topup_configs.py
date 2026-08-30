@@ -2,6 +2,7 @@ from pathlib import Path
 from runpy import run_path
 
 import pandas as pd
+import pytest
 import yaml
 
 
@@ -73,8 +74,24 @@ def test_resolves_manifest_model_alias_to_transcript_key(tmp_path):
     assert config["comparisons"] == [["openrouter/openai/gpt-5.2", "model-a", "modelc"]]
 
 
-def test_skips_pair_without_an_approved_transcript_map(tmp_path):
+def test_missing_manifest_source_names_the_model_and_row_count(tmp_path):
     manifest = manifest_frame().iloc[:1].copy()
     manifest.loc[0, ["target", "opponent"]] = ["model-a", "not-imported"]
 
-    assert write_configs(manifest, base_configs(), tmp_path) == []
+    with pytest.raises(ValueError, match=r"not-imported \(1 rows\)"):
+        write_configs(manifest, base_configs(), tmp_path)
+
+
+def test_extra_transcripts_complete_missing_manifest_pair(tmp_path):
+    manifest = manifest_frame().iloc[:1].copy()
+    manifest.loc[0, ["target", "opponent"]] = ["model-a", "model-c"]
+
+    outputs = write_configs(
+        manifest, base_configs(), tmp_path,
+        extra_transcripts={"gpqa": {"model-c": "c.eval"}},
+    )
+
+    config = yaml.safe_load(outputs[0].read_text())
+    assert len(outputs) == 1
+    assert config["transcripts"]["model-c"] == "c.eval"
+    assert config["comparisons"] == [["openrouter/openai/gpt-5.2", "model-a", "model-c"]]

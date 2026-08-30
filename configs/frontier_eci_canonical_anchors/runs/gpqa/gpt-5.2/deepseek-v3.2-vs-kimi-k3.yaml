@@ -31,6 +31,8 @@ transcripts:
   kimi-k3: data/gpqa/b0a0d9c9/kimi-k3/0/2026-08-12T14-22-20-00-00_gpqa-diamond_HG9QEEJBeoTCGpPwxNXZWX.eval
   o3: data/gpqa/b0a0d9c9/o3/0/2026-08-11T14-31-03-00-00_gpqa-diamond_dCwsQoaEeS7WA45UyfMbJD.eval
   qwen3-32b: data/gpqa/b0a0d9c9/qwen3-32b/0/2026-08-13T11-02-11-00-00_gpqa-diamond_8RphQCTbQjQXu6Rn3dYv8L.eval
+  mistral-medium-3: data/gpqa/b0a0d9c9/mistral-medium-3/0/2026-08-11T14-31-08-00-00_gpqa-diamond_mrxWhg6S5wT5nSn3qe2Wxi.eval
+  gemma-4-e2b-it: data/gpqa/b0a0d9c9/gemma-4-e2b-it/0/2026-08-13T12-58-49-00-00_gpqa-diamond_aE48MpXQuP9kG9mbVerjhH.eval
 comparisons:
 - - openrouter/openai/gpt-5.2
   - deepseek-v3.2

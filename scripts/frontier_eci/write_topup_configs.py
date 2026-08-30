@@ -1,6 +1,7 @@
 """Write one resumable judging config for every frozen canonical-anchor pair."""
 
 import argparse
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -16,18 +17,35 @@ def transcript_key(model: str, transcripts: dict) -> str:
     raise ValueError(f"no unique transcript key for {model}")
 
 
-def write_configs(manifest: pd.DataFrame, base_configs: dict, output_root: Path) -> list[Path]:
+def write_configs(manifest: pd.DataFrame, base_configs: dict, output_root: Path,
+                  *, extra_transcripts: dict | None = None) -> list[Path]:
     """Write one-pair configs with the item order frozen by ``manifest``."""
     outputs = []
-    def pair(row):
+    extra_transcripts = extra_transcripts or {}
+    base_configs = {
+        (bench, judge): config | {
+            "transcripts": config["transcripts"] | extra_transcripts.get(bench, {})
+        }
+        for (bench, judge), config in base_configs.items()
+    }
+    pairs, missing = [], Counter()
+    for row in manifest.itertuples(index=False):
+        transcripts = base_configs[(row.bench, row.judge)]["transcripts"]
         try:
-            transcripts = base_configs[(row.bench, row.judge)]["transcripts"]
-            return tuple(sorted((transcript_key(row.target, transcripts),
-                                 transcript_key(row.opponent, transcripts))))
+            pairs.append(tuple(sorted((transcript_key(row.target, transcripts),
+                                       transcript_key(row.opponent, transcripts)))))
         except ValueError:
-            return None
+            pairs.append(None)
+            for model in (row.target, row.opponent):
+                try:
+                    transcript_key(model, transcripts)
+                except ValueError:
+                    missing[model] += 1
+    if missing:
+        detail = ", ".join(f"{model} ({count} rows)" for model, count in sorted(missing.items()))
+        raise ValueError(f"unresolved manifest transcript sources: {detail}")
 
-    manifest = manifest.assign(pair=manifest.apply(pair, axis=1)).dropna(subset=["pair"])
+    manifest = manifest.assign(pair=pairs)
     for (bench, judge, pair), rows in manifest.groupby(["bench", "judge", "pair"], sort=True):
         base = base_configs[(bench, judge)]
         judges = {comparison[0] for comparison in base["comparisons"]}
@@ -64,7 +82,10 @@ def main() -> int:
         (path.parent.name, path.stem): yaml.safe_load(path.read_text())
         for path in base_root.glob("*/*.yaml")
     }
-    outputs = write_configs(manifest, base_configs, args.config.parent / "runs")
+    outputs = write_configs(
+        manifest, base_configs, args.config.parent / "runs",
+        extra_transcripts=experiment.get("extra_transcripts"),
+    )
     print(f"wrote {len(outputs)} one-pair configs")
     return 0
 
