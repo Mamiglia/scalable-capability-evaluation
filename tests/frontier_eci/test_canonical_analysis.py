@@ -87,6 +87,10 @@ def test_target_hard_outcomes_never_change_prediction():
     assert first.predicted == second.predicted
     assert first.intercept == second.intercept
     assert first.slope == second.slope
+    assert first.actual == 0.0
+    assert second.actual == 1.0
+    assert first.residual == first.predicted
+    assert second.residual == second.predicted - 1.0
 
 
 def bootstrap_inputs(patterns, q1_items=10):
@@ -122,6 +126,8 @@ def test_two_source_bootstrap_is_seeded_and_exports_success_count():
     assert first == second
     assert first["n_bootstrap"] == 20
     assert not first["bootstrap_unstable"]
+    assert first["actual"] == 1.0
+    assert first["residual"] == first["predicted"] - 1.0
     assert first["predicted_low"] < first["predicted_median"] < first["predicted_high"]
     assert set(anchors.model) == set(models[:-1])
 

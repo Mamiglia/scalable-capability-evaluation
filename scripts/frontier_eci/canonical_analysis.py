@@ -37,6 +37,8 @@ class Prediction:
     gradient_intercept: float
     gradient_slope: float
     anchor_table: pd.DataFrame
+    actual: float
+    residual: float
 
 
 def cap_pair_items(verdicts: pd.DataFrame, limit: int = 8) -> pd.DataFrame:
@@ -122,8 +124,12 @@ def predict_from_ability(ability: pd.Series, hard_outcomes: pd.DataFrame,
     anchor_outcomes = hard_outcomes[hard_outcomes.model.isin(anchor_ids)].copy()
     fit = fit_binomial_logit(ability.reindex(anchor_ids), anchor_outcomes)
     predicted = float(expit(fit.intercept + fit.slope * ability[target]))
+    target_outcome = _aggregate_outcomes(hard_outcomes[hard_outcomes.model.eq(target)])
+    actual = (float(target_outcome.iloc[0].successes / target_outcome.iloc[0].total)
+              if len(target_outcome) and target_outcome.iloc[0].total > 0 else np.nan)
     return Prediction(predicted, fit.intercept, fit.slope, fit.converged,
-                      fit.gradient_intercept, fit.gradient_slope, fit.anchor_table)
+                      fit.gradient_intercept, fit.gradient_slope, fit.anchor_table,
+                      actual, predicted - actual)
 
 
 def _resample_hard_items(outcomes: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
@@ -161,6 +167,8 @@ def predict_block(verdicts: pd.DataFrame, hard_outcomes: pd.DataFrame, target: s
     summary = {
         "model": target,
         "predicted": point.predicted,
+        "actual": point.actual,
+        "residual": point.residual,
         "predicted_low": float(low),
         "predicted_median": float(median),
         "predicted_high": float(high),
