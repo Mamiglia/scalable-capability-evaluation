@@ -205,6 +205,7 @@ def fit_fold(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matrix", type=Path, required=True)
+    parser.add_argument("--matrix-manifest-sha256", required=True)
     parser.add_argument("--responses", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--fold-index", type=int, required=True)
@@ -214,6 +215,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     config = replace(
         CONFIG, processed_matrix_root=args.matrix, results_dir=args.output,
+        processed_matrix_manifest_sha256=args.matrix_manifest_sha256,
         feature_space=args.feature_space, penalty=args.penalty,
         execution_mode="execute", execution_target="swc_hpc",
     )

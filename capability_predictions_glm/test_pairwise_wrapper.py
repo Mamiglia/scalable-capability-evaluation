@@ -8,6 +8,7 @@ import pytest
 from scripts.judge_verdict_analysis.config import CONFIG
 from scripts.judge_verdict_analysis.hierarchy import outer_roles
 
+from . import pairwise_wrapper
 from .pairwise_wrapper import (
     CAPABILITY_TASK,
     _capability_design,
@@ -137,3 +138,31 @@ def test_fit_fold_runs_every_supported_variant(tmp_path, feature_space, penalty)
     predictions = pd.read_parquet(output / "predictions.parquet")
     assert predictions.probability.between(0, 1).all()
     assert {"judge", "pick_left"}.isdisjoint(predictions)
+
+
+def test_cli_passes_explicit_matrix_manifest_pin_to_guard_and_fold(
+    monkeypatch, tmp_path,
+) -> None:
+    pin = "a" * 64
+    guarded, fitted = [], []
+    monkeypatch.setattr(pairwise_wrapper, "_guard_execution", guarded.append)
+    monkeypatch.setattr(
+        pairwise_wrapper, "_load_rows",
+        lambda config: (pd.DataFrame(), pd.DataFrame()),
+    )
+    monkeypatch.setattr(pairwise_wrapper.pd, "read_parquet", lambda path: pd.DataFrame())
+    monkeypatch.setattr(
+        pairwise_wrapper, "fit_fold",
+        lambda pairs, responses, dictionary, fold_index, config: fitted.append(config),
+    )
+
+    pairwise_wrapper.main([
+        "--matrix", str(tmp_path / "matrix"),
+        "--matrix-manifest-sha256", pin,
+        "--responses", str(tmp_path / "responses.parquet"),
+        "--output", str(tmp_path / "output"),
+        "--fold-index", "3", "--feature-space", "pc", "--penalty", "ridge",
+    ])
+
+    assert guarded[0].processed_matrix_manifest_sha256 == pin
+    assert fitted[0] is guarded[0]
