@@ -68,13 +68,14 @@ def _pairs() -> pd.DataFrame:
 
 
 def _config(**changes):
-    return replace(
-        CONFIG, benchmarks=("b",), judges=("j1", "j2"), inner_folds=2,
-        elastic_net_cs=(1.0,), ridge_cs=(1.0,), fit_n_jobs=1,
-        glm_max_iter=1_000, feature_space="raw", penalty="ridge",
-        execution_target="local_test", local_test_max_rows=200,
-        **changes,
-    )
+    values = {
+        "benchmarks": ("b",), "judges": ("j1", "j2"), "inner_folds": 2,
+        "elastic_net_cs": (1.0,), "ridge_cs": (1.0,), "fit_n_jobs": 1,
+        "glm_max_iter": 1_000, "feature_space": "raw", "penalty": "ridge",
+        "execution_target": "local_test", "local_test_max_rows": 200,
+    }
+    values.update(changes)
+    return replace(CONFIG, **values)
 
 
 def _response_source(tmp_path):
@@ -122,7 +123,13 @@ def _fake_fit(train, test, features, penalty, frozen, config, tuning=None, task=
     )
 
 
-def test_checkpoint_tunes_once_and_freezes_every_raw_refit(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("feature_space", "penalty"),
+    (("raw", "l1"), ("raw", "ridge"), ("pc", "l1"), ("pc", "ridge")),
+)
+def test_checkpoint_tunes_once_and_freezes_every_refit(
+    monkeypatch, tmp_path, feature_space, penalty,
+) -> None:
     pairs = _pairs().assign(d_other=lambda frame: -frame.d_signal)
     dictionary = pd.DataFrame({
         "feature": ["signal", "other"], "block": ["surface", "structure"],
@@ -135,7 +142,10 @@ def test_checkpoint_tunes_once_and_freezes_every_raw_refit(monkeypatch, tmp_path
     def fake_tune(*args, **kwargs):
         nonlocal tuning_calls
         tuning_calls += 1
-        return {"C": 0.25, "l1_ratio": None}, pd.DataFrame({"selected": [True], "C": [0.25]})
+        ratio = 1.0 if args[2] == "l1" else None
+        return {"C": 0.25, "l1_ratio": ratio}, pd.DataFrame({
+            "selected": [True], "C": [0.25], "l1_ratio": [ratio],
+        })
 
     def fake_fit(*args, **kwargs):
         frozen = args[4]
@@ -148,26 +158,33 @@ def test_checkpoint_tunes_once_and_freezes_every_raw_refit(monkeypatch, tmp_path
     config = _config(
         model_folds=(("fold", ("held",)),), processed_matrix_root=matrix_root,
         processed_matrix_manifest_sha256=matrix_hash, resume_completed_folds=True,
+        feature_space=feature_space, penalty=penalty,
     )
 
     output = run_cell(
         2, "all-readable", config, responses_path, tmp_path / "output",
         response_manifest_path=manifest_path,
     )
+    prepared_dictionary = pd.read_parquet(output / "feature-dictionary.parquet")
     specifications = build_specifications(
-        dictionary, "raw", config.lesion_families,
+        prepared_dictionary, feature_space, config.lesion_families,
     )
 
-    assert output == tmp_path / "output/all-readable/raw-ridge/cells/fold__Q4"
+    assert output == tmp_path / f"output/all-readable/{feature_space}-{penalty}/cells/fold__Q4"
     assert tuning_calls == 1
     assert {record["C"] for record in fit_calls} == {0.25}
-    assert {record["l1_ratio"] for record in fit_calls} == {None}
-    assert {spec.kind for spec in specifications} >= {
-        "singular-feature", "lesion-feature", "singular-block", "lesion-block",
+    assert {record["l1_ratio"] for record in fit_calls} == {
+        1.0 if penalty == "l1" else None,
     }
-    assert {spec.kind for spec in build_specifications(dictionary, "pc", ())} == {
-        "singular-feature", "lesion-feature",
-    }
+    if feature_space == "raw":
+        assert {spec.kind for spec in specifications} >= {
+            "singular-feature", "lesion-feature", "singular-block", "lesion-block",
+        }
+    else:
+        assert {spec.kind for spec in specifications} == {
+            "singular-feature", "lesion-feature",
+        }
+        assert all(spec.variable.startswith("pc_") for spec in specifications)
     manifest = json.loads((output / "manifest.json").read_text())
     assert manifest["response_source"] == {
         "responses_path": str(responses_path),
@@ -175,11 +192,45 @@ def test_checkpoint_tunes_once_and_freezes_every_raw_refit(monkeypatch, tmp_path
         "response_manifest_path": str(manifest_path),
         "response_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
     }
+    assert manifest["matrix_source"] == {
+        "matrix_config_path": str(matrix_root / "design-matrix.yaml"),
+        "matrix_config_sha256": hashlib.sha256(
+            (matrix_root / "design-matrix.yaml").read_bytes(),
+        ).hexdigest(),
+        "matrix_manifest_path": str(matrix_root / "manifest.json"),
+        "matrix_manifest_sha256": matrix_hash,
+    }
+    variant_settings = json.loads((output / "settings.json").read_text())["settings"]["variant"]
+    expected_selection_settings = {
+        "feature_blocks": list(config.feature_blocks),
+        "regressors": list(config.regressors),
+        "splits": list(config.splits),
+        "judges": list(config.judges),
+        "benchmarks": list(config.benchmarks),
+    }
+    assert {
+        key: variant_settings[key] for key in expected_selection_settings
+    } == expected_selection_settings
     assert run_cell(
         2, "all-readable", config, responses_path, tmp_path / "output",
         response_manifest_path=manifest_path,
     ) == output
     assert tuning_calls == 1
+    manifest_path_in_cell = output / "manifest.json"
+    manifest_text = manifest_path_in_cell.read_text()
+    manifest["matrix_source"] = {"invalid": "source"}
+    manifest_path_in_cell.write_text(json.dumps(manifest))
+    with pytest.raises(RuntimeError, match="stale or corrupt"):
+        run_cell(
+            2, "all-readable", config, responses_path, tmp_path / "output",
+            response_manifest_path=manifest_path,
+        )
+    manifest_path_in_cell.write_text(manifest_text)
+    with pytest.raises(RuntimeError, match="settings mismatch"):
+        run_cell(
+            2, "all-readable", replace(config, splits=("different-split",)),
+            responses_path, tmp_path / "output", response_manifest_path=manifest_path,
+        )
     with pytest.raises(RuntimeError, match="settings mismatch"):
         run_cell(
             2, "all-readable", replace(config, benchmark_deviation_penalty=4.0),
@@ -252,6 +303,33 @@ def test_aggregate_requires_twelve_matching_hash_valid_cells(monkeypatch, tmp_pa
     assert len(pd.read_csv(output / "artifact-index.csv").cell.unique()) == 12
     aggregate_manifest = json.loads((output / "manifest.json").read_text())
     assert aggregate_manifest["response_source"]["responses_path"] == str(responses_path)
+    assert aggregate_manifest["matrix_source"]["matrix_manifest_sha256"] == matrix_hash
+    other = tmp_path / "other-sources"
+    other.mkdir()
+    other_matrix, other_matrix_hash = _matrix_source(other)
+    other_responses, other_manifest = _response_source(other)
+    with pytest.raises(RuntimeError, match="supplied source provenance"):
+        sparse_pairwise.main([
+            "--mode", "aggregate",
+            "--matrix-root", str(other_matrix),
+            "--matrix-manifest-sha256", other_matrix_hash,
+            "--responses", str(other_responses),
+            "--response-manifest", str(other_manifest),
+            "--response-manifest-sha256", hashlib.sha256(
+                other_manifest.read_bytes(),
+            ).hexdigest(),
+            "--output-root", str(tmp_path / "output"),
+            "--scope", "all-readable",
+            "--feature-space", "raw",
+            "--penalty", "ridge",
+        ])
+    aggregate_manifest_path = output / "manifest.json"
+    aggregate_manifest_text = aggregate_manifest_path.read_text()
+    aggregate_manifest["matrix_source"] = {"invalid": "source"}
+    aggregate_manifest_path.write_text(json.dumps(aggregate_manifest))
+    with pytest.raises(RuntimeError, match="stale or corrupt"):
+        aggregate_variant("all-readable", "raw", "ridge", tmp_path / "output")
+    aggregate_manifest_path.write_text(aggregate_manifest_text)
     damaged = tmp_path / "output/all-readable/raw-ridge/cells/fold-0__Q2/predictions/full.parquet"
     damaged.write_bytes(damaged.read_bytes() + b"corrupt")
     with pytest.raises(RuntimeError, match="stale or corrupt"):

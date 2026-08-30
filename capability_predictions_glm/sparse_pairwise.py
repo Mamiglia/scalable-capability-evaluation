@@ -323,6 +323,11 @@ def _variant_settings(
         "scope": scope,
         "feature_space": config.feature_space,
         "penalty": config.penalty,
+        "feature_blocks": list(config.feature_blocks),
+        "regressors": list(config.regressors),
+        "splits": list(config.splits),
+        "judges": list(config.judges),
+        "benchmarks": list(config.benchmarks),
         "model_folds": [[name, list(models)] for name, models in config.model_folds],
         "targets": list(TARGET_QUARTILES),
         "inner_folds": config.inner_folds,
@@ -426,6 +431,7 @@ def _validate_cell(directory: Path, expected_settings: dict[str, object] | None 
         or manifest.get("settings_signature") != saved["signature"]
         or manifest.get("variant_signature") != saved.get("variant_signature")
         or manifest.get("response_source") != settings.get("variant", {}).get("response_source")
+        or manifest.get("matrix_source") != settings.get("variant", {}).get("matrix_source")
         or not isinstance(hashes, dict) or set(hashes) != actual or not required <= actual
         or any(_sha256(directory / name) != digest for name, digest in hashes.items())
     ):
@@ -567,6 +573,7 @@ def run_cell(
             "settings_signature": payload["signature"],
             "variant_signature": payload["variant_signature"],
             "response_source": response_source,
+            "matrix_source": matrix_source,
             "artifact_sha256": _artifact_hashes(stage),
         }
         (stage / "manifest.json").write_text(_json(manifest))
@@ -687,6 +694,7 @@ def _validate_aggregate(
         or manifest.get("settings_signature") != saved["signature"]
         or manifest.get("cell_manifest_sha256") != cell_hashes
         or manifest.get("response_source") != settings.get("response_source")
+        or manifest.get("matrix_source") != settings.get("matrix_source")
         or not isinstance(hashes, dict) or set(hashes) != actual or actual != expected
         or any(_sha256(directory / name) != digest for name, digest in hashes.items())
     ):
@@ -694,7 +702,13 @@ def _validate_aggregate(
 
 
 def aggregate_variant(
-    scope: str, feature_space: str, penalty: str, output_root: str | Path,
+    scope: str,
+    feature_space: str,
+    penalty: str,
+    output_root: str | Path,
+    *,
+    matrix_source: dict[str, str] | None = None,
+    response_source: dict[str, str] | None = None,
 ) -> Path:
     """Aggregate exactly twelve compatible, hash-valid capability cells."""
     if feature_space not in {"raw", "pc"} or penalty not in {"l1", "ridge"}:
@@ -717,6 +731,11 @@ def aggregate_variant(
         scope, feature_space, penalty,
     ):
         raise RuntimeError("cell variant does not match requested aggregate")
+    if (
+        (matrix_source is not None and matrix_source != variant["matrix_source"])
+        or (response_source is not None and response_source != variant["response_source"])
+    ):
+        raise RuntimeError("supplied source provenance does not match cell provenance")
     expected_cells = {
         f"{name}__{target}"
         for name, _ in variant["model_folds"] for target in TARGET_QUARTILES
@@ -873,9 +892,12 @@ def main(argv: list[str] | None = None) -> None:
             response_manifest_sha256=args.response_manifest_sha256,
         )
     else:
-        validate_response_source(args.responses, args.response_manifest)
-        _matrix_source(config)
-        aggregate_variant(args.scope, args.feature_space, args.penalty, args.output_root)
+        _, response_source = validate_response_source(args.responses, args.response_manifest)
+        matrix_source = _matrix_source(config)
+        aggregate_variant(
+            args.scope, args.feature_space, args.penalty, args.output_root,
+            matrix_source=matrix_source, response_source=response_source,
+        )
 
 
 if __name__ == "__main__":
