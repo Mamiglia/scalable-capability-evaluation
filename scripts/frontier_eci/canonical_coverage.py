@@ -126,13 +126,14 @@ def coverage_blocks(config: dict, rollouts: pd.DataFrame, verdicts: pd.DataFrame
                 ])
                 ability = outcomes.groupby("model").pick_left.mean().to_dict()
                 existing = pd.DataFrame({"target": target, "opponent": direct})
+                viable = [anchor for anchor in anchors
+                          if _joint_correct_items(q1_rollouts, bench, target, anchor)]
                 candidates = pd.DataFrame({"target": target,
-                                           "opponent": [anchor for anchor in anchors if anchor != target],
+                                           "opponent": viable,
                                            "hard_accuracy": [accuracy.get((bench, anchor), float("nan"))
-                                                             for anchor in anchors if anchor != target]})
+                                                             for anchor in viable]})
                 recommended = choose_pairs(existing, candidates, config["desired_direct_anchors"])
-                recommendations = [opponent for opponent in recommended.opponent
-                                   if _joint_correct_items(q1_rollouts, bench, target, opponent)]
+                recommendations = recommended.opponent.tolist()
                 attainable = len(set(direct) | set(recommendations))
                 accuracies = [accuracy.get((bench, model)) for model in connected]
                 accuracies = [value for value in accuracies if pd.notna(value)]

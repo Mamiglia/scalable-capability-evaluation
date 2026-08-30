@@ -88,3 +88,18 @@ def test_pair_items_reject_item_with_any_incorrect_duplicate_rollout():
                              "item": ["q1"] * 3, "correct": [True, False, True],
                              "is_canonical": [True] * 3, "item_quartile": [1] * 3})
     assert pair_items(blocks, rollouts, pd.DataFrame(), limit=8).empty
+
+
+def test_coverage_skips_invalid_early_anchor_for_later_viable_topup():
+    config = {"releases": {"target": "2024-01-01", "judge": "2025-01-01",
+                           "a-invalid": "2023-01-01", "z-valid": "2023-01-01"},
+              "candidates": ["target"], "judges": {"checkpoint": ["judge"]},
+              "desired_direct_anchors": 1, "minimum_anchors": 1}
+    quartiles = pd.DataFrame({"bench": ["b"], "item": ["q1"], "item_quartile": [1]})
+    rollouts = pd.DataFrame({"bench": ["b"] * 3, "model": ["target", "a-invalid", "z-valid"],
+                             "item": ["q1"] * 3, "correct": [True, False, True],
+                             "is_canonical": [True] * 3})
+    verdicts = pd.DataFrame(columns=["bench", "judge", "item", "model_left", "model_right", "pick_left"])
+    block = coverage_blocks(config, rollouts, verdicts, quartiles).iloc[0]
+    assert json.loads(block.recommended_anchors) == ["z-valid"]
+    assert block.status == "identifiable"
