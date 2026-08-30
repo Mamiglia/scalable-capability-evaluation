@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-matrix_root=${1:?usage: submit_lesion_specs.sh MATRIX_ROOT RESULTS_DIR raw|pc l1|ridge}
+matrix_root=${1:?usage: submit_lesion_specs.sh MATRIX_ROOT RESULTS_DIR raw|pc l1|ridge [PC_BASIS_ROOT] [PC_COMPONENTS]}
 results_dir=${2:?missing RESULTS_DIR}
 feature_space=${3:?missing raw|pc}
 penalty=${4:?missing l1|ridge}
+pc_basis_root=${5:-}
+pc_components=${6:-30}
 repo=${JV_CODE_DIR:?set JV_CODE_DIR}
 fold_root="$results_dir/lesions/$feature_space-$penalty/folds"
 first=$(find "$fold_root" -name run-specifications.csv -type f | sort | head -1)
@@ -22,4 +24,5 @@ tasks=$((folds * per_fold))
 sbatch --parsable --array="0-$((tasks - 1))%128" \
   --export=ALL,JV_CODE_DIR,JV_PYTHON,JV_PACKAGES \
   "$repo/scripts/judge_verdict_analysis/lesion_spec.sbatch" \
-  "$matrix_root" "$results_dir" "$feature_space" "$penalty"
+  "$matrix_root" "$results_dir" "$feature_space" "$penalty" \
+  "$pc_basis_root" "$pc_components"

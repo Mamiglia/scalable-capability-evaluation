@@ -131,7 +131,8 @@ class AnalysisConfig:
     inner_folds: int = 3  # Grouped folds used to tune each outer frequentist fit.
     fit_n_jobs: int = 2  # Concurrent hyperparameter evaluations within each outer fit.
     fit_pca_components: int = 20  # Shared uncentred component count for the compressed verdict model.
-    fit_pca_algorithm: str = "randomized"  # TruncatedSVD algorithm used within each outer training fold.
+    fit_pca_algorithm: str = "randomized"  # Retained only for the obsolete fold-local PCA runners.
+    pc_basis_root: Path | None = None  # Frozen global basis shared by every PC fold and lesion.
     resume_completed_folds: bool = False  # Skip complete atomic fold outputs when resuming a remote run.
     elastic_net_cs: tuple[float, ...] = (0.01, 0.1, 1.0, 10.0)  # Elastic-net inverse penalties.
     elastic_net_l1_ratios: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)  # Elastic-net L1 shares.

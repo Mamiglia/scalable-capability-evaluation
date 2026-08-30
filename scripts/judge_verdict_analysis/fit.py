@@ -31,7 +31,7 @@ ARTIFACTS = (
 
 
 def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
-    return {
+    settings = {
         "model_folds": [[name, list(models)] for name, models in config.model_folds],
         "item_folds": config.item_folds,
         "inner_folds": config.inner_folds,
@@ -51,6 +51,9 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "require_pinned_source_for_fit": config.require_pinned_source_for_fit,
         "processed_matrix_manifest_sha256": config.processed_matrix_manifest_sha256,
     }
+    if config.feature_space == "pc":
+        settings["pc_basis_root"] = str(config.pc_basis_root)
+    return settings
 
 
 def _ceph_available() -> bool:
@@ -505,6 +508,8 @@ def main(argv: list[str] | None = None) -> None:
         command.add_argument("--feature-space", choices=("raw", "pc"), required=True)
         command.add_argument("--penalty", choices=("l1", "ridge"), required=True)
         command.add_argument("--manifest-sha256", required=True)
+        command.add_argument("--pc-basis-root", type=Path)
+        command.add_argument("--pc-components", type=int, default=30)
         if name == "fold":
             command.add_argument("--fold-index", type=int, required=True)
             command.add_argument("--processed-matrix-root", type=Path, required=True)
@@ -514,6 +519,13 @@ def main(argv: list[str] | None = None) -> None:
         feature_space=args.feature_space, penalty=args.penalty,
         processed_matrix_manifest_sha256=args.manifest_sha256,
     )
+    if args.feature_space == "pc":
+        if args.pc_basis_root is None:
+            parser.error("--pc-basis-root is required for PC features")
+        config = replace(
+            config, pc_basis_root=args.pc_basis_root,
+            fit_pca_components=args.pc_components,
+        )
     if args.command == "fold":
         run_fold(args.fold_index, replace(
             config, processed_matrix_root=args.processed_matrix_root,

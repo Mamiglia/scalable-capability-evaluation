@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sklearn.decomposition import TruncatedSVD
 
 from .config import AnalysisConfig
 
@@ -28,7 +27,7 @@ def prepare_features(
     feature_space: str,
     config: AnalysisConfig,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, object]]:
-    """Return raw features unchanged or a fold-local PC projection."""
+    """Return raw features unchanged or project through the frozen global basis."""
     if feature_space not in {"raw", "pc"}:
         raise ValueError("feature_space must be 'raw' or 'pc'")
     if {"feature", "block"} - set(dictionary):
@@ -49,41 +48,51 @@ def prepare_features(
             ]),
         }
 
+    if config.pc_basis_root is None:
+        raise ValueError("pc_basis_root is required for PC features")
+    loadings_path = config.pc_basis_root / "loadings.parquet"
+    variance_path = config.pc_basis_root / "explained-variance.csv"
+    if not loadings_path.is_file() or not variance_path.is_file():
+        raise ValueError(f"incomplete global PC basis: {config.pc_basis_root}")
+    loadings = pd.read_parquet(loadings_path)
+    variance = pd.read_csv(variance_path)
+    if {"component", "feature", "loading"} - set(loadings) or "component" not in variance:
+        raise ValueError("invalid global PC basis schema")
+    components = variance.component.astype(str).tolist()[:config.fit_pca_components]
+    if len(components) != config.fit_pca_components or len(components) != len(set(components)):
+        raise ValueError("global PC basis has too few or duplicate components")
+    if loadings.duplicated(["component", "feature"]).any():
+        raise ValueError("global PC basis has duplicate loadings")
+    basis_features = set(loadings.loc[loadings.component.isin(components), "feature"].astype(str))
+    if basis_features != set(features):
+        raise ValueError("global PC basis features do not match the design matrix")
+    matrix = loadings.pivot(index="component", columns="feature", values="loading").reindex(
+        index=components, columns=features,
+    ).to_numpy(dtype=float)
     train_values = train[features].to_numpy(dtype=float)
     test_values = test[features].to_numpy(dtype=float)
+    if not np.isfinite(matrix).all():
+        raise ValueError("global PC loadings must be finite and complete")
     if not np.isfinite(train_values).all() or not np.isfinite(test_values).all():
         raise ValueError("PC features must be finite")
-    count = min(config.fit_pca_components, len(features))
-    model = TruncatedSVD(
-        n_components=count,
-        algorithm=config.fit_pca_algorithm,
-        random_state=config.random_seed,
-    ).fit(train_values)
-    names = [f"pc_{index:02d}" for index in range(1, count + 1)]
 
     def project(frame: pd.DataFrame, values: np.ndarray) -> pd.DataFrame:
         metadata = frame.drop(columns=features).reset_index(drop=True)
-        scores = pd.DataFrame(model.transform(values), columns=names)
+        scores = pd.DataFrame(values @ matrix.T, columns=components)
         return pd.concat([metadata, scores], axis=1)
 
-    ratios = model.explained_variance_ratio_
-    loadings = pd.DataFrame([
-        {"component": component, "feature": feature, "loading": float(loading)}
-        for component, row in zip(names, model.components_)
-        for feature, loading in zip(features, row)
-    ])
-    variance = pd.DataFrame({
-        "component": names,
-        "explained_variance": model.explained_variance_,
-        "explained_variance_ratio": ratios,
-        "cumulative_explained_variance_ratio": np.cumsum(ratios),
-        "singular_value": model.singular_values_,
+    selected_loadings = pd.DataFrame({
+        "component": np.repeat(components, len(features)),
+        "feature": features * len(components),
+        "loading": matrix.ravel(),
     })
-    prepared_dictionary = pd.DataFrame({"feature": names, "block": "pc"})
+    selected_variance = variance.set_index("component").loc[components].reset_index()
+    prepared_dictionary = pd.DataFrame({"feature": components, "block": "pc"})
     return project(train, train_values), project(test, test_values), prepared_dictionary, {
         "feature_space": "pc",
-        "features": names,
+        "features": components,
         "source_features": features,
-        "loadings": loadings,
-        "explained_variance": variance,
+        "pc_basis_root": str(config.pc_basis_root),
+        "loadings": selected_loadings,
+        "explained_variance": selected_variance,
     }
