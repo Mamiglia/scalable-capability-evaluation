@@ -1,0 +1,67 @@
+log_root: logs/frontier-eci-early-anchors-nocache/gpqa
+system_prompt: assets/system_prompt/mcq.txt
+include_reasoning: false
+only_items:
+- rec06pnAkLOr2t2mp
+- rec0VuKUjt1SZ7NYv
+- rec0wZvZgiz320KRs
+- rec1zl5LvaatzGhFt
+- rec2UlKqC6RFHdcro
+- rec4UqStf9WUVif1f
+- rec5eA17Qr1ucNLUf
+- rec7C06XOB2h298ue
+- rec8y3ZrBOcLgNEkE
+- recBtVK8rBVtIlXDq
+- recHVUd2DkoKfedJZ
+- recI1ls9OXdxatHQn
+- recIIUynGGpsGEYuo
+- recINGR1z01Fh1Z3A
+- recJJcOHhFeSaRpl4
+- recKcjTwONILZqHAX
+- recKm6LNWykGapmCr
+- recLSzwBUS3olCjhl
+- recNFJjE5PPTqVJGv
+- recOYsaYs6RmtlTDy
+- recPIzpnuYpB4yvmp
+- recPL4ZPpVYxgMu57
+- recPSTGXK3P39yNYT
+- recPzW1WqRnPs57D6
+- recRTiyaRymerDJ4y
+- recReg13iV2HwJTaA
+- recS48OsU6kVadBPW
+- recSBcGLPatKb3Ygu
+- recV1nqYQvpII94oC
+- recWXwn9v4IG9ZrM6
+- recWzUUYBN0NuXO2k
+- recXsuOHRBLcyenF2
+- recafnH3RRnMBXEb1
+- recatj4YXzbOaq3Ar
+- receYQxnUBvxPcvbQ
+- recgI6tUQ7RLJRWGx
+- rechgQucGlrnt8KRV
+- rechtUKxC6G67H7Pr
+- reckYqR92oJkqJXkE
+- recmI7EiLv72PxmYK
+- recmwwQJnx7ll7bqL
+- recoiTJPGUmzAkief
+- recqFDvYKKRmbnoUb
+- recrs0kUo7Ua1xhKO
+- recw4rROcnHKNZhtK
+- recwlwlcPvXVNPmvl
+- recypVp2NmPlBKVTp
+- recywRj5a8EEjj2Ib
+- reczkBiPPNrNN49Hp
+transcripts:
+  gpt-4o-1120: data/gpqa/frontier-eci/gpt-4o-1120/0/gpt-4o-2024-11-20.eval
+  gpt-4-1106: data/gpqa/a288e1a9/gpt-4-1106/0/gpt-4-1106-preview.eval
+  claude-3-opus: data/gpqa/a288e1a9/claude-3-opus/0/claude-3-opus-20240229.eval
+  claude-3.5-sonnet-0620: data/gpqa/a288e1a9/claude-3.5-sonnet-0620/0/claude-3-5-sonnet-20240620.eval
+  gpt-4o-0806: data/gpqa/frontier-eci/gpt-4o-0806/0/gpt-4o-2024-08-06.eval
+comparisons:
+- - openrouter/openai/gpt-4o-2024-11-20
+  - gpt-4o-1120
+  - gpt-4-1106
+- - openrouter/openai/o4-mini
+  - gpt-4o-1120
+  - gpt-4-1106
+cache: false

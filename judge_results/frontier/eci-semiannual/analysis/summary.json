@@ -1,6 +1,6 @@
 {
-  "verdicts": 43153,
-  "q1_verdicts": 25217,
+  "verdicts": 43625,
+  "q1_verdicts": 25925,
   "judges": [
     "gpt-4o-2024-11-20",
     "gemini-2.5-pro",

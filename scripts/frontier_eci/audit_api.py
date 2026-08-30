@@ -50,11 +50,17 @@ def main():
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
     calls = collect(args.roots)
-    bad = calls[calls.provider != calls.judge.map(EXPECTED)]
+    missing_provider_with_usage = calls[calls.provider.isna() &
+                                        ((calls.cost > 0) | (calls.input_tokens > 0) |
+                                         (calls.output_tokens > 0))]
+    if not missing_provider_with_usage.empty:
+        raise ValueError(f"{len(missing_provider_with_usage)} paid responses lack provider provenance")
+    bad = calls[calls.provider.notna() & (calls.provider != calls.judge.map(EXPECTED))]
     if not bad.empty:
         raise ValueError(f"{len(bad)} responses came from an unexpected provider")
     args.out.mkdir(parents=True, exist_ok=True)
     calls.to_parquet(args.out / "api_calls.parquet", index=False)
+    calls["provider"] = calls.provider.fillna("Inspect cache (unattributed)")
     summary = (calls.groupby(["source", "judge", "provider"])
                .agg(calls=("response_id", "size"), cost=("cost", "sum"),
                     input_tokens=("input_tokens", "sum"), output_tokens=("output_tokens", "sum"),

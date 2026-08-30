@@ -13,9 +13,10 @@ the existing pool.
 
 Difficulty quartiles are frozen exclusively from the canonical identity table. Judges see only Q1
 items that both answer models solved. Q1 verdicts predict accuracy separately on unseen Q2, Q3,
-and Q4 items. Every new target is compared only with strictly older opponents. Prediction fits are
-also rolling: later comparisons cannot revise an earlier frontier point, and absolute calibration
-uses only models strictly older than the target.
+and Q4 items. An opponent is allowed when it predates either the answer model or the judge. Thus
+the cutoff for answer model `m` and judge `j` is `max(release(m), release(j))`: candidates predating
+the judge may use pool models available by the judge's release, while candidates postdating the
+judge may use models available before the candidate. Only models newer than both are excluded.
 
 ## Provenance
 
@@ -33,8 +34,10 @@ uses only models strictly older than the target.
 The first RunPod attempt stopped when its OpenRouter account exhausted its balance. Its completed
 rows are not inputs here: the complete matrix was rerun locally with the personal key. Provider
 audit confirms every response came from the intended endpoint (OpenAI, Google AI Studio, or
-DeepInfra). The local matrix contains 11,562 API responses and cost $109.39. Including smoke tests
-and the abandoned RunPod calls, total experiment API spend was about $130.6.
+DeepInfra). The local matrix plus early-anchor top-up contains 12,130 live API responses and cost
+$112.20. Thirteen zero-cost cache replays were replaced by newer no-cache calls with full provider
+provenance. Including smoke tests and the abandoned RunPod calls, total experiment API spend was
+about $133.4.
 
 ## GPQA results
 
@@ -43,13 +46,13 @@ models with enough historical anchors, checkpoint-judge MAE on Q2/Q3/Q4 is:
 
 | Judge | Q2 | Q3 | Q4 |
 |---|---:|---:|---:|
-| GPT-4o 2024-11-20 | 0.263 | 0.445 | 0.293 |
-| Gemini 2.5 Pro | 0.097 | 0.322 | 0.230 |
-| GPT-5.2 | **0.079** | **0.249** | **0.218** |
+| GPT-4o 2024-11-20 | 0.259 | 0.381 | 0.234 |
+| Gemini 2.5 Pro | 0.185 | 0.313 | 0.179 |
+| GPT-5.2 | **0.091** | **0.128** | **0.157** |
 
-Every mean residual is negative. The equal-judge consensus has MAE 0.125/0.379/0.246 and does not
+Every mean residual is negative. The equal-judge consensus has MAE 0.126/0.297/0.192 and does not
 beat GPT-5.2. Ranking is more successful than magnitude on Q3/Q4: Gemini and GPT-5.2 reach
-Spearman 0.94 on Q3, while every judge gets the Q2 ordering wrong (Spearman −0.56 to −0.68).
+Spearman 0.83/0.81 on Q3. Q2 is weak for GPT-4o/Gemini but positive for GPT-5.2 (0.53).
 
 ### Epoch capability-trend baseline
 
@@ -59,13 +62,13 @@ current model from its ECI. It therefore has the same rolling no-future-target r
 analysis, but only captures the capability trend.
 
 On GPQA its Q2/Q3/Q4 MAE is **0.030/0.098/0.093**, substantially better than GPT-5.2's
-0.079/0.249/0.218 and every other judge. Q3/Q4 Spearman is 0.90/0.75; Q2 ordering remains poor
+0.091/0.128/0.157 and every other judge. Q3/Q4 Spearman is 0.90/0.75; Q2 ordering remains poor
 (−0.57). The release-time plot's visually persuasive upward shape is therefore mostly reproducible
 from Epoch capability growth alone. This is strong evidence that the plot is not, by itself,
 evidence that transcript judging adds information.
 
-Consensus mean error by answer model is: GPT-5 −0.317, Kimi K3 −0.287, Opus 4.7 −0.280, o3
-−0.265, Gemini 3 Pro −0.256, and Opus 4.6 −0.094. Thus the corrected experiment does **not** find
+Consensus mean error by answer model is: Kimi K3 −0.315, GPT-5 −0.299, Opus 4.7 −0.281, o3
+−0.264, Gemini 3 Pro −0.223, Claude 3.7 −0.119, Opus 4.6 −0.100, and GPT-4o +0.038. Thus the experiment does **not** find
 uniform Opus downrating: Opus 4.7 is strongly underrated, but Opus 4.6 is the best-calibrated
 frontier model on GPQA. GPT-5 is worst.
 
@@ -81,13 +84,13 @@ changed. Only four later candidates have enough anchors for scored forecasts, so
 diagnostic rather than the final cross-benchmark result.
 
 The same underprediction appears: checkpoint MAE on Q2/Q3/Q4 is 0.302/0.370/0.199 for GPT-4o,
-0.343/0.396/0.203 for Gemini 2.5 Pro, and **0.109/0.327/0.168** for GPT-5.2. Consensus mean error is
+0.343/0.396/0.203 for Gemini 2.5 Pro, and **0.175/0.221/0.096** for GPT-5.2. Consensus mean error is
 −0.282 for Kimi K3, −0.260 for Opus 4.7, −0.258 for Opus 4.6, and −0.173 for GPT-5.
 
 ## Transcript visibility
 
 The protocol strips explicit reasoning blocks and inline `<think>` content. On GPQA, mean residual
-has Spearman 0.77 with visible transcript length: models exposing more text are generally less
+has Spearman 0.74 with visible transcript length: models exposing more text are generally less
 underpredicted. Opus 4.7 exposes a median 22 characters and is underrated by 0.280; GPT-5 exposes
 421 characters and is underrated by 0.317. o3, GPT-5, Gemini 3 Pro, and Opus 4.6 have redacted or
 encrypted reasoning on essentially every correct Q1 sample, so the judge is calibrating from a

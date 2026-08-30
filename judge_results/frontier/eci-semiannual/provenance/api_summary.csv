@@ -4,3 +4,9 @@ frontier-eci,gemini-2.5-pro,Google AI Studio,2374,45.288409125,10645418,3319322,
 frontier-eci,gpt-4o-2024-11-20,OpenAI,2374,24.418485,9281134,240525,0
 frontier-eci,gpt-5.2,OpenAI,2374,23.4995516,9278760,680176,408610
 frontier-eci,o4-mini,OpenAI,2220,15.0429378,8765830,1387568,1149504
+frontier-eci-early-anchors,gpt-4o-2024-11-20,Inspect cache (unattributed),8,0.0,0,0,0
+frontier-eci-early-anchors,gpt-4o-2024-11-20,OpenAI,236,1.195525,390746,25066,0
+frontier-eci-early-anchors,o4-mini,Inspect cache (unattributed),5,0.0,0,0,0
+frontier-eci-early-anchors,o4-mini,OpenAI,236,1.1920326,390510,174201,148672
+frontier-eci-early-anchors-nocache,gpt-4o-2024-11-20,OpenAI,48,0.19246,83300,5333,0
+frontier-eci-early-anchors-nocache,o4-mini,OpenAI,48,0.2373888,83252,33139,27776

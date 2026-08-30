@@ -34,6 +34,10 @@ prompts:
   gpqa: assets/system_prompt/mcq.txt
   swe_bench_mini: assets/system_prompt/default.txt
 releases:
+  gpt-4-1106: '2023-11-06'
+  claude-3-opus: '2024-02-29'
+  claude-3.5-sonnet-0620: '2024-06-20'
+  gpt-4o-0806: '2024-08-06'
   gpt-4o-1120: '2024-11-20'
   claude-3.7-sonnet: '2025-02-24'
   gemma3-12b-it: '2025-03-13'

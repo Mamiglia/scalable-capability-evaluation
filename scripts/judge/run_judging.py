@@ -16,6 +16,7 @@ Optional knobs:
                      (logs under trunc-<pct>/)
   include_reasoning: judges see candidates' reasoning (protocol default: false)
   only_items:        optional item-id allowlist, applied before phase splitting
+  cache:             Inspect model-response cache setting (omit for framework default)
   min_correct:       drop comparisons where either model has fewer than this many
                      correct samples (default 0: keep all)
 
@@ -183,6 +184,9 @@ def main() -> int:
         for phase, judge, judge_short, major, minor, frac, block, phase_dir in pending:
             if judge not in models:
                 models[judge] = stack.enter_context(Model(judge_config(judge)))
+            eval_kwargs = models[judge].eval_kwargs()
+            if "cache" in cfg:
+                eval_kwargs["cache"] = bool(cfg["cache"])
             success, _ = eval_set(
                 tasks=[get_task(judge_short, major, minor, frac)],
                 log_dir=str(phase_dir),
@@ -190,7 +194,7 @@ def main() -> int:
                 sample_id=block,
                 epochs=epochs,
                 max_connections=40,
-                **models[judge].eval_kwargs(),
+                **eval_kwargs,
             )
             if not success:
                 failures.append(f"phase{phase} {judge_short} on {major}-vs-{minor}")

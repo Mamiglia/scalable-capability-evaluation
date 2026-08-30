@@ -38,6 +38,16 @@ def test_future_edges_are_absent_from_an_earlier_prefix():
     assert set(prefix.iloc[0][["model_left", "model_right"]]) == {"past", "target"}
 
 
+def test_later_judge_allows_models_available_by_judge_release():
+    verdicts = pd.DataFrame({
+        "model_left": ["target"], "model_right": ["intermediate"],
+        "pick_left": [1], "bench": ["gpqa"], "judge": ["later-judge"], "item": ["x"],
+    })
+    releases = {"target": "2024-01-01", "intermediate": "2025-01-01",
+                "later-judge": "2026-01-01"}
+    assert len(prefix_verdicts(verdicts, "target", releases, "later-judge")) == 1
+
+
 def test_consensus_weights_judges_not_uploaded_rounds():
     rows = pd.DataFrame({
         "bench": ["gpqa"] * 3, "item": ["x"] * 3,

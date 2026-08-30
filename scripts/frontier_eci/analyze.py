@@ -86,9 +86,15 @@ def release_date(releases, model):
     return pd.Timestamp(value) if value is not None else pd.NaT
 
 
-def prefix_verdicts(verdicts, target, releases):
-    """Only edges whose two answer models existed by the target's release."""
-    cutoff = release_date(releases, target)
+def prediction_cutoff(target, judge, releases):
+    target_date = release_date(releases, target)
+    judge_date = release_date(releases, judge) if judge else pd.NaT
+    return max(target_date, judge_date) if pd.notna(judge_date) else target_date
+
+
+def prefix_verdicts(verdicts, target, releases, judge=None):
+    """Edges available before either the answer model or judge, whichever is later."""
+    cutoff = prediction_cutoff(target, judge, releases)
     left = verdicts.model_left.map(lambda model: release_date(releases, model))
     right = verdicts.model_right.map(lambda model: release_date(releases, model))
     return verdicts[(left <= cutoff) & (right <= cutoff)].copy()
@@ -142,14 +148,15 @@ def consensus_verdicts(verdicts):
     return out
 
 
-def predict_block(verdicts, actual, target, releases, resamples, rng):
+def predict_block(verdicts, actual, target, releases, resamples, rng, judge=None):
     if verdicts.empty:
         return {"model": target, "actual": actual.get(target, np.nan), "predicted": np.nan,
                 "predicted_low": np.nan, "predicted_high": np.nan,
                 "n_anchors": 0, "n_bootstrap": 0, "n_prefix_verdicts": 0}
     ability = rank(verdicts).set_index("model").ability
-    cutoff = release_date(releases, target)
-    anchors = [model for model in ability.index if release_date(releases, model) < cutoff]
+    cutoff = prediction_cutoff(target, judge, releases)
+    anchors = [model for model in ability.index
+               if model != target and release_date(releases, model) < cutoff]
     if target not in ability or len(ability.index.intersection(actual.index).intersection(anchors)) < 4:
         return {"model": target, "actual": actual.get(target, np.nan), "predicted": np.nan,
                 "predicted_low": np.nan, "predicted_high": np.nan,
@@ -428,10 +435,10 @@ def main():
             if judged.empty:
                 raise ValueError(f"no Q1 verdicts for {bench}/{judge}")
             for target in candidates:
-                prefix = prefix_verdicts(judged, target, releases)
+                prefix = prefix_verdicts(judged, target, releases, judge)
                 for target_quartile in (2, 3, 4):
                     actual = accuracy.loc[(bench, target_quartile)]
-                    row = predict_block(prefix, actual, target, releases, args.resamples, rng)
+                    row = predict_block(prefix, actual, target, releases, args.resamples, rng, judge)
                     predictions.append({"bench": bench, "judge": judge,
                                         "target_quartile": target_quartile, **row})
     predictions = pd.DataFrame(predictions)
