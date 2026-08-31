@@ -1502,7 +1502,7 @@ def plot_judge_comparisons(comparison: dict[str, pd.DataFrame], root: Path) -> N
         lower, upper = math.floor(xmin / step) * step, math.ceil(xmax / step) * step
         ax.set_xlim(lower, upper); ax.set_xticks([lower, upper])
         ax.set_ylim(-1, 1); ax.set_yticks([-1, 0, 1])
-        ax.set_xlabel(label); ax.set_ylabel("Coefficient cosine"); _ordinary(ax)
+        ax.set_xlabel(label); ax.set_ylabel("Cosine"); _ordinary(ax)
     handles = [Line2D([], [], marker="o", lw=0, color=color, label=JUDGE_LABELS[judge])
                for judge, color in JUDGE_COLORS.items() if judge in set(relations.judge)]
     handles += [Line2D([], [], marker="o", lw=0, color="#555555", label="L1"),
