@@ -355,7 +355,8 @@ def plot_visibility(summary, model_errors, candidates, benches, out):
 def plot_frontier_style(table, judge, bench, quartile, out, style,
                         prediction_label="Predicted", filename_prefix="",
                         value_column="predicted", low_column="predicted_low",
-                        high_column="predicted_high", clip_prediction_display=False):
+                        high_column="predicted_high", clip_prediction_display=False,
+                        panel_label=None, y_label="Hard accuracy", file_quartile=None):
     """Original frontier figure grammar: release time, judge cutoff, actual vs prediction."""
     table = table.sort_values("target_release").copy()
     table["target_release"] = pd.to_datetime(table.target_release)
@@ -382,8 +383,13 @@ def plot_frontier_style(table, judge, bench, quartile, out, style,
         prediction_handle, = ax.plot(table.target_release, table.display_value,
                                      color="#2a78d6", lw=1)
     else:
-        prediction_handle, = ax.plot(table.target_release, table.display_value, "o",
-                                     ms=3, color="#2a78d6", clip_on=False)
+        error = predicted[["display_value", "display_low", "display_high"]].copy()
+        lower = (error.display_value - error.display_low).clip(lower=0)
+        upper = (error.display_high - error.display_value).clip(lower=0)
+        prediction_handle = ax.errorbar(
+            predicted.target_release, predicted.display_value,
+            yerr=np.vstack([lower, upper]), fmt="o", ms=3, lw=1,
+            color="#2a78d6", capsize=0, clip_on=False)
     actual_handle, = ax.plot(actual.target_release, actual.actual, "o", ms=3.5,
                              color="#222222", clip_on=False)
     judge_handle = ax.axvline(judge_date, color="#777777", lw=0.8, ls="--")
@@ -395,9 +401,10 @@ def plot_frontier_style(table, judge, bench, quartile, out, style,
     ax.set_xlim(first, last)
     ax.set_ylim(0, 1)
     ax.set_yticks([0, 0.5, 1])
-    ax.set_ylabel("Hard accuracy")
+    ax.set_ylabel(y_label)
     ax.set_xlabel("Model release")
-    ax.text(0, 1.02, f"{'GPQA' if bench == 'gpqa' else 'SWE-mini'} · Q{quartile}",
+    label = panel_label or f"{'GPQA' if bench == 'gpqa' else 'SWE-mini'} · Q{quartile}"
+    ax.text(0, 1.02, label,
             color="#777777", fontsize=7, ha="left", va="bottom", transform=ax.transAxes)
     ax.spines["left"].set_bounds(0, 1)
     for spine in ("left", "bottom"):
@@ -408,7 +415,8 @@ def plot_frontier_style(table, judge, bench, quartile, out, style,
               handler_map={tuple: HandlerTuple(ndivide=1)}, loc="lower left",
               bbox_to_anchor=(0, 1.08), frameon=False, handletextpad=0.5,
               borderaxespad=0, ncol=1)
-    save(fig, out / f"{filename_prefix}{judge}_{bench}_q{quartile}_frontier_{style}")
+    file_tag = file_quartile or str(quartile)
+    save(fig, out / f"{filename_prefix}{judge}_{bench}_q{file_tag}_frontier_{style}")
     return ax
 
 

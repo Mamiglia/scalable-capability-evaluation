@@ -3,6 +3,7 @@ from runpy import run_path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 
 module = run_path(Path(__file__).parents[2] / "scripts/frontier_eci/analyze.py")
@@ -135,3 +136,31 @@ def test_rank_regression_plot_uses_exact_in_sample_label_and_clips_display_only(
     assert blue.get_ydata().tolist() == [0.0, 1.0]
     assert ax.get_legend().get_texts()[1].get_text() == "Rank–accuracy fit (in-sample)"
     pd.testing.assert_frame_equal(table, original)
+
+
+def test_combined_rank_plot_has_item_errorbars_and_band(tmp_path):
+    table = pd.DataFrame({
+        "target_release": ["2024-11-20", "2025-06-01"],
+        "judge_release": ["2025-03-25"] * 2,
+        "actual": [0.3, 0.7], "fitted": [0.4, 0.6],
+        "fitted_low": [0.2, 0.45], "fitted_high": [0.6, 0.8],
+    })
+    points = plot_frontier_style(
+        table, "gpt-4o-2024-11-20", "gpqa", "2-4", tmp_path, "points",
+        prediction_label="Rank–accuracy fit (in-sample)",
+        value_column="fitted", low_column="fitted_low", high_column="fitted_high",
+        panel_label="GPQA · Q2–Q4", y_label="Combined hard accuracy",
+        file_quartile="2-q4",
+    )
+    assert any(len(collection.get_segments()) == 2 for collection in points.collections
+               if hasattr(collection, "get_segments"))
+    assert points.get_ylabel() == "Combined hard accuracy"
+    band = plot_frontier_style(
+        table, "gpt-4o-2024-11-20", "gpqa", "2-4", tmp_path, "band",
+        prediction_label="Rank–accuracy fit (in-sample)",
+        value_column="fitted", low_column="fitted_low", high_column="fitted_high",
+        panel_label="GPQA · Q2–Q4", y_label="Combined hard accuracy",
+        file_quartile="2-q4",
+    )
+    assert any(collection.get_alpha() == pytest.approx(0.18)
+               for collection in band.collections)

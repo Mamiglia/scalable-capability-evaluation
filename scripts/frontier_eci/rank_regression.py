@@ -1,10 +1,13 @@
 """Descriptive in-sample rank-to-accuracy fits for the frozen frontier study."""
 
 import argparse
+import hashlib
 import json
+import multiprocessing
 import shutil
 import sys
 import tempfile
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -16,10 +19,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 from ranking import rank  # noqa: E402
+from ranking.scoring import resample_items  # noqa: E402
 from scripts.frontier_eci.analyze import plot_frontier_style  # noqa: E402
 from scripts.frontier_eci.canonical_analysis import (  # noqa: E402
     _atomic_write_json, _checkpoint_tables, cap_pair_items, filter_protocol_verdicts,
-    fit_binomial_logit, merge_rollout_sources,
+    fit_binomial_logit, merge_rollout_sources, _resample_hard_items,
 )
 from scripts.frontier_eci.canonical_coverage import (  # noqa: E402
     _load_config, _path, historical_rollouts, release_date,
@@ -29,6 +33,7 @@ from scripts.judge.verdict_tables import read_verdicts  # noqa: E402
 
 FIT_LABEL = "Rank–accuracy fit (in-sample)"
 QUARTILES = (2, 3, 4)
+HARD_SLICE = "Q2–Q4"
 REQUIRED_OUTPUTS = (
     "abilities.csv", "ranking_blocks.csv", "fits.csv", "training_fitted.csv",
     "frontier_fitted.csv", "checkpoint-main.json", "summary.json",
@@ -48,6 +53,8 @@ MAIN_OUTPUT_MANIFEST = {
         {"root": "../eci-semiannual", "glob": "calibration-audit/**"},
     ],
     "scientific_scope": "in-sample; no temporal cutoff, anchors, target exclusion, or ECI",
+    "target": "combined Q2–Q4 accuracy",
+    "uncertainty": "95% two-source item bootstrap",
 }
 
 
@@ -174,6 +181,138 @@ def fit_rank_regressions(abilities: pd.DataFrame, hard_outcomes: pd.DataFrame,
             pd.concat(fitted_points, ignore_index=True) if fitted_points else pd.DataFrame())
 
 
+def _combined_hard(hard_outcomes: pd.DataFrame) -> pd.DataFrame:
+    """Return one Q2–Q4 item table; Q1 never enters the hard target."""
+    table = hard_outcomes[hard_outcomes.target_quartile.isin(QUARTILES)].copy()
+    return table.drop(columns="target_quartile")
+
+
+def fit_combined_rank_regressions(abilities: pd.DataFrame,
+                                  hard_outcomes: pd.DataFrame
+                                  ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fit one combined-Q2–Q4 curve per judge and benchmark."""
+    hard = _combined_hard(hard_outcomes)
+    fits, fitted_points = [], []
+    for (bench, judge), ranked in abilities.groupby(["bench", "judge"], sort=True):
+        ability = ranked.set_index("model").ability
+        outcomes = hard[hard.bench.eq(bench)]
+        try:
+            fit, points = fit_accuracy_candidates(ability, outcomes)
+            fit.update(bench=bench, judge=judge, target_slice=HARD_SLICE,
+                       fit_status="ok", failure_reason="")
+            fitted_points.append(points.assign(
+                bench=bench, judge=judge, target_slice=HARD_SLICE))
+        except (RuntimeError, ValueError) as error:
+            fit = {"bench": bench, "judge": judge, "target_slice": HARD_SLICE,
+                   "fit_status": "failed", "failure_reason": str(error),
+                   "fit_label": FIT_LABEL, "n_training_models": 0,
+                   "training_model_ids": ""}
+        fits.append(fit)
+    return (pd.DataFrame(fits),
+            pd.concat(fitted_points, ignore_index=True) if fitted_points else pd.DataFrame())
+
+
+def _bootstrap_seed(seed: int, bench: str, judge: str) -> int:
+    digest = hashlib.sha256(f"{seed}|{bench}|{judge}|{HARD_SLICE}".encode()).digest()
+    return int.from_bytes(digest[:4], "big")
+
+
+def _fit_combined_block(task) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    bench, judge, protocol, hard, resamples, seed, pair_limit = task
+    capped = cap_pair_items(protocol, pair_limit) if pair_limit is not None else protocol.copy()
+    ability_frame = rank(capped).assign(bench=bench, judge=judge)
+    ability = ability_frame.set_index("model").ability
+    fit, points = fit_accuracy_candidates(ability, hard)
+    fit.update(bench=bench, judge=judge, target_slice=HARD_SLICE,
+               fit_status="ok", failure_reason="", n_bootstrap=resamples,
+               bootstrap_unit="Q1 and combined Q2–Q4 item IDs")
+    rng = np.random.default_rng(_bootstrap_seed(seed, bench, judge))
+    draws = {model: [] for model in points.model.astype(str)}
+    for _ in range(resamples):
+        try:
+            draw_ability = rank(resample_items(capped, rng)).set_index("model").ability
+            draw_hard = _resample_hard_items(hard, rng)
+            _, draw_points = fit_accuracy_candidates(draw_ability, draw_hard)
+            values = draw_points.set_index("model").selected_fitted
+            for model in draws:
+                if model in values and pd.notna(values[model]):
+                    draws[model].append(float(values[model]))
+        except (RuntimeError, ValueError):
+            continue
+    lows, highs, counts = [], [], []
+    for row in points.itertuples():
+        values = draws[str(row.model)]
+        if not values:
+            lows.append(np.nan)
+            highs.append(np.nan)
+            counts.append(0)
+            continue
+        low, high = np.quantile(values, [0.025, 0.975])
+        lows.append(min(float(low), float(row.selected_fitted)))
+        highs.append(max(float(high), float(row.selected_fitted)))
+        counts.append(len(values))
+    points = points.assign(
+        bench=bench, judge=judge, target_slice=HARD_SLICE,
+        fitted_low=lows, fitted_high=highs, n_bootstrap=counts,
+        bootstrap_unstable=np.asarray(counts) < 0.8 * resamples,
+    )
+    fit["n_bootstrap_min"] = int(min(counts)) if counts else 0
+    return ability_frame, pd.DataFrame([fit]), points
+
+
+def fit_combined_with_bootstrap(protocol: pd.DataFrame, hard_outcomes: pd.DataFrame,
+                                resamples: int = 1000, seed: int = 0, workers: int = 1,
+                                pair_limit: int | None = 8
+                                ) -> tuple[pd.DataFrame, pd.DataFrame,
+                                           pd.DataFrame, pd.DataFrame]:
+    hard = _combined_hard(hard_outcomes)
+    tasks = [
+        (bench, judge, block.copy(), hard[hard.bench.eq(bench)].copy(),
+         resamples, seed, pair_limit)
+        for (bench, judge), block in protocol.groupby(["bench", "judge"], sort=True)
+    ]
+    if workers <= 1:
+        results = [_fit_combined_block(task) for task in tasks]
+    else:
+        results = [None] * len(tasks)
+        with ProcessPoolExecutor(
+                max_workers=min(workers, len(tasks)),
+                mp_context=multiprocessing.get_context("spawn")) as executor:
+            futures = {executor.submit(_fit_combined_block, task): index
+                       for index, task in enumerate(tasks)}
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+    abilities = pd.concat([result[0] for result in results], ignore_index=True)
+    fits = pd.concat([result[1] for result in results], ignore_index=True)
+    points = pd.concat([result[2] for result in results], ignore_index=True)
+    _, ranking_blocks = rank_all_blocks(protocol, pair_limit=pair_limit)
+    return abilities, ranking_blocks, fits, points
+
+
+def combined_frontier_grid(points: pd.DataFrame, actual: pd.DataFrame,
+                           targets: list[str], judges: list[str],
+                           releases: dict[str, str], benches: list[str]) -> pd.DataFrame:
+    grid = pd.MultiIndex.from_product(
+        [benches, judges, targets], names=["bench", "judge", "model"]
+    ).to_frame(index=False)
+    grid = grid.merge(actual, on=["bench", "model"], how="left")
+    columns = ["bench", "judge", "model", "ability", "selected_fitted",
+               "fitted_low", "fitted_high", "n_bootstrap", "bootstrap_unstable",
+               "selected_method", "fit_label"]
+    grid = grid.merge(points[columns], on=["bench", "judge", "model"], how="left")
+    grid = grid.rename(columns={"selected_fitted": "fitted"})
+    grid["residual"] = grid.fitted - grid.actual
+    grid["target_slice"] = HARD_SLICE
+    grid["fit_status"] = np.where(grid.fitted.notna(), "ok", "missing_ability")
+    grid["failure_reason"] = np.where(
+        grid.fit_status.eq("ok"), "", "frontier model absent from judge/benchmark BT ranking")
+    grid["fit_label"] = grid.fit_label.fillna(FIT_LABEL)
+    grid["target_release"] = grid.model.map(lambda model: release_date(releases, model))
+    grid["judge_release"] = grid.judge.map(lambda judge: release_date(releases, judge))
+    grid["post_judge_release"] = grid.target_release > grid.judge_release
+    return grid
+
+
 def frontier_grid(points: pd.DataFrame, actual: pd.DataFrame, targets: list[str],
                   judges: list[str], releases: dict[str, str],
                   benches: list[str], quartiles: tuple[int, ...] = QUARTILES) -> pd.DataFrame:
@@ -220,6 +359,20 @@ def _write_figures(frontier: pd.DataFrame, out: Path) -> None:
             )
 
 
+def _write_combined_figures(frontier: pd.DataFrame, out: Path) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+    for (bench, judge), table in frontier.groupby(["bench", "judge"], sort=True):
+        bench_label = "GPQA" if bench == "gpqa" else "SWE-mini"
+        for style in ("band", "points"):
+            plot_frontier_style(
+                table, judge, bench, "2-4", out, style,
+                prediction_label=FIT_LABEL, filename_prefix="rank-regression_",
+                value_column="fitted", low_column="fitted_low", high_column="fitted_high",
+                clip_prediction_display=True, panel_label=f"{bench_label} · Q2–Q4",
+                y_label="Combined hard accuracy", file_quartile="2-q4",
+            )
+
+
 def _validate_staged_output(staging: Path, require_figures: bool) -> None:
     missing = [name for name in REQUIRED_OUTPUTS if not (staging / name).is_file()]
     if missing:
@@ -238,15 +391,16 @@ def _validate_staged_output(staging: Path, require_figures: bool) -> None:
     valid = (
         len(ranking_blocks) == summary.get("ranking_blocks") == 10
         and ranking_blocks.n_pair_items_max.max() <= 8
-        and len(fits) == summary.get("fit_blocks") == 30
+        and len(fits) == summary.get("fit_blocks") == 10
         and fits.fit_status.eq("ok").all()
-        and len(frontier) == summary.get("frontier_rows") == 240
+        and fits.target_slice.eq(HARD_SLICE).all()
+        and len(frontier) == summary.get("frontier_rows") == 80
         and not frontier[["actual", "fitted"]].isna().any().any()
-        and set(frontier.target_quartile) == set(QUARTILES)
+        and frontier.target_slice.eq(HARD_SLICE).all()
         and all(
             set(training[(training.bench == row.bench)
                          & (training.judge == row.judge)
-                         & (training.target_quartile == row.target_quartile)].model)
+                         & (training.target_slice == row.target_slice)].model)
             == set(row.training_model_ids.split("|"))
             for row in fits.itertuples()
         )
@@ -257,7 +411,7 @@ def _validate_staged_output(staging: Path, require_figures: bool) -> None:
         figures = staging / "figures"
         counts = {suffix: len(list(figures.glob(f"*.{suffix}")))
                   for suffix in ("png", "pdf", "svg")}
-        if counts != {"png": 60, "pdf": 60, "svg": 60}:
+        if counts != {"png": 20, "pdf": 20, "svg": 20}:
             raise ValueError(f"incomplete staged rank-regression output: figure counts {counts}")
 
 
@@ -293,6 +447,9 @@ def main() -> None:
                         default=ROOT / "configs/frontier_eci_canonical_anchors/experiment.yaml")
     parser.add_argument("--logs-root", type=Path,
                         default=ROOT / "logs/frontier-eci-canonical-anchors")
+    parser.add_argument("--resamples", type=int, default=1000)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--no-figures", action="store_true")
     args = parser.parse_args()
 
@@ -328,13 +485,17 @@ def main() -> None:
                     .drop_duplicates(columns[:-1], keep="last").reset_index(drop=True))
         protocol = filter_protocol_verdicts(verdicts, rollouts, quartiles)
 
-        abilities, ranking_blocks = rank_all_blocks(protocol, pair_limit=8)
-        fits, training = fit_rank_regressions(abilities, hard)
-        actual = _observed_accuracy(hard)
         targets = list(config["candidates"])
+        abilities, ranking_blocks, fits, training = fit_combined_with_bootstrap(
+            protocol, hard, resamples=args.resamples,
+            seed=args.seed, workers=args.workers, pair_limit=8)
+        combined = _combined_hard(hard)
+        actual = (combined.groupby(["bench", "model"], sort=True)
+                  .agg(actual=("correct", "mean"), n_items=("correct", "size"))
+                  .reset_index())
         benches = sorted(hard.bench.unique())
-        frontier_fitted = frontier_grid(
-            training, actual, targets, judges, config["releases"], benches=benches)
+        frontier_fitted = combined_frontier_grid(
+            training, actual, targets, judges, config["releases"], benches)
 
         _checkpoint_tables(staging, "main", {
             "abilities.csv": abilities,
@@ -344,10 +505,13 @@ def main() -> None:
             "frontier_fitted.csv": frontier_fitted,
         })
         if not args.no_figures:
-            _write_figures(frontier_fitted, staging / "figures")
+            _write_combined_figures(frontier_fitted, staging / "figures")
         missing = frontier_fitted[frontier_fitted.fit_status.ne("ok")]
         summary = {
             "analysis": FIT_LABEL,
+            "target": "combined Q2–Q4 accuracy",
+            "uncertainty": "95% two-source item bootstrap",
+            "resamples": args.resamples,
             "pair_item_cap": 8,
             "q1_protocol_rows": len(protocol),
             "ranking_blocks": len(ranking_blocks),

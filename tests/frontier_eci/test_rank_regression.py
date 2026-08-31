@@ -82,6 +82,60 @@ def test_rank_regressions_emit_q2_q3_q4_without_eci_or_anchor_inputs():
     assert "epoch-eci" not in source and "eci_mapping" not in source
 
 
+def test_combined_hard_fit_uses_q2_q3_q4_as_one_target():
+    module = load_module()
+    abilities = pd.DataFrame({
+        "bench": ["gpqa"] * 4, "judge": ["judge"] * 4,
+        "model": ["a", "b", "c", "frontier"],
+        "ability": [-1.0, 0.0, 1.0, 2.0],
+    })
+    hard = hard_rows({
+        1: {"a": 10, "b": 10, "c": 10, "frontier": 10},
+        2: {"a": 1, "b": 4, "c": 6, "frontier": 9},
+        3: {"a": 2, "b": 5, "c": 7, "frontier": 8},
+        4: {"a": 3, "b": 6, "c": 8, "frontier": 7},
+    })
+    fits, points = module["fit_combined_rank_regressions"](abilities, hard)
+    assert len(fits) == 1
+    assert fits.iloc[0].target_slice == "Q2–Q4"
+    assert set(points.model) == {"a", "b", "c", "frontier"}
+    assert points.set_index("model").loc["a", "actual"] == pytest.approx(0.2)
+    assert points.set_index("model").loc["frontier", "n_items"] == 30
+
+
+def test_two_source_item_bootstrap_exports_nonzero_combined_intervals():
+    module = load_module()
+    rows = []
+    for item in range(12):
+        for left, right, pick in (("a", "b", item % 3 != 0),
+                                  ("b", "a", item % 3 == 0),
+                                  ("b", "frontier", item % 4 != 0),
+                                  ("frontier", "b", item % 4 == 0),
+                                  ("a", "frontier", item % 5 == 0),
+                                  ("frontier", "a", item % 5 != 0)):
+            rows.append({"bench": "gpqa", "judge": "judge", "item": str(item),
+                         "model_left": left, "model_right": right,
+                         "pick_left": int(pick)})
+    protocol = pd.DataFrame(rows)
+    hard = hard_rows({
+        2: {"a": 2, "b": 5, "frontier": 9},
+        3: {"a": 3, "b": 6, "frontier": 8},
+        4: {"a": 1, "b": 7, "frontier": 7},
+    })
+    _, _, fits, points = module["fit_combined_with_bootstrap"](
+        protocol, hard, resamples=30, seed=7, workers=1)
+    frontier = points.set_index("model").loc["frontier"]
+    assert fits.iloc[0].n_bootstrap == 30
+    assert frontier.fitted_low <= frontier.selected_fitted <= frontier.fitted_high
+    assert frontier.fitted_high > frontier.fitted_low
+
+
+def test_main_manifest_declares_combined_q2_q4_item_bootstrap():
+    manifest = load_module()["MAIN_OUTPUT_MANIFEST"]
+    assert manifest["target"] == "combined Q2–Q4 accuracy"
+    assert manifest["uncertainty"] == "95% two-source item bootstrap"
+
+
 def test_one_bt_ranking_uses_all_protocol_rows_per_judge_benchmark():
     module = load_module()
     calls = []
