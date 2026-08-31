@@ -1,7 +1,7 @@
 # Pairwise Capability Hierarchical Refit Design
 
 Date: 2026-08-31
-Status: Draft for review
+Status: Approved
 
 ## Scope
 
@@ -43,11 +43,12 @@ Within each outer fold:
 
 1. Prepare raw composites or the first 30 globally shared PC scores. Divide PC
    scores by the square root of their saved explained variance.
-2. Select `C` and the single benchmark-deviation relative penalty ratio using
-   grouped inner-CV log loss on outer-training rows only.
-3. Use the judge refit's deterministic coordinate search and ratio grid
-   `0.1, 0.3, 1, 3, 10, 30`, starting at one and stopping when unchanged or
-   after two passes.
+2. Fit the population and benchmark coefficient-family scales from the
+   outer-training likelihood using the judge refit's NumPyro SVI procedure.
+   Convert them to the single benchmark-deviation relative penalty ratio using
+   `(population_scale / benchmark_scale)` under L1 and its square under L2.
+3. Freeze that ratio while selecting `C` by grouped inner-CV log loss on the
+   outer-training rows.
 4. Require the selected inner fits and the final outer-training fit to
    converge.
 5. Save the selected `C`, L1 ratio, benchmark-deviation ratio, complete tuning
@@ -63,12 +64,12 @@ Keep `capability_predictions_glm/pairwise_wrapper.py` and
 `capability_predictions_glm/pairwise_wrapper_lesions.py` as the entry points.
 Do not add another fitting pipeline.
 
-Make the shared sparse task declare which relative penalty parameters it owns.
-The judge task continues to declare its existing four parameters; the
-capability task declares only `benchmark_deviation_penalty`. Generalize the
-coordinate-search helper to operate on the task's declared parameter names.
-This is an interface extension only: judge design, grids, selection order,
-diagnostics, and outputs remain unchanged.
+Make the shared sparse task declare its scale estimator and relative penalty
+parameters. The judge task continues to use its existing crossed-hierarchy
+estimator and four parameters; the capability task uses a no-intercept
+population-plus-benchmark estimator and declares only
+`benchmark_deviation_penalty`. This is an interface extension only: judge
+design, estimator, tuning, diagnostics, and outputs remain unchanged.
 
 The capability design reads the fitted ratio supplied by the full-fit path.
 Coefficient reconstruction continues to save population, benchmark deviation,
@@ -116,3 +117,19 @@ delete or modify existing Ceph data artifacts.
 Only regenerated artifacts may feed capability conclusions. Judge-capability
 comparisons wait for the canonical corrected judge outputs and consume them
 without modifying the judge pipeline.
+
+## Judge-capability reporting
+
+Make the comparison a primary report section. Reuse the existing aligned
+comparison machinery to publish one compact overview table joining, by variant
+and judge, capability stronger-model accuracy, judge stronger-model accuracy,
+their difference, overall coefficient cosine, Pearson/Spearman agreement, and
+judge ECI where available. Follow it with benchmark-specific coefficient and
+cosine summaries, raw/PC original-leaf comparisons, cosine drivers, and the
+descriptive relationships with judge ECI and empirical judge accuracy.
+
+Do not compare PC indices directly. Back-project through the frozen global
+loadings and benchmark-specific composite leaf weights before original-feature
+comparisons. Keep predictive performance, singular contribution, unique
+contribution, coefficient direction, PC definition, and cross-task similarity
+as separate quantities.
