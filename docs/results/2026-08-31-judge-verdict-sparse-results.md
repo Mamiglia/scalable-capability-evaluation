@@ -6,7 +6,7 @@ The primary specification is L1 throughout. It incurred no practically meaningfu
 
 The analysis supports four conclusions:
 
-1. **Judge verdicts are substantially but not completely predictable.** The global-PC L1 model reached 72.70% held-out accuracy. Relative to the empirical repeat-agreement ceiling, this recovers about **63–81% of the available accuracy above chance** overall.
+1. **Judge verdicts are substantially but not completely predictable.** The raw L1 regression reached 72.59% held-out accuracy and recovered **62.6–80.3%** of empirical repeat-limited accuracy headroom above chance. To obtain orthogonal, separately interpretable axes, we projected the features into one global PCA basis and applied L1 regularisation. This PC GLM still reached 72.70% accuracy and recovered **62.9–80.7%** of the same headroom.
 2. **Judges use a direct-quality axis.** PC2—clear, efficient, rigorous and direct responses versus deep, redundant and tool-heavy trajectories—was by far the most important PC. Its Unique effect was 0.141 log-loss units.
 3. **Raw rubric features carry the clearest interpretable signal.** The annotation family had a Unique effect of 0.0655. Self-corrections, think-aloud language and hedging were negatively associated with selection; depth, efficiency and rigour were positive.
 4. **Failures reflect ambiguous or unstable verdicts, not obvious model-era mismatch.** Prediction error rose by 14.7 percentage points for order-inconsistent verdicts and by 11.2 points when the judge selected the weaker model. Configured-reasoning mismatch and release distance showed no comparable penalty.
@@ -33,18 +33,18 @@ The analysis supports four conclusions:
 
 ## 1. Per-judge prediction ceiling
 
-The table uses the PC-L1 model because it had the best overall held-out accuracy. Ceiling endpoints are weighted across each judge's available benchmark cells using the held-out row counts.
+Ceiling endpoints are weighted across each judge's available benchmark cells using the held-out row counts. Recovery is shown for both the raw regression and the orthogonalized PC regression.
 
-| Judge | PC-L1 accuracy | Empirical ceiling range | Chance-to-ceiling headroom recovered |
-|---|---:|---:|---:|
-| Llama 8B | 62.91% | 64.87–74.19% | 53.4–86.8% |
-| DeepSeek R1 | 75.50% | 75.48–83.89% | 75.3–100.1% |
-| DeepSeek V4 | 73.30% | 77.40–85.56% | 65.5–85.0% |
-| Gemma | 74.06% | 83.97–91.15% | 58.5–70.8% |
-| GPT-OSS | 74.74% | 83.05–90.38% | 61.3–74.9% |
-| o4-mini | 76.02% | 83.54–90.79% | 63.8–77.6% |
+| Judge | Empirical ceiling | Raw accuracy | Raw headroom recovered | PC accuracy | PC headroom recovered |
+|---|---:|---:|---:|---:|---:|
+| Llama 8B | 64.87–74.19% | 62.93% | 53.4–86.9% | 62.91% | 53.4–86.8% |
+| DeepSeek R1 | 75.48–83.89% | 75.71% | 75.9–100.9% | 75.50% | 75.3–100.1% |
+| DeepSeek V4 | 77.40–85.56% | 73.55% | 66.2–85.9% | 73.30% | 65.5–85.0% |
+| Gemma | 83.97–91.15% | 74.21% | 58.8–71.3% | 74.06% | 58.5–70.8% |
+| GPT-OSS | 83.05–90.38% | 74.30% | 60.2–73.5% | 74.74% | 61.3–74.9% |
+| o4-mini | 83.54–90.79% | 75.19% | 61.8–75.1% | 76.02% | 63.8–77.6% |
 
-The pooled PC-L1 accuracy was 72.70%; the row-weighted ceiling was 78.13–86.06%. Thus the model recovered 62.9–80.7% of repeat-limited accuracy headroom above chance. DeepSeek R1 slightly exceeds the conservative endpoint because that endpoint is a sampled lower confidence bound, not a hard ceiling.
+The pooled raw-L1 accuracy was 72.59%; against the row-weighted 78.13–86.06% ceiling, it recovered 62.6–80.3% of repeat-limited accuracy headroom. Orthogonalizing 112 correlated features into 30 PCs retained 71.21% of feature variance but essentially all recovered predictive headroom: PC L1 recovered 62.9–80.7%. DeepSeek R1 slightly exceeds the conservative endpoint because that endpoint is a sampled lower confidence bound, not a hard ceiling.
 
 The ceiling study repeats historical inputs on current endpoints. It includes temporal and provider drift as well as stochasticity. The interval should therefore be read as an empirical reliability reference, not an intrinsic upper limit.
 
@@ -158,7 +158,7 @@ PC1 explains the most input variance but contributes no reliable Unique verdict 
 
 ![Semantically labelled PC effects](../figures/judge-verdict-20260831/pc-effects.svg)
 
-Loading plots: [PC1](../figures/judge-verdict-20260831/pc1-loadings.svg), [PC2](../figures/judge-verdict-20260831/pc2-loadings.svg), [PC3](../figures/judge-verdict-20260831/pc3-loadings.svg), [PC4](../figures/judge-verdict-20260831/pc4-loadings.svg), [PC5](../figures/judge-verdict-20260831/pc5-loadings.svg), [PC22](../figures/judge-verdict-20260831/pc22-loadings.svg), [PC29](../figures/judge-verdict-20260831/pc29-loadings.svg).
+Loading plots: [PC1](../figures/judge-verdict-20260831/pc1-loadings.svg), [PC2](../figures/judge-verdict-20260831/pc2-loadings.svg), [PC3](../figures/judge-verdict-20260831/pc3-loadings.svg), [PC4](../figures/judge-verdict-20260831/pc4-loadings.svg), [PC5](../figures/judge-verdict-20260831/pc5-loadings.svg), [PC6](../figures/judge-verdict-20260831/pc6-loadings.svg), [PC7](../figures/judge-verdict-20260831/pc7-loadings.svg), [PC8](../figures/judge-verdict-20260831/pc8-loadings.svg), [PC22](../figures/judge-verdict-20260831/pc22-loadings.svg), [PC29](../figures/judge-verdict-20260831/pc29-loadings.svg).
 
 Several smaller axes had negative Unique effects: PC16, PC6, PC7, PC18, PC26, PC15 and PC19. Their magnitudes were only 0.0018–0.0055 log-loss units. They likely represent redundant or mildly overfit directions rather than useful Singular predictors.
 
@@ -187,6 +187,42 @@ PC2's aggregate dominance is highly benchmark-specific:
 Other PCs matter where PC2 does not. PC4 was strongest on AIME and GPQA (0.0314 and 0.0320). PC3 was strongest on GPQA and InterCode (0.0207 and 0.0297). PC5 was positive across all four benchmarks (0.0081–0.0223). PC1 was negative on AIME and small positive elsewhere.
 
 ![PC L1 Unique effects by benchmark](../figures/judge-verdict-20260831/pc-unique-by-benchmark.svg)
+
+### Benchmark heterogeneity beyond one-benchmark effects
+
+To find variables whose importance changes across domains, every raw feature and PC was ranked by:
+
+`max(max benchmark Unique − min benchmark Unique, max benchmark Singular − min benchmark Singular)`.
+
+This is deliberately different from ranking the largest pooled effect. It detects variables that are useful on both agentic benchmarks but weak on AIME/GPQA, as well as the reverse pattern. The accompanying table also records the mean InterCode/SWE effect minus the mean AIME/GPQA effect.
+
+The strongest raw heterogeneity was mainly Singular:
+
+- **Dense/modular graph structure** (`communities per node + density + max degree share + modularity`) was negative on AIME/GPQA (−0.0150/−0.0632) but positive on InterCode/SWE (+0.0233/+0.0567).
+- **Relation/type entropy** was negative on AIME/GPQA (−0.0388/−0.0190) and positive on InterCode/SWE (+0.0637/+0.0180).
+- **Adjacent-edge share** was negative on AIME/GPQA (−0.0135/−0.0103) and positive on both InterCode/SWE (+0.0148/+0.0598).
+- **Test commands** were near zero on AIME/GPQA and positive on both agentic benchmarks (+0.0041 InterCode; +0.0629 SWE).
+- **Response/tool-call length** was negative on GPQA (−0.0677), near zero on AIME/InterCode and positive on SWE (+0.0216).
+- **Bare-answer/prose length** separated the families most strongly: negative on AIME/GPQA (−0.0212/−0.0752) and positive on InterCode/SWE (+0.0575/+0.0193).
+
+Thus there is a coherent multi-benchmark agentic pattern: tool/test activity and graph/trajectory structure are useful on both InterCode and SWE-bench Mini even when they are unhelpful on the reasoning benchmarks.
+
+![Raw benchmark-heterogeneous Unique effects](../figures/judge-verdict-20260831/raw-benchmark-heterogeneity-unique.svg)
+
+![Raw benchmark-heterogeneous Singular effects](../figures/judge-verdict-20260831/raw-benchmark-heterogeneity-singular.svg)
+
+The PC heterogeneity analysis shows complementary axes:
+
+- **PC2 direct efficiency** is uniquely dominated by InterCode, but its Singular effect is positive in every benchmark.
+- **PC1 trajectory breadth/length** has a positive Singular effect on InterCode/SWE (+0.0065/+0.0550), is positive on AIME (+0.0168), and negative on GPQA (−0.0431).
+- **PC3 symbolic/backtracking** is Singularly useful on AIME/GPQA (+0.0239/+0.0610) but weak or negative on InterCode/SWE (+0.0104/−0.0240).
+- **PC6 equations versus verification** is negative on AIME (−0.0415), near zero on GPQA/InterCode and positive on SWE (+0.0204).
+- **PC8 assertion versus equations** is positive on AIME/GPQA (+0.0201/+0.0255) and weakly negative on InterCode/SWE.
+- **PC29 planned backtracking** is strongest on SWE (+0.0247) and weak elsewhere.
+
+![PC benchmark-heterogeneous Unique effects](../figures/judge-verdict-20260831/pc-benchmark-heterogeneity-unique.svg)
+
+![PC benchmark-heterogeneous Singular effects](../figures/judge-verdict-20260831/pc-benchmark-heterogeneity-singular.svg)
 
 ## 5. When verdicts cannot be predicted
 
@@ -277,6 +313,8 @@ Key generated tables:
 - [`l1-coefficients-by-judge.csv`](../../judge_results/verdict_interpretability/sparse-primary-20260830/tables/l1-coefficients-by-judge.csv)
 - [`l1-coefficients-by-benchmark.csv`](../../judge_results/verdict_interpretability/sparse-primary-20260830/tables/l1-coefficients-by-benchmark.csv)
 - [`l1-unique-effects-by-benchmark.csv`](../../judge_results/verdict_interpretability/sparse-primary-20260830/tables/l1-unique-effects-by-benchmark.csv)
+- [`l1-effects-by-benchmark.csv`](../../judge_results/verdict_interpretability/sparse-primary-20260830/tables/l1-effects-by-benchmark.csv)
+- [`l1-benchmark-heterogeneity.csv`](../../judge_results/verdict_interpretability/sparse-primary-20260830/tables/l1-benchmark-heterogeneity.csv)
 - [`prediction-failure-factors.csv`](../../judge_results/verdict_interpretability/sparse-primary-20260830/tables/prediction-failure-factors.csv)
 - [`prediction-failure-quartiles.csv`](../../judge_results/verdict_interpretability/sparse-primary-20260830/tables/prediction-failure-quartiles.csv)
 - [`prediction-error-cases.parquet`](../../judge_results/verdict_interpretability/sparse-primary-20260830/tables/prediction-error-cases.parquet)

@@ -27,7 +27,10 @@ LABELS = {
     "pc-l1": "PC L1", "pc-ridge": "PC L2",
 }
 PRIMARY_VARIANTS = ("raw-l1", "pc-l1")
-IMPORTANT_PCS = ("pc_001", "pc_002", "pc_003", "pc_004", "pc_005", "pc_022", "pc_029")
+IMPORTANT_PCS = (
+    "pc_001", "pc_002", "pc_003", "pc_004", "pc_005", "pc_006", "pc_007",
+    "pc_008", "pc_022", "pc_029",
+)
 PC_EFFECT_PCS = (
     "pc_002", "pc_003", "pc_005", "pc_004", "pc_029", "pc_022", "pc_001",
     "pc_016", "pc_006", "pc_007", "pc_018", "pc_026",
@@ -40,6 +43,7 @@ PC_LABELS = {
     "pc_005": "PC5 · sequential verification",
     "pc_006": "PC6 · equations vs verification",
     "pc_007": "PC7 · planning vs maths",
+    "pc_008": "PC8 · assertion vs equations",
     "pc_016": "PC16 · graph/tool irregularity",
     "pc_018": "PC18 · equations vs correction",
     "pc_022": "PC22 · explicit checking",
@@ -57,6 +61,16 @@ JUDGE_LABELS = {
 BENCH_LABELS = {
     "aime": "AIME", "gpqa": "GPQA", "intercode": "InterCode",
     "swe_bench_mini": "SWE-bench Mini",
+}
+RAW_HETEROGENEITY_LABELS = {
+    "composite-010": "Bare answer / prose length",
+    "composite-022": "Graph density / modularity",
+    "composite-014": "Relation / type entropy",
+    "depth": "Reasoning depth",
+    "composite-019": "Response / tool-call length",
+    "adjacent_edge_share": "Adjacent-edge share",
+    "composite-009": "Graph diameter / path length",
+    "test_commands": "Test commands",
 }
 CMAP = LinearSegmentedColormap.from_list(
     "judge_diverging", ("#2a78d6", "#f4f1eb", "#eb6834"),
@@ -277,20 +291,25 @@ def stratified_performance(root: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.D
 def ceiling_by_judge(root: Path, cells: pd.DataFrame) -> pd.DataFrame:
     ceiling_path = root.parents[1] / "verdict_dissection/exact_rejudge_20260828/summary.csv"
     ceiling = pd.read_csv(ceiling_path).rename(columns={"benchmark": "bench"})
-    merged = cells[cells.variant == "pc-l1"].merge(ceiling, on=["judge", "bench"], how="inner")
     rows = []
-    for judge, group in merged.groupby("judge", sort=False):
+    for judge, group in cells[cells.variant == "pc-l1"].merge(
+        ceiling, on=["judge", "bench"], how="inner").groupby("judge", sort=False):
         weight = group.row_count.to_numpy()
-        accuracy = np.average(group.accuracy, weights=weight)
         conservative = np.average(group.wilson_95_low, weights=weight)
         raw = np.average(group.raw_agreement, weights=weight)
-        rows.append({
+        record = {
             "judge": judge, "observed_cells": len(group), "held_out_rows": weight.sum(),
-            "pc_l1_accuracy": accuracy, "conservative_repeat_ceiling": conservative,
-            "raw_repeat_agreement": raw,
-            "recovery_vs_raw": (accuracy - 0.5) / (raw - 0.5),
-            "recovery_vs_conservative": (accuracy - 0.5) / (conservative - 0.5),
-        })
+            "conservative_repeat_ceiling": conservative, "raw_repeat_agreement": raw,
+        }
+        for variant in PRIMARY_VARIANTS:
+            variant_rows = cells[(cells.variant == variant) & (cells.judge == judge)]
+            accuracy = np.average(variant_rows.accuracy, weights=variant_rows.row_count)
+            prefix = variant.replace("-", "_")
+            record[f"{prefix}_accuracy"] = accuracy
+            record[f"{prefix}_recovery_vs_raw"] = (accuracy - 0.5) / (raw - 0.5)
+            record[f"{prefix}_recovery_vs_conservative"] = (
+                (accuracy - 0.5) / (conservative - 0.5))
+        rows.append(record)
     return pd.DataFrame(rows)
 
 
@@ -298,12 +317,15 @@ def ceiling_figure(root: Path, table: pd.DataFrame) -> None:
     order = [judge for judge in JUDGE_LABELS if judge in set(table.judge)]
     values = table.set_index("judge").loc[order]
     positions = np.arange(len(order))[::-1]
-    figure, axis = plt.subplots(figsize=(2.9, 2.75))
+    figure, axis = plt.subplots(figsize=(2.9, 2.9))
     axis.hlines(
         positions, values.conservative_repeat_ceiling, values.raw_repeat_agreement,
         color="#999999", lw=1,
     )
-    axis.plot(values.pc_l1_accuracy, positions, "o", color="#222222", ms=4, label="PC L1")
+    axis.plot(values.raw_l1_accuracy, positions - 0.08, "o", color="#2a78d6", ms=4,
+              label="Raw L1")
+    axis.plot(values.pc_l1_accuracy, positions + 0.08, "o", color="#eb6834", ms=4,
+              label="PC L1")
     axis.plot(values.conservative_repeat_ceiling, positions, "s", color="#777777", ms=3.5,
               label="Lower bound")
     axis.plot(values.raw_repeat_agreement, positions, "^", color="#aaaaaa", ms=4,
@@ -389,6 +411,37 @@ def benchmark_unique_effects(root: Path, features: dict[str, list[str]]) -> pd.D
         summary["unique_delta_log_loss"] = summary.weighted / summary.row_count
         rows.append(summary.assign(variant=variant))
     return pd.concat(rows, ignore_index=True)
+
+
+def benchmark_effect_heterogeneity(root: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    long_rows, summaries = [], []
+    benchmarks = ("aime", "gpqa", "intercode", "swe_bench_mini")
+    for variant in PRIMARY_VARIANTS:
+        table = pd.read_parquet(root / VARIANTS[variant] / "lesions/item-deltas.parquet")
+        table = table[table.kind.isin(("lesion-feature", "singular-feature"))].copy()
+        table["weighted"] = table.delta_log_loss * table.row_count
+        grouped = table.groupby(["kind", "variable", "bench"], as_index=False).agg(
+            weighted=("weighted", "sum"), row_count=("row_count", "sum"))
+        grouped["effect"] = grouped.weighted / grouped.row_count
+        grouped["effect_type"] = grouped.kind.map({
+            "lesion-feature": "Unique", "singular-feature": "Singular",
+        })
+        long_rows.append(grouped.assign(variant=variant))
+        for variable, rows in grouped.groupby("variable"):
+            record = {"variant": variant, "variable": variable}
+            for kind, prefix in (("lesion-feature", "unique"), ("singular-feature", "singular")):
+                values = rows[rows.kind == kind].set_index("bench").effect
+                for benchmark in benchmarks:
+                    record[f"{prefix}_{benchmark}"] = values.get(benchmark, np.nan)
+                record[f"{prefix}_range"] = values.max() - values.min()
+                record[f"{prefix}_sd"] = values.std(ddof=0)
+                record[f"{prefix}_agentic_minus_reasoning"] = (
+                    (values.get("intercode", np.nan) + values.get("swe_bench_mini", np.nan)) / 2
+                    - (values.get("aime", np.nan) + values.get("gpqa", np.nan)) / 2
+                )
+            record["heterogeneity_score"] = max(record["unique_range"], record["singular_range"])
+            summaries.append(record)
+    return pd.concat(long_rows, ignore_index=True), pd.DataFrame(summaries)
 
 
 def interpretation_tables(
@@ -745,6 +798,9 @@ def build(root: Path) -> None:
     coefficients_by_benchmark.to_csv(tables / "l1-coefficients-by-benchmark.csv", index=False)
     unique_by_benchmark = benchmark_unique_effects(root, strata_features)
     unique_by_benchmark.to_csv(tables / "l1-unique-effects-by-benchmark.csv", index=False)
+    heterogeneity_long, heterogeneity = benchmark_effect_heterogeneity(root)
+    heterogeneity_long.to_csv(tables / "l1-effects-by-benchmark.csv", index=False)
+    heterogeneity.to_csv(tables / "l1-benchmark-heterogeneity.csv", index=False)
     (
         metadata, error_cases, failure_by_judge, failure_summary,
         failure_quartiles_by_judge, failure_quartiles, failure_outcomes,
@@ -781,6 +837,18 @@ def build(root: Path) -> None:
         root, unique_by_benchmark, "pc-l1", strata_features["pc-l1"], "bench",
         "unique_delta_log_loss", PC_LABELS, "pc-unique-by-benchmark", "Unique Δ log loss",
     )
+    for variant, prefix, label_map in (
+        ("raw-l1", "raw", RAW_HETEROGENEITY_LABELS), ("pc-l1", "pc", PC_LABELS),
+    ):
+        top = heterogeneity[heterogeneity.variant == variant].nlargest(
+            8, "heterogeneity_score").variable.tolist()
+        for effect_type in ("Unique", "Singular"):
+            heatmap_figure(
+                root, heterogeneity_long[heterogeneity_long.effect_type == effect_type],
+                variant, top, "bench", "effect", label_map,
+                f"{prefix}-benchmark-heterogeneity-{effect_type.lower()}",
+                f"{effect_type} Δ log loss",
+            )
     failure_factor_figure(root, failure_summary)
     failure_quartile_figure(root, failure_quartiles)
     loadings_figure(root, labels).to_csv(tables / "important-pc-loadings.csv", index=False)
