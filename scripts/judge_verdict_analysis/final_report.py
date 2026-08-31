@@ -176,7 +176,7 @@ def load_results(root: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 def performance_figure(
     root: Path, performance: pd.DataFrame, *, output: Path | None = None,
 ) -> tuple[Path, Path]:
-    figure, axes = plt.subplots(1, 2, figsize=(3.0, 1.25))
+    figure, axes = plt.subplots(1, 2, figsize=(3.35, 1.25))
     positions = np.arange(len(PRIMARY_VARIANTS))[::-1]
     table = performance.set_index(["metric", "variant"])
     for axis, metric, label in zip(axes, ("accuracy", "log_loss"), ("Accuracy", "Log loss")):
@@ -207,7 +207,9 @@ def performance_figure(
             [LABELS[variant] for variant in PRIMARY_VARIANTS] if metric == "accuracy" else [],
         )
         axis.set_xlabel(label); _style(axis)
-    figure.subplots_adjust(left=0.28, right=0.98, bottom=0.35, top=0.96, wspace=0.24)
+        axis.spines["bottom"].set_bounds(low, high)
+        axis.spines["left"].set_bounds(positions.min(), positions.max())
+    figure.subplots_adjust(left=0.26, right=0.98, bottom=0.35, top=0.96, wspace=0.55)
     return _write_figure(figure, output, "performance") if output else _save(
         figure, root, "performance")
 
@@ -544,7 +546,7 @@ def ceiling_figure(root: Path, table: pd.DataFrame) -> None:
     order = [judge for judge in JUDGE_LABELS if judge in set(table.judge)]
     values = table.set_index("judge").loc[order]
     positions = np.arange(len(order))[::-1]
-    figure, axis = plt.subplots(figsize=(2.1, 2.15))
+    figure, axis = plt.subplots(figsize=(2.5, 2.15))
     bounds = []
     for prefix, offset, color, label in (
         ("raw_l1", -0.09, "#2a78d6", "Raw L1"),
@@ -566,7 +568,7 @@ def ceiling_figure(root: Path, table: pd.DataFrame) -> None:
     axis.spines["bottom"].set_bounds(minimum, maximum)
     axis.spines["left"].set_bounds(positions.min(), positions.max())
     axis.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=2, frameon=False)
-    figure.subplots_adjust(left=0.42, right=0.97, bottom=0.31, top=0.97)
+    figure.subplots_adjust(left=0.39, right=0.98, bottom=0.31, top=0.97)
     _save(figure, root, "accuracy-vs-ceiling")
 
 
@@ -574,7 +576,7 @@ def performance_strata_figure(root: Path, table: pd.DataFrame, dimension: str) -
     order = list(JUDGE_LABELS if dimension == "judge" else BENCH_LABELS)
     order = [value for value in order if value in set(table[dimension])]
     labels = JUDGE_LABELS if dimension == "judge" else BENCH_LABELS
-    figure, axes = plt.subplots(1, 2, figsize=(3.4, 1.3 + 0.24 * len(order)), sharey=True)
+    figure, axes = plt.subplots(1, 2, figsize=(3.5, 1.3 + 0.24 * len(order)), sharey=True)
     positions = np.arange(len(order))[::-1]
     for axis, metric, axis_label in zip(axes, ("accuracy", "log_loss"), ("Accuracy", "Log loss")):
         for offset, variant, color in ((-0.08, "raw-l1", "#2a78d6"), (0.08, "pc-l1", "#eb6834")):
@@ -586,6 +588,8 @@ def performance_strata_figure(root: Path, table: pd.DataFrame, dimension: str) -
         axis.set_xlim(low, high); axis.set_xticks((low, (low + high) / 2, high))
         axis.set_yticks(positions)
         axis.set_xlabel(axis_label); _style(axis)
+        axis.spines["bottom"].set_bounds(low, high)
+        axis.spines["left"].set_bounds(positions.min(), positions.max())
     axes[0].set_yticklabels([labels[value] for value in order])
     axes[1].tick_params(labelleft=False)
     handles = [
@@ -593,7 +597,7 @@ def performance_strata_figure(root: Path, table: pd.DataFrame, dimension: str) -
         plt.Line2D([], [], marker="o", color="#eb6834", ls="", label="PC L1", ms=4),
     ]
     figure.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.0), ncol=2, frameon=False)
-    figure.subplots_adjust(left=0.34, right=0.98, bottom=0.3, top=0.97, wspace=0.24)
+    figure.subplots_adjust(left=0.33, right=0.98, bottom=0.3, top=0.97, wspace=0.55)
     _save(figure, root, f"performance-by-{dimension}")
 
 
@@ -1126,7 +1130,7 @@ def _pack_performance_figure(table: pd.DataFrame, output: Path) -> tuple[Path, P
         ("accuracy_fraction_of_ceiling", "Accuracy / ceiling"),
         ("held_out_deviance_explained", "Deviance explained"),
     )
-    figure, axes = plt.subplots(2, 2, figsize=(3.2, 2.2))
+    figure, axes = plt.subplots(2, 2, figsize=(3.35, 2.45))
     positions = np.arange(len(PRIMARY_VARIANTS))[::-1]
     for index, (axis, (metric, label)) in enumerate(zip(axes.flat, metrics)):
         values = table[metric].to_numpy(float)
@@ -1142,8 +1146,10 @@ def _pack_performance_figure(table: pd.DataFrame, output: Path) -> tuple[Path, P
             [LABELS[variant] for variant in PRIMARY_VARIANTS] if index % 2 == 0 else [],
         )
         axis.set_xlabel(label); _style(axis)
-    figure.subplots_adjust(left=0.29, right=0.98, bottom=0.17, top=0.97,
-                           wspace=0.32, hspace=0.75)
+        axis.spines["bottom"].set_bounds(low, high)
+        axis.spines["left"].set_bounds(positions.min(), positions.max())
+    figure.subplots_adjust(left=0.28, right=0.98, bottom=0.24, top=0.97,
+                           wspace=0.55, hspace=0.95)
     return _write_figure(figure, output, "performance")
 
 
