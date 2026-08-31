@@ -136,20 +136,20 @@ def test_main_manifest_declares_combined_q2_q4_item_bootstrap():
     assert manifest["uncertainty"] == "95% two-source item bootstrap"
 
 
-def test_time_trend_control_fits_only_strictly_pre_judge_hard_scores():
+def test_time_trend_control_fits_only_strictly_pre_judge_frontier_scores():
     actual = pd.DataFrame({
-        "bench": ["gpqa"] * 4,
-        "model": ["old-a", "old-b", "at-cutoff", "later"],
-        "actual": [0.2, 0.3, 0.4, 0.5],
-        "n_items": [100] * 4,
+        "bench": ["gpqa"] * 5,
+        "model": ["old-a", "pool-old", "old-b", "at-cutoff", "later"],
+        "actual": [0.2, 0.9, 0.3, 0.4, 0.5],
+        "n_items": [100] * 5,
     })
     releases = {
-        "old-a": "2024-01-01", "old-b": "2024-01-11",
+        "old-a": "2024-01-01", "pool-old": "2024-01-06", "old-b": "2024-01-11",
         "judge": "2024-01-21", "at-cutoff": "2024-01-21",
         "later": "2024-01-31",
     }
     fits, points = load_module()["fit_time_trend_controls"](
-        actual, ["at-cutoff", "later"], ["judge"], releases,
+        actual, ["old-a", "old-b", "at-cutoff", "later"], ["judge"], releases,
         resamples=40, seed=7,
     )
     fit = fits.iloc[0]

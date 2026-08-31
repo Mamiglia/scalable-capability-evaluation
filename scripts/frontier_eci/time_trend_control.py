@@ -26,10 +26,7 @@ def main() -> None:
 
     config = _load_config(args.config)
     rank_root = _path(config["results"]) / "analysis/rank_regression"
-    source = pd.concat([
-        pd.read_csv(rank_root / "training_fitted.csv"),
-        pd.read_csv(rank_root / "frontier_fitted.csv"),
-    ], ignore_index=True)
+    source = pd.read_csv(rank_root / "frontier_fitted.csv")
     actuals = (source[["bench", "model", "actual", "n_items"]]
                .dropna().drop_duplicates(["bench", "model"]))
     judges = [judge.split("/")[-1] for group in config["judges"].values() for judge in group]

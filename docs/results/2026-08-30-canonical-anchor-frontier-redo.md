@@ -71,10 +71,11 @@ black actuals, blue fitted values, dotted residuals, and 95% item-bootstrap unce
 
 The deliberately dumber control ignores ranking values and verdict outcomes. For each judge ×
 benchmark, it fits a free-intercept linear regression of combined Q2–Q4 hard accuracy on release
-date using every pool/frontier model with a materialized hard score that was released strictly
-before the judge, then extrapolates to the quarterly frontier.
-Models released on the judge date do not enter the fit. Black pre-release points are the fit data;
-later black points are frontier outcomes.
+date using only the same eight quarterly frontier points shown in the judge figures that were
+released strictly before the judge, then extrapolates to the remaining frontier points. Models
+released on the judge date do not enter the fit. Thus every control panel has exactly the same
+black actual points as its corresponding judge panel. GPT-4o has no fitted control line because no
+frontier point predates its release; this is recorded as two expected fit failures, one per benchmark.
 
 - [Control figures](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/figures/):
   20 PNG, 20 PDF, and 20 editable-text SVG files.

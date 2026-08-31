@@ -48,7 +48,7 @@ MAIN_OUTPUT_MANIFEST = {
     "supplemental_controls": [{
         "analysis": TIME_TREND_LABEL,
         "root": "analysis/rank_regression/time_trend_control",
-        "scientific_scope": "no ranking values or judge verdict outcomes; linear release-time extrapolation",
+        "scientific_scope": "same quarterly frontier points as judge figures; no ranking values or judge verdict outcomes",
     }],
     "result_document": "../../../docs/results/2026-08-30-canonical-anchor-frontier-redo.md",
     "lifecycle_manifest": "provenance/final-lifecycle.json",
@@ -300,8 +300,9 @@ def fit_time_trend_controls(actuals: pd.DataFrame, targets: list[str],
                             judges: list[str], releases: dict[str, str],
                             resamples: int = 1000, seed: int = 0
                             ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Fit hard accuracy on release time using only models older than each judge."""
-    actuals = actuals.drop_duplicates(["bench", "model"]).copy()
+    """Fit frontier hard accuracy on release time using targets older than each judge."""
+    actuals = (actuals[actuals.model.isin(targets)]
+               .drop_duplicates(["bench", "model"]).copy())
     actuals["target_release"] = actuals.model.map(
         lambda model: release_date(releases, model))
     fits, predictions = [], []
@@ -310,11 +311,28 @@ def fit_time_trend_controls(actuals: pd.DataFrame, targets: list[str],
         for judge in judges:
             judge_release = release_date(releases, judge)
             training = bench_actuals[bench_actuals.target_release < judge_release].copy()
+            shown = bench_actuals.copy()
             if len(training) < 2 or training.target_release.nunique() < 2:
-                raise ValueError(f"fewer than two pre-release points for {bench}/{judge}")
-            shown = bench_actuals[
-                bench_actuals.model.isin(set(training.model) | set(targets))
-            ].copy()
+                reason = f"only {len(training)} strictly pre-release frontier points"
+                fits.append({
+                    "bench": bench, "judge": judge, "fit_label": TIME_TREND_LABEL,
+                    "intercept_2024": np.nan, "slope_per_year": np.nan, "rmse": np.nan,
+                    "n_training_models": len(training),
+                    "training_model_ids": "|".join(sorted(training.model.astype(str))),
+                    "judge_release": judge_release, "target_slice": HARD_SLICE,
+                    "n_bootstrap": 0, "bootstrap_unit": "hard-item outcomes within model",
+                    "fit_status": "failed", "failure_reason": reason,
+                })
+                predictions.append(shown.assign(
+                    judge=judge, judge_release=judge_release,
+                    predicted=np.nan, predicted_low=np.nan, predicted_high=np.nan,
+                    is_fit_point=shown.model.isin(training.model), is_frontier=True,
+                    post_judge_release=shown.target_release > judge_release,
+                    residual=np.nan, fit_label=TIME_TREND_LABEL,
+                    target_slice=HARD_SLICE, n_bootstrap=0,
+                    fit_status="failed", failure_reason=reason,
+                ))
+                continue
             x_train = ((training.target_release - TIME_ORIGIN).dt.days / 365.25).to_numpy()
             x_shown = ((shown.target_release - TIME_ORIGIN).dt.days / 365.25).to_numpy()
             design = np.column_stack([np.ones(len(training)), x_train])
@@ -339,16 +357,17 @@ def fit_time_trend_controls(actuals: pd.DataFrame, targets: list[str],
                 "judge_release": judge_release, "target_slice": HARD_SLICE,
                 "n_bootstrap": resamples,
                 "bootstrap_unit": "hard-item outcomes within model (aggregate binomial)",
+                "fit_status": "ok", "failure_reason": "",
             })
             predictions.append(shown.assign(
                 judge=judge, judge_release=judge_release,
                 predicted=predicted, predicted_low=low, predicted_high=high,
                 is_fit_point=shown.model.isin(training.model),
-                is_frontier=shown.model.isin(targets),
+                is_frontier=True,
                 post_judge_release=shown.target_release > judge_release,
                 residual=predicted - shown.actual.to_numpy(),
                 fit_label=TIME_TREND_LABEL, target_slice=HARD_SLICE,
-                n_bootstrap=resamples,
+                n_bootstrap=resamples, fit_status="ok", failure_reason="",
             ))
     return pd.DataFrame(fits), pd.concat(predictions, ignore_index=True)
 
@@ -463,10 +482,11 @@ def write_time_trend_output(fits: pd.DataFrame, points: pd.DataFrame,
     summary = {
         "analysis": TIME_TREND_LABEL,
         "target": f"combined {HARD_SLICE} accuracy",
-        "fit": "free-intercept linear OLS on models released strictly before each judge",
+        "fit": "free-intercept linear OLS on frontier models released strictly before each judge",
         "uncertainty": "95% aggregate binomial item bootstrap",
         "resamples": resamples,
         "fit_blocks": len(fits),
+        "fit_failures": int(fits.fit_status.ne("ok").sum()),
         "prediction_rows": len(points),
         "frontier_prediction_rows": int(points.is_frontier.sum()),
     }
