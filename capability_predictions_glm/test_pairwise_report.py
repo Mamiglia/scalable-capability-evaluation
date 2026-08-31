@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -9,6 +12,7 @@ from .pairwise_report import (
     pc_score_scales,
     refit_matches_frozen,
     summarize_capability_predictions,
+    validate_fold_manifest,
 )
 
 
@@ -54,6 +58,23 @@ def test_refit_validation_includes_fitted_benchmark_ratio() -> None:
     assert refit_matches_frozen(frozen | {"converged": True}, frozen)
     assert not refit_matches_frozen(frozen | {"benchmark_deviation_penalty": 3.0}, frozen)
     assert not refit_matches_frozen({"C": 0.1, "l1_ratio": 1.0}, frozen)
+
+
+def test_fold_manifest_validation_checks_predecessor_and_artifact_hashes(tmp_path) -> None:
+    artifact = tmp_path / "artifact.txt"
+    artifact.write_text("valid")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({
+        "state": "completed",
+        "artifacts": {"artifact.txt": hashlib.sha256(artifact.read_bytes()).hexdigest()},
+    }))
+    expected = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+
+    assert validate_fold_manifest(tmp_path, expected)["state"] == "completed"
+
+    artifact.write_text("tampered")
+    with pytest.raises(RuntimeError, match="invalid completed fold artifacts"):
+        validate_fold_manifest(tmp_path, expected)
 
 
 def test_judge_capability_overview_joins_prediction_and_representation_metrics() -> None:
