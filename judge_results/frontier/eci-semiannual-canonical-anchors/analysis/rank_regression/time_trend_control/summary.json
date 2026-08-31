@@ -7,5 +7,6 @@
   "fit_blocks": 10,
   "fit_failures": 2,
   "prediction_rows": 80,
-  "frontier_prediction_rows": 80
+  "frontier_prediction_rows": 80,
+  "comparison_rows": 80
 }

@@ -82,6 +82,10 @@ frontier point predates its release; this is recorded as two expected fit failur
 - [Control fits](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/fits.csv)
 - [Control predictions](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/predictions.csv)
 - [Control summary](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/summary.json)
+- [Judge-vs-trend overlays](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/comparison/figures/):
+  10 PNG, 10 PDF, and 10 editable-text SVG files. Black points are actuals, blue is the judge
+  prediction, orange is the time trend, and the grey dashed line is judge release.
+- [Overlay table](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/comparison/comparison.csv)
 
 The control intervals use 1,000 aggregate binomial item bootstraps from each model's observed
 success count and item count. This preserves each model's marginal item uncertainty but not paired
