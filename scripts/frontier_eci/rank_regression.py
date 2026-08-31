@@ -36,6 +36,7 @@ from scripts.judge.verdict_tables import read_verdicts  # noqa: E402
 
 FIT_LABEL = "Rank–accuracy fit (in-sample)"
 TIME_TREND_LABEL = "Pre-release time trend"
+POOLED_LABEL = "Pooled pre-release judges"
 QUARTILES = (2, 3, 4)
 HARD_SLICE = "Q2–Q4"
 TIME_ORIGIN = pd.Timestamp("2024-01-01")
@@ -52,6 +53,11 @@ MAIN_OUTPUT_MANIFEST = {
         "analysis": TIME_TREND_LABEL,
         "root": "analysis/rank_regression/time_trend_control",
         "scientific_scope": "same quarterly frontier points as judge figures; no ranking values or judge verdict outcomes",
+    }],
+    "supplemental_analyses": [{
+        "analysis": POOLED_LABEL,
+        "root": "analysis/rank_regression/pooled_judges",
+        "scientific_scope": "target-specific pool of raw verdicts from strictly earlier judges",
     }],
     "result_document": "../../../docs/results/2026-08-30-canonical-anchor-frontier-redo.md",
     "lifecycle_manifest": "provenance/final-lifecycle.json",
@@ -375,6 +381,133 @@ def fit_time_trend_controls(actuals: pd.DataFrame, targets: list[str],
     return pd.DataFrame(fits), pd.concat(predictions, ignore_index=True)
 
 
+def pooled_protocol_for_target(protocol: pd.DataFrame, bench: str, target: str,
+                               judges: list[str], releases: dict[str, str],
+                               pair_limit: int = 8
+                               ) -> tuple[pd.DataFrame, list[str], list[str]]:
+    target_release = release_date(releases, target)
+    eligible = sorted(
+        (judge for judge in judges
+         if pd.notna(release_date(releases, judge))
+         and release_date(releases, judge) < target_release),
+        key=lambda judge: (release_date(releases, judge), judge),
+    )
+    block = protocol[protocol.bench.eq(bench) & protocol.judge.isin(eligible)].copy()
+    block = cap_pair_items(block, pair_limit) if not block.empty else block
+    contributing = sorted(block.judge.astype(str).unique(),
+                          key=lambda judge: (release_date(releases, judge), judge))
+    return block, eligible, contributing
+
+
+def _pooled_seed(seed: int, bench: str, target: str) -> int:
+    digest = hashlib.sha256(f"{seed}|pooled|{bench}|{target}".encode()).digest()
+    return int.from_bytes(digest[:4], "big")
+
+
+def _fit_pooled_block(task) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    bench, target, protocol, hard, judges, releases, resamples, seed, pair_limit = task
+    block, eligible, contributing = pooled_protocol_for_target(
+        protocol, bench, target, judges, releases, pair_limit)
+    target_outcomes = hard[hard.model.eq(target)]
+    actual = float(target_outcomes.correct.mean()) if not target_outcomes.empty else np.nan
+    n_items = len(target_outcomes)
+    metadata = {
+        "bench": bench, "target": target, "target_slice": HARD_SLICE,
+        "target_release": release_date(releases, target),
+        "eligible_judges": "|".join(eligible),
+        "contributing_judges": "|".join(contributing),
+        "n_judges": len(contributing), "n_eligible_judges": len(eligible),
+        "n_protocol_verdicts": len(block), "pair_item_cap": pair_limit,
+        "fit_label": POOLED_LABEL,
+    }
+
+    def failed(reason: str):
+        fit = pd.DataFrame([{**metadata, "fit_status": "failed", "failure_reason": reason,
+                             "n_bootstrap": 0}])
+        prediction = pd.DataFrame([{**metadata, "actual": actual, "n_items": n_items,
+                                    "ability": np.nan, "predicted": np.nan,
+                                    "predicted_low": np.nan, "predicted_high": np.nan,
+                                    "residual": np.nan, "fit_status": "failed",
+                                    "failure_reason": reason, "n_bootstrap": 0,
+                                    "bootstrap_unstable": True}])
+        return pd.DataFrame(), fit, prediction
+
+    if not eligible:
+        return failed("no judge predates target")
+    if block.empty:
+        return failed("eligible judges have no protocol verdicts")
+    try:
+        abilities = rank(block).assign(**metadata)
+        fit, points = fit_accuracy_candidates(abilities.set_index("model").ability, hard)
+        target_point = points[points.model.eq(target)]
+        if target_point.empty:
+            raise ValueError("target absent from pooled BT ranking")
+    except (RuntimeError, ValueError) as error:
+        return failed(str(error))
+
+    point = target_point.iloc[0]
+    rng = np.random.default_rng(_pooled_seed(seed, bench, target))
+    draws = []
+    for _ in range(resamples):
+        try:
+            draw_ability = rank(resample_items(block, rng)).set_index("model").ability
+            draw_hard = _resample_hard_items(hard, rng)
+            _, draw_points = fit_accuracy_candidates(draw_ability, draw_hard)
+            value = draw_points.loc[draw_points.model.eq(target), "selected_fitted"]
+            if not value.empty and pd.notna(value.iloc[0]):
+                draws.append(float(value.iloc[0]))
+        except (RuntimeError, ValueError):
+            continue
+    predicted = float(point.selected_fitted)
+    if draws:
+        low, high = np.quantile(draws, [0.025, 0.975])
+        low, high = min(float(low), predicted), max(float(high), predicted)
+    else:
+        low = high = np.nan
+    fit.update(metadata, fit_status="ok", failure_reason="",
+               n_bootstrap=len(draws), bootstrap_unit="Q1 and combined Q2–Q4 item IDs")
+    prediction = pd.DataFrame([{**metadata, "actual": float(point.actual),
+                                "n_items": int(point.n_items), "ability": float(point.ability),
+                                "predicted": predicted, "predicted_low": low,
+                                "predicted_high": high,
+                                "residual": predicted - float(point.actual),
+                                "selected_method": point.selected_method,
+                                "fit_status": "ok", "failure_reason": "",
+                                "n_bootstrap": len(draws),
+                                "bootstrap_unstable": len(draws) < 0.8 * resamples}])
+    return abilities, pd.DataFrame([fit]), prediction
+
+
+def fit_pooled_judges(protocol: pd.DataFrame, hard_outcomes: pd.DataFrame,
+                       targets: list[str], judges: list[str], releases: dict[str, str],
+                       resamples: int = 1000, seed: int = 0, workers: int = 1,
+                       pair_limit: int = 8
+                       ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    hard = _combined_hard(hard_outcomes)
+    tasks = [
+        (bench, target, protocol, hard[hard.bench.eq(bench)].copy(), judges,
+         releases, resamples, seed, pair_limit)
+        for bench in sorted(hard.bench.unique()) for target in targets
+    ]
+    if workers <= 1:
+        results = [_fit_pooled_block(task) for task in tasks]
+    else:
+        results = [None] * len(tasks)
+        with ProcessPoolExecutor(
+                max_workers=min(workers, len(tasks)),
+                mp_context=multiprocessing.get_context("spawn")) as executor:
+            futures = {executor.submit(_fit_pooled_block, task): index
+                       for index, task in enumerate(tasks)}
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+    ability_tables = [result[0] for result in results if not result[0].empty]
+    return (
+        pd.concat(ability_tables, ignore_index=True) if ability_tables else pd.DataFrame(),
+        pd.concat([result[1] for result in results], ignore_index=True),
+        pd.concat([result[2] for result in results], ignore_index=True),
+    )
+
+
 def merge_prediction_comparison(judge: pd.DataFrame,
                                 trend: pd.DataFrame) -> pd.DataFrame:
     """Join judge and time predictions only when their frontier cells match exactly."""
@@ -599,6 +732,46 @@ def write_time_trend_output(fits: pd.DataFrame, points: pd.DataFrame,
     return summary
 
 
+def write_pooled_judge_figures(predictions: pd.DataFrame, out: Path) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+    table = predictions.rename(columns={"target": "model"})
+    for bench, block in table.groupby("bench", sort=True):
+        bench_label = "GPQA" if bench == "gpqa" else "SWE-mini"
+        for style in ("band", "points"):
+            plot_frontier_style(
+                block, "all", bench, "2-4", out, style,
+                prediction_label="Pooled judges", filename_prefix="pooled-judges_",
+                value_column="predicted", low_column="predicted_low",
+                high_column="predicted_high", clip_prediction_display=True,
+                panel_label=f"{bench_label} · Q2–Q4", y_label="Combined hard accuracy",
+                file_quartile="2-q4", show_judge_release=False,
+            )
+
+
+def write_pooled_judge_output(abilities: pd.DataFrame, fits: pd.DataFrame,
+                              predictions: pd.DataFrame, output: Path,
+                              figures: bool = True) -> dict:
+    output.mkdir(parents=True, exist_ok=True)
+    abilities.to_csv(output / "abilities.csv", index=False)
+    fits.to_csv(output / "fits.csv", index=False)
+    predictions.to_csv(output / "predictions.csv", index=False)
+    if figures:
+        write_pooled_judge_figures(predictions, output / "figures")
+    summary = {
+        "analysis": POOLED_LABEL,
+        "target": f"combined {HARD_SLICE} accuracy",
+        "eligibility": "judge release strictly before target release",
+        "uncertainty": "95% two-source item bootstrap with fixed eligible-judge pool",
+        "fit_blocks": len(fits),
+        "fit_failures": int(fits.fit_status.ne("ok").sum()),
+        "prediction_rows": len(predictions),
+        "missing_predictions": int(predictions.predicted.isna().sum()),
+        "max_pooled_judges": int(predictions.n_judges.max()),
+    }
+    _atomic_write_json(summary, output / "summary.json")
+    return summary
+
+
 def _validate_staged_output(staging: Path, require_figures: bool) -> None:
     missing = [name for name in REQUIRED_OUTPUTS if not (staging / name).is_file()]
     if missing:
@@ -725,6 +898,9 @@ def main() -> None:
         control_fits, control_points = fit_time_trend_controls(
             actual, targets, judges, config["releases"],
             resamples=args.resamples, seed=args.seed)
+        pooled_abilities, pooled_fits, pooled_predictions = fit_pooled_judges(
+            protocol, hard, targets, judges, config["releases"],
+            resamples=args.resamples, seed=args.seed, workers=args.workers, pair_limit=8)
 
         _checkpoint_tables(staging, "main", {
             "abilities.csv": abilities,
@@ -739,6 +915,9 @@ def main() -> None:
             control_fits, control_points, frontier_fitted,
             staging / "time_trend_control",
             args.resamples, figures=not args.no_figures)
+        write_pooled_judge_output(
+            pooled_abilities, pooled_fits, pooled_predictions,
+            staging / "pooled_judges", figures=not args.no_figures)
         missing = frontier_fitted[frontier_fitted.fit_status.ne("ok")]
         summary = {
             "analysis": FIT_LABEL,

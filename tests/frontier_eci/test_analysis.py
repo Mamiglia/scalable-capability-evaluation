@@ -164,3 +164,19 @@ def test_combined_rank_plot_has_item_errorbars_and_band(tmp_path):
     )
     assert any(collection.get_alpha() == pytest.approx(0.18)
                for collection in band.collections)
+
+
+def test_pooled_plot_omits_single_judge_release_line(tmp_path):
+    table = pd.DataFrame({
+        "target_release": ["2025-01-01", "2025-04-01"],
+        "actual": [0.3, 0.7], "predicted": [0.4, 0.6],
+        "predicted_low": [0.2, 0.45], "predicted_high": [0.6, 0.8],
+    })
+    ax = plot_frontier_style(
+        table, "pooled", "gpqa", "2-4", tmp_path, "band",
+        prediction_label="Pooled pre-release judges",
+        panel_label="GPQA · Q2–Q4", y_label="Combined hard accuracy",
+        file_quartile="2-q4", show_judge_release=False,
+    )
+    assert "Judge release" not in [text.get_text() for text in ax.get_legend().get_texts()]
+    assert not any(line.get_linestyle() == "--" for line in ax.lines)

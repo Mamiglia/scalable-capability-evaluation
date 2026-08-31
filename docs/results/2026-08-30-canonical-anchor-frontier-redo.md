@@ -92,6 +92,34 @@ success count and item count. This preserves each model's marginal item uncertai
 item-difficulty covariance across models. The control is intended only to show how much of the
 visual pattern can arise from historical capability growth.
 
+## Pooled pre-release judges
+
+For each frontier target × benchmark, this extension pools the raw Q1 verdicts from every judge
+released strictly before the target. The eight-item cap is applied within judge × unordered pair
+before pooling. One joint BT ranking and the same combined-Q2–Q4 linear/sigmoid mapping are then
+fit for that target. As in the main analysis, this mapping is descriptive and in-sample: every
+joined model with observed hard accuracy, including the frontier target, enters the mapping fit.
+Each eligible judge contributes its full frozen Q1 protocol block; there is no additional
+model-release cutoff inside that block.
+The eligible judges are treated as the fixed available ensemble; 1,000 bootstrap draws jointly
+resample Q1 item IDs across the pool and combined Q2–Q4 item IDs.
+
+Fourteen of 16 target × benchmark predictions succeed with all 1,000 draws. The two expected gaps
+are GPT-4o as the frontier target, because no judge predates it. The pool grows from GPT-4o alone
+for Claude 3.7 and o3, to three judges for GPT-5 and Gemini 3 Pro, and four for Opus 4.6, Opus 4.7,
+and Kimi K3. DeepSeek is not eligible for any current target because it was released after Kimi K3.
+
+- [Pooled figures](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/pooled_judges/figures/):
+  GPQA and SWE-mini band/points variants in PNG, PDF, and editable-text SVG.
+- [Pooled predictions](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/pooled_judges/predictions.csv)
+- [Pooled fit details](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/pooled_judges/fits.csv)
+- [Target-specific BT abilities](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/pooled_judges/abilities.csv)
+- [Pooled summary](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/pooled_judges/summary.json)
+
+The RunPod balance decreased by approximately $1.654 during this compute-only extension; this is a
+balance observation including ongoing volume billing, not an invoice allocation. No API calls were
+made.
+
 ## Provenance and cost
 
 The final paid corpus contains 3,220 audited responses: 3,219 latest-success rows plus one retained

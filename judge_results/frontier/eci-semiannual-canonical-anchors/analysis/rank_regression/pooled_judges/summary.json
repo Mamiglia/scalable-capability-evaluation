@@ -1,0 +1,11 @@
+{
+  "analysis": "Pooled pre-release judges",
+  "target": "combined Q2\u2013Q4 accuracy",
+  "eligibility": "judge release strictly before target release",
+  "uncertainty": "95% two-source item bootstrap with fixed eligible-judge pool",
+  "fit_blocks": 16,
+  "fit_failures": 2,
+  "prediction_rows": 16,
+  "missing_predictions": 2,
+  "max_pooled_judges": 4
+}

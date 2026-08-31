@@ -356,7 +356,8 @@ def plot_frontier_style(table, judge, bench, quartile, out, style,
                         prediction_label="Predicted", filename_prefix="",
                         value_column="predicted", low_column="predicted_low",
                         high_column="predicted_high", clip_prediction_display=False,
-                        panel_label=None, y_label="Hard accuracy", file_quartile=None):
+                        panel_label=None, y_label="Hard accuracy", file_quartile=None,
+                        show_judge_release=True):
     """Original frontier figure grammar: release time, judge cutoff, actual vs prediction."""
     table = table.sort_values("target_release").copy()
     table["target_release"] = pd.to_datetime(table.target_release)
@@ -366,7 +367,8 @@ def plot_frontier_style(table, judge, bench, quartile, out, style,
     if clip_prediction_display:
         table[["display_value", "display_low", "display_high"]] = table[[
             "display_value", "display_low", "display_high"]].clip(0, 1)
-    judge_date = pd.Timestamp(table.judge_release.dropna().iloc[0])
+    judge_date = (pd.Timestamp(table.judge_release.dropna().iloc[0])
+                  if show_judge_release else pd.NaT)
     predicted = table.dropna(subset=["display_value"])
     actual = table.dropna(subset=["actual"])
     fig, ax = plt.subplots(figsize=(1.75, 1.55))
@@ -392,9 +394,12 @@ def plot_frontier_style(table, judge, bench, quartile, out, style,
             color="#2a78d6", capsize=0, clip_on=False)
     actual_handle, = ax.plot(actual.target_release, actual.actual, "o", ms=3.5,
                              color="#222222", clip_on=False)
-    judge_handle = ax.axvline(judge_date, color="#777777", lw=0.8, ls="--")
-    first = min(table.target_release.min(), judge_date).replace(month=1, day=1)
-    last = max(table.target_release.max(), judge_date).replace(month=1, day=1) + pd.DateOffset(years=1)
+    judge_handle = (ax.axvline(judge_date, color="#777777", lw=0.8, ls="--")
+                    if show_judge_release else None)
+    first_date = min(table.target_release.min(), judge_date) if show_judge_release else table.target_release.min()
+    last_date = max(table.target_release.max(), judge_date) if show_judge_release else table.target_release.max()
+    first = first_date.replace(month=1, day=1)
+    last = last_date.replace(month=1, day=1) + pd.DateOffset(years=1)
     ticks = pd.date_range(first, last, freq="YS")
     ax.set_xticks(ticks)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
@@ -410,8 +415,12 @@ def plot_frontier_style(table, judge, bench, quartile, out, style,
     for spine in ("left", "bottom"):
         ax.spines[spine].set_position(("outward", 5))
     residual_handle, = ax.plot([], [], ":", color="#222222", lw=1)
-    ax.legend([actual_handle, prediction_handle, residual_handle, judge_handle],
-              ["Actual", prediction_label, "Residual", "Judge release"],
+    handles = [actual_handle, prediction_handle, residual_handle]
+    labels = ["Actual", prediction_label, "Residual"]
+    if show_judge_release:
+        handles.append(judge_handle)
+        labels.append("Judge release")
+    ax.legend(handles, labels,
               handler_map={tuple: HandlerTuple(ndivide=1)}, loc="lower left",
               bbox_to_anchor=(0, 1.08), frameon=False, handletextpad=0.5,
               borderaxespad=0, ncol=1)

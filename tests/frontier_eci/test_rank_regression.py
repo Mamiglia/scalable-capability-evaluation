@@ -200,6 +200,63 @@ def test_prediction_comparison_rejects_different_frontier_cells():
         load_module()["merge_prediction_comparison"](judge, trend)
 
 
+def test_pooled_protocol_uses_every_strictly_earlier_judge():
+    protocol = pd.DataFrame({
+        "bench": ["gpqa"] * 4,
+        "judge": ["old-a", "old-b", "same-day", "future"],
+        "item": ["1"] * 4,
+        "model_left": ["a"] * 4, "model_right": ["target"] * 4,
+        "pick_left": [1, 0, 1, 0],
+    })
+    releases = {
+        "old-a": "2025-01-01", "old-b": "2025-01-05",
+        "target": "2025-01-10", "same-day": "2025-01-10",
+        "future": "2025-01-11",
+    }
+    block, eligible, contributing = load_module()["pooled_protocol_for_target"](
+        protocol, "gpqa", "target",
+        ["old-a", "old-b", "same-day", "future"], releases, pair_limit=8)
+    assert eligible == ["old-a", "old-b"]
+    assert contributing == ["old-a", "old-b"]
+    assert set(block.judge) == {"old-a", "old-b"}
+
+
+def test_pooled_judges_emit_one_bootstrapped_prediction_per_target():
+    rows = []
+    for judge, shift in (("old-a", 0), ("old-b", 1), ("same-day", 2)):
+        for item in range(12):
+            for left, right, pick in (
+                ("a", "b", (item + shift) % 3 == 0),
+                ("b", "target", (item + shift) % 4 == 0),
+                ("a", "target", (item + shift) % 5 == 0),
+            ):
+                rows.append({
+                    "bench": "gpqa", "judge": judge, "item": str(item),
+                    "model_left": left, "model_right": right,
+                    "pick_left": int(pick),
+                })
+    protocol = pd.DataFrame(rows)
+    hard = hard_rows({
+        2: {"a": 2, "b": 5, "target": 8},
+        3: {"a": 3, "b": 6, "target": 9},
+        4: {"a": 1, "b": 7, "target": 7},
+    })
+    releases = {
+        "old-a": "2025-01-01", "old-b": "2025-01-15",
+        "target": "2025-02-01", "same-day": "2025-02-01",
+    }
+    abilities, fits, predictions = load_module()["fit_pooled_judges"](
+        protocol, hard, ["target"], ["old-a", "old-b", "same-day"], releases,
+        resamples=20, seed=3, workers=1, pair_limit=8)
+    fit = fits.iloc[0]
+    prediction = predictions.iloc[0]
+    assert fit.fit_status == "ok"
+    assert fit.eligible_judges == "old-a|old-b"
+    assert fit.n_judges == 2
+    assert prediction.predicted_low <= prediction.predicted <= prediction.predicted_high
+    assert set(abilities.model) == {"a", "b", "target"}
+
+
 def test_one_bt_ranking_uses_all_protocol_rows_per_judge_benchmark():
     module = load_module()
     calls = []

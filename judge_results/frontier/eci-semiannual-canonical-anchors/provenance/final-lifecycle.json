@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scope": "Task 4 and Task 5 RunPod lifecycle provenance",
+  "scope": "Task 4 through Task 6 RunPod lifecycle provenance",
   "task4": {
     "pod": {
       "id": "qiufz0alzfzkae",
@@ -63,13 +63,41 @@
       "label": "control-plane balance change including network-volume billing; not an invoice allocation or pod-only cost"
     }
   },
+  "task6": {
+    "analysis": "pooled pre-release judges",
+    "pod": {
+      "id": "e58te6jyju3ivq",
+      "name": "pooled-judges-20260831",
+      "cloud": "Secure Cloud",
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "data_center_id": "AP-JP-1",
+      "cost_per_hour_usd": 3.29,
+      "created_at_utc": "2026-08-31T13:38:35.952Z",
+      "deleted_before_utc": "2026-08-31T14:09:20Z",
+      "final_state": "deleted"
+    },
+    "run": {
+      "resamples": 1000,
+      "workers": 10,
+      "fit_blocks": 16,
+      "successful_predictions": 14,
+      "expected_no_prior_judge_gaps": 2,
+      "recovery": "summary.json, fits.csv, predictions.csv, and abilities.csv matched remote SHA-256 checksums"
+    },
+    "balance_observations": {
+      "pre_task_usd": 23.1715810718,
+      "final_usd": 21.5177100385,
+      "decrease_usd": 1.6538710333,
+      "label": "control-plane balance change including network-volume billing; not an invoice allocation or pod-only cost"
+    }
+  },
   "final_control_plane_observation": {
-    "observed_at_utc": "2026-08-31T08:47:22Z",
+    "observed_at_utc": "2026-08-31T14:09:20Z",
     "runpodctl_version": "2.12.0-51ca7f0",
     "pod_list": [],
     "account": {
       "id": "user_3H8v32sAbkyV7HsBOUc87UGdpOl",
-      "client_balance_usd": 23.6436603533,
+      "client_balance_usd": 21.5177100385,
       "current_spend_per_hour_usd": 0.005,
       "spend_limit_usd": 80,
       "observation_label": "control-plane snapshot; no pods active; ongoing spend is the retained volume, not GPU runtime"
