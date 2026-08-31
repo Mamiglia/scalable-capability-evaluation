@@ -83,6 +83,8 @@ def _config(tmp_path: Path, feature_space: str = "raw", penalty: str = "ridge"):
         model_folds=tuple((f"model-fold-{i}", (f"m{i}",)) for i in range(4)),
         item_folds=4, inner_folds=2, fit_n_jobs=1, fit_pca_components=2,
         elastic_net_cs=(1.0,), ridge_cs=(1.0,), glm_max_iter=1_000,
+        pooling_svi_steps=150, pooling_svi_learning_rate=0.03,
+        benchmark_deviation_penalty=123.0,
         feature_space=feature_space, penalty=penalty, execution_mode="prepare",
         pc_basis_root=_pc_basis(tmp_path) if feature_space == "pc" else None,
     )
@@ -204,10 +206,21 @@ def test_fit_fold_runs_every_supported_variant(tmp_path, feature_space, penalty)
     assert output == config.fit_dir / f"{feature_space}-{penalty}" / "model-fold-0__item-0"
     predictions = pd.read_parquet(output / "predictions.parquet")
     manifest = json.loads((output / "manifest.json").read_text())
+    diagnostics = json.loads((output / "diagnostics.json").read_text())
+    tuning = pd.read_csv(output / "tuning.csv")
     assert predictions.probability.between(0, 1).all()
     assert {"judge", "pick_left"}.isdisjoint(predictions)
     assert manifest["source_paths"] == manifest_provenance["source_paths"]
     assert manifest["source_sha256"] == manifest_provenance["source_sha256"]
+    ratio = diagnostics["benchmark_deviation_penalty"]
+    assert np.isfinite(ratio) and ratio > 0
+    assert ratio != config.benchmark_deviation_penalty
+    variance = tuning[tuning.record_type == "variance_component"]
+    selected = tuning[tuning.selected]
+    assert len(variance) == len(selected) == 1
+    assert variance.benchmark_deviation_penalty.item() == ratio
+    assert selected.benchmark_deviation_penalty.item() == ratio
+    assert manifest["frozen_hyperparameters"]["benchmark_deviation_penalty"] == ratio
     if feature_space == "raw":
         assert not any(key.startswith("pc_") for key in manifest["source_paths"])
         assert not any(key.startswith("pc_") for key in manifest["source_sha256"])
