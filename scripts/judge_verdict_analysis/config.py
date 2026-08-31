@@ -139,7 +139,7 @@ class AnalysisConfig:
     elastic_net_cs: tuple[float, ...] = (0.01, 0.1, 1.0, 10.0)  # Elastic-net inverse penalties.
     elastic_net_l1_ratios: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)  # Elastic-net L1 shares.
     selection_min_fold_share: float = 2 / 3  # Inner-fold share required to retain a base feature.
-    ridge_cs: tuple[float, ...] = (0.001, 0.005, 0.01, 0.05)  # Ridge inverse penalties around the prior lower-bound choice.
+    ridge_cs: tuple[float, ...] = (0.00001, 0.00003, 0.0001, 0.0003, 0.001, 0.005, 0.01, 0.05)  # Bracket the post-variance-component optimum below 0.001.
     pooling_svi_steps: int = 2_000  # Full-batch variational steps for training-fold variance components.
     pooling_svi_learning_rate: float = 0.01  # Adam rate for the variance-component fit.
     pooling_scale_prior: float = 1.0  # HalfNormal prior scale for coefficient-block scales.
