@@ -10,6 +10,7 @@ from . import pairwise_wrapper, pairwise_wrapper_lesions
 from .pairwise_wrapper import fit_fold
 from .pairwise_wrapper_lesions import (
     CapabilityLesionRun,
+    _validated_frozen_hyperparameters,
     capability_specifications,
     prepare_fold,
 )
@@ -89,6 +90,33 @@ def test_capability_specifications_use_null_and_keep_raw_groups_pc_features_only
         "lesion-family", "singular-family",
     }
     assert {spec.kind for spec in pc} == {"lesion-feature", "singular-feature"}
+
+
+def test_frozen_hyperparameters_require_matching_manifest_and_converged_tuning() -> None:
+    frozen = {"C": 1.0, "l1_ratio": 1.0, "benchmark_deviation_penalty": 0.3}
+    manifest = {"frozen_hyperparameters": frozen}
+    tuning = pd.DataFrame([
+        {"record_type": "variance_component", "selected": False, "converged": True,
+         "benchmark_deviation_penalty": 0.3},
+        {"record_type": "tuning", "selected": True, "converged": True,
+         "C": 1.0, "l1_ratio": 1.0, "benchmark_deviation_penalty": 0.30000000000000004},
+    ])
+
+    assert _validated_frozen_hyperparameters(manifest, frozen, tuning) == frozen
+
+    with pytest.raises(RuntimeError, match="manifest frozen hyperparameters"):
+        _validated_frozen_hyperparameters(
+            {"frozen_hyperparameters": frozen | {"benchmark_deviation_penalty": 3.0}},
+            frozen, tuning,
+        )
+    with pytest.raises(RuntimeError, match="selected capability tuning"):
+        _validated_frozen_hyperparameters(
+            manifest, frozen, tuning.assign(converged=[True, False]),
+        )
+    with pytest.raises(RuntimeError, match="invalid fitted benchmark ratio"):
+        _validated_frozen_hyperparameters(
+            manifest, frozen | {"benchmark_deviation_penalty": -0.3}, tuning,
+        )
 
 
 @pytest.mark.parametrize("feature_space", ("raw", "pc"))
