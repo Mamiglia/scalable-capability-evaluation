@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=judge-sparse
 #SBATCH --partition=cpu
-#SBATCH --array=0-15%4
+#SBATCH --array=0-15
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=16G
 #SBATCH --time=48:00:00

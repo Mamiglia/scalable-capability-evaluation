@@ -20,7 +20,7 @@ from scipy.sparse import csr_matrix
 from .config import AnalysisConfig
 from .fit_common import FitResult
 from .hierarchy import HierarchyLevels, effective_coefficients, hierarchical_design
-from .pooling import POOLING_PARAMETERS, coordinate_search
+from .pooling import POOLING_PARAMETERS, estimate_pooling_ratios
 
 
 Input = TypeVar("Input")
@@ -148,37 +148,39 @@ def tune_sparse(
     cs = config.elastic_net_cs if penalty == "l1" else config.ridge_cs
 
     if task is JUDGE_TASK:
-        def score(parameters: dict[str, float]) -> tuple[float, int, bool]:
-            candidate_config = replace(
-                config, penalty=penalty,
-                **{name: parameters[name] for name in POOLING_PARAMETERS},
-            )
+        pooling, variance_tuning = estimate_pooling_ratios(
+            train, features, penalty, config,
+        )
+        fit_config = replace(config, penalty=penalty, **pooling)
+        designs = [
+            (fit_rows, check_rows, *_designs(
+                train, fit_rows, check_rows, features, levels, fit_config, task))
+            for fit_rows, check_rows in splits
+        ]
+
+        def score(c: float) -> tuple[float, float, int, bool]:
             losses, iterations, convergence = [], [], []
-            for fit_rows, check_rows in splits:
-                fit_x, check_x, _ = _designs(
-                    train, fit_rows, check_rows, features, levels,
-                    candidate_config, task,
-                )
+            for fit_rows, check_rows, fit_x, check_x, _ in designs:
                 model, n_iter, converged = _fit_model(
-                    _model(config, c=parameters["C"], l1_ratio=ratios[0]),
-                    fit_x, y[fit_rows],
-                )
+                    _model(config, c=c, l1_ratio=ratios[0]), fit_x, y[fit_rows])
                 losses.append(log_loss(
                     y[check_rows], model.predict_proba(check_x)[:, 1], labels=[0, 1]))
                 iterations.append(n_iter)
                 convergence.append(converged)
-            return float(np.mean(losses)), max(iterations), all(convergence)
+            return c, float(np.mean(losses)), max(iterations), all(convergence)
 
-        frozen, rows = coordinate_search(
-            cs, config.pooling_penalty_ratios,
-            lambda candidates: _parallel_map(score, candidates, config.fit_n_jobs),
-            item_ratios=config.item_pooling_penalty_ratios,
-        )
+        scores = _parallel_map(score, cs, config.fit_n_jobs)
+        best = min(scores, key=lambda result: (not result[3], result[1], result[0]))
         l1_ratio = ratios[0]
-        tuning = pd.DataFrame(rows).assign(
-            stage=penalty, record_type="tuning", l1_ratio=l1_ratio,
-        )
-        return frozen | {"l1_ratio": l1_ratio}, tuning
+        c_tuning = pd.DataFrame([{
+            "stage": penalty, "record_type": "tuning", "C": c,
+            "l1_ratio": l1_ratio, "mean_log_loss": loss,
+            "max_n_iter": iterations, "converged": converged,
+            "selected": c == best[0], **pooling,
+        } for c, loss, iterations, converged in scores])
+        return {
+            "C": float(best[0]), "l1_ratio": l1_ratio, **pooling,
+        }, pd.concat([variance_tuning, c_tuning], ignore_index=True, sort=False)
 
     designs = [
         (fit_rows, check_rows, *_designs(

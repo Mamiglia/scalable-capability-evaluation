@@ -6,7 +6,7 @@ import pandas as pd
 from .config import CONFIG
 from .fit_frequentist import fit_sparse, tune_sparse
 from .hierarchy import HierarchyLevels, hierarchical_design
-from .pooling import POOLING_PARAMETERS, coordinate_search, penalty_multiplier
+from .pooling import POOLING_PARAMETERS, estimate_pooling_ratios, penalty_multiplier
 
 
 def test_relative_penalties_use_family_specific_scaling_and_keep_global_intercept() -> None:
@@ -44,18 +44,6 @@ def test_relative_penalties_use_family_specific_scaling_and_keep_global_intercep
 
 
 def test_pooling_ratios_are_tuned_once_and_frozen_for_lesions() -> None:
-    targets = dict(zip(("C", *POOLING_PARAMETERS), (1.0, 0.3, 3.0, 1.0, 100.0)))
-    chosen, _ = coordinate_search(
-        (0.1, 1.0), (0.3, 1.0, 3.0),
-        lambda candidates: [
-            (sum((np.log(parameters[name]) - np.log(target)) ** 2
-                 for name, target in targets.items()), 1, True)
-            for parameters in candidates
-        ],
-        item_ratios=(0.3, 1.0, 3.0, 100.0),
-    )
-    assert chosen == targets
-
     rows = [
         {
             "judge": judge, "bench": f"b{item_index % 2}", "item": f"i{item_index}",
@@ -71,23 +59,22 @@ def test_pooling_ratios_are_tuned_once_and_frozen_for_lesions() -> None:
     test = frame[frame.item.isin(("i6", "i7"))].reset_index(drop=True)
     config = replace(
         CONFIG, inner_folds=2, fit_n_jobs=1, elastic_net_cs=(0.1, 1.0),
-        pooling_penalty_ratios=(0.3, 1.0, 3.0),
-        item_pooling_penalty_ratios=(0.3, 1.0, 3.0), glm_max_iter=1_000,
+        pooling_svi_steps=150, pooling_svi_learning_rate=0.03,
+        glm_max_iter=1_000,
     )
 
+    estimated, variance_fit = estimate_pooling_ratios(
+        train, ["feature"], "l1", config,
+    )
     frozen, tuning = tune_sparse(train, ["feature"], "l1", config)
     full = fit_sparse(train, test, ["feature"], "l1", frozen, config, tuning)
     lesion = fit_sparse(train, test, [], "l1", frozen, config)
 
+    assert set(estimated) == set(POOLING_PARAMETERS)
+    assert all(np.isfinite(value) and value > 0 for value in estimated.values())
+    assert variance_fit.record_type.item() == "variance_component"
     assert set(frozen) == {"C", "l1_ratio", *POOLING_PARAMETERS}
-    assert all(
-        frozen[name] in (
-            config.item_pooling_penalty_ratios
-            if name == "item_intercept_penalty" else config.pooling_penalty_ratios)
-        for name in POOLING_PARAMETERS
-    )
-    assert set(tuning.coordinate) == {"C", *POOLING_PARAMETERS}
-    assert tuning["pass"].max() <= 2
+    assert set(tuning.record_type) == {"variance_component", "tuning"}
     selected = tuning[tuning.selected]
     assert len(selected) == 1
     assert selected.iloc[0].C == frozen["C"]

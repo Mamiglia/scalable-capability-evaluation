@@ -1,9 +1,17 @@
-"""Relative-penalty scaling and coordinate selection for sparse fits."""
+"""Training-fold variance components for relative hierarchical penalties."""
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-
+import jax.numpy as jnp
+from jax import random
 import numpy as np
+import numpyro
+from numpyro import distributions as dist
+from numpyro.infer import SVI, Trace_ELBO
+from numpyro.infer.autoguide import AutoNormal
+from numpyro.optim import Adam
+import pandas as pd
+
+from .config import AnalysisConfig
 
 
 POOLING_PARAMETERS = (
@@ -12,9 +20,6 @@ POOLING_PARAMETERS = (
     "cell_deviation_penalty",
     "item_intercept_penalty",
 )
-Score = tuple[float, int, bool]
-
-
 def penalty_multiplier(relative_penalty: float, penalty: str) -> float:
     """Return the design-column multiplier for one relative penalty."""
     ratio = float(relative_penalty)
@@ -25,66 +30,99 @@ def penalty_multiplier(relative_penalty: float, penalty: str) -> float:
     return 1 / ratio if penalty == "l1" else 1 / np.sqrt(ratio)
 
 
-def coordinate_search(
-    cs: Sequence[float],
-    ratios: Sequence[float],
-    evaluate: Callable[[list[dict[str, float]]], list[Score]],
-    *,
-    item_ratios: Sequence[float] | None = None,
-) -> tuple[dict[str, float], list[dict[str, object]]]:
-    """Alternate pooling-ratio coordinates with C for at most two passes."""
-    cs = tuple(map(float, cs))
-    ratios = tuple(map(float, ratios))
-    item_ratios = tuple(map(float, item_ratios or ratios))
-    if not cs or not ratios or 1.0 not in ratios:
-        raise ValueError("C and pooling grids must be non-empty and pooling must contain 1")
-    if not item_ratios or 1.0 not in item_ratios:
-        raise ValueError("item pooling grid must be non-empty and contain 1")
-    if any(not np.isfinite(value) or value <= 0
-           for value in (*cs, *ratios, *item_ratios)):
-        raise ValueError("C and pooling grids must be finite and positive")
-    state = {"C": cs[0], **dict.fromkeys(POOLING_PARAMETERS, 1.0)}
-    records: dict[tuple[float, ...], dict[str, object]] = {}
+def _hierarchical_scale_model(
+    x: jnp.ndarray, y: jnp.ndarray, judge: jnp.ndarray, benchmark: jnp.ndarray,
+    cell: jnp.ndarray, item: jnp.ndarray, counts: tuple[int, int, int, int],
+    penalty: str, scale_prior: float,
+) -> None:
+    """Crossed logistic model with one learned scale per coefficient block."""
+    family = dist.Laplace if penalty == "l1" else dist.Normal
 
-    def select(parameter: str, values: Sequence[float], pass_index: int) -> None:
-        nonlocal state
-        candidates = [state | {parameter: value} for value in values]
-        scores = evaluate(candidates)
-        if len(scores) != len(candidates):
-            raise ValueError("pooling evaluator returned the wrong number of scores")
-        if any(not np.isfinite(loss) for loss, _, _ in scores):
-            raise ValueError("pooling evaluator returned a non-finite loss")
-        for candidate, (loss, max_n_iter, converged) in zip(candidates, scores):
-            key = tuple(candidate[name] for name in ("C", *POOLING_PARAMETERS))
-            records.setdefault(key, {
-                **candidate, "pass": pass_index, "coordinate": parameter,
-                "mean_log_loss": float(loss), "max_n_iter": int(max_n_iter),
-                "converged": bool(converged),
-            })
-        current = state[parameter]
-        state = min(
-            zip(candidates, scores),
-            key=lambda result: (not result[1][2], result[1][0],
-                                result[0][parameter] != current,
-                                result[0][parameter]),
-        )[0]
+    def coefficients(name: str, scale: jnp.ndarray, shape: tuple[int, ...]) -> jnp.ndarray:
+        return numpyro.sample(
+            name, family(0, scale).expand(shape).to_event(len(shape)),
+        )
 
-    for pass_index in (1, 2):
-        previous = state.copy()
-        select("C", cs, pass_index)
-        for parameter in POOLING_PARAMETERS:
-            select(
-                parameter,
-                item_ratios if parameter == "item_intercept_penalty" else ratios,
-                pass_index,
-            )
-            select("C", cs, pass_index)
-        if state == previous:
-            break
-    selected = tuple(state[name] for name in ("C", *POOLING_PARAMETERS))
-    rows = list(records.values())
-    for row in rows:
-        row["selected"] = tuple(
-            row[name] for name in ("C", *POOLING_PARAMETERS)
-        ) == selected
-    return state, rows
+    scales = {
+        name: numpyro.sample(f"{name}_scale", dist.HalfNormal(scale_prior))
+        for name in ("population", "judge", "benchmark", "cell", "item")
+    }
+    width = x.shape[1] + 1
+    population = coefficients("population", scales["population"], (width,))
+    judge_effect = coefficients("judge", scales["judge"], (counts[0], width))
+    benchmark_effect = coefficients(
+        "benchmark", scales["benchmark"], (counts[1], width))
+    cell_effect = coefficients("cell", scales["cell"], (counts[2], width))
+    item_effect = coefficients("item", scales["item"], (counts[3],))
+    logits = (
+        population[0] + judge_effect[judge, 0] + benchmark_effect[benchmark, 0]
+        + cell_effect[cell, 0] + item_effect[item]
+        + jnp.sum(x * population[1:], axis=1)
+        + jnp.sum(x * judge_effect[judge, 1:], axis=1)
+        + jnp.sum(x * benchmark_effect[benchmark, 1:], axis=1)
+        + jnp.sum(x * cell_effect[cell, 1:], axis=1)
+    )
+    numpyro.sample("obs", dist.Bernoulli(logits=logits), obs=y)
+
+
+def estimate_pooling_ratios(
+    train: pd.DataFrame, features: list[str], penalty: str, config: AnalysisConfig,
+) -> tuple[dict[str, float], pd.DataFrame]:
+    """Estimate relative penalties from one outer-training likelihood only."""
+    if penalty not in {"l1", "ridge"}:
+        raise ValueError("penalty must be 'l1' or 'ridge'")
+    required = {"judge", "bench", "item", "pick_left", *features}
+    if missing := sorted(required - set(train)):
+        raise ValueError(f"pooling rows missing columns: {missing}")
+    x = train[features].to_numpy(np.float32)
+    y = train.pick_left.to_numpy(np.float32)
+    if not np.isfinite(x).all() or not np.isin(y, (0, 1)).all():
+        raise ValueError("pooling features must be finite and outcomes binary")
+
+    def factorize(columns: list[str]) -> tuple[np.ndarray, int]:
+        codes, levels = pd.factorize(pd.MultiIndex.from_frame(train[columns]), sort=True)
+        return codes.astype(np.int32), len(levels)
+
+    judge, n_judge = factorize(["judge"])
+    benchmark, n_benchmark = factorize(["bench"])
+    cell, n_cell = factorize(["judge", "bench"])
+    item, n_item = factorize(["bench", "item"])
+    args = (
+        jnp.asarray(x), jnp.asarray(y), jnp.asarray(judge), jnp.asarray(benchmark),
+        jnp.asarray(cell), jnp.asarray(item),
+        (n_judge, n_benchmark, n_cell, n_item), penalty,
+        float(config.pooling_scale_prior),
+    )
+    guide = AutoNormal(_hierarchical_scale_model)
+    result = SVI(
+        _hierarchical_scale_model, guide,
+        Adam(config.pooling_svi_learning_rate), Trace_ELBO(),
+    ).run(
+        random.PRNGKey(config.random_seed), config.pooling_svi_steps, *args,
+        progress_bar=False,
+    )
+    losses = np.asarray(result.losses, dtype=float)
+    if not np.isfinite(losses).all():
+        raise RuntimeError("hierarchy variance-component fit produced non-finite loss")
+    median = guide.median(result.params)
+    scales = {
+        name: float(np.asarray(median[f"{name}_scale"]))
+        for name in ("population", "judge", "benchmark", "cell", "item")
+    }
+    if any(not np.isfinite(value) or value <= 0 for value in scales.values()):
+        raise RuntimeError("hierarchy variance-component fit produced invalid scales")
+    power = 1 if penalty == "l1" else 2
+    ratios = {
+        parameter: (scales["population"] / scales[group]) ** power
+        for parameter, group in zip(
+            POOLING_PARAMETERS, ("judge", "benchmark", "cell", "item"))
+    }
+    diagnostics = pd.DataFrame([{
+        "stage": "pooling", "record_type": "variance_component",
+        "penalty": penalty, "selected": False, "converged": True,
+        "svi_steps": config.pooling_svi_steps,
+        "svi_initial_loss": losses[0], "svi_final_loss": losses[-1],
+        **{f"{name}_scale": value for name, value in scales.items()},
+        **ratios,
+    }])
+    return ratios, diagnostics
