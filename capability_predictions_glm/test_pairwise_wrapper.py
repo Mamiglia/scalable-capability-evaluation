@@ -154,6 +154,24 @@ def test_design_and_null_are_exactly_antisymmetric(tmp_path) -> None:
     assert chance_predictions(frame, ["signal"]).probability.tolist() == [0.5]
 
 
+@pytest.mark.parametrize(("penalty", "multiplier"), (("l1", 0.25), ("ridge", 0.5)))
+def test_capability_design_uses_penalty_specific_benchmark_scaling(
+    tmp_path: Path, penalty: str, multiplier: float,
+) -> None:
+    frame = pd.DataFrame({
+        "bench": ["b"], "item": ["i"], "model_left": ["l"],
+        "model_right": ["r"], "signal": [2.0], "left_stronger": [1],
+    })
+    config = replace(
+        _config(tmp_path, penalty=penalty), benchmark_deviation_penalty=4.0,
+    )
+
+    design, columns = _capability_design(frame, ["signal"], ("b",), config)
+
+    assert columns.loc[columns.block == "benchmark_slope", "multiplier"].item() == multiplier
+    assert design[0, 1] == pytest.approx(2 * multiplier)
+
+
 @pytest.mark.parametrize("feature_space", ("raw", "pc"))
 @pytest.mark.parametrize("penalty", ("l1", "ridge"))
 def test_fit_fold_runs_every_supported_variant(tmp_path, feature_space, penalty) -> None:
