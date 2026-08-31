@@ -23,6 +23,7 @@ def test_backprojection_uses_shared_loadings_and_benchmark_leaf_weights() -> Non
         {"component": "pc_003", "feature": "c1", "loading": 9.0},
         {"component": "pc_003", "feature": "c2", "loading": 9.0},
     ])
+    score_scales = pd.Series({"pc_001": 2.0, "pc_002": 3.0})
     composites = [
         {"output_name": "c1", "block": "mixed",
          "leaf_weights_by_benchmark": {"a": {"x": 0.5, "y": -0.5}}},
@@ -30,11 +31,11 @@ def test_backprojection_uses_shared_loadings_and_benchmark_leaf_weights() -> Non
          "leaf_weights_by_benchmark": {"a": {"y": 2.0}}},
     ]
 
-    projected = backproject_pc_coefficients(coefficients, loadings)
+    projected = backproject_pc_coefficients(coefficients, loadings, score_scales)
     leaves = expand_leaf_coefficients(projected, composites)
 
-    assert projected.set_index("feature").effective.to_dict() == {"c1": -2.0, "c2": 2.75}
-    assert leaves.set_index("feature").effective.to_dict() == {"x": -1.0, "y": 6.5}
+    assert projected.set_index("feature").effective.to_dict() == {"c1": -0.5, "c2": 1.25}
+    assert leaves.set_index("feature").effective.to_dict() == {"x": -0.25, "y": 2.75}
 
 
 def test_judge_capability_overview_joins_prediction_and_representation_metrics() -> None:
