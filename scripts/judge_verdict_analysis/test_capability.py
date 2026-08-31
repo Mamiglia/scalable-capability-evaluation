@@ -7,7 +7,7 @@ import pandas as pd
 
 from .capability import fit_capability_companion, prepare_capability_difference
 from .config import CONFIG
-from .final_report import VARIANTS, capability_companion_results
+from .final_report import VARIANTS, capability_companion_results, ceiling_by_judge
 from .pooling import POOLING_PARAMETERS
 
 
@@ -121,3 +121,22 @@ def test_capability_companion_reports_increment_and_coefficient_shift(tmp_path) 
     np.testing.assert_allclose(overall.delta_accuracy, 0)
     assert (overall.delta_log_loss_gain > 0).all()
     np.testing.assert_allclose(shifts.delta_effective, 0.05)
+
+
+def test_judge_ceiling_summary_uses_direct_accuracy_ratio(tmp_path) -> None:
+    cells = pd.DataFrame([
+        {"variant": variant, "judge": "j", "bench": "b", "accuracy": 0.72,
+         "row_count": 10}
+        for variant in VARIANTS
+    ])
+    ceiling = tmp_path / "ceiling.csv"
+    pd.DataFrame([{
+        "judge": "j", "benchmark": "b", "wilson_95_low": 0.75,
+        "raw_agreement": 0.8,
+    }]).to_csv(ceiling, index=False)
+
+    summary = ceiling_by_judge(tmp_path, cells, ceiling).iloc[0]
+
+    assert np.isclose(summary.raw_l1_accuracy_over_raw_ceiling, 0.9)
+    assert np.isclose(summary.raw_l1_accuracy_over_conservative_ceiling, 0.96)
+    assert "raw_l1_recovery_vs_raw" not in summary.index

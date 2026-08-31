@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import textwrap
@@ -532,9 +533,9 @@ def ceiling_by_judge(
             accuracy = np.average(variant_rows.accuracy, weights=variant_rows.row_count)
             prefix = variant.replace("-", "_")
             record[f"{prefix}_accuracy"] = accuracy
-            record[f"{prefix}_recovery_vs_raw"] = (accuracy - 0.5) / (raw - 0.5)
-            record[f"{prefix}_recovery_vs_conservative"] = (
-                (accuracy - 0.5) / (conservative - 0.5))
+            record[f"{prefix}_accuracy_over_raw_ceiling"] = accuracy / raw
+            record[f"{prefix}_accuracy_over_conservative_ceiling"] = (
+                accuracy / conservative)
         rows.append(record)
     return pd.DataFrame(rows)
 
@@ -543,24 +544,29 @@ def ceiling_figure(root: Path, table: pd.DataFrame) -> None:
     order = [judge for judge in JUDGE_LABELS if judge in set(table.judge)]
     values = table.set_index("judge").loc[order]
     positions = np.arange(len(order))[::-1]
-    figure, axis = plt.subplots(figsize=(2.9, 2.9))
-    axis.hlines(
-        positions, values.conservative_repeat_ceiling, values.raw_repeat_agreement,
-        color="#999999", lw=1,
-    )
-    axis.plot(values.raw_l1_accuracy, positions - 0.08, "o", color="#2a78d6", ms=4,
-              label="Raw L1")
-    axis.plot(values.pc_l1_accuracy, positions + 0.08, "o", color="#eb6834", ms=4,
-              label="PC L1")
-    axis.plot(values.conservative_repeat_ceiling, positions, "s", color="#777777", ms=3.5,
-              label="Lower bound")
-    axis.plot(values.raw_repeat_agreement, positions, "^", color="#aaaaaa", ms=4,
-              label="Repeat")
-    axis.set_xlim(0.6, 1); axis.set_xticks((0.6, 0.8, 1.0))
+    figure, axis = plt.subplots(figsize=(2.1, 2.15))
+    bounds = []
+    for prefix, offset, color, label in (
+        ("raw_l1", -0.09, "#2a78d6", "Raw L1"),
+        ("pc_l1", 0.09, "#eb6834", "PC L1"),
+    ):
+        lower = values[f"{prefix}_accuracy_over_raw_ceiling"].to_numpy(float)
+        upper = values[f"{prefix}_accuracy_over_conservative_ceiling"].to_numpy(float)
+        bounds.extend((lower, upper))
+        axis.hlines(positions + offset, lower, upper, color=color, lw=1)
+        axis.plot(lower, positions + offset, "o", color=color, ms=4, label=label)
+        axis.plot(upper, positions + offset, "|", color=color, ms=5)
+    minimum = math.floor(min(np.min(value) for value in bounds) * 10) / 10
+    maximum = math.ceil(max(1, max(np.max(value) for value in bounds)) * 10) / 10
+    axis.axvline(1, color="#999999", lw=0.8, ls="--")
+    axis.set_xlim(minimum, maximum)
+    axis.set_xticks(sorted(set((minimum, 1.0, maximum))))
     axis.set_yticks(positions, [JUDGE_LABELS[judge] for judge in order])
-    axis.set_xlabel("Accuracy / agreement"); _style(axis)
-    axis.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=2, frameon=False)
-    figure.subplots_adjust(left=0.4, right=0.98, bottom=0.4, top=0.98)
+    axis.set_xlabel("Accuracy / ceiling"); _style(axis)
+    axis.spines["bottom"].set_bounds(minimum, maximum)
+    axis.spines["left"].set_bounds(positions.min(), positions.max())
+    axis.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=2, frameon=False)
+    figure.subplots_adjust(left=0.42, right=0.97, bottom=0.31, top=0.97)
     _save(figure, root, "accuracy-vs-ceiling")
 
 
