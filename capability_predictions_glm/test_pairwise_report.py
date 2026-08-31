@@ -13,6 +13,7 @@ from .pairwise_report import (
     backproject_pc_coefficients,
     expand_leaf_coefficients,
     judge_capability_overview,
+    load_deterministic_performance,
     pc_score_scales,
     refit_matches_frozen,
     summarize_capability_predictions,
@@ -26,6 +27,26 @@ def test_markdown_table_needs_no_optional_dependency() -> None:
     assert _markdown_table(table) == (
         "| Name | Value |\n| --- | --- |\n| A\\|B | 1.5 |"
     )
+
+
+def test_deterministic_performance_requires_both_raw_refits(tmp_path) -> None:
+    path = tmp_path / "comparison.csv"
+    pd.DataFrame({
+        "variant": ["raw-l1", "raw-l2"],
+        "rows_deterministic": [10627, 10627],
+        "accuracy_deterministic": [0.713, 0.708],
+        "log_loss_deterministic": [0.574, 0.579],
+        "rows_full": [10627, 10627],
+        "accuracy_full": [0.724, 0.721],
+        "log_loss_full": [0.569, 0.572],
+        "delta_accuracy_pp": [-1.1, -1.2],
+        "delta_log_loss": [0.005, 0.007],
+    }).to_csv(path, index=False)
+
+    table = load_deterministic_performance(path)
+
+    assert table.variant.tolist() == ["raw-l1", "raw-l2"]
+    assert table.rows_deterministic.eq(10627).all()
 
 
 def test_capability_singular_accuracy_uses_same_row_null() -> None:

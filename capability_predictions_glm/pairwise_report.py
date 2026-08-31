@@ -1608,10 +1608,29 @@ def _markdown_table(table: pd.DataFrame) -> str:
     return "\n".join(f"| {' | '.join(row)} |" for row in rows)
 
 
+def load_deterministic_performance(path: Path) -> pd.DataFrame:
+    """Load the completed performance-only Raw-L1/L2 deterministic refits."""
+    table = pd.read_csv(path)
+    required = {
+        "variant", "rows_deterministic", "accuracy_deterministic",
+        "log_loss_deterministic", "rows_full", "accuracy_full", "log_loss_full",
+        "delta_accuracy_pp", "delta_log_loss",
+    }
+    if missing := required - set(table):
+        raise ValueError(f"deterministic performance missing columns: {sorted(missing)}")
+    table = table.sort_values("variant").reset_index(drop=True)
+    if table.variant.tolist() != ["raw-l1", "raw-l2"]:
+        raise ValueError("deterministic performance must contain Raw-L1 and Raw-L2")
+    if not table.rows_deterministic.eq(table.rows_full).all():
+        raise ValueError("deterministic and full performance rows differ")
+    return table
+
+
 def _write_scientific_summary(
     source_root: Path, output_root: Path, tables: dict[str, pd.DataFrame],
     comparison: dict[str, pd.DataFrame],
     important_pcs: list[str],
+    deterministic_performance: pd.DataFrame,
 ) -> None:
     metrics = tables["variant_metrics"]
     top_features = (tables["feature_effects"].query("variant == 'raw-l1'")
@@ -1620,6 +1639,13 @@ def _write_scientific_summary(
                .nlargest(5, "singular")[["feature", "singular", "unique"]])
     cosines = comparison["leaf_judge_cosine_summary"]
     overview = comparison["judge_capability_overview"]
+    deterministic = deterministic_performance[[
+        "variant", "rows_deterministic", "accuracy_deterministic",
+        "log_loss_deterministic", "delta_accuracy_pp", "delta_log_loss",
+    ]].rename(columns={
+        "rows_deterministic": "rows", "accuracy_deterministic": "accuracy",
+        "log_loss_deterministic": "log_loss",
+    })
     best = cosines[cosines.benchmark == "all"].sort_values("estimate", ascending=False).iloc[0]
     lines = [
         "# Pairwise capability ablations and judge comparison",
@@ -1680,10 +1706,11 @@ def _write_scientific_summary(
         "",
         "## Deterministic-only view",
         "",
-        "The deterministic-only deliverable is a 90-composite subset view of the same complete "
-        "raw fits: annotation blocks and the composite containing `bare_answer` are excluded. "
-        "It is deliberately not a separate refit, so its coefficients remain conditional on the "
-        "full feature set and its model-level accuracy is unchanged.",
+        "The deterministic-only figures are 90-composite subset views of the complete raw fits; "
+        "their coefficients remain conditional on the full feature set. Separately refitted "
+        "90-feature Raw-L1/L2 models provide held-out performance without lesions:",
+        "",
+        _markdown_table(deterministic),
         "",
         "All figures have PNG/SVG partners and a same-stem source CSV. Intervals for capability "
         "lesions use item clustering overall and conservative crossed outer-fold summaries by "
@@ -1705,6 +1732,7 @@ def _write_manifest(root: Path) -> None:
     manifest = {
         "state": "completed",
         "capability_attribution_measure": "same-row delta accuracy; delta log loss retained",
+        "deterministic_refit_performance": True,
         "figure_count": len(figures),
         "all_figures_have_png_svg_csv": True,
         "artifact_sha256": {
@@ -1725,6 +1753,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--basis-root", type=Path, required=True)
     parser.add_argument("--provenance", type=Path, required=True)
     parser.add_argument("--eci", type=Path, required=True)
+    parser.add_argument("--deterministic-performance", type=Path, required=True)
     args = parser.parse_args(argv)
     output = args.output_root
     (output / "tables").mkdir(parents=True, exist_ok=True)
@@ -1745,7 +1774,13 @@ def main(argv: list[str] | None = None) -> None:
         table.to_csv(output / "tables" / f"{name.replace('_', '-')}.csv", index=False)
     plot_judge_comparisons(comparison, output)
     plot_deterministic_views(tables, comparison, output)
-    _write_scientific_summary(args.root, output, tables, comparison, important_pcs)
+    deterministic_performance = load_deterministic_performance(args.deterministic_performance)
+    deterministic_performance.to_csv(
+        output / "tables/deterministic-refit-performance.csv", index=False,
+    )
+    _write_scientific_summary(
+        args.root, output, tables, comparison, important_pcs, deterministic_performance,
+    )
     _write_manifest(output)
 
 
