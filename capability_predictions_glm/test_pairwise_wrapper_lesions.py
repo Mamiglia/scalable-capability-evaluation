@@ -137,7 +137,13 @@ def test_prepare_fold_reconstructs_full_fit_and_uses_fixed_null_without_retuning
     )
     frozen = json.loads((fold_dir / "frozen-hyperparameters.json").read_text())
     assert null.probability.eq(0.5).all()
-    assert null_metrics.accuracy.eq(0.5).all()
+    expected_accuracy = (null.assign(correct=null.observed.eq(1))
+                         .groupby(["bench", "item"], sort=False).correct.mean())
+    pd.testing.assert_series_equal(
+        null_metrics.set_index(["bench", "item"]).accuracy,
+        expected_accuracy.rename("accuracy"),
+    )
+    assert not null_metrics.accuracy.eq(0.5).all()
     assert set(specifications.loc[
         specifications.kind.str.startswith("singular-"), "reference"
     ]) == {"null"}

@@ -211,6 +211,45 @@ def _benchmark_lesions(item_deltas: pd.DataFrame) -> pd.DataFrame:
     return output
 
 
+def _correct_null_accuracy(
+    item_deltas: pd.DataFrame, null_predictions: pd.DataFrame,
+) -> pd.DataFrame:
+    """Replace the artificial 0.5 null accuracy with its same-row accuracy."""
+    required = {"fold", "bench", "item", "reference", "candidate_accuracy", "row_count"}
+    if missing := required - set(item_deltas):
+        raise ValueError(f"item deltas missing columns: {sorted(missing)}")
+    required_null = {"fold", "bench", "item", "observed", "probability"}
+    if missing := required_null - set(null_predictions):
+        raise ValueError(f"null predictions missing columns: {sorted(missing)}")
+    null = null_predictions[["fold", "bench", "item"]].copy()
+    null["reference_accuracy"] = (
+        (null_predictions.probability.to_numpy(float) >= 0.5)
+        == null_predictions.observed.to_numpy(int)
+    ).astype(float)
+    null = null.groupby(["fold", "bench", "item"], as_index=False, sort=False).agg(
+        reference_accuracy=("reference_accuracy", "mean"),
+        null_row_count=("reference_accuracy", "size"),
+    )
+    output = item_deltas.assign(_order=np.arange(len(item_deltas)))
+    singular = output[output.reference == "null"].drop(
+        columns=["reference_accuracy", "delta_accuracy"], errors="ignore",
+    ).merge(null, on=["fold", "bench", "item"], how="left", validate="many_to_one")
+    if (singular.reference_accuracy.isna().any()
+            or not singular.row_count.eq(singular.null_row_count).all()):
+        raise RuntimeError("null predictions do not match singular item rows")
+    singular["delta_accuracy"] = singular.candidate_accuracy - singular.reference_accuracy
+    singular = singular.drop(columns="null_row_count")
+    return (pd.concat([output[output.reference != "null"], singular], ignore_index=True)
+            .sort_values("_order").drop(columns="_order").reset_index(drop=True))
+
+
+def _overall_lesions(item_deltas: pd.DataFrame) -> pd.DataFrame:
+    """Summarize the same held-out log-loss deltas across benchmarks."""
+    return _benchmark_lesions(item_deltas.assign(bench="all")).drop(
+        columns="benchmark",
+    )
+
+
 def _paired_effects(
     lesions: pd.DataFrame, level: str = "feature", extra: tuple[str, ...] = (),
 ) -> pd.DataFrame:
@@ -224,9 +263,11 @@ def _paired_effects(
         "variable": level, "estimate": "unique", "lower": "unique_lower",
         "upper": "unique_upper",
     })
-    return singular.merge(
+    output = singular.merge(
         unique, on=[*extra, level], how="inner", validate="one_to_one",
     )
+    output["measure"] = "delta_accuracy"
+    return output
 
 
 def _feature_labels(composites: list[dict[str, object]]) -> dict[str, str]:
@@ -375,10 +416,18 @@ def build_core_tables(
         } for path in diagnostic_paths)
 
         lesion_dir = ablation_root / fit_name
-        lesions = pd.read_csv(lesion_dir / "lesions.csv")
-        if lesions.fold_count.nunique() != 1 or lesions.fold_count.iloc[0] != 16:
+        published_lesions = pd.read_csv(lesion_dir / "lesions.csv")
+        if (published_lesions.fold_count.nunique() != 1
+                or published_lesions.fold_count.iloc[0] != 16):
             raise ValueError(f"{variant} capability lesions do not contain exactly 16 folds")
-        lesions[["estimate", "lower", "upper", "delta_accuracy"]] *= 100
+        item_deltas = pd.read_parquet(lesion_dir / "item-deltas.parquet")
+        null_predictions = pd.concat([
+            pd.read_parquet(lesion_dir / "folds" / fold / "predictions/null.parquet")
+            .assign(fold=fold)
+            for fold in sorted(item_deltas.fold.astype(str).unique())
+        ], ignore_index=True)
+        item_deltas = _correct_null_accuracy(item_deltas, null_predictions)
+        lesions = _overall_lesions(item_deltas)
         lesions["variant"], lesions["space"], lesions["penalty"] = variant, space, penalty
         lesion_tables.append(lesions)
         features = _paired_effects(lesions, "feature")
@@ -395,9 +444,7 @@ def build_core_tables(
             ], ignore_index=True)
             groups["variant"], groups["penalty"] = variant, penalty
             group_tables.append(groups)
-        benchmark = _benchmark_lesions(pd.read_parquet(
-            lesion_dir / "item-deltas.parquet"
-        ))
+        benchmark = _benchmark_lesions(item_deltas)
         benchmark = _paired_effects(benchmark, "feature", ("benchmark",))
         benchmark["variant"], benchmark["space"], benchmark["penalty"] = (
             variant, space, penalty,
@@ -1574,7 +1621,8 @@ def _write_scientific_summary(
         "",
         "## Singular contribution",
         "",
-        "Singular effects are held-out accuracy gains over the fixed 0.5 capability null. "
+        "Singular effects are held-out accuracy gains over the same-row antisymmetric "
+        "probability-0.5 null; paired log-loss gains are retained in the lesion tables. "
         "The leading raw-L1 singular predictors were:",
         "",
         top_features.to_markdown(index=False),
@@ -1636,6 +1684,7 @@ def _write_manifest(root: Path) -> None:
             raise RuntimeError(f"SVG lacks editable text: {png.with_suffix('.svg')}")
     manifest = {
         "state": "completed",
+        "capability_attribution_measure": "same-row delta accuracy; delta log loss retained",
         "figure_count": len(figures),
         "all_figures_have_png_svg_csv": True,
         "artifact_sha256": {

@@ -6,6 +6,9 @@ import pandas as pd
 import pytest
 
 from .pairwise_report import (
+    _benchmark_lesions,
+    _correct_null_accuracy,
+    _overall_lesions,
     backproject_pc_coefficients,
     expand_leaf_coefficients,
     judge_capability_overview,
@@ -14,6 +17,34 @@ from .pairwise_report import (
     summarize_capability_predictions,
     validate_fold_manifest,
 )
+
+
+def test_capability_singular_accuracy_uses_same_row_null() -> None:
+    rows = pd.DataFrame([
+        {"fold": f"model-fold-{model}__item-{item}", "bench": "a", "item": "i",
+         "kind": kind, "variable": "zero", "reference": reference,
+         "candidate_accuracy": candidate, "reference_accuracy": reference_accuracy,
+         "delta_accuracy": delta, "delta_log_loss": log_loss, "row_count": 4}
+        for model in range(4) for item in range(4)
+        for kind, reference, candidate, reference_accuracy, delta, log_loss in (
+            ("singular-feature", "null", 0.75, 0.5, 0.25, 0.0),
+            ("lesion-feature", "full", 0.65, 0.75, 0.1, 0.02),
+        )
+    ])
+    null = pd.DataFrame([
+        {"fold": f"model-fold-{model}__item-{item}", "bench": "a", "item": "i",
+         "observed": observed, "probability": 0.5}
+        for model in range(4) for item in range(4) for observed in (1, 1, 1, 0)
+    ])
+
+    corrected = _correct_null_accuracy(rows, null)
+    summary = _benchmark_lesions(corrected).set_index("kind")
+    overall = _overall_lesions(corrected).set_index("kind")
+
+    assert summary.loc["singular-feature", "estimate"] == pytest.approx(0.0)
+    assert summary.loc["lesion-feature", "estimate"] == pytest.approx(10.0)
+    assert overall.loc["singular-feature", "estimate"] == pytest.approx(0.0)
+    assert overall.loc["lesion-feature", "estimate"] == pytest.approx(10.0)
 
 
 def test_backprojection_uses_shared_loadings_and_benchmark_leaf_weights() -> None:
