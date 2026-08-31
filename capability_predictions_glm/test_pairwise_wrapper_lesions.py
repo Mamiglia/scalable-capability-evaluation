@@ -95,6 +95,7 @@ def test_capability_specifications_use_null_and_keep_raw_groups_pc_features_only
 def test_frozen_hyperparameters_require_matching_manifest_and_converged_tuning() -> None:
     frozen = {"C": 1.0, "l1_ratio": 1.0, "benchmark_deviation_penalty": 0.3}
     manifest = {"frozen_hyperparameters": frozen}
+    diagnostics = frozen | {"penalty": "l1"}
     tuning = pd.DataFrame([
         {"record_type": "variance_component", "selected": False, "converged": True,
          "benchmark_deviation_penalty": 0.3},
@@ -102,20 +103,24 @@ def test_frozen_hyperparameters_require_matching_manifest_and_converged_tuning()
          "C": 1.0, "l1_ratio": 1.0, "benchmark_deviation_penalty": 0.30000000000000004},
     ])
 
-    assert _validated_frozen_hyperparameters(manifest, frozen, tuning) == frozen
+    assert _validated_frozen_hyperparameters(manifest, diagnostics, tuning) == frozen
 
     with pytest.raises(RuntimeError, match="manifest frozen hyperparameters"):
         _validated_frozen_hyperparameters(
             {"frozen_hyperparameters": frozen | {"benchmark_deviation_penalty": 3.0}},
-            frozen, tuning,
+            diagnostics, tuning,
         )
     with pytest.raises(RuntimeError, match="selected capability tuning"):
         _validated_frozen_hyperparameters(
-            manifest, frozen, tuning.assign(converged=[True, False]),
+            manifest, diagnostics, tuning.assign(converged=[True, False]),
         )
     with pytest.raises(RuntimeError, match="invalid fitted benchmark ratio"):
         _validated_frozen_hyperparameters(
-            manifest, frozen | {"benchmark_deviation_penalty": -0.3}, tuning,
+            manifest, diagnostics | {"benchmark_deviation_penalty": -0.3}, tuning,
+        )
+    with pytest.raises(RuntimeError, match="invalid frozen capability penalty"):
+        _validated_frozen_hyperparameters(
+            manifest, diagnostics | {"C": -1.0}, tuning,
         )
 
 

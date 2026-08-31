@@ -494,6 +494,26 @@ def refit_matches_frozen(values: dict[str, object], frozen: dict[str, object]) -
     return all(key in values and values[key] == expected for key, expected in frozen.items())
 
 
+def validate_fold_manifest(fold: Path, expected_sha256: str) -> dict[str, object]:
+    """Validate one completed lesion fold against its summary predecessor hash."""
+    manifest_path = fold / "manifest.json"
+    if (not manifest_path.is_file()
+            or hashlib.sha256(manifest_path.read_bytes()).hexdigest() != expected_sha256):
+        raise RuntimeError(f"lesion fold manifest hash mismatch: {fold}")
+    manifest = json.loads(manifest_path.read_text())
+    hashes = manifest.get("artifacts")
+    files = {
+        str(path.relative_to(fold))
+        for path in fold.rglob("*") if path.is_file() and path != manifest_path
+    }
+    if (manifest.get("state") != "completed" or not isinstance(hashes, dict)
+            or set(hashes) != files
+            or any(hashlib.sha256((fold / name).read_bytes()).hexdigest() != digest
+                   for name, digest in hashes.items())):
+        raise RuntimeError(f"invalid completed fold artifacts: {fold}")
+    return manifest
+
+
 def validate_ablation_download(ablation_root: Path) -> pd.DataFrame:
     rows = []
     for variant, (fit_name, _, space, _) in VARIANTS.items():
@@ -508,10 +528,11 @@ def validate_ablation_download(ablation_root: Path) -> pd.DataFrame:
         folds = sorted((directory / "folds").glob("model-fold-*__item-*"))
         if len(folds) != 16:
             raise RuntimeError(f"expected 16 downloaded folds for {variant}, found {len(folds)}")
+        expected_fold_hashes = summary["settings"]["fold_manifests"]
         expected_specs = 250 if space == "raw" else 60
         converged, diagnostic_count = 0, 0
-        for fold in folds:
-            manifest = json.loads((fold / "manifest.json").read_text())
+        for fold, expected_fold_hash in zip(folds, expected_fold_hashes, strict=True):
+            manifest = validate_fold_manifest(fold, expected_fold_hash)
             if (manifest.get("state") != "completed"
                     or manifest.get("unique_specifications") != expected_specs):
                 raise RuntimeError(f"invalid completed fold manifest: {fold}")
