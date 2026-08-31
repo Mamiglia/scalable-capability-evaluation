@@ -157,3 +157,35 @@ renaming into the historical report layout is required.
 Never overwrite or delete the existing Ceph artifacts. Stage code and outputs
 to new paths, validate manifests/hashes, and commit code/docs before submitting
 the full jobs.
+
+## Active SWC rerun
+
+Staged code commit: `98b5a3a` (core implementation commit `d0c221e`).
+
+```text
+staging/judge-hierarchical-refit-20260831-98b5a3a/
+results/judge-hierarchical-refit-20260831-98b5a3a-29e4b847-27dbd491/
+```
+
+Full-fit arrays (16 folds, four concurrent tasks each; 48-hour limit):
+
+```text
+raw L1  3471110
+raw L2  3471111
+PC L1   3471109
+PC L2   3471104
+```
+
+Dependent jobs already submitted:
+
+```text
+primary aggregates:        raw-L1 3471132, raw-L2 3471130, PC-L1 3471134, PC-L2 3471126
+capability fold arrays:     raw-L1 3471127, raw-L2 3471129, PC-L1 3471131, PC-L2 3471128
+capability aggregates:      raw-L1 3471136, raw-L2 3471139, PC-L1 3471137, PC-L2 3471138
+lesion preparation arrays: raw-L1 3471124, raw-L2 3471125, PC-L1 3471135, PC-L2 3471133
+```
+
+At submission, all 16 active full-fit tasks were running and all dependent
+jobs were pending on the declared `afterok` dependencies. After each lesion
+preparation array completes, validate its per-fold inventory before submitting
+the large lesion-spec array; those arrays cannot be safely submitted earlier.
