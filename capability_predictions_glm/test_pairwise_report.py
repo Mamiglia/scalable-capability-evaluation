@@ -43,6 +43,10 @@ def test_capability_singular_accuracy_uses_same_row_null() -> None:
 
     assert summary.loc["singular-feature", "estimate"] == pytest.approx(0.0)
     assert summary.loc["lesion-feature", "estimate"] == pytest.approx(10.0)
+    assert summary.loc["singular-feature", "delta_accuracy"] == pytest.approx(0.0)
+    assert summary.loc["lesion-feature", "delta_accuracy"] == pytest.approx(10.0)
+    assert summary.loc["singular-feature", "delta_log_loss"] == pytest.approx(0.0)
+    assert summary.loc["lesion-feature", "delta_log_loss"] == pytest.approx(0.02)
     assert overall.loc["singular-feature", "estimate"] == pytest.approx(0.0)
     assert overall.loc["lesion-feature", "estimate"] == pytest.approx(10.0)
 

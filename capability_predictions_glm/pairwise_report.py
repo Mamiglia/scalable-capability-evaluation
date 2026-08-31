@@ -191,6 +191,7 @@ def _benchmark_lesions(item_deltas: pd.DataFrame) -> pd.DataFrame:
     keys = ["bench", "kind", "variable", "reference"]
     for values, frame in rows.groupby(keys, sort=False):
         estimate = float(np.average(frame.delta_accuracy, weights=frame.row_count))
+        delta_log_loss = float(np.average(frame.delta_log_loss, weights=frame.row_count))
         intervals = []
         for dimension in ("model_fold", "item_fold"):
             by_fold = np.array([
@@ -200,6 +201,7 @@ def _benchmark_lesions(item_deltas: pd.DataFrame) -> pd.DataFrame:
             intervals.append(_t_interval(by_fold))
         summaries.append({
             **dict(zip(keys, values)), "estimate": estimate,
+            "delta_accuracy": estimate, "delta_log_loss": delta_log_loss,
             "lower": min(interval[0] for interval in intervals),
             "upper": max(interval[1] for interval in intervals),
             "model_fold_count": frame.model_fold.nunique(),
@@ -207,7 +209,7 @@ def _benchmark_lesions(item_deltas: pd.DataFrame) -> pd.DataFrame:
             "row_count": int(frame.row_count.sum()),
         })
     output = pd.DataFrame(summaries).rename(columns={"bench": "benchmark"})
-    output[["estimate", "lower", "upper"]] *= 100
+    output[["estimate", "lower", "upper", "delta_accuracy"]] *= 100
     return output
 
 
@@ -244,7 +246,7 @@ def _correct_null_accuracy(
 
 
 def _overall_lesions(item_deltas: pd.DataFrame) -> pd.DataFrame:
-    """Summarize the same held-out log-loss deltas across benchmarks."""
+    """Summarize paired held-out accuracy and log-loss deltas overall."""
     return _benchmark_lesions(item_deltas.assign(bench="all")).drop(
         columns="benchmark",
     )
