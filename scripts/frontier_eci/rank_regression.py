@@ -4,6 +4,7 @@ import argparse
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +29,26 @@ from scripts.judge.verdict_tables import read_verdicts  # noqa: E402
 
 FIT_LABEL = "Rank–accuracy fit (in-sample)"
 QUARTILES = (2, 3, 4)
+REQUIRED_OUTPUTS = (
+    "abilities.csv", "ranking_blocks.csv", "fits.csv", "training_fitted.csv",
+    "frontier_fitted.csv", "checkpoint-main.json", "summary.json",
+)
+MAIN_OUTPUT_MANIFEST = {
+    "status": "authoritative",
+    "main_analysis": "analysis/rank_regression",
+    "main_glob": "analysis/rank_regression/**",
+    "label": FIT_LABEL,
+    "result_document": "../../../docs/results/2026-08-30-canonical-anchor-frontier-redo.md",
+    "lifecycle_manifest": "provenance/final-lifecycle.json",
+    "discarded_provenance": [
+        {"root": ".", "glob": "analysis/**",
+         "except": ["analysis/rank_regression/**"]},
+        {"root": ".", "glob": "capability_baseline/**"},
+        {"root": "../eci-semiannual", "glob": "analysis*/**"},
+        {"root": "../eci-semiannual", "glob": "calibration-audit/**"},
+    ],
+    "scientific_scope": "in-sample; no temporal cutoff, anchors, target exclusion, or ECI",
+}
 
 
 def select_method(linear_fitted: np.ndarray, linear_rmse: float,
@@ -199,6 +220,73 @@ def _write_figures(frontier: pd.DataFrame, out: Path) -> None:
             )
 
 
+def _validate_staged_output(staging: Path, require_figures: bool) -> None:
+    missing = [name for name in REQUIRED_OUTPUTS if not (staging / name).is_file()]
+    if missing:
+        raise ValueError(f"incomplete staged rank-regression output: missing {','.join(missing)}")
+    checkpoint = json.loads((staging / "checkpoint-main.json").read_text())
+    summary = json.loads((staging / "summary.json").read_text())
+    if checkpoint.get("phase") != "main" or summary.get("analysis") != FIT_LABEL:
+        raise ValueError("incomplete staged rank-regression output: invalid completion metadata")
+    for name, expected_rows in checkpoint.get("rows", {}).items():
+        if len(pd.read_csv(staging / name)) != expected_rows:
+            raise ValueError(f"incomplete staged rank-regression output: row count mismatch for {name}")
+    fits = pd.read_csv(staging / "fits.csv")
+    frontier = pd.read_csv(staging / "frontier_fitted.csv")
+    ranking_blocks = pd.read_csv(staging / "ranking_blocks.csv")
+    training = pd.read_csv(staging / "training_fitted.csv")
+    valid = (
+        len(ranking_blocks) == summary.get("ranking_blocks") == 10
+        and ranking_blocks.n_pair_items_max.max() <= 8
+        and len(fits) == summary.get("fit_blocks") == 30
+        and fits.fit_status.eq("ok").all()
+        and len(frontier) == summary.get("frontier_rows") == 240
+        and not frontier[["actual", "fitted"]].isna().any().any()
+        and set(frontier.target_quartile) == set(QUARTILES)
+        and all(
+            set(training[(training.bench == row.bench)
+                         & (training.judge == row.judge)
+                         & (training.target_quartile == row.target_quartile)].model)
+            == set(row.training_model_ids.split("|"))
+            for row in fits.itertuples()
+        )
+    )
+    if not valid:
+        raise ValueError("invalid main-analysis invariants in staged rank-regression output")
+    if require_figures:
+        figures = staging / "figures"
+        counts = {suffix: len(list(figures.glob(f"*.{suffix}")))
+                  for suffix in ("png", "pdf", "svg")}
+        if counts != {"png": 60, "pdf": 60, "svg": 60}:
+            raise ValueError(f"incomplete staged rank-regression output: figure counts {counts}")
+
+
+def publish_staged_output(staging: Path, output: Path, require_figures: bool = True) -> None:
+    """Validate and atomically-ish swap a same-parent staging directory into place."""
+    _validate_staged_output(staging, require_figures)
+    _atomic_write_json({
+        "status": "complete", "analysis": FIT_LABEL,
+        "required_files": list(REQUIRED_OUTPUTS), "figures_required": require_figures,
+    }, staging / "COMPLETE.json")
+    backup = output.with_name(f".{output.name}.previous")
+    if backup.exists():
+        if output.exists():
+            shutil.rmtree(backup)
+        else:
+            backup.replace(output)
+    if output.exists():
+        output.replace(backup)
+    try:
+        staging.replace(output)
+    except Exception:
+        if backup.exists() and not output.exists():
+            backup.replace(output)
+        raise
+    else:
+        if backup.exists():
+            shutil.rmtree(backup)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path,
@@ -211,73 +299,73 @@ def main() -> None:
     config = _load_config(args.config)
     result_root = _path(config["results"])
     output = result_root / "analysis/rank_regression"
-    if output.exists():
-        shutil.rmtree(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{output.name}.staging-", dir=output.parent))
 
-    quartiles = pd.read_csv(_path(config["quartiles"]), dtype={"item": str})
-    canonical = pd.read_parquet(
-        _path(config["canonical_identity"]),
-        columns=["bench", "model", "item", "epoch", "correct", "is_canonical"])
-    frontier = pd.read_parquet(_path(config["frontier_rollouts"])).copy()
-    historical = historical_rollouts(config.get("historical_backfill", {}))
-    historical["epoch"] = 0
-    supplements = historical_rollouts(config.get("actual_supplements", {}))
-    supplements["epoch"] = 0
-    rollouts = merge_rollout_sources(canonical, frontier, historical, supplements)
-    rollouts["item"] = rollouts.item.astype(str)
-    hard = rollouts.merge(quartiles[["bench", "item", "item_quartile"]],
-                          on=["bench", "item"], how="inner")
-    hard = hard.rename(columns={"item_quartile": "target_quartile"})
+    try:
+        quartiles = pd.read_csv(_path(config["quartiles"]), dtype={"item": str})
+        canonical = pd.read_parquet(
+            _path(config["canonical_identity"]),
+            columns=["bench", "model", "item", "epoch", "correct", "is_canonical"])
+        frontier = pd.read_parquet(_path(config["frontier_rollouts"])).copy()
+        historical = historical_rollouts(config.get("historical_backfill", {}))
+        historical["epoch"] = 0
+        supplements = historical_rollouts(config.get("actual_supplements", {}))
+        supplements["epoch"] = 0
+        rollouts = merge_rollout_sources(canonical, frontier, historical, supplements)
+        rollouts["item"] = rollouts.item.astype(str)
+        hard = rollouts.merge(quartiles[["bench", "item", "item_quartile"]],
+                              on=["bench", "item"], how="inner")
+        hard = hard.rename(columns={"item_quartile": "target_quartile"})
 
-    judges = [judge.split("/")[-1] for group in config["judges"].values() for judge in group]
-    old = [pd.read_parquet(_path(path)) for path in config["verdicts"]]
-    paid, candidate_logs = read_verdicts([args.logs_root])
-    columns = ["bench", "judge", "item", "model_left", "model_right",
-               "epoch_left", "epoch_right", "judge_epoch", "pick_left"]
-    verdicts = pd.concat([table[columns] for table in old] + [paid[columns]], ignore_index=True)
-    verdicts = (verdicts[verdicts.judge.isin(judges)]
-                .drop_duplicates(columns[:-1], keep="last").reset_index(drop=True))
-    protocol = filter_protocol_verdicts(verdicts, rollouts, quartiles)
+        judges = [judge.split("/")[-1] for group in config["judges"].values() for judge in group]
+        old = [pd.read_parquet(_path(path)) for path in config["verdicts"]]
+        paid, candidate_logs = read_verdicts([args.logs_root])
+        columns = ["bench", "judge", "item", "model_left", "model_right",
+                   "epoch_left", "epoch_right", "judge_epoch", "pick_left"]
+        verdicts = pd.concat([table[columns] for table in old] + [paid[columns]], ignore_index=True)
+        verdicts = (verdicts[verdicts.judge.isin(judges)]
+                    .drop_duplicates(columns[:-1], keep="last").reset_index(drop=True))
+        protocol = filter_protocol_verdicts(verdicts, rollouts, quartiles)
 
-    abilities, ranking_blocks = rank_all_blocks(protocol, pair_limit=8)
-    fits, training = fit_rank_regressions(abilities, hard)
-    actual = _observed_accuracy(hard)
-    targets = list(config["candidates"])
-    benches = sorted(hard.bench.unique())
-    frontier_fitted = frontier_grid(
-        training, actual, targets, judges, config["releases"], benches=benches)
+        abilities, ranking_blocks = rank_all_blocks(protocol, pair_limit=8)
+        fits, training = fit_rank_regressions(abilities, hard)
+        actual = _observed_accuracy(hard)
+        targets = list(config["candidates"])
+        benches = sorted(hard.bench.unique())
+        frontier_fitted = frontier_grid(
+            training, actual, targets, judges, config["releases"], benches=benches)
 
-    _checkpoint_tables(output, "main", {
-        "abilities.csv": abilities,
-        "ranking_blocks.csv": ranking_blocks,
-        "fits.csv": fits,
-        "training_fitted.csv": training,
-        "frontier_fitted.csv": frontier_fitted,
-    })
-    if not args.no_figures:
-        _write_figures(frontier_fitted, output / "figures")
-    missing = frontier_fitted[frontier_fitted.fit_status.ne("ok")]
-    summary = {
-        "analysis": FIT_LABEL,
-        "pair_item_cap": 8,
-        "q1_protocol_rows": len(protocol),
-        "ranking_blocks": len(ranking_blocks),
-        "fit_blocks": len(fits),
-        "fit_failures": int(fits.fit_status.ne("ok").sum()),
-        "frontier_rows": len(frontier_fitted),
-        "frontier_actual_missing": int(frontier_fitted.actual.isna().sum()),
-        "frontier_ability_gaps": int(missing.actual.notna().sum()),
-        "frontier_gap_ids": sorted(missing.loc[missing.actual.notna(), "model"].unique()),
-        "paid_success_rows": len(paid),
-        "paid_candidate_logs": len(candidate_logs),
-    }
-    _atomic_write_json(summary, output / "summary.json")
-    _atomic_write_json({
-        "main_analysis": "analysis/rank_regression",
-        "label": FIT_LABEL,
-        "discarded_non_main": ["analysis/figures/frontier_style", "capability_baseline/figures"],
-        "scientific_scope": "in-sample; no temporal cutoff, anchors, target exclusion, or ECI",
-    }, result_root / "MAIN_OUTPUT.json")
+        _checkpoint_tables(staging, "main", {
+            "abilities.csv": abilities,
+            "ranking_blocks.csv": ranking_blocks,
+            "fits.csv": fits,
+            "training_fitted.csv": training,
+            "frontier_fitted.csv": frontier_fitted,
+        })
+        if not args.no_figures:
+            _write_figures(frontier_fitted, staging / "figures")
+        missing = frontier_fitted[frontier_fitted.fit_status.ne("ok")]
+        summary = {
+            "analysis": FIT_LABEL,
+            "pair_item_cap": 8,
+            "q1_protocol_rows": len(protocol),
+            "ranking_blocks": len(ranking_blocks),
+            "fit_blocks": len(fits),
+            "fit_failures": int(fits.fit_status.ne("ok").sum()),
+            "frontier_rows": len(frontier_fitted),
+            "frontier_actual_missing": int(frontier_fitted.actual.isna().sum()),
+            "frontier_ability_gaps": int(missing.actual.notna().sum()),
+            "frontier_gap_ids": sorted(missing.loc[missing.actual.notna(), "model"].unique()),
+            "paid_success_rows": len(paid),
+            "paid_candidate_logs": len(candidate_logs),
+        }
+        _atomic_write_json(summary, staging / "summary.json")
+        publish_staged_output(staging, output, require_figures=not args.no_figures)
+        _atomic_write_json(MAIN_OUTPUT_MANIFEST, result_root / "MAIN_OUTPUT.json")
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
     print(json.dumps(summary, indent=2))
 
 

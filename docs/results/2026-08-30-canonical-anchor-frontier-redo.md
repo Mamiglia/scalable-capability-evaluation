@@ -3,7 +3,8 @@
 **Status: noncanonical side analysis; current main result for this frontier redo.** The sole
 authoritative output is [MAIN_OUTPUT.json](../../judge_results/frontier/eci-semiannual-canonical-anchors/MAIN_OUTPUT.json),
 which designates [analysis/rank_regression/](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/).
-All older anchor/ECI figure roots are discarded/non-main; the archived notice lists each one in
+All older anchor/ECI tables, metrics, coverage exports, and figure roots are discarded/non-main.
+The comprehensive path rules live in `MAIN_OUTPUT.json`; the archived notice explains them in
 [the preceding side-analysis document](2026-08-28-frontier-eci-side-analysis.md).
 
 ## Interpretation limit
@@ -68,6 +69,7 @@ of 12/13/12/9; the Q2/Q3/Q4 accuracies are 0.846/0.417/0.111.
 ## Valid artifacts and QA
 
 - [summary.json](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/summary.json),
+  [COMPLETE.json](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/COMPLETE.json),
   [checkpoint-main.json](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/checkpoint-main.json),
   [ranking blocks](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/ranking_blocks.csv),
   [BT abilities](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/abilities.csv),
@@ -103,6 +105,9 @@ The original top-up [final run summary](../../judge_results/frontier/eci-semiann
 [consolidated ledger](../../judge_results/frontier/eci-semiannual-canonical-anchors/run-runpod/ledger.jsonl),
 and [monitor](../../judge_results/frontier/eci-semiannual-canonical-anchors/run-runpod/monitor.jsonl)
 retain the execution audit.
+The compact [final lifecycle manifest](../../judge_results/frontier/eci-semiannual-canonical-anchors/provenance/final-lifecycle.json)
+records the Task 4 and Task 5 pod identities, lifecycle/deletion evidence, the final empty-pod
+control-plane check, preserved network volume, and explicitly labeled balance/cost observations.
 
 **Cost totals (approximate, not invoice allocations):** new-key API is **$65.5190**
 ($51.589830740 original top-up + $13.929153 Gemini SWE addition); Task 4 RunPod was estimated at

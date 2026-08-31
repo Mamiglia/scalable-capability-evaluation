@@ -1,5 +1,12 @@
 # Canonical-Anchor Frontier Redo Implementation Plan
 
+> **SUPERSEDED FOR MAIN INTERPRETATION BY THE LATEST USER REQUIREMENT.** This plan records the
+> historical anchor/ECI workflow only. The sole authoritative result is the deliberately
+> in-sample [rank–accuracy result](../../results/2026-08-30-canonical-anchor-frontier-redo.md),
+> whose machine-readable authority and complete discarded-provenance rules are in
+> [MAIN_OUTPUT.json](../../../judge_results/frontier/eci-semiannual-canonical-anchors/MAIN_OUTPUT.json).
+> Do not interpret the forecast, anchor, or ECI steps below as main results.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rebuild the noncanonical quarterly-frontier forecasts using temporally eligible canonical-pool anchors, broad low-item pair coverage, explicit-intercept calibration, and matched ECI baselines for GPQA and SWE-mini.

@@ -1,5 +1,11 @@
 # Canonical-anchor frontier judging redo
 
+> **SUPERSEDED FOR MAIN INTERPRETATION BY THE LATEST USER REQUIREMENT.** This design specifies a
+> historical anchor/ECI analysis retained as provenance only. The sole authoritative result is the
+> deliberately in-sample [rank–accuracy result](../../results/2026-08-30-canonical-anchor-frontier-redo.md),
+> named and scoped by [MAIN_OUTPUT.json](../../../judge_results/frontier/eci-semiannual-canonical-anchors/MAIN_OUTPUT.json).
+> No anchor/ECI output described below is a current main result.
+
 **Status:** Revised design awaiting written review. This is a noncanonical side analysis. It does
 not modify the canonical pool, canonical verdicts, or frozen difficulty estimates.
 

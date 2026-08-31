@@ -9,15 +9,18 @@ The current main analysis for this work is the deliberately in-sample
 as named by the authoritative [MAIN_OUTPUT.json](../../judge_results/frontier/eci-semiannual-canonical-anchors/MAIN_OUTPUT.json).
 Its exact label is `Rank–accuracy fit (in-sample)`.
 
-Every older plot root below is discarded/non-main:
+Every older output below—tables, metrics, coverage exports, and figures—is discarded/non-main.
+The machine-readable rules in `MAIN_OUTPUT.json` classify `analysis/**` except
+`analysis/rank_regression/**`, all of `capability_baseline/**`, and every older `analysis*` root:
 
 - [`judge_results/frontier/eci-semiannual/analysis/`](../../judge_results/frontier/eci-semiannual/analysis/)
   and [`analysis-swe-partial/`](../../judge_results/frontier/eci-semiannual/analysis-swe-partial/),
   including their `figures/frontier_style/` subdirectories;
 - [`judge_results/frontier/eci-semiannual/analysis/capability_baseline/`](../../judge_results/frontier/eci-semiannual/analysis/capability_baseline/);
 - [`judge_results/frontier/eci-semiannual/calibration-audit/`](../../judge_results/frontier/eci-semiannual/calibration-audit/);
-- [`analysis/figures/frontier_style/`](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/figures/frontier_style/)
-  and [`capability_baseline/figures/`](../../judge_results/frontier/eci-semiannual-canonical-anchors/capability_baseline/figures/).
+- [`analysis/`](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/), except its
+  authoritative `rank_regression/` child, and the entire
+  [`capability_baseline/`](../../judge_results/frontier/eci-semiannual-canonical-anchors/capability_baseline/).
 
 The old anchor-only, release-time, 79/80-coverage, and Epoch-ECI comparisons remain retained
 provenance only. They do not qualify the main curve, which uses neither anchors nor ECI and has

@@ -178,7 +178,7 @@ For each judge×benchmark ranking and each of Q2/Q3/Q4, every model with both BT
 
 Both candidates export coefficients, model-level SSE, and model-level RMSE. Selection is deterministic: sigmoid when any linear training fitted value is outside [0,1], or when sigmoid RMSE is strictly lower; linear otherwise. All fitted values are raw in the CSVs. Only plot display values are clipped to [0,1] if necessary. The exact canvas/export label is `Rank–accuracy fit (in-sample)`; the final tables and figures use neither forecast nor held-out language.
 
-The unambiguous main-output manifest is `judge_results/frontier/eci-semiannual-canonical-anchors/MAIN_OUTPUT.json`. It points to `analysis/rank_regression/` and marks the earlier `analysis/figures/frontier_style` and `capability_baseline/figures` roots discarded/non-main. ECI and anchor subsets do not enter the final main analysis.
+The unambiguous main-output manifest is `judge_results/frontier/eci-semiannual-canonical-anchors/MAIN_OUTPUT.json`. It points to `analysis/rank_regression/` and comprehensively marks every sibling `analysis/**` artifact, all `capability_baseline/**` artifacts, and older `analysis*` roots discarded/non-main. ECI and anchor subsets do not enter the final main analysis.
 
 ### Review defects fixed before the final ruling
 
@@ -257,3 +257,29 @@ Original-resolution inspection covered both benchmarks and all three quartiles a
 - Model selection uses the same in-sample rows as fitting, exactly as specified.
 - The existing BT implementation uses its fixed ridge of 0.01 to keep unbeaten model abilities finite; the rank-regression layer adds no further regularization.
 - The four absent upstream Gemini SWE items remain absent; the explicit per-quartile denominators above are used without imputation.
+
+## Final whole-branch review fix
+
+The last review found ambiguity and durability problems around the already-correct main result. This wave changed no scientific fit and did not rerun the heavy analysis.
+
+### RED/GREEN
+
+The initial focused run failed four regressions for the expected reasons:
+
+- the official RunPod launcher invoked `canonical_analysis.py` instead of the script named by `MAIN_OUTPUT.json`;
+- the manifest lacked comprehensive discarded-provenance rules;
+- no staged-publication interface existed;
+- `audit_api.py` had no validation interface that rejected a zero-usage response with missing provider provenance.
+
+A second RED proved that a complete-looking staged tree with a missing frontier actual could pass the first structural validator. The validator now enforces the ten ranking blocks, cap at eight, 30 successful Q2/Q3/Q4 fits, 240 complete frontier rows, and exact training-model IDs before publication. The focused suite then passed five tests.
+
+### Changes
+
+- `scripts/frontier_eci/runpod/run_canonical_analysis.sh` now launches the authoritative `scripts/frontier_eci/rank_regression.py` and forwards its arguments. A real-shell regression shadows `uv`, executes the launcher, and checks its target against `MAIN_OUTPUT.json`.
+- `MAIN_OUTPUT.json` now has `status: authoritative`, the sole main glob, result/lifecycle links, and path rules covering `analysis/**` except `analysis/rank_regression/**`, all `capability_baseline/**`, older `analysis*/**`, and the older calibration audit.
+- The historical implementation plan and design spec now open with prominent supersession notices linking the authoritative result document and manifest.
+- Rank-regression generation now builds in a unique same-parent staging directory. It writes tables, figures, summary, and phase checkpoint there; validates all main invariants; writes `COMPLETE.json` last; and then swaps staging into place with a same-parent backup and rollback path. Pre-swap failure tests prove the current main directory remains untouched.
+- `provenance/final-lifecycle.json` compactly records the Task 4 pod, all three Task 5 pods, deletion evidence, final empty pod list, preserved volume `c16kxrwrr4`, and labeled cost/balance observations. A read-only `runpodctl 2.12.0-51ca7f0` refresh at `2026-08-31T08:47:22Z` returned pod list `[]`, balance `$23.6436603533`, spend rate `$0.005/h` from the retained volume, and the 50 GB AP-JP-1 volume record.
+- Provider audit now rejects every response lacking `provider`, even when cost and token usage are all zero. The committed 3,220-response corpus passes the stricter check with zero missing providers.
+
+Final fresh repository-wide verification passed `216 passed` with one pre-existing Pydantic deprecation warning. Python compilation, launcher `bash -n`, stricter validation of the committed main root, document/manifest/lifecycle link resolution, the 3,220-row provider audit, supersession-notice checks, and `git diff --check` all exited zero. No pod was created and no paid API call was made for this review wave.

@@ -1,9 +1,30 @@
 {
+  "status": "authoritative",
   "main_analysis": "analysis/rank_regression",
+  "main_glob": "analysis/rank_regression/**",
   "label": "Rank\u2013accuracy fit (in-sample)",
-  "discarded_non_main": [
-    "analysis/figures/frontier_style",
-    "capability_baseline/figures"
+  "result_document": "../../../docs/results/2026-08-30-canonical-anchor-frontier-redo.md",
+  "lifecycle_manifest": "provenance/final-lifecycle.json",
+  "discarded_provenance": [
+    {
+      "root": ".",
+      "glob": "analysis/**",
+      "except": [
+        "analysis/rank_regression/**"
+      ]
+    },
+    {
+      "root": ".",
+      "glob": "capability_baseline/**"
+    },
+    {
+      "root": "../eci-semiannual",
+      "glob": "analysis*/**"
+    },
+    {
+      "root": "../eci-semiannual",
+      "glob": "calibration-audit/**"
+    }
   ],
   "scientific_scope": "in-sample; no temporal cutoff, anchors, target exclusion, or ECI"
 }
