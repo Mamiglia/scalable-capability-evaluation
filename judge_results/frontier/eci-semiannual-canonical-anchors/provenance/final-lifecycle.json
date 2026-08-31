@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "scope": "Task 4 through Task 6 RunPod lifecycle provenance",
+  "task4": {
+    "pod": {
+      "id": "qiufz0alzfzkae",
+      "name": "canonical-anchor-redo",
+      "cloud": "Secure Cloud",
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "data_center_id": "AP-JP-1",
+      "cost_per_hour_usd": 3.29,
+      "created_at_utc": "2026-08-30T21:15:52.731Z",
+      "lifecycle": "stopped and restarted at recorded gates; final continuous run began 2026-08-30T23:47:35Z",
+      "deletion_window_utc": {
+        "after": "2026-08-31T01:39:29.460256Z",
+        "before": "2026-08-31T01:47:53Z"
+      },
+      "final_state": "deleted"
+    },
+    "detailed_manifest": "../run-runpod/provenance/lifecycle-staging.json",
+    "cost_observations": {
+      "visible_pod_billing_usd": 3.636004967,
+      "estimated_total_pod_cost_usd": 6.899304864,
+      "label": "estimate from recorded visible billing plus final uninterrupted uptime; not an invoice allocation"
+    }
+  },
+  "task5": {
+    "pods": [
+      {
+        "id": "ckxd596vw8fbbd",
+        "name": "initial Task 5 pod",
+        "cloud": "Secure Cloud",
+        "gpu": "NVIDIA H100 80GB HBM3",
+        "cost_per_hour_usd": 3.29,
+        "lifecycle": "ran initial gates and smokes; stopped during fixes; deleted after host could not resume",
+        "final_state": "deleted"
+      },
+      {
+        "id": "hcutc6jtodrinp",
+        "name": "replacement Task 5 pod",
+        "cloud": "Secure Cloud",
+        "gpu": "NVIDIA H200",
+        "cost_per_hour_usd": 4.59,
+        "lifecycle": "stopped during local-only changes; ran trimming, paid top-up, and superseded full analysis",
+        "final_state": "deleted"
+      },
+      {
+        "id": "a74kw8pd94zkuk",
+        "name": "canonical-anchor-fix1",
+        "cloud": "Secure Cloud",
+        "gpu": "NVIDIA H100 80GB HBM3",
+        "cost_per_hour_usd": 3.29,
+        "created_at_utc": "2026-08-31T07:37:11.586Z",
+        "lifecycle": "superseded bootstrap terminated at headline task 77/240; stopped during local fixes; resumed 2026-08-31T08:00:49Z; final rank-regression run completed in about 86 seconds",
+        "deletion_evidence": "deleted after checksum-verified recovery; subsequent pod list was empty",
+        "final_state": "deleted"
+      }
+    ],
+    "balance_observations": {
+      "pre_task_usd": 46.143585,
+      "final_usd": 23.6436603533,
+      "decrease_usd": 22.4999246467,
+      "label": "control-plane balance change including network-volume billing; not an invoice allocation or pod-only cost"
+    }
+  },
+  "task6": {
+    "analysis": "pooled pre-release judges",
+    "pod": {
+      "id": "e58te6jyju3ivq",
+      "name": "pooled-judges-20260831",
+      "cloud": "Secure Cloud",
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "data_center_id": "AP-JP-1",
+      "cost_per_hour_usd": 3.29,
+      "created_at_utc": "2026-08-31T13:38:35.952Z",
+      "deleted_before_utc": "2026-08-31T14:09:20Z",
+      "final_state": "deleted"
+    },
+    "run": {
+      "resamples": 1000,
+      "workers": 10,
+      "fit_blocks": 16,
+      "successful_predictions": 14,
+      "expected_no_prior_judge_gaps": 2,
+      "recovery": "summary.json, fits.csv, predictions.csv, and abilities.csv matched remote SHA-256 checksums"
+    },
+    "balance_observations": {
+      "pre_task_usd": 23.1715810718,
+      "final_usd": 21.5177100385,
+      "decrease_usd": 1.6538710333,
+      "label": "control-plane balance change including network-volume billing; not an invoice allocation or pod-only cost"
+    }
+  },
+  "final_control_plane_observation": {
+    "observed_at_utc": "2026-08-31T14:09:20Z",
+    "runpodctl_version": "2.12.0-51ca7f0",
+    "pod_list": [],
+    "account": {
+      "id": "user_3H8v32sAbkyV7HsBOUc87UGdpOl",
+      "client_balance_usd": 21.5177100385,
+      "current_spend_per_hour_usd": 0.005,
+      "spend_limit_usd": 80,
+      "observation_label": "control-plane snapshot; no pods active; ongoing spend is the retained volume, not GPU runtime"
+    },
+    "network_volume": {
+      "id": "c16kxrwrr4",
+      "name": "interesting_harlequin_eagle_volume",
+      "data_center_id": "AP-JP-1",
+      "size_gb": 50,
+      "preserved": true
+    }
+  }
+}
