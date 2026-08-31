@@ -56,9 +56,9 @@ DETERMINISTIC_EXCLUDED_BLOCKS = frozenset({"rubric", "intermediate-errors", "ann
 
 
 def backproject_pc_coefficients(
-    coefficients: pd.DataFrame, loadings: pd.DataFrame,
+    coefficients: pd.DataFrame, loadings: pd.DataFrame, score_scales: pd.Series,
 ) -> pd.DataFrame:
-    """Return ``loadings.T @ beta_pc`` for every coefficient cell."""
+    """Map unit-variance PC coefficients back into composite coordinates."""
     required = {"feature", "effective"}
     if missing := required - set(coefficients):
         raise ValueError(f"PC coefficients missing columns: {sorted(missing)}")
@@ -71,11 +71,13 @@ def backproject_pc_coefficients(
     dimensions = [column for column in coefficients if column not in required]
     values = coefficients.pivot(index=dimensions, columns="feature", values="effective")
     values = values.reindex(columns=matrix.index)
+    scales = score_scales.reindex(components).to_numpy(float)
     if (values.isna().any().any() or matrix.isna().any().any()
-            or not np.isfinite(matrix.to_numpy(float)).all()):
-        raise ValueError("PC coefficients and loadings must be finite and complete")
+            or not np.isfinite(matrix.to_numpy(float)).all()
+            or not np.isfinite(scales).all() or np.any(scales <= 0)):
+        raise ValueError("PC coefficients, loadings, and score scales must be finite and complete")
     projected = pd.DataFrame(
-        values.to_numpy(float) @ matrix.to_numpy(float),
+        (values.to_numpy(float) / scales) @ matrix.to_numpy(float),
         index=values.index,
         columns=matrix.columns,
     )
@@ -337,16 +339,12 @@ def build_core_tables(
         capability["task"] = "capability"
         capability["space"], capability["penalty"] = space, penalty
         capability["standardized_effect"] = capability.effective
-        if space == "pc":
-            capability["standardized_effect"] *= capability.feature.map(variance_scale)
         capability_coefficients.append(capability)
 
         judge = pd.read_csv(root / "canonical-judge-fits" / judge_name / "coefficients.csv")
         judge["variant"], judge["task"] = variant, "judge"
         judge["space"], judge["penalty"] = space, penalty
         judge["standardized_effect"] = judge.effective
-        if space == "pc":
-            judge["standardized_effect"] *= judge.feature.map(variance_scale)
         judge_coefficients.append(judge)
 
         selection = _load_capability_selections(root, fit_name, variant)
@@ -954,7 +952,7 @@ def build_backprojection_tables(
             if task == "capability":
                 frame["judge"] = "all"
             composite = (frame if space == "raw" else
-                         backproject_pc_coefficients(frame, loadings))
+                         backproject_pc_coefficients(frame, loadings, variance_scale))
             expanded = expand_leaf_coefficients(composite, composites, source_blocks)
             expanded["task"], expanded["variant"] = task, variant
             expanded["space"], expanded["penalty"] = space, penalty
@@ -1541,8 +1539,9 @@ def _write_scientific_summary(
         "## Coefficient direction",
         "",
         "Effective coefficients describe conditional direction, not unique attribution. PC "
-        "coefficient comparisons use signed β × sqrt(explained variance); PC fits are also "
-        "back-projected through the shared loadings and benchmark-specific composite weights.",
+        "coefficients are already per unit-variance PC score. Original-feature comparisons "
+        "divide by the saved PC standard deviation before back-projecting through the shared "
+        "loadings and benchmark-specific composite weights.",
         "",
         "## PC variance and loading definition",
         "",
