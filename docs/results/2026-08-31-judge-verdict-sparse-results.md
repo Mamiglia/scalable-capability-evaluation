@@ -26,6 +26,7 @@ The analysis supports four conclusions:
 - 16 outer folds: four held-out model groups × four held-out item folds.
 - 113,951 held-out predictions per model.
 - Raw representation: 137 original features reduced to 112 deterministic correlation composites.
+- Scaling order: correlated raw features were merged first, then the final composites were re-scaled separately within each benchmark on representation-training rows. Transcript composites were centered and divided by their SD. The left-minus-right pair composites used by the GLM and PCA were divided by the per-benchmark SD but not re-centered, preserving their antisymmetric difference origin.
 - PC representation: one global basis fitted once to 12,423 unique representation-training pairs pooled across all folds and benchmarks. Thirty PCs retain 71.21% of total variance.
 - Three inner folds selected `C`; every Unique and Singular fit reused the full model's `C` without retuning.
 - Performance and feature-effect intervals use 1,000 item-clustered bootstrap draws. Judge-level failure contrasts use the six judges as replication units and paired t-based 95% intervals.
@@ -154,7 +155,7 @@ Component numbers are not interpretations. The table combines each PC's loadings
 | PC22 | 1.04% | Explicit checking, verification and answer restatement **vs** code/maths and option matching | 0.00226 (0.00014–0.00591) | 0.00088; interval spans zero |
 | PC1 | 17.65% | Trajectory breadth/length—wide, long, high-fan-out responses **vs** dense/modular, short and sequential structure | 0.00435 (−0.00417–0.0117) | 0.00354; interval spans zero |
 
-PC1 explains the most input variance but contributes no reliable Unique verdict signal. PC2 explains less than half as much variance yet dominates prediction. Variance captured and verdict relevance are therefore different quantities.
+PC1 explains the most input variance but contributes no reliable Unique verdict signal. `n_words` is present inside the correlated composite `log chars + n words + tool-call chars`; that composite loads +0.171 on PC1 and is the sixth-largest absolute PC1 loading among 112 inputs. On AIME/GPQA the composite is the equal mean of log characters and word count; on InterCode/SWE it weights log characters and word count at 0.25 each and tool-call characters at 0.5. It was previously visually absent only because the loading figure showed four features per pole. PC2 explains less than half as much variance yet dominates prediction. Variance captured and verdict relevance are therefore different quantities.
 
 ![Semantically labelled PC effects](../figures/judge-verdict-20260831/pc-effects.svg)
 

@@ -243,7 +243,10 @@ def loadings_figure(root: Path, labels: dict[str, str]) -> pd.DataFrame:
     for component in IMPORTANT_PCS:
         figure, axis = plt.subplots(figsize=(2.7, 3.2))
         values = loadings[loadings.component == component].set_index("feature").loading
-        selected = pd.concat([values.nsmallest(4), values.nlargest(4)]).drop_duplicates().sort_values()
+        negative_count, positive_count = (3, 5) if component == "pc_001" else (4, 4)
+        selected = pd.concat([
+            values.nsmallest(negative_count), values.nlargest(positive_count),
+        ]).drop_duplicates().sort_values()
         selected_rows.append(pd.DataFrame({
             "component": component, "semantic_label": PC_LABELS[component],
             "feature": selected.index, "loading": selected.values,

@@ -123,7 +123,8 @@ L -2.5 0
       </g>
      </g>
      <g id="text_8">
-      <text style="font-size: 7px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="107.584" y="132.64096" transform="rotate(-0 107.584 132.64096)">components per node</text>
+      <text style="font-size: 7px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif" transform="translate(37.759 128.790344)">log chars + n words</text>
+      <text style="font-size: 7px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif" transform="translate(50.661969 137.192258)">+ tool call chars</text>
      </g>
     </g>
     <g id="ytick_5">
@@ -183,7 +184,7 @@ L 130.033455 170.675532
 L 130.684426 150.328519 
 " clip-path="url(#p0ea271453d)" style="fill: none; stroke: #777777"/>
     <path d="M 152.604 129.981506 
-L 131.803551 129.981506 
+L 175.874588 129.981506 
 " clip-path="url(#p0ea271453d)" style="fill: none; stroke: #777777"/>
     <path d="M 152.604 109.634494 
 L 175.958178 109.634494 
@@ -226,7 +227,7 @@ z
      <use xlink:href="#m31d4b65ad3" x="126.623206" y="191.022545" style="fill: #333333; stroke: #333333"/>
      <use xlink:href="#m31d4b65ad3" x="130.033455" y="170.675532" style="fill: #333333; stroke: #333333"/>
      <use xlink:href="#m31d4b65ad3" x="130.684426" y="150.328519" style="fill: #333333; stroke: #333333"/>
-     <use xlink:href="#m31d4b65ad3" x="131.803551" y="129.981506" style="fill: #333333; stroke: #333333"/>
+     <use xlink:href="#m31d4b65ad3" x="175.874588" y="129.981506" style="fill: #333333; stroke: #333333"/>
      <use xlink:href="#m31d4b65ad3" x="175.958178" y="109.634494" style="fill: #333333; stroke: #333333"/>
      <use xlink:href="#m31d4b65ad3" x="177.693647" y="89.287481" style="fill: #333333; stroke: #333333"/>
      <use xlink:href="#m31d4b65ad3" x="178.076695" y="68.940468" style="fill: #333333; stroke: #333333"/>
