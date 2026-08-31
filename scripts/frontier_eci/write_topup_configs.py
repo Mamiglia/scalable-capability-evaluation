@@ -17,8 +17,23 @@ def transcript_key(model: str, transcripts: dict) -> str:
     raise ValueError(f"no unique transcript key for {model}")
 
 
+def matched_pair_items(verdicts: pd.DataFrame) -> pd.DataFrame:
+    """Pair-items with successful verdicts in both transcript orders."""
+    table = verdicts.copy()
+    pair = table[["model_left", "model_right"]].astype(str).apply(sorted, axis=1)
+    table["opponent"] = pair.str[0]
+    table["target"] = pair.str[1]
+    table["direction"] = table.model_left.astype(str).eq(table.opponent)
+    keys = ["bench", "judge", "target", "opponent", "item"]
+    matched = table.groupby(keys, sort=True).direction.nunique().eq(2)
+    return matched[matched].rename("matched").reset_index()[keys]
+
+
 def write_configs(manifest: pd.DataFrame, base_configs: dict, output_root: Path,
-                  *, extra_transcripts: dict | None = None) -> list[Path]:
+                  *, extra_transcripts: dict | None = None,
+                  include_reasoning: bool = False,
+                  log_root_template: str = "logs/frontier-eci-canonical-anchors/{bench}",
+                  ) -> list[Path]:
     """Write one-pair configs with the item order frozen by ``manifest``."""
     extra_transcripts = extra_transcripts or {}
     base_configs = {
@@ -56,9 +71,9 @@ def write_configs(manifest: pd.DataFrame, base_configs: dict, output_root: Path,
             raise ValueError(f"{bench}/{judge}/{pair}: expected one to eight unique items")
         path = output_root / bench / judge / f"{pair[0]}-vs-{pair[1]}.yaml"
         text = yaml.safe_dump({
-            "log_root": f"logs/frontier-eci-canonical-anchors/{bench}",
+            "log_root": log_root_template.format(bench=bench, judge=judge),
             "system_prompt": base["system_prompt"],
-            "include_reasoning": False,
+            "include_reasoning": include_reasoning,
             "only_items": items,
             "phase1_items": 8,
             "cache": False,

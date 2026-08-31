@@ -42,6 +42,32 @@ def test_each_config_has_one_pair_and_frozen_items(tmp_path):
     assert config["log_root"] == "logs/frontier-eci-canonical-anchors/gpqa"
 
 
+def test_reasoning_ablation_can_override_rendering_and_log_root(tmp_path):
+    outputs = write_configs(
+        manifest_frame(), base_configs(), tmp_path,
+        include_reasoning=True,
+        log_root_template="logs/reasoning_ablation/cot_on/{bench}",
+    )
+    config = yaml.safe_load(outputs[0].read_text())
+    assert config["include_reasoning"] is True
+    assert config["log_root"] == "logs/reasoning_ablation/cot_on/gpqa"
+
+
+def test_matched_pair_items_requires_both_transcript_orders():
+    verdicts = pd.DataFrame([
+        {"bench": "gpqa", "judge": "j", "item": "i1", "model_left": "a", "model_right": "b"},
+        {"bench": "gpqa", "judge": "j", "item": "i1", "model_left": "b", "model_right": "a"},
+        {"bench": "gpqa", "judge": "j", "item": "i2", "model_left": "a", "model_right": "b"},
+        {"bench": "gpqa", "judge": "other", "item": "i1", "model_left": "a", "model_right": "b"},
+    ])
+    matched = run_path(
+        Path(__file__).parents[2] / "scripts/frontier_eci/write_topup_configs.py"
+    )["matched_pair_items"](verdicts)
+    assert matched.to_dict("records") == [{
+        "bench": "gpqa", "judge": "j", "target": "b", "opponent": "a", "item": "i1",
+    }]
+
+
 def test_reverse_manifest_rows_share_one_unordered_pair_config(tmp_path):
     manifest = manifest_frame().iloc[:2].copy()
     manifest.loc[1, ["target", "opponent"]] = ["model-a", "model-b"]

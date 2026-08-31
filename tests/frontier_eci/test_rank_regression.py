@@ -257,6 +257,31 @@ def test_pooled_judges_emit_one_bootstrapped_prediction_per_target():
     assert set(abilities.model) == {"a", "b", "target"}
 
 
+def test_finalize_rank_inputs_uses_q1_exact_epochs_and_latest_verdict():
+    rollouts = pd.DataFrame([
+        {"bench": "gpqa", "model": model, "item": item, "epoch": 0,
+         "correct": correct, "is_canonical": True}
+        for item, correct in (("q1", True), ("q2", True))
+        for model in ("a", "b")
+    ])
+    quartiles = pd.DataFrame({
+        "bench": ["gpqa", "gpqa"], "item": ["q1", "q2"],
+        "item_quartile": [1, 2],
+    })
+    old = pd.DataFrame([{
+        "bench": "gpqa", "judge": "j", "item": "q1",
+        "model_left": "a", "model_right": "b", "epoch_left": 0,
+        "epoch_right": 0, "judge_epoch": 1, "pick_left": 1,
+    }])
+    latest = old.assign(pick_left=0)
+    hard, protocol = load_module()["finalize_rank_inputs"](
+        rollouts, quartiles, [old, latest], ["j"])
+    assert set(hard.target_quartile) == {1, 2}
+    assert len(protocol) == 1
+    assert protocol.iloc[0]["item"] == "q1"
+    assert protocol.iloc[0].pick_left == 0
+
+
 def test_one_bt_ranking_uses_all_protocol_rows_per_judge_benchmark():
     module = load_module()
     calls = []

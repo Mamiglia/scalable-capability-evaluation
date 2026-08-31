@@ -40,6 +40,8 @@ POOLED_LABEL = "Pooled pre-release judges"
 QUARTILES = (2, 3, 4)
 HARD_SLICE = "Q2–Q4"
 TIME_ORIGIN = pd.Timestamp("2024-01-01")
+VERDICT_COLUMNS = ["bench", "judge", "item", "model_left", "model_right",
+                   "epoch_left", "epoch_right", "judge_epoch", "pick_left"]
 REQUIRED_OUTPUTS = (
     "abilities.csv", "ranking_blocks.csv", "fits.csv", "training_fitted.csv",
     "frontier_fitted.csv", "checkpoint-main.json", "summary.json",
@@ -87,6 +89,42 @@ def _observed_accuracy(outcomes: pd.DataFrame) -> pd.DataFrame:
     return (outcomes.groupby(["bench", "target_quartile", "model"], sort=True)
             .agg(actual=("correct", "mean"), n_items=("correct", "size"))
             .reset_index())
+
+
+def finalize_rank_inputs(rollouts: pd.DataFrame, quartiles: pd.DataFrame,
+                         verdict_tables: list[pd.DataFrame], judges: list[str]
+                         ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    rollouts = rollouts.copy()
+    rollouts["item"] = rollouts.item.astype(str)
+    hard = rollouts.merge(quartiles[["bench", "item", "item_quartile"]],
+                          on=["bench", "item"], how="inner")
+    hard = hard.rename(columns={"item_quartile": "target_quartile"})
+    verdicts = pd.concat(
+        [table[VERDICT_COLUMNS] for table in verdict_tables if not table.empty],
+        ignore_index=True)
+    verdicts = (verdicts[verdicts.judge.isin(judges)]
+                .drop_duplicates(VERDICT_COLUMNS[:-1], keep="last").reset_index(drop=True))
+    return hard, filter_protocol_verdicts(verdicts, rollouts, quartiles)
+
+
+def load_rank_analysis_inputs(config_path: Path, logs_root: Path):
+    """Load the exact hard-outcome and Q1 protocol tables shared by side analyses."""
+    config = _load_config(config_path)
+    quartiles = pd.read_csv(_path(config["quartiles"]), dtype={"item": str})
+    canonical = pd.read_parquet(
+        _path(config["canonical_identity"]),
+        columns=["bench", "model", "item", "epoch", "correct", "is_canonical"])
+    frontier = pd.read_parquet(_path(config["frontier_rollouts"])).copy()
+    historical = historical_rollouts(config.get("historical_backfill", {}))
+    historical["epoch"] = 0
+    supplements = historical_rollouts(config.get("actual_supplements", {}))
+    supplements["epoch"] = 0
+    rollouts = merge_rollout_sources(canonical, frontier, historical, supplements)
+    judges = [judge.split("/")[-1] for group in config["judges"].values() for judge in group]
+    frozen = [pd.read_parquet(_path(path)) for path in config["verdicts"]]
+    paid, candidate_logs = read_verdicts([logs_root])
+    hard, protocol = finalize_rank_inputs(rollouts, quartiles, frozen + [paid], judges)
+    return config, hard, protocol, paid, candidate_logs
 
 
 def fit_accuracy_candidates(ability: pd.Series,
@@ -852,38 +890,15 @@ def main() -> None:
     parser.add_argument("--no-figures", action="store_true")
     args = parser.parse_args()
 
-    config = _load_config(args.config)
+    config, hard, protocol, paid, candidate_logs = load_rank_analysis_inputs(
+        args.config, args.logs_root)
     result_root = _path(config["results"])
     output = result_root / "analysis/rank_regression"
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{output.name}.staging-", dir=output.parent))
 
     try:
-        quartiles = pd.read_csv(_path(config["quartiles"]), dtype={"item": str})
-        canonical = pd.read_parquet(
-            _path(config["canonical_identity"]),
-            columns=["bench", "model", "item", "epoch", "correct", "is_canonical"])
-        frontier = pd.read_parquet(_path(config["frontier_rollouts"])).copy()
-        historical = historical_rollouts(config.get("historical_backfill", {}))
-        historical["epoch"] = 0
-        supplements = historical_rollouts(config.get("actual_supplements", {}))
-        supplements["epoch"] = 0
-        rollouts = merge_rollout_sources(canonical, frontier, historical, supplements)
-        rollouts["item"] = rollouts.item.astype(str)
-        hard = rollouts.merge(quartiles[["bench", "item", "item_quartile"]],
-                              on=["bench", "item"], how="inner")
-        hard = hard.rename(columns={"item_quartile": "target_quartile"})
-
         judges = [judge.split("/")[-1] for group in config["judges"].values() for judge in group]
-        old = [pd.read_parquet(_path(path)) for path in config["verdicts"]]
-        paid, candidate_logs = read_verdicts([args.logs_root])
-        columns = ["bench", "judge", "item", "model_left", "model_right",
-                   "epoch_left", "epoch_right", "judge_epoch", "pick_left"]
-        verdicts = pd.concat([table[columns] for table in old] + [paid[columns]], ignore_index=True)
-        verdicts = (verdicts[verdicts.judge.isin(judges)]
-                    .drop_duplicates(columns[:-1], keep="last").reset_index(drop=True))
-        protocol = filter_protocol_verdicts(verdicts, rollouts, quartiles)
-
         targets = list(config["candidates"])
         abilities, ranking_blocks, fits, training = fit_combined_with_bootstrap(
             protocol, hard, resamples=args.resamples,

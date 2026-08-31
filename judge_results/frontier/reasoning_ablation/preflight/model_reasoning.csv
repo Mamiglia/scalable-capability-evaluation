@@ -1,0 +1,28 @@
+model,samples_scanned,samples_with_reasoning,source_errors,is_reasoning
+claude-3-opus,50,0,,False
+claude-3.5-sonnet-0620,100,0,,False
+claude-3.5-sonnet-1022,50,0,,False
+claude-3.7-sonnet,96,0,,False
+claude-opus-4.6,96,50,,True
+claude-opus-4.7,100,39,,True
+claude-sonnet-4.5,100,50,,True
+deepseek-r1-0528,100,99,,True
+deepseek-v3.2,100,81,,True
+gemini-2.0-flash-001,50,0,,False
+gemini-3-pro-preview,96,96,,True
+gemini-3.5-flash,100,100,,True
+gemma-4-e2b-it,100,50,,True
+gemma3-12b-it,50,0,[Errno 2] No such file or directory: '/workspace/canonical-anchor-redo/data/swe_bench_mini/477dc96c/gemma-3-12b-it/0/2026-08-21T00-22-38-00-00_swe-bench-verified-mini_VTJm5v9FHHtZazdwXNG3k3.eval',False
+glm-4.6,100,100,,True
+glm-5.2,0,0,[Errno 2] No such file or directory: '/workspace/canonical-anchor-redo/data/gpqa/b0a0d9c9/glm-5.2/0/2026-08-11T14-31-10-00-00_gpqa-diamond_75dQtbTHvFMo9pU8G2xpRL.eval' | [Errno 2] No such file or directory: '/workspace/canonical-anchor-redo/data/swe_bench_mini/477dc96c/glm-5.2/0/2026-08-21T17-49-34-00-00_swe-bench-verified-mini_3yPLfjEE3ZswAmPwDLS3He.eval',False
+gpt-4-1106,50,0,,False
+gpt-4.1,100,0,,False
+gpt-4o-0806,50,0,,False
+gpt-4o-1120,96,0,,False
+gpt-5,100,100,,True
+kimi-k2.6,0,0,[Errno 2] No such file or directory: '/workspace/canonical-anchor-redo/data/gpqa/b0a0d9c9/kimi-k2.6/0/2026-08-28T05-25-34+00-00_gpqa_diamond_BppMWX6eZgjcxeqzTwKc5D.eval' | [Errno 2] No such file or directory: '/workspace/canonical-anchor-redo/data/swe_bench_mini/477dc96c/kimi-k2.6/0/2026-08-21T04-40-13-00-00_swe-bench-verified-mini_LM6nMdwzUdzmWqn69XMYi5.eval',False
+kimi-k3,100,100,,True
+mistral-medium-3,100,0,,False
+o3,100,100,,True
+o3-mini-0131-medium,50,0,,False
+qwen3-32b,100,98,,True

@@ -1,0 +1,5 @@
+bench,judge,n_verdicts,n_models,n_pairs,n_components,largest_component_models,largest_component_size
+gpqa,gpt-5.2,16,2,1,1,claude-3.7-sonnet|gpt-4o-1120,2
+gpqa,gemini-2.5-pro,80,4,5,1,claude-3.7-sonnet|gpt-4.1|gpt-4o-1120|mistral-medium-3,4
+swe_bench_mini,gpt-5.2,36,3,3,1,claude-3.7-sonnet|gpt-4.1|gpt-4o-1120,3
+swe_bench_mini,gemini-2.5-pro,44,4,5,1,claude-3.7-sonnet|gpt-4.1|gpt-4o-1120|mistral-medium-3,4
