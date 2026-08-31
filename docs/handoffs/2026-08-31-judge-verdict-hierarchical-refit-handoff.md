@@ -40,10 +40,12 @@ For each outer fold and each raw/PC, L1/L2 variant:
    judge-by-benchmark slopes; global, judge, benchmark, cell, and nested-item
    intercepts.
 2. Select the global `C` and four positive relative penalty ratios from only
-   the outer-training rows using grouped inner-CV log loss. Use deterministic
-   coordinate updates over `0.1, 0.3, 1, 3, 10, 30`, starting at one and
-   stopping when unchanged or after two passes. No Bayesian sampler or new
-   dependency is required.
+   the outer-training rows using grouped inner-CV log loss. Judge, benchmark,
+   and cell ratios use `0.1, 0.3, 1, 3, 10, 30`. The item-intercept grid adds
+   `100, 300, 1,000`, and `1,000,000`; the last value is the practical
+   zero-item-heterogeneity limit rather than an unresolved finite boundary.
+   Start at one and stop when unchanged or after two coordinate passes. No
+   Bayesian sampler or new dependency is required.
 3. Apply penalty-family-correct column scaling. For relative penalty `r`, use
    `1 / r` under L1 and `1 / sqrt(r)` under L2.
 4. Fit the outer-training full model and save `C`, the four ratios, tuning
@@ -160,38 +162,36 @@ the full jobs.
 
 ## Active SWC rerun
 
-Staged code commit: `98b5a3a` (core implementation commit `d0c221e`).
+The `98b5a3a` tree was cancelled and retained after its first four PC-L2 folds
+all selected the finite item-ratio maximum (`30`). Their loss curves were still
+improving slightly at that endpoint. Nothing was deleted or overwritten.
+
+Replacement staged code commit: `cff3f13` (core implementation `d0c221e`).
 
 ```text
-staging/judge-hierarchical-refit-20260831-98b5a3a/
-results/judge-hierarchical-refit-20260831-98b5a3a-29e4b847-27dbd491/
+staging/judge-hierarchical-refit-20260831-cff3f13/
+results/judge-hierarchical-refit-20260831-cff3f13-29e4b847-27dbd491/
 ```
 
-Full-fit arrays (16 folds, four concurrent tasks each; 48-hour limit):
+Replacement full-fit arrays:
 
 ```text
-raw L1  3471110
-raw L2  3471111
-PC L1   3471109
-PC L2   3471104
+raw L1  3471491
+raw L2  3471490
+PC L1   3471500
+PC L2   3471505
 ```
 
-Dependent jobs already submitted:
+Dependent jobs:
 
 ```text
-primary aggregates:        raw-L1 3471132, raw-L2 3471130, PC-L1 3471134, PC-L2 3471126
-capability fold arrays:     raw-L1 3471127, raw-L2 3471129, PC-L1 3471131, PC-L2 3471128
-capability aggregates:      raw-L1 3471136, raw-L2 3471139, PC-L1 3471137, PC-L2 3471138
-lesion preparation arrays: raw-L1 3471124, raw-L2 3471125, PC-L1 3471135, PC-L2 3471133
+primary aggregates:        raw-L1 3471518, raw-L2 3471512, PC-L1 3471511, PC-L2 3471515
+capability fold arrays:     raw-L1 3471517, raw-L2 3471521, PC-L1 3471514, PC-L2 3471513
+capability aggregates:      raw-L1 3471523, raw-L2 3471525, PC-L1 3471524, PC-L2 3471526
+lesion preparation arrays: raw-L1 3471510, raw-L2 3471519, PC-L1 3471520, PC-L2 3471516
+lesion orchestrators:       raw-L1 3471527, raw-L2 3471529, PC-L1 3471528, PC-L2 3471530
 ```
 
-Dependency-safe lesion orchestrators are also queued: raw-L1 `3471142`,
-raw-L2 `3471145`, PC-L1 `3471144`, and PC-L2 `3471143`. Each runs only after
-its preparation array succeeds, verifies 16 folds and the exact runnable count,
-then submits the specification, finalize, summarize, and lesion-cell stages.
-Their logs record the dynamically assigned child job IDs.
-
-At submission, all 16 active full-fit tasks were running and all dependent
-jobs were pending on the declared `afterok` dependencies. After each lesion
-preparation array completes, validate its per-fold inventory before submitting
-the large lesion-spec array; those arrays cannot be safely submitted earlier.
+The orchestrators verify the exact prepared inventory before releasing the
+large lesion arrays and record their dynamically assigned child IDs in the
+staging logs.
