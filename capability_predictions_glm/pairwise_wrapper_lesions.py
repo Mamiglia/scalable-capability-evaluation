@@ -201,7 +201,10 @@ def prepare_fold(fold_index: int, run: CapabilityLesionRun) -> Path:
     specifications = capability_specifications(prepared_dictionary, config)
     unique, aliases = unique_specifications(specifications)
     diagnostics = json.loads((fit_dir / "diagnostics.json").read_text())
-    frozen = {"C": diagnostics["C"], "l1_ratio": diagnostics["l1_ratio"]}
+    frozen = {
+        name: diagnostics[name]
+        for name in ("C", "l1_ratio", "benchmark_deviation_penalty")
+    }
 
     fold_dir.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(mkdtemp(prefix=f".{fold}-prepare-", dir=fold_dir.parent))
