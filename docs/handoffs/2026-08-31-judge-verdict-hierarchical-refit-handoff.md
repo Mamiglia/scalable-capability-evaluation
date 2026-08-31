@@ -88,12 +88,13 @@ delta-log-loss contribution, and whether the leading raw/PC effects change.
 
 Report both:
 
-- repeat-limited accuracy headroom recovered,
-  `(accuracy - 0.5) / (repeat agreement - 0.5)`; and
+- direct accuracy as a fraction of the empirical repeat-agreement ceiling,
+  `accuracy / repeat agreement`, reported across both ceiling endpoints; and
 - held-out deviance explained relative to the intercept-only model,
   `1 - full log loss / intercept-only log loss`.
 
-Do not call accuracy-headroom recovery “variance explained”.
+Do not substitute chance-adjusted headroom for the requested direct
+accuracy/ceiling percentage.
 
 Retain the current overall figures and generate equivalent model-dependent
 result packs for:
