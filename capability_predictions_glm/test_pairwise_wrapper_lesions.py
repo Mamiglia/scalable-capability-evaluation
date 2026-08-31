@@ -108,7 +108,9 @@ def test_prepare_fold_reconstructs_full_fit_and_uses_fixed_null_without_retuning
     assert set(specifications.loc[
         specifications.kind.str.startswith("singular-"), "reference"
     ]) == {"null"}
-    assert frozen == {"C": 1.0, "l1_ratio": 1.0}
+    assert set(frozen) == {"C", "l1_ratio", "benchmark_deviation_penalty"}
+    assert frozen["C"] == frozen["l1_ratio"] == 1.0
+    assert frozen["benchmark_deviation_penalty"] > 0
 
 
 @pytest.mark.parametrize("feature_space", ("raw", "pc"))
@@ -117,6 +119,7 @@ def test_specification_refits_use_capability_task_and_full_fit_hyperparameters(
 ) -> None:
     run, fold_dir = _prepared_run(monkeypatch, tmp_path, feature_space)
     specifications = pd.read_csv(fold_dir / "run-specifications.csv")
+    frozen = json.loads((fold_dir / "frozen-hyperparameters.json").read_text())
 
     for task_index in range(len(specifications)):
         pairwise_wrapper_lesions.run_specification(task_index, run)
@@ -127,6 +130,9 @@ def test_specification_refits_use_capability_task_and_full_fit_hyperparameters(
         )
         assert diagnostics["C"] == 1.0
         assert diagnostics["l1_ratio"] == 1.0
+        assert diagnostics["benchmark_deviation_penalty"] == frozen[
+            "benchmark_deviation_penalty"
+        ]
         assert (fold_dir / "predictions" / f"{specification}.parquet").is_file()
         assert (fold_dir / "coefficients" / f"{specification}.parquet").is_file()
         assert (fold_dir / "item-metrics" / f"{specification}.parquet").is_file()
