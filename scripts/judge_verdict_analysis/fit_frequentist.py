@@ -172,6 +172,7 @@ def tune_sparse(
         frozen, rows = coordinate_search(
             cs, config.pooling_penalty_ratios,
             lambda candidates: _parallel_map(score, candidates, config.fit_n_jobs),
+            item_ratios=config.item_pooling_penalty_ratios,
         )
         l1_ratio = ratios[0]
         tuning = pd.DataFrame(rows).assign(

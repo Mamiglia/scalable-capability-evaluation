@@ -29,13 +29,19 @@ def coordinate_search(
     cs: Sequence[float],
     ratios: Sequence[float],
     evaluate: Callable[[list[dict[str, float]]], list[Score]],
+    *,
+    item_ratios: Sequence[float] | None = None,
 ) -> tuple[dict[str, float], list[dict[str, object]]]:
     """Alternate pooling-ratio coordinates with C for at most two passes."""
     cs = tuple(map(float, cs))
     ratios = tuple(map(float, ratios))
+    item_ratios = tuple(map(float, item_ratios or ratios))
     if not cs or not ratios or 1.0 not in ratios:
         raise ValueError("C and pooling grids must be non-empty and pooling must contain 1")
-    if any(not np.isfinite(value) or value <= 0 for value in (*cs, *ratios)):
+    if not item_ratios or 1.0 not in item_ratios:
+        raise ValueError("item pooling grid must be non-empty and contain 1")
+    if any(not np.isfinite(value) or value <= 0
+           for value in (*cs, *ratios, *item_ratios)):
         raise ValueError("C and pooling grids must be finite and positive")
     state = {"C": cs[0], **dict.fromkeys(POOLING_PARAMETERS, 1.0)}
     records: dict[tuple[float, ...], dict[str, object]] = {}
@@ -67,7 +73,11 @@ def coordinate_search(
         previous = state.copy()
         select("C", cs, pass_index)
         for parameter in POOLING_PARAMETERS:
-            select(parameter, ratios, pass_index)
+            select(
+                parameter,
+                item_ratios if parameter == "item_intercept_penalty" else ratios,
+                pass_index,
+            )
             select("C", cs, pass_index)
         if state == previous:
             break

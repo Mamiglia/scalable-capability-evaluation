@@ -333,6 +333,7 @@ def _config_settings(config: AnalysisConfig, fold_index: int | None = None) -> d
         "elastic_net_cs": list(config.elastic_net_cs),
         "ridge_cs": list(config.ridge_cs),
         "pooling_penalty_ratios": list(config.pooling_penalty_ratios),
+        "item_pooling_penalty_ratios": list(config.item_pooling_penalty_ratios),
         "judge_deviation_penalty": config.judge_deviation_penalty,
         "benchmark_deviation_penalty": config.benchmark_deviation_penalty,
         "cell_deviation_penalty": config.cell_deviation_penalty,

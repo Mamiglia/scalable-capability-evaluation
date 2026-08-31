@@ -44,7 +44,7 @@ def test_relative_penalties_use_family_specific_scaling_and_keep_global_intercep
 
 
 def test_pooling_ratios_are_tuned_once_and_frozen_for_lesions() -> None:
-    targets = dict(zip(("C", *POOLING_PARAMETERS), (1.0, 0.3, 3.0, 1.0, 0.3)))
+    targets = dict(zip(("C", *POOLING_PARAMETERS), (1.0, 0.3, 3.0, 1.0, 100.0)))
     chosen, _ = coordinate_search(
         (0.1, 1.0), (0.3, 1.0, 3.0),
         lambda candidates: [
@@ -52,6 +52,7 @@ def test_pooling_ratios_are_tuned_once_and_frozen_for_lesions() -> None:
                  for name, target in targets.items()), 1, True)
             for parameters in candidates
         ],
+        item_ratios=(0.3, 1.0, 3.0, 100.0),
     )
     assert chosen == targets
 
@@ -70,7 +71,8 @@ def test_pooling_ratios_are_tuned_once_and_frozen_for_lesions() -> None:
     test = frame[frame.item.isin(("i6", "i7"))].reset_index(drop=True)
     config = replace(
         CONFIG, inner_folds=2, fit_n_jobs=1, elastic_net_cs=(0.1, 1.0),
-        pooling_penalty_ratios=(0.3, 1.0, 3.0), glm_max_iter=1_000,
+        pooling_penalty_ratios=(0.3, 1.0, 3.0),
+        item_pooling_penalty_ratios=(0.3, 1.0, 3.0), glm_max_iter=1_000,
     )
 
     frozen, tuning = tune_sparse(train, ["feature"], "l1", config)
@@ -78,7 +80,12 @@ def test_pooling_ratios_are_tuned_once_and_frozen_for_lesions() -> None:
     lesion = fit_sparse(train, test, [], "l1", frozen, config)
 
     assert set(frozen) == {"C", "l1_ratio", *POOLING_PARAMETERS}
-    assert all(frozen[name] in config.pooling_penalty_ratios for name in POOLING_PARAMETERS)
+    assert all(
+        frozen[name] in (
+            config.item_pooling_penalty_ratios
+            if name == "item_intercept_penalty" else config.pooling_penalty_ratios)
+        for name in POOLING_PARAMETERS
+    )
     assert set(tuning.coordinate) == {"C", *POOLING_PARAMETERS}
     assert tuning["pass"].max() <= 2
     selected = tuning[tuning.selected]
