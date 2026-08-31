@@ -185,6 +185,12 @@ capability aggregates:      raw-L1 3471136, raw-L2 3471139, PC-L1 3471137, PC-L2
 lesion preparation arrays: raw-L1 3471124, raw-L2 3471125, PC-L1 3471135, PC-L2 3471133
 ```
 
+Dependency-safe lesion orchestrators are also queued: raw-L1 `3471142`,
+raw-L2 `3471145`, PC-L1 `3471144`, and PC-L2 `3471143`. Each runs only after
+its preparation array succeeds, verifies 16 folds and the exact runnable count,
+then submits the specification, finalize, summarize, and lesion-cell stages.
+Their logs record the dynamically assigned child job IDs.
+
 At submission, all 16 active full-fit tasks were running and all dependent
 jobs were pending on the declared `afterok` dependencies. After each lesion
 preparation array completes, validate its per-fold inventory before submitting
