@@ -1145,11 +1145,11 @@ def _pack_performance_figure(table: pd.DataFrame, output: Path) -> tuple[Path, P
             positions,
             [LABELS[variant] for variant in PRIMARY_VARIANTS] if index % 2 == 0 else [],
         )
-        axis.set_xlabel(label); _style(axis)
+        axis.set_xlabel(label); axis.tick_params(axis="x", labelsize=6); _style(axis)
         axis.spines["bottom"].set_bounds(low, high)
         axis.spines["left"].set_bounds(positions.min(), positions.max())
     figure.subplots_adjust(left=0.27, right=0.93, bottom=0.24, top=0.97,
-                           wspace=0.65, hspace=0.95)
+                           wspace=0.85, hspace=0.95)
     return _write_figure(figure, output, "performance")
 
 
