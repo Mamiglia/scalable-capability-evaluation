@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from inspect import signature
 from itertools import product
 from typing import Literal, TypeVar
@@ -27,6 +28,15 @@ SparsePenalty = Literal["l1", "ridge"]
 _PENALTY_DEPRECATED = signature(LogisticRegression).parameters["penalty"].default == "deprecated"
 
 
+@dataclass(frozen=True)
+class SparseTask:
+    outcome: str
+    group_columns: tuple[str, ...]
+    levels: Callable[[pd.DataFrame], object]
+    design: Callable[[pd.DataFrame, list[str], object, AnalysisConfig], tuple[csr_matrix, pd.DataFrame]]
+    coefficients: Callable[[np.ndarray, pd.DataFrame], pd.DataFrame]
+
+
 def _penalties(config: AnalysisConfig) -> dict[str, float]:
     return {
         name: getattr(config, name)
@@ -39,13 +49,29 @@ def _penalties(config: AnalysisConfig) -> dict[str, float]:
     }
 
 
-def _splits(frame: pd.DataFrame, config: AnalysisConfig) -> list[tuple[np.ndarray, np.ndarray]]:
-    groups = pd.MultiIndex.from_frame(frame[["bench", "item"]]).factorize()[0]
+def _judge_design(frame, features, levels, config):
+    return hierarchical_design(frame, features, levels, _penalties(config))
+
+
+JUDGE_TASK = SparseTask(
+    outcome="pick_left",
+    group_columns=("bench", "item"),
+    levels=HierarchyLevels.from_training,
+    design=_judge_design,
+    coefficients=effective_coefficients,
+)
+
+
+def _splits(
+    frame: pd.DataFrame, config: AnalysisConfig, task: SparseTask = JUDGE_TASK,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    y = frame[task.outcome].to_numpy(dtype=int)
+    groups = pd.MultiIndex.from_frame(frame[list(task.group_columns)]).factorize()[0]
     if len(np.unique(groups)) < config.inner_folds:
         raise ValueError("inner_folds exceeds the number of bench/item groups")
     return list(GroupKFold(
         config.inner_folds, shuffle=True, random_state=config.random_seed,
-    ).split(frame, frame["pick_left"], groups))
+    ).split(frame, y, groups))
 
 
 def _model(config: AnalysisConfig, *, c: float, l1_ratio: float | None) -> LogisticRegression:
@@ -85,14 +111,12 @@ def _designs(
     fit_rows: np.ndarray,
     check_rows: np.ndarray,
     features: list[str],
-    levels: HierarchyLevels,
+    levels: object,
     config: AnalysisConfig,
+    task: SparseTask = JUDGE_TASK,
 ):
-    penalties = _penalties(config)
-    fit_x, column_map = hierarchical_design(
-        frame.iloc[fit_rows], features, levels, penalties)
-    check_x, _ = hierarchical_design(
-        frame.iloc[check_rows], features, levels, penalties)
+    fit_x, column_map = task.design(frame.iloc[fit_rows], features, levels, config)
+    check_x, _ = task.design(frame.iloc[check_rows], features, levels, config)
     return fit_x, check_x, column_map
 
 
@@ -109,16 +133,17 @@ def tune_sparse(
     features: list[str],
     penalty: SparsePenalty,
     config: AnalysisConfig,
+    task: SparseTask = JUDGE_TASK,
 ) -> tuple[dict[str, float | None], pd.DataFrame]:
     """Tune the sparse penalty once on an outer-training fold."""
     if penalty not in {"l1", "ridge"}:
         raise ValueError("penalty must be 'l1' or 'ridge'")
-    levels = HierarchyLevels.from_training(train)
-    y = train.pick_left.to_numpy(dtype=int)
+    levels = task.levels(train)
+    y = train[task.outcome].to_numpy(dtype=int)
     designs = [
         (fit_rows, check_rows, *_designs(
-            train, fit_rows, check_rows, features, levels, config))
-        for fit_rows, check_rows in _splits(train, config)
+            train, fit_rows, check_rows, features, levels, config, task))
+        for fit_rows, check_rows in _splits(train, config, task)
     ]
     ratios = (1.0,) if penalty == "l1" else (None,)
     cs = config.elastic_net_cs if penalty == "l1" else config.ridge_cs
@@ -161,6 +186,7 @@ def fit_sparse(
     frozen_hyperparameters: dict[str, float | None],
     config: AnalysisConfig,
     tuning: pd.DataFrame | None = None,
+    task: SparseTask = JUDGE_TASK,
 ) -> FitResult:
     """Fit one hierarchical sparse model without changing its hyperparameters."""
     if penalty not in {"l1", "ridge"}:
@@ -181,19 +207,19 @@ def fit_sparse(
     if len(folds) != 1:
         raise ValueError("train and test must contain exactly one shared fold")
 
-    levels = HierarchyLevels.from_training(train)
-    train_x, column_map = hierarchical_design(train, features, levels, _penalties(config))
-    test_x, _ = hierarchical_design(test, features, levels, _penalties(config))
+    levels = task.levels(train)
+    train_x, column_map = task.design(train, features, levels, config)
+    test_x, _ = task.design(test, features, levels, config)
     model, n_iter, converged = _fit_model(
         _model(config, c=c, l1_ratio=l1_ratio), train_x,
-        train.pick_left.to_numpy(dtype=int),
+        train[task.outcome].to_numpy(dtype=int),
     )
     probability = model.predict_proba(test_x)[:, 1]
-    observed = test.pick_left.to_numpy(dtype=int)
-    predictions = test.drop(columns=features + ["pick_left"], errors="ignore").copy()
+    observed = test[task.outcome].to_numpy(dtype=int)
+    predictions = test.drop(columns=features + [task.outcome], errors="ignore").copy()
     predictions["observed"] = observed
     predictions["probability"] = probability
-    coefficients = effective_coefficients(model.coef_[0], column_map)
+    coefficients = task.coefficients(model.coef_[0], column_map)
     active = set(coefficients.loc[coefficients.effective != 0, "feature"])
     return FitResult(
         backend=f"{config.feature_space}-{penalty}",

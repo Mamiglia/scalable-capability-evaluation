@@ -14,7 +14,7 @@ results_dir=${2:?missing RESULTS_DIR}
 feature_space=${3:?missing raw|pc}
 penalty=${4:?missing l1|ridge}
 pc_basis_root=${5:-}
-pc_components=${6:-30}
+pc_components=${6:-}
 : "${SLURM_ARRAY_TASK_ID:?submit through submit_lesion_specs.sh}"
 [[ -n ${SLURM_JOB_ID:-} ]] || { echo "lesions require Slurm" >&2; exit 2; }
 [[ $(hostname) != gateway* && $(hostname) != sgw* ]] || { echo "refusing gateway execution" >&2; exit 2; }
@@ -30,7 +30,11 @@ cd "$repo"
 pc_args=()
 if [[ $feature_space == pc ]]; then
   [[ -d $pc_basis_root ]] || { echo "missing global PC basis: $pc_basis_root" >&2; exit 2; }
+  [[ $pc_components =~ ^[1-9][0-9]*$ ]] || { echo "PC_COMPONENTS must be explicit and positive" >&2; exit 2; }
   pc_args=(--pc-basis-root "$pc_basis_root" --pc-components "$pc_components")
+elif [[ -n $pc_basis_root || -n $pc_components ]]; then
+  echo "PC arguments require feature space pc" >&2
+  exit 2
 fi
 "$python" -m scripts.judge_verdict_analysis.lesioning spec \
   --task-index "$SLURM_ARRAY_TASK_ID" \

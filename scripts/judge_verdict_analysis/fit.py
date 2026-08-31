@@ -38,8 +38,6 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "fit_n_jobs": config.fit_n_jobs,
         "feature_space": config.feature_space,
         "penalty": config.penalty,
-        "fit_pca_components": config.fit_pca_components,
-        "fit_pca_algorithm": config.fit_pca_algorithm,
         "elastic_net_cs": list(config.elastic_net_cs),
         "ridge_cs": list(config.ridge_cs),
         "judge_deviation_penalty": config.judge_deviation_penalty,
@@ -52,7 +50,11 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "processed_matrix_manifest_sha256": config.processed_matrix_manifest_sha256,
     }
     if config.feature_space == "pc":
-        settings["pc_basis_root"] = str(config.pc_basis_root)
+        settings.update({
+            "fit_pca_components": config.fit_pca_components,
+            "fit_pca_algorithm": config.fit_pca_algorithm,
+            "pc_basis_root": str(config.pc_basis_root),
+        })
     return settings
 
 
@@ -329,6 +331,13 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return number
+
+
 def summarize_predictions(
     predictions: pd.DataFrame,
     config: AnalysisConfig,
@@ -425,6 +434,7 @@ def _write_result(
     *,
     prepared_dictionary: pd.DataFrame,
     provenance: dict[str, object],
+    manifest_provenance: dict[str, object] | None = None,
 ) -> None:
     output = config.fit_dir / result.backend / result.fold
     if output.exists():
@@ -465,6 +475,10 @@ def _write_result(
                 path.name: _file_sha256(path) for path in stage.iterdir()
             },
         }
+        if manifest_provenance:
+            if overlap := set(manifest) & set(manifest_provenance):
+                raise ValueError(f"manifest provenance overlaps reserved keys: {sorted(overlap)}")
+            manifest.update(manifest_provenance)
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         os.replace(stage, output)
     except BaseException:
@@ -512,7 +526,7 @@ def main(argv: list[str] | None = None) -> None:
         command.add_argument("--penalty", choices=("l1", "ridge"), required=True)
         command.add_argument("--manifest-sha256", required=True)
         command.add_argument("--pc-basis-root", type=Path)
-        command.add_argument("--pc-components", type=int, default=30)
+        command.add_argument("--pc-components", type=_positive_int)
         if name == "fold":
             command.add_argument("--fold-index", type=int, required=True)
             command.add_argument("--processed-matrix-root", type=Path, required=True)
@@ -523,12 +537,14 @@ def main(argv: list[str] | None = None) -> None:
         processed_matrix_manifest_sha256=args.manifest_sha256,
     )
     if args.feature_space == "pc":
-        if args.pc_basis_root is None:
-            parser.error("--pc-basis-root is required for PC features")
+        if args.pc_basis_root is None or args.pc_components is None:
+            parser.error("--pc-basis-root and --pc-components are required for PC features")
         config = replace(
             config, pc_basis_root=args.pc_basis_root,
             fit_pca_components=args.pc_components,
         )
+    elif args.pc_basis_root is not None or args.pc_components is not None:
+        parser.error("PC-only arguments require --feature-space pc")
     if args.command == "fold":
         run_fold(args.fold_index, replace(
             config, processed_matrix_root=args.processed_matrix_root,

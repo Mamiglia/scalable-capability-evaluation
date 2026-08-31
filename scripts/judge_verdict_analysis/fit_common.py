@@ -56,16 +56,37 @@ def prepare_features(
         raise ValueError(f"incomplete global PC basis: {config.pc_basis_root}")
     loadings = pd.read_parquet(loadings_path)
     variance = pd.read_csv(variance_path)
-    if {"component", "feature", "loading"} - set(loadings) or "component" not in variance:
+    variance_columns = [
+        "component", "explained_variance", "explained_variance_ratio",
+        "cumulative_explained_variance_ratio", "singular_value",
+    ]
+    if {"component", "feature", "loading"} - set(loadings) or set(variance_columns) - set(variance):
         raise ValueError("invalid global PC basis schema")
+    loadings = loadings.copy()
+    variance = variance.copy()
+    loadings[["component", "feature"]] = loadings[["component", "feature"]].astype(str)
+    variance["component"] = variance.component.astype(str)
+    if variance.component.duplicated().any():
+        raise ValueError("global PC basis has duplicate component rows")
+    try:
+        variance[variance_columns[1:]] = variance[variance_columns[1:]].apply(
+            pd.to_numeric, errors="raise",
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("global PC explained variance must have finite numeric values") from error
+    if not np.isfinite(variance[variance_columns[1:]].to_numpy(dtype=float)).all():
+        raise ValueError("global PC explained variance must have finite numeric values")
     components = variance.component.astype(str).tolist()[:config.fit_pca_components]
     if len(components) != config.fit_pca_components or len(components) != len(set(components)):
         raise ValueError("global PC basis has too few or duplicate components")
     if loadings.duplicated(["component", "feature"]).any():
         raise ValueError("global PC basis has duplicate loadings")
-    basis_features = set(loadings.loc[loadings.component.isin(components), "feature"].astype(str))
-    if basis_features != set(features):
-        raise ValueError("global PC basis features do not match the design matrix")
+    selected = loadings[loadings.component.isin(components)]
+    if set(selected.component) != set(components) or any(
+        set(group.feature) != set(features)
+        for _, group in selected.groupby("component", sort=False)
+    ):
+        raise ValueError("global PC basis selected components do not match the design matrix")
     matrix = loadings.pivot(index="component", columns="feature", values="loading").reindex(
         index=components, columns=features,
     ).to_numpy(dtype=float)

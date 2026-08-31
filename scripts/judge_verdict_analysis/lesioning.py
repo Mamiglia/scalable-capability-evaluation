@@ -15,9 +15,9 @@ import pandas as pd
 
 from .config import AnalysisConfig, CONFIG
 from .fit import ARTIFACTS as FIT_ARTIFACTS
-from .fit import _guard_execution, _load_rows, _outer_folds, _resume_existing
+from .fit import _guard_execution, _load_rows, _outer_folds, _positive_int, _resume_existing
 from .fit_common import prepare_features
-from .fit_frequentist import fit_sparse, tune_sparse
+from .fit_frequentist import JUDGE_TASK, SparseTask, fit_sparse, tune_sparse
 
 
 @dataclass(frozen=True)
@@ -331,8 +331,6 @@ def _config_settings(config: AnalysisConfig, fold_index: int | None = None) -> d
         "inner_folds": config.inner_folds,
         "elastic_net_cs": list(config.elastic_net_cs),
         "ridge_cs": list(config.ridge_cs),
-        "fit_pca_components": config.fit_pca_components,
-        "fit_pca_algorithm": config.fit_pca_algorithm,
         "judge_deviation_penalty": config.judge_deviation_penalty,
         "benchmark_deviation_penalty": config.benchmark_deviation_penalty,
         "cell_deviation_penalty": config.cell_deviation_penalty,
@@ -342,7 +340,13 @@ def _config_settings(config: AnalysisConfig, fold_index: int | None = None) -> d
         "source_manifest": config.processed_matrix_manifest_sha256,
     }
     if config.feature_space == "pc":
-        settings["pc_basis_root"] = str(config.pc_basis_root)
+        settings.update({
+            "fit_pca_components": config.fit_pca_components,
+            "fit_pca_algorithm": config.fit_pca_algorithm,
+            "pc_basis_root": str(config.pc_basis_root),
+        })
+    if config.lesion_source_signature:
+        settings["lesion_source_signature"] = config.lesion_source_signature
     return settings
 
 
@@ -485,7 +489,13 @@ def prepare_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
     return fold_dir
 
 
-def run_specification(task_index: int, config: AnalysisConfig = CONFIG) -> Path | None:
+def run_specification(
+    task_index: int,
+    config: AnalysisConfig = CONFIG,
+    *,
+    task: SparseTask = JUDGE_TASK,
+    write_diagnostics: bool = True,
+) -> Path | None:
     """Fit one fold×specification task with frozen full-model hyperparameters."""
     config = config.validate()
     _guard_execution(config)
@@ -502,15 +512,19 @@ def run_specification(task_index: int, config: AnalysisConfig = CONFIG) -> Path 
         fold_dir / folder / f"{row.specification}.parquet"
         for folder in ("predictions", "coefficients", "item-metrics")
     ]
-    diagnostic_path = fold_dir / "diagnostics" / f"{row.specification}.json"
-    if all(path.is_file() for path in paths) and diagnostic_path.is_file():
+    diagnostic = fold_dir / "diagnostics" / f"{row.specification}.json"
+    if write_diagnostics:
+        paths.append(diagnostic)
+    if all(path.is_file() for path in paths):
         return paths[0]
     train = pd.read_parquet(fold_dir / "train.parquet")
     test = pd.read_parquet(fold_dir / "test.parquet")
     all_features = pd.read_parquet(fold_dir / "feature-dictionary.parquet").feature.tolist()
     features = json.loads(row.features)
     frozen = json.loads((fold_dir / "frozen-hyperparameters.json").read_text())
-    result = fit_sparse(train, test, features, config.penalty, frozen, config)
+    result = fit_sparse(
+        train, test, features, config.penalty, frozen, config, task=task,
+    )
     if not result.diagnostics["converged"]:
         raise RuntimeError(
             f"lesion fit did not converge: {row.specification} {result.diagnostics}"
@@ -519,9 +533,10 @@ def run_specification(task_index: int, config: AnalysisConfig = CONFIG) -> Path 
     _atomic(paths[0], lambda path: predictions.to_parquet(path, index=False))
     _atomic(paths[1], lambda path: result.coefficients.to_parquet(path, index=False))
     _atomic(paths[2], lambda path: _item_metrics(predictions).to_parquet(path, index=False))
-    _atomic(diagnostic_path, lambda path: path.write_text(
-        json.dumps(result.diagnostics, indent=2, sort_keys=True) + "\n"
-    ))
+    if write_diagnostics:
+        _atomic(diagnostic, lambda path: path.write_text(
+            json.dumps(result.diagnostics, indent=2, sort_keys=True) + "\n"
+        ))
     return paths[0]
 
 
@@ -570,7 +585,7 @@ def finalize_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
             for path in fold_dir.rglob("*") if path.is_file() and path != manifest_path
         },
         "labelled_specifications": len(pd.read_csv(fold_dir / "specifications.csv")),
-        "unique_specifications": len(table) - 1,
+        "unique_specifications": len(table) - int((table.kind == "reference").sum()),
         "aliases": json.loads((fold_dir / "aliases.json").read_text()),
     }
     _atomic(manifest_path, lambda path: path.write_text(
@@ -663,7 +678,12 @@ def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
     backend = f"{config.feature_space}-{config.penalty}"
     item_deltas, summaries, index_rows = [], [], []
     for fold, fold_dir in zip(fold_names, fold_dirs):
-        for reference in ("full", "intercept-only"):
+        references = [
+            "full", *dict.fromkeys(
+                reference for reference in tables[0].reference if reference != "full"
+            ),
+        ]
+        for reference in references:
             index_rows.append({
                 "fold": fold, "specification": reference, "kind": "reference",
                 "variable": reference, "reference": "", "artifact": reference,
@@ -735,7 +755,7 @@ def main(argv: list[str] | None = None) -> None:
         command.add_argument("--penalty", choices=("l1", "ridge"), required=True)
         command.add_argument("--manifest-sha256", required=True)
         command.add_argument("--pc-basis-root", type=Path)
-        command.add_argument("--pc-components", type=int, default=30)
+        command.add_argument("--pc-components", type=_positive_int)
     args = parser.parse_args(argv)
     config = replace(
         CONFIG, results_dir=args.results_dir,
@@ -743,12 +763,14 @@ def main(argv: list[str] | None = None) -> None:
         processed_matrix_manifest_sha256=args.manifest_sha256,
     )
     if args.feature_space == "pc":
-        if args.pc_basis_root is None:
-            parser.error("--pc-basis-root is required for PC features")
+        if args.pc_basis_root is None or args.pc_components is None:
+            parser.error("--pc-basis-root and --pc-components are required for PC features")
         config = replace(
             config, pc_basis_root=args.pc_basis_root,
             fit_pca_components=args.pc_components,
         )
+    elif args.pc_basis_root is not None or args.pc_components is not None:
+        parser.error("PC-only arguments require --feature-space pc")
     config = replace(
         config, processed_matrix_root=args.processed_matrix_root,
         execution_mode="execute", execution_target="swc_hpc",

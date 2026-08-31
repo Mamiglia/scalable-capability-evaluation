@@ -17,7 +17,7 @@ results_dir=${3:?missing RESULTS_DIR}
 feature_space=${4:?missing raw|pc}
 penalty=${5:?missing l1|ridge}
 pc_basis_root=${6:-}
-pc_components=${7:-30}
+pc_components=${7:-}
 [[ $feature_space == raw || $feature_space == pc ]] || { echo "invalid feature space" >&2; exit 2; }
 [[ $penalty == l1 || $penalty == ridge ]] || { echo "invalid penalty" >&2; exit 2; }
 [[ -n ${SLURM_JOB_ID:-} ]] || { echo "sparse fits require Slurm" >&2; exit 2; }
@@ -35,7 +35,11 @@ cd "$repo"
 args=(--results-dir "$results_dir" --feature-space "$feature_space" --penalty "$penalty" --manifest-sha256 "$manifest_sha")
 if [[ $feature_space == pc ]]; then
   [[ -d $pc_basis_root ]] || { echo "missing global PC basis: $pc_basis_root" >&2; exit 2; }
+  [[ $pc_components =~ ^[1-9][0-9]*$ ]] || { echo "PC_COMPONENTS must be explicit and positive" >&2; exit 2; }
   args+=(--pc-basis-root "$pc_basis_root" --pc-components "$pc_components")
+elif [[ -n $pc_basis_root || -n $pc_components ]]; then
+  echo "PC arguments require feature space pc" >&2
+  exit 2
 fi
 case "$mode" in
   fold)

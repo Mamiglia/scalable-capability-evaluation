@@ -23,7 +23,7 @@ results_dir=${3:?missing RESULTS_DIR}
 feature_space=${4:?missing raw|pc}
 penalty=${5:?missing l1|ridge}
 pc_basis_root=${6:-}
-pc_components=${7:-30}
+pc_components=${7:-}
 staging=$SLURM_SUBMIT_DIR
 repo=${JV_CODE_DIR:-$staging/repo}
 python=${JV_PYTHON:-/ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge/staging/glm-ablations-20260826/venv/bin/python}
@@ -50,7 +50,11 @@ manifest_sha=$(sha256sum "$matrix_root/manifest.json" | cut -d' ' -f1)
 variant_args=(--feature-space "$feature_space" --penalty "$penalty" --manifest-sha256 "$manifest_sha")
 if [[ $feature_space == pc ]]; then
   [[ -d $pc_basis_root ]] || { echo "missing global PC basis: $pc_basis_root" >&2; exit 2; }
+  [[ $pc_components =~ ^[1-9][0-9]*$ ]] || { echo "PC_COMPONENTS must be explicit and positive" >&2; exit 2; }
   variant_args+=(--pc-basis-root "$pc_basis_root" --pc-components "$pc_components")
+elif [[ -n $pc_basis_root || -n $pc_components ]]; then
+  echo "PC arguments require feature space pc" >&2
+  exit 2
 fi
 
 case "$mode" in
