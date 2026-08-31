@@ -56,9 +56,9 @@ DETERMINISTIC_EXCLUDED_BLOCKS = frozenset({"rubric", "intermediate-errors", "ann
 
 
 def backproject_pc_coefficients(
-    coefficients: pd.DataFrame, loadings: pd.DataFrame,
+    coefficients: pd.DataFrame, loadings: pd.DataFrame, score_scales: pd.Series,
 ) -> pd.DataFrame:
-    """Return ``loadings.T @ beta_pc`` for every coefficient cell."""
+    """Map unit-variance PC coefficients back into composite coordinates."""
     required = {"feature", "effective"}
     if missing := required - set(coefficients):
         raise ValueError(f"PC coefficients missing columns: {sorted(missing)}")
@@ -71,11 +71,13 @@ def backproject_pc_coefficients(
     dimensions = [column for column in coefficients if column not in required]
     values = coefficients.pivot(index=dimensions, columns="feature", values="effective")
     values = values.reindex(columns=matrix.index)
+    scales = score_scales.reindex(components).to_numpy(float)
     if (values.isna().any().any() or matrix.isna().any().any()
-            or not np.isfinite(matrix.to_numpy(float)).all()):
-        raise ValueError("PC coefficients and loadings must be finite and complete")
+            or not np.isfinite(matrix.to_numpy(float)).all()
+            or not np.isfinite(scales).all() or np.any(scales <= 0)):
+        raise ValueError("PC coefficients, loadings, and score scales must be finite and complete")
     projected = pd.DataFrame(
-        values.to_numpy(float) @ matrix.to_numpy(float),
+        (values.to_numpy(float) / scales) @ matrix.to_numpy(float),
         index=values.index,
         columns=matrix.columns,
     )
@@ -189,6 +191,7 @@ def _benchmark_lesions(item_deltas: pd.DataFrame) -> pd.DataFrame:
     keys = ["bench", "kind", "variable", "reference"]
     for values, frame in rows.groupby(keys, sort=False):
         estimate = float(np.average(frame.delta_accuracy, weights=frame.row_count))
+        delta_log_loss = float(np.average(frame.delta_log_loss, weights=frame.row_count))
         intervals = []
         for dimension in ("model_fold", "item_fold"):
             by_fold = np.array([
@@ -198,6 +201,7 @@ def _benchmark_lesions(item_deltas: pd.DataFrame) -> pd.DataFrame:
             intervals.append(_t_interval(by_fold))
         summaries.append({
             **dict(zip(keys, values)), "estimate": estimate,
+            "delta_accuracy": estimate, "delta_log_loss": delta_log_loss,
             "lower": min(interval[0] for interval in intervals),
             "upper": max(interval[1] for interval in intervals),
             "model_fold_count": frame.model_fold.nunique(),
@@ -205,8 +209,47 @@ def _benchmark_lesions(item_deltas: pd.DataFrame) -> pd.DataFrame:
             "row_count": int(frame.row_count.sum()),
         })
     output = pd.DataFrame(summaries).rename(columns={"bench": "benchmark"})
-    output[["estimate", "lower", "upper"]] *= 100
+    output[["estimate", "lower", "upper", "delta_accuracy"]] *= 100
     return output
+
+
+def _correct_null_accuracy(
+    item_deltas: pd.DataFrame, null_predictions: pd.DataFrame,
+) -> pd.DataFrame:
+    """Replace the artificial 0.5 null accuracy with its same-row accuracy."""
+    required = {"fold", "bench", "item", "reference", "candidate_accuracy", "row_count"}
+    if missing := required - set(item_deltas):
+        raise ValueError(f"item deltas missing columns: {sorted(missing)}")
+    required_null = {"fold", "bench", "item", "observed", "probability"}
+    if missing := required_null - set(null_predictions):
+        raise ValueError(f"null predictions missing columns: {sorted(missing)}")
+    null = null_predictions[["fold", "bench", "item"]].copy()
+    null["reference_accuracy"] = (
+        (null_predictions.probability.to_numpy(float) >= 0.5)
+        == null_predictions.observed.to_numpy(int)
+    ).astype(float)
+    null = null.groupby(["fold", "bench", "item"], as_index=False, sort=False).agg(
+        reference_accuracy=("reference_accuracy", "mean"),
+        null_row_count=("reference_accuracy", "size"),
+    )
+    output = item_deltas.assign(_order=np.arange(len(item_deltas)))
+    singular = output[output.reference == "null"].drop(
+        columns=["reference_accuracy", "delta_accuracy"], errors="ignore",
+    ).merge(null, on=["fold", "bench", "item"], how="left", validate="many_to_one")
+    if (singular.reference_accuracy.isna().any()
+            or not singular.row_count.eq(singular.null_row_count).all()):
+        raise RuntimeError("null predictions do not match singular item rows")
+    singular["delta_accuracy"] = singular.candidate_accuracy - singular.reference_accuracy
+    singular = singular.drop(columns="null_row_count")
+    return (pd.concat([output[output.reference != "null"], singular], ignore_index=True)
+            .sort_values("_order").drop(columns="_order").reset_index(drop=True))
+
+
+def _overall_lesions(item_deltas: pd.DataFrame) -> pd.DataFrame:
+    """Summarize paired held-out accuracy and log-loss deltas overall."""
+    return _benchmark_lesions(item_deltas.assign(bench="all")).drop(
+        columns="benchmark",
+    )
 
 
 def _paired_effects(
@@ -222,9 +265,11 @@ def _paired_effects(
         "variable": level, "estimate": "unique", "lower": "unique_lower",
         "upper": "unique_upper",
     })
-    return singular.merge(
+    output = singular.merge(
         unique, on=[*extra, level], how="inner", validate="one_to_one",
     )
+    output["measure"] = "delta_accuracy"
+    return output
 
 
 def _feature_labels(composites: list[dict[str, object]]) -> dict[str, str]:
@@ -283,6 +328,48 @@ def _quadrant_text(row: object) -> str:
             f"−+ {shares[2]:.0%}  −− {shares[3]:.0%}")
 
 
+def summarize_capability_predictions(
+    predictions: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Summarize saved held-out capability probabilities overall and by benchmark."""
+    required = {"variant", "bench", "observed", "probability"}
+    if missing := required - set(predictions):
+        raise ValueError(f"capability predictions missing columns: {sorted(missing)}")
+    rows = predictions.copy()
+    probability = rows.probability.to_numpy(float)
+    observed = rows.observed.to_numpy()
+    if (not np.isfinite(probability).all() or not np.isin(observed, (0, 1)).all()
+            or np.any((probability < 0) | (probability > 1))):
+        raise ValueError(
+            "capability predictions must contain finite probabilities and binary outcomes"
+        )
+    observed = observed.astype(int)
+    clipped = np.clip(probability, 1e-12, 1 - 1e-12)
+    rows["accuracy"] = ((probability >= 0.5) == observed).astype(float)
+    rows["log_loss"] = -(observed * np.log(clipped) + (1 - observed) * np.log1p(-clipped))
+
+    def aggregate(by: list[str]) -> pd.DataFrame:
+        return rows.groupby(by, as_index=False).agg(
+            rows=("observed", "size"), accuracy=("accuracy", "mean"),
+            log_loss=("log_loss", "mean"),
+        )
+
+    return aggregate(["variant"]), aggregate(["variant", "bench"])
+
+
+def pc_score_scales(explained_variance: pd.DataFrame) -> pd.Series:
+    """Return the saved standard deviation of each frozen global PC score."""
+    required = {"component", "explained_variance"}
+    if missing := required - set(explained_variance):
+        raise ValueError(f"PC variance table missing columns: {sorted(missing)}")
+    if explained_variance.component.duplicated().any():
+        raise ValueError("PC variance table contains duplicate components")
+    scales = explained_variance.set_index("component").explained_variance.astype(float).pow(0.5)
+    if not np.isfinite(scales).all() or (scales <= 0).any():
+        raise ValueError("PC score scales must be finite and positive")
+    return scales
+
+
 def build_core_tables(
     root: Path, basis_root: Path, provenance_path: Path, ablation_root: Path,
 ) -> dict[str, pd.DataFrame]:
@@ -293,13 +380,14 @@ def build_core_tables(
     labels = _feature_labels(composites)
     loadings = pd.read_parquet(basis_root / "loadings.parquet")
     variance = pd.read_csv(basis_root / "explained-variance.csv").head(30)
-    variance_scale = variance.set_index("component").explained_variance.pow(0.5)
+    variance_scale = pc_score_scales(variance)
     raw_dictionary = pd.read_parquet(
         root / "fits/raw-l1/model-fold-0__item-0/feature-dictionary.parquet"
     )
     blocks = raw_dictionary.set_index("feature").block.astype(str).to_dict()
 
     capability_coefficients, judge_coefficients, selections = [], [], []
+    prediction_tables, fit_diagnostics = [], []
     feature_tables, group_tables, benchmark_tables = [], [], []
     lesion_tables = []
     for variant, (fit_name, judge_name, space, penalty) in VARIANTS.items():
@@ -307,27 +395,41 @@ def build_core_tables(
         capability["task"] = "capability"
         capability["space"], capability["penalty"] = space, penalty
         capability["standardized_effect"] = capability.effective
-        if space == "pc":
-            capability["standardized_effect"] *= capability.feature.map(variance_scale)
         capability_coefficients.append(capability)
 
         judge = pd.read_csv(root / "canonical-judge-fits" / judge_name / "coefficients.csv")
         judge["variant"], judge["task"] = variant, "judge"
         judge["space"], judge["penalty"] = space, penalty
         judge["standardized_effect"] = judge.effective
-        if space == "pc":
-            judge["standardized_effect"] *= judge.feature.map(variance_scale)
         judge_coefficients.append(judge)
 
         selection = _load_capability_selections(root, fit_name, variant)
         selection["space"], selection["penalty"] = space, penalty
         selections.append(selection)
+        prediction_tables.append(_load_capability_predictions(root, fit_name, variant))
+        diagnostic_paths = sorted(
+            (root / "fits" / fit_name).glob("model-fold-*__item-*/diagnostics.json")
+        )
+        if len(diagnostic_paths) != 16:
+            raise ValueError(f"expected 16 capability diagnostics for {variant}")
+        fit_diagnostics.extend({
+            "variant": variant, "fold": path.parent.name,
+            **json.loads(path.read_text()),
+        } for path in diagnostic_paths)
 
         lesion_dir = ablation_root / fit_name
-        lesions = pd.read_csv(lesion_dir / "lesions.csv")
-        if lesions.fold_count.nunique() != 1 or lesions.fold_count.iloc[0] != 16:
+        published_lesions = pd.read_csv(lesion_dir / "lesions.csv")
+        if (published_lesions.fold_count.nunique() != 1
+                or published_lesions.fold_count.iloc[0] != 16):
             raise ValueError(f"{variant} capability lesions do not contain exactly 16 folds")
-        lesions[["estimate", "lower", "upper", "delta_accuracy"]] *= 100
+        item_deltas = pd.read_parquet(lesion_dir / "item-deltas.parquet")
+        null_predictions = pd.concat([
+            pd.read_parquet(lesion_dir / "folds" / fold / "predictions/null.parquet")
+            .assign(fold=fold)
+            for fold in sorted(item_deltas.fold.astype(str).unique())
+        ], ignore_index=True)
+        item_deltas = _correct_null_accuracy(item_deltas, null_predictions)
+        lesions = _overall_lesions(item_deltas)
         lesions["variant"], lesions["space"], lesions["penalty"] = variant, space, penalty
         lesion_tables.append(lesions)
         features = _paired_effects(lesions, "feature")
@@ -344,9 +446,7 @@ def build_core_tables(
             ], ignore_index=True)
             groups["variant"], groups["penalty"] = variant, penalty
             group_tables.append(groups)
-        benchmark = _benchmark_lesions(pd.read_parquet(
-            lesion_dir / "item-deltas.parquet"
-        ))
+        benchmark = _benchmark_lesions(item_deltas)
         benchmark = _paired_effects(benchmark, "feature", ("benchmark",))
         benchmark["variant"], benchmark["space"], benchmark["penalty"] = (
             variant, space, penalty,
@@ -360,6 +460,9 @@ def build_core_tables(
     capability_coefficients = pd.concat(capability_coefficients, ignore_index=True)
     judge_coefficients = pd.concat(judge_coefficients, ignore_index=True)
     selections = pd.concat(selections, ignore_index=True)
+    variant_metrics, benchmark_metrics = summarize_capability_predictions(
+        pd.concat(prediction_tables, ignore_index=True),
+    )
     coefficient_overall, coefficient_benchmark, stability = [], [], []
     for variant, frame in capability_coefficients.groupby("variant", sort=False):
         coefficient_benchmark.append(_fold_summary(
@@ -424,12 +527,40 @@ def build_core_tables(
         "coefficient_overall": pd.concat(coefficient_overall, ignore_index=True),
         "coefficient_benchmark": pd.concat(coefficient_benchmark, ignore_index=True),
         "selection_stability": pd.DataFrame(stability),
+        "variant_metrics": variant_metrics,
+        "benchmark_metrics": benchmark_metrics,
+        "fit_diagnostics": pd.DataFrame(fit_diagnostics),
         "composite_sources": pd.DataFrame(source_rows),
         "loadings": loading_table,
         "explained_variance": variance,
         "pc_block_mass": block_mass,
         "pc_top_loadings": top_loadings,
     }
+
+
+def refit_matches_frozen(values: dict[str, object], frozen: dict[str, object]) -> bool:
+    """Return whether a refit diagnostic preserves every frozen hyperparameter."""
+    return all(key in values and values[key] == expected for key, expected in frozen.items())
+
+
+def validate_fold_manifest(fold: Path, expected_sha256: str) -> dict[str, object]:
+    """Validate one completed lesion fold against its summary predecessor hash."""
+    manifest_path = fold / "manifest.json"
+    if (not manifest_path.is_file()
+            or hashlib.sha256(manifest_path.read_bytes()).hexdigest() != expected_sha256):
+        raise RuntimeError(f"lesion fold manifest hash mismatch: {fold}")
+    manifest = json.loads(manifest_path.read_text())
+    hashes = manifest.get("artifacts")
+    files = {
+        str(path.relative_to(fold))
+        for path in fold.rglob("*") if path.is_file() and path != manifest_path
+    }
+    if (manifest.get("state") != "completed" or not isinstance(hashes, dict)
+            or set(hashes) != files
+            or any(hashlib.sha256((fold / name).read_bytes()).hexdigest() != digest
+                   for name, digest in hashes.items())):
+        raise RuntimeError(f"invalid completed fold artifacts: {fold}")
+    return manifest
 
 
 def validate_ablation_download(ablation_root: Path) -> pd.DataFrame:
@@ -446,21 +577,24 @@ def validate_ablation_download(ablation_root: Path) -> pd.DataFrame:
         folds = sorted((directory / "folds").glob("model-fold-*__item-*"))
         if len(folds) != 16:
             raise RuntimeError(f"expected 16 downloaded folds for {variant}, found {len(folds)}")
+        expected_fold_hashes = summary["settings"]["fold_manifests"]
         expected_specs = 250 if space == "raw" else 60
         converged, diagnostic_count = 0, 0
-        for fold in folds:
-            manifest = json.loads((fold / "manifest.json").read_text())
+        for fold, expected_fold_hash in zip(folds, expected_fold_hashes, strict=True):
+            manifest = validate_fold_manifest(fold, expected_fold_hash)
             if (manifest.get("state") != "completed"
                     or manifest.get("unique_specifications") != expected_specs):
                 raise RuntimeError(f"invalid completed fold manifest: {fold}")
             frozen = json.loads((fold / "frozen-hyperparameters.json").read_text())
+            if set(frozen) != {"C", "l1_ratio", "benchmark_deviation_penalty"}:
+                raise RuntimeError(f"invalid frozen capability hyperparameters: {fold}")
             diagnostics = sorted((fold / "diagnostics").glob("*.json"))
             diagnostic_count += len(diagnostics)
             for path in diagnostics:
                 if path.stem in {"full", "null"}:
                     continue
                 values = json.loads(path.read_text())
-                if {key: values.get(key) for key in ("C", "l1_ratio")} != frozen:
+                if not refit_matches_frozen(values, frozen):
                     raise RuntimeError(f"refit hyperparameters changed: {path}")
                 converged += int(values.get("converged") is True)
         expected_diagnostics = 16 * (expected_specs + 2)
@@ -507,7 +641,9 @@ def _importance_plot(frame: pd.DataFrame, directory: Path, name: str, *, top: in
     if top is not None:
         values = values.nlargest(min(top, len(values)), "rank_score")
     values = values.sort_values("rank_score")
-    height = min(3.15, max(1.35, 0.17 * len(values) + 0.65))
+    tick_labels = [textwrap.fill(value, 24) for value in values.label]
+    line_count = sum(label.count("\n") + 1 for label in tick_labels)
+    height = min(3.2, max(1.35, 0.17 * line_count + 0.65))
     _style()
     fig, axes = plt.subplots(1, 3, figsize=(3.35, height), sharey=True, layout="constrained")
     colors = {"singular": "#2a78d6", "unique": "#eb6834", "coefficient": "#4a3aa7"}
@@ -528,7 +664,7 @@ def _importance_plot(frame: pd.DataFrame, directory: Path, name: str, *, top: in
                 ha="left", va="bottom", fontsize=7, color="#666666")
         ax.set_yticks(y)
         if index == 0:
-            ax.set_yticklabels([textwrap.fill(value, 20) for value in values.label], fontsize=6)
+            ax.set_yticklabels(tick_labels, fontsize=6)
         else:
             ax.tick_params(axis="y", labelleft=False)
         ax.tick_params(axis="y", length=0)
@@ -758,7 +894,7 @@ def _pc_definition_figure(
                   .rename(columns={"standardized_effect": "judge_effect"}))
     comparison["capability_effect"] = comparison.penalty.map(cap_overall)
 
-    _style(); fig, axes = plt.subplots(1, 2, figsize=(3.5, 2.2), layout="constrained")
+    _style(); fig, axes = plt.subplots(1, 2, figsize=(3.5, 2.35), layout="constrained")
     ax = axes[0]; y = np.arange(len(loading))
     colors = [BLOCK_COLORS.get(block, "#777777") for block in loading.block]
     ax.hlines(y, 0, loading.loading, color=colors, lw=1)
@@ -766,7 +902,7 @@ def _pc_definition_figure(
     limit = max(.05, float(loading.loading.abs().max()))
     ax.set_xlim(-limit, limit)
     ax.set_xticks([-limit, limit], [f"{-limit:.1g}", f"{limit:.1g}"])
-    ax.set_yticks(y, [textwrap.shorten(value, width=17, placeholder="…")
+    ax.set_yticks(y, [textwrap.fill(value, width=18)
                       for value in loading.label], fontsize=5.5)
     ax.set_xlabel("Signed loading"); ax.axvline(0, color="#999999", lw=.8, ls="--"); _ordinary(ax)
     ax.text(0, 1.03, "Loading definition", transform=ax.transAxes, fontsize=7, color="#666666")
@@ -895,6 +1031,7 @@ def build_backprojection_tables(
     composites = provenance["final_composites"]
     source_blocks = provenance["source_blocks"]
     loadings = tables["loadings"][["component", "feature", "loading"]]
+    variance_scale = pc_score_scales(tables["explained_variance"])
     leaves = []
     for task, coefficients in (("capability", tables["capability_coefficients"]),
                                ("judge", tables["judge_coefficients"])):
@@ -908,7 +1045,7 @@ def build_backprojection_tables(
             if task == "capability":
                 frame["judge"] = "all"
             composite = (frame if space == "raw" else
-                         backproject_pc_coefficients(frame, loadings))
+                         backproject_pc_coefficients(frame, loadings, variance_scale))
             expanded = expand_leaf_coefficients(composite, composites, source_blocks)
             expanded["task"], expanded["variant"] = task, variant
             expanded["space"], expanded["penalty"] = space, penalty
@@ -1047,6 +1184,38 @@ def _load_capability_predictions(root: Path, fit_name: str, variant: str) -> pd.
     return pd.concat(frames, ignore_index=True)
 
 
+def judge_capability_overview(
+    accuracy: pd.DataFrame, statistics: pd.DataFrame,
+    cosines: pd.DataFrame, eci: pd.DataFrame,
+) -> pd.DataFrame:
+    """Join matched predictive accuracy and coefficient-alignment summaries."""
+    if ("coordinate_space" not in statistics or "coordinate_space" not in cosines
+            or not statistics.coordinate_space.eq("original_leaf").all()
+            or not cosines.coordinate_space.eq("original_leaf").all()):
+        raise ValueError("primary judge-capability similarity requires original-leaf coordinates")
+    coefficient = statistics[statistics.benchmark == "all"][
+        ["variant", "judge", "pearson", "spearman", "same_sign_share"]
+    ]
+    cosine = cosines[cosines.benchmark == "all"][
+        ["variant", "judge", "estimate", "lower", "upper"]
+    ].rename(columns={
+        "estimate": "cosine", "lower": "cosine_lower", "upper": "cosine_upper",
+    })
+    output = (accuracy.merge(
+        coefficient, on=["variant", "judge"], how="left", validate="one_to_one",
+    ).merge(
+        cosine, on=["variant", "judge"], how="left", validate="one_to_one",
+    ).merge(
+        eci[["judge", "eci", "eci_ci_low", "eci_ci_high"]],
+        on="judge", how="left", validate="many_to_one",
+    ))
+    output.insert(
+        output.columns.get_loc("judge_accuracy") + 1, "accuracy_difference",
+        output.capability_accuracy - output.judge_accuracy,
+    )
+    return output.sort_values(["variant", "judge"], kind="stable").reset_index(drop=True)
+
+
 def build_judge_comparison_tables(
     tables: dict[str, pd.DataFrame], back: dict[str, pd.DataFrame],
     root: Path, eci_path: Path,
@@ -1092,7 +1261,7 @@ def build_judge_comparison_tables(
     cosines = pd.DataFrame(cosines)
     cosine_summary = _fold_summary(
         cosines, ["variant", "judge", "benchmark"], "cosine",
-    )
+    ).assign(coordinate_space="native")
     contribution_summary = (pd.DataFrame(contributions).groupby(
         ["variant", "judge", "feature"], as_index=False,
     ).contribution.mean())
@@ -1135,12 +1304,15 @@ def build_judge_comparison_tables(
                     ).to_dict("records"))
     leaf_points = pd.concat(leaf_points, ignore_index=True)
     leaf_cosines = pd.DataFrame(leaf_cosines)
+    leaf_cosine_summary = _fold_summary(
+        leaf_cosines, ["variant", "judge", "benchmark"], "cosine",
+    ).assign(coordinate_space="original_leaf")
     leaf_contributions = (pd.DataFrame(leaf_contributions).groupby(
         ["variant", "judge", "feature", "block"], as_index=False,
     ).contribution.mean())
 
     accuracy_rows = []
-    for variant in ("raw-l1", "raw-l2"):
+    for variant in VARIANTS:
         fit_name, judge_name, _, _ = VARIANTS[variant]
         capability = _load_capability_predictions(root, fit_name, variant)
         judge = pd.read_parquet(root / "canonical-judge-fits" / judge_name / "predictions.parquet")
@@ -1181,22 +1353,31 @@ def build_judge_comparison_tables(
         for judge, model in ECI_MODELS.items()
         if (eci.Model == model).any()
     ])
-    relations = cosine_summary[cosine_summary.benchmark == "all"].merge(
+    coefficient_statistics = pd.DataFrame(statistics).assign(coordinate_space="native")
+    leaf_statistics_frame = pd.DataFrame(leaf_statistics).assign(
+        coordinate_space="original_leaf",
+    )
+    overview = judge_capability_overview(
+        accuracy_summary, leaf_statistics_frame, leaf_cosine_summary, eci,
+    )
+    relations = leaf_cosine_summary[leaf_cosine_summary.benchmark == "all"].merge(
         accuracy_summary.groupby("judge", as_index=False).judge_accuracy.mean(),
         on="judge", how="left", validate="many_to_one",
     ).merge(eci, on="judge", how="left", validate="many_to_one")
     return {
         "judge_coefficient_points": points,
-        "judge_coefficient_statistics": pd.DataFrame(statistics),
+        "judge_coefficient_statistics": coefficient_statistics,
         "judge_cosines": cosines,
         "judge_cosine_summary": cosine_summary,
         "judge_cosine_contributions": contribution_summary,
         "leaf_judge_points": leaf_points,
-        "leaf_judge_statistics": pd.DataFrame(leaf_statistics),
+        "leaf_judge_statistics": leaf_statistics_frame,
         "leaf_judge_cosines": leaf_cosines,
+        "leaf_judge_cosine_summary": leaf_cosine_summary,
         "leaf_judge_contributions": leaf_contributions,
         "stronger_model_accuracy": accuracy,
         "stronger_model_accuracy_summary": accuracy_summary,
+        "judge_capability_overview": overview,
         "judge_eci": eci,
         "judge_relations": relations,
     }
@@ -1238,7 +1419,7 @@ def plot_judge_comparisons(comparison: dict[str, pd.DataFrame], root: Path) -> N
         _judge_scatter(comparison["leaf_judge_points"],
                        comparison["leaf_judge_statistics"], variant, directory,
                        suffix="original-leaf")
-        frame = comparison["judge_cosine_summary"].query("variant == @variant")
+        frame = comparison["leaf_judge_cosine_summary"].query("variant == @variant")
         _style(); fig, ax = plt.subplots(figsize=(2.45, 2.05), layout="constrained")
         y = np.arange(len(JUDGE_LABELS)); dodges = np.linspace(-.24, .24, 5)
         for dodge, benchmark, color in zip(dodges, ("all", *BENCHMARKS),
@@ -1290,19 +1471,24 @@ def plot_judge_comparisons(comparison: dict[str, pd.DataFrame], root: Path) -> N
         _save(fig, directory, f"{variant}-original-leaf-cosine-drivers", leaf_drivers)
 
     accuracy = comparison["stronger_model_accuracy_summary"]
-    _style(); fig, axes = plt.subplots(1, 2, figsize=(3.0, 1.65), sharey=True, layout="constrained")
-    for ax, variant in zip(axes, ("raw-l1", "raw-l2")):
+    _style(); fig, axes = plt.subplots(2, 2, figsize=(3.0, 2.6), sharex=True, sharey=True,
+                                      layout="constrained")
+    for ax, variant in zip(axes.flat, VARIANTS):
         frame = accuracy[accuracy.variant == variant].set_index("judge").reindex(JUDGE_LABELS)
         y = np.arange(len(frame))
         ax.scatter(frame.capability_accuracy, y - .08, color="#2a78d6", s=9, label="Capability GLM")
         ax.scatter(frame.judge_accuracy, y + .08, color="#eb6834", s=9, label="Judge decision")
         ax.set_xlim(0, 1); ax.set_xticks([0, .5, 1]); ax.set_yticks(y, [JUDGE_LABELS[value]
-                    for value in frame.index], fontsize=6)
+                    for value in frame.index], fontsize=7)
         ax.set_xlabel(""); _ordinary(ax)
-        ax.text(0, 1.02, VARIANTS[variant][3], transform=ax.transAxes, fontsize=7, color="#666666")
+        ax.text(0, 1.02, f"{VARIANTS[variant][2].upper()} {VARIANTS[variant][3]}",
+                transform=ax.transAxes, fontsize=7, color="#666666")
     fig.supxlabel("Stronger-model accuracy", fontsize=8)
-    fig.legend(loc="outside upper center", ncol=2, frameon=False)
-    _save(fig, directory, "raw-capability-vs-judge-accuracy", accuracy)
+    fig.legend(handles=[
+        Line2D([], [], marker="o", lw=0, color="#2a78d6", label="Capability GLM"),
+        Line2D([], [], marker="o", lw=0, color="#eb6834", label="Judge decision"),
+    ], loc="outside upper center", ncol=2, frameon=False)
+    _save(fig, directory, "capability-vs-judge-accuracy", accuracy)
 
     relations = comparison["judge_relations"].dropna(subset=["eci"])
     _style(); fig, axes = plt.subplots(1, 2, figsize=(3.0, 1.5), layout="constrained")
@@ -1316,7 +1502,7 @@ def plot_judge_comparisons(comparison: dict[str, pd.DataFrame], root: Path) -> N
         lower, upper = math.floor(xmin / step) * step, math.ceil(xmax / step) * step
         ax.set_xlim(lower, upper); ax.set_xticks([lower, upper])
         ax.set_ylim(-1, 1); ax.set_yticks([-1, 0, 1])
-        ax.set_xlabel(label); ax.set_ylabel("Coefficient cosine"); _ordinary(ax)
+        ax.set_xlabel(label); ax.set_ylabel("Cosine"); _ordinary(ax)
     handles = [Line2D([], [], marker="o", lw=0, color=color, label=JUDGE_LABELS[judge])
                for judge, color in JUDGE_COLORS.items() if judge in set(relations.judge)]
     handles += [Line2D([], [], marker="o", lw=0, color="#555555", label="L1"),
@@ -1409,17 +1595,57 @@ def plot_deterministic_views(
     }, indent=2, sort_keys=True) + "\n")
 
 
+def _markdown_table(table: pd.DataFrame) -> str:
+    """Render a small DataFrame without pandas' optional tabulate dependency."""
+    def cell(value: object) -> str:
+        if pd.isna(value):
+            return ""
+        text = f"{value:g}" if isinstance(value, (float, np.floating)) else str(value)
+        return text.replace("|", "\\|").replace("\n", " ")
+
+    rows = [[cell(column) for column in table.columns], ["---"] * len(table.columns)]
+    rows.extend([cell(value) for value in row] for row in table.itertuples(index=False, name=None))
+    return "\n".join(f"| {' | '.join(row)} |" for row in rows)
+
+
+def load_deterministic_performance(path: Path) -> pd.DataFrame:
+    """Load the completed performance-only Raw-L1/L2 deterministic refits."""
+    table = pd.read_csv(path)
+    required = {
+        "variant", "rows_deterministic", "accuracy_deterministic",
+        "log_loss_deterministic", "rows_full", "accuracy_full", "log_loss_full",
+        "delta_accuracy_pp", "delta_log_loss",
+    }
+    if missing := required - set(table):
+        raise ValueError(f"deterministic performance missing columns: {sorted(missing)}")
+    table = table.sort_values("variant").reset_index(drop=True)
+    if table.variant.tolist() != ["raw-l1", "raw-l2"]:
+        raise ValueError("deterministic performance must contain Raw-L1 and Raw-L2")
+    if not table.rows_deterministic.eq(table.rows_full).all():
+        raise ValueError("deterministic and full performance rows differ")
+    return table
+
+
 def _write_scientific_summary(
     source_root: Path, output_root: Path, tables: dict[str, pd.DataFrame],
     comparison: dict[str, pd.DataFrame],
     important_pcs: list[str],
+    deterministic_performance: pd.DataFrame,
 ) -> None:
-    metrics = pd.read_csv(source_root / "summary/variant-metrics.csv")
+    metrics = tables["variant_metrics"]
     top_features = (tables["feature_effects"].query("variant == 'raw-l1'")
                     .nlargest(5, "singular")[["label", "singular", "unique"]])
     top_pcs = (tables["feature_effects"].query("variant == 'pc-l2'")
                .nlargest(5, "singular")[["feature", "singular", "unique"]])
-    cosines = comparison["judge_cosine_summary"]
+    cosines = comparison["leaf_judge_cosine_summary"]
+    overview = comparison["judge_capability_overview"]
+    deterministic = deterministic_performance[[
+        "variant", "rows_deterministic", "accuracy_deterministic",
+        "log_loss_deterministic", "delta_accuracy_pp", "delta_log_loss",
+    ]].rename(columns={
+        "rows_deterministic": "rows", "accuracy_deterministic": "accuracy",
+        "log_loss_deterministic": "log_loss",
+    })
     best = cosines[cosines.benchmark == "all"].sort_values("estimate", ascending=False).iloc[0]
     lines = [
         "# Pairwise capability ablations and judge comparison",
@@ -1429,18 +1655,27 @@ def _write_scientific_summary(
         "Held-out accuracy and log loss are properties of the complete predictive models; "
         "they are not feature attribution measures.",
         "",
-        metrics.to_markdown(index=False),
+        _markdown_table(metrics),
+        "",
+        "## Judge–capability prediction and representation comparison",
+        "",
+        "The matched accuracy columns compare prediction of the same held-out stronger-model "
+        "target. Correlations, sign agreement, and coefficient cosine instead compare fitted "
+        "representations; they are not predictive-performance measures.",
+        "",
+        _markdown_table(overview),
         "",
         "## Singular contribution",
         "",
-        "Singular effects are held-out accuracy gains over the fixed 0.5 capability null. "
+        "Singular effects are held-out accuracy gains over the same-row antisymmetric "
+        "probability-0.5 null; paired log-loss gains are retained in the lesion tables. "
         "The leading raw-L1 singular predictors were:",
         "",
-        top_features.to_markdown(index=False),
+        _markdown_table(top_features),
         "",
         "The leading PC-L2 singular predictors were:",
         "",
-        top_pcs.to_markdown(index=False),
+        _markdown_table(top_pcs),
         "",
         "## Unique/drop-one contribution",
         "",
@@ -1451,8 +1686,9 @@ def _write_scientific_summary(
         "## Coefficient direction",
         "",
         "Effective coefficients describe conditional direction, not unique attribution. PC "
-        "coefficient comparisons use signed β × sqrt(explained variance); PC fits are also "
-        "back-projected through the shared loadings and benchmark-specific composite weights.",
+        "coefficients are already per unit-variance PC score. Original-feature comparisons "
+        "divide by the saved PC standard deviation before back-projecting through the shared "
+        "loadings and benchmark-specific composite weights.",
         "",
         "## PC variance and loading definition",
         "",
@@ -1461,7 +1697,7 @@ def _write_scientific_summary(
         "block mass, benchmark effects, and judge-task comparison; semantic descriptions are "
         "only shorthand.",
         "",
-        "## Judge–capability similarity",
+        "## Benchmark-specific judge–capability similarity",
         "",
         f"The largest mean coefficient cosine was {best.estimate:.3f} for "
         f"{JUDGE_LABELS.get(best.judge, best.judge)} under {best.variant}. Cosines, raw/PC leaf "
@@ -1470,10 +1706,11 @@ def _write_scientific_summary(
         "",
         "## Deterministic-only view",
         "",
-        "The deterministic-only deliverable is a 90-composite subset view of the same complete "
-        "raw fits: annotation blocks and the composite containing `bare_answer` are excluded. "
-        "It is deliberately not a separate refit, so its coefficients remain conditional on the "
-        "full feature set and its model-level accuracy is unchanged.",
+        "The deterministic-only figures are 90-composite subset views of the complete raw fits; "
+        "their coefficients remain conditional on the full feature set. Separately refitted "
+        "90-feature Raw-L1/L2 models provide held-out performance without lesions:",
+        "",
+        _markdown_table(deterministic),
         "",
         "All figures have PNG/SVG partners and a same-stem source CSV. Intervals for capability "
         "lesions use item clustering overall and conservative crossed outer-fold summaries by "
@@ -1494,6 +1731,8 @@ def _write_manifest(root: Path) -> None:
             raise RuntimeError(f"SVG lacks editable text: {png.with_suffix('.svg')}")
     manifest = {
         "state": "completed",
+        "capability_attribution_measure": "same-row delta accuracy; delta log loss retained",
+        "deterministic_refit_performance": True,
         "figure_count": len(figures),
         "all_figures_have_png_svg_csv": True,
         "artifact_sha256": {
@@ -1514,6 +1753,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--basis-root", type=Path, required=True)
     parser.add_argument("--provenance", type=Path, required=True)
     parser.add_argument("--eci", type=Path, required=True)
+    parser.add_argument("--deterministic-performance", type=Path, required=True)
     args = parser.parse_args(argv)
     output = args.output_root
     (output / "tables").mkdir(parents=True, exist_ok=True)
@@ -1534,7 +1774,13 @@ def main(argv: list[str] | None = None) -> None:
         table.to_csv(output / "tables" / f"{name.replace('_', '-')}.csv", index=False)
     plot_judge_comparisons(comparison, output)
     plot_deterministic_views(tables, comparison, output)
-    _write_scientific_summary(args.root, output, tables, comparison, important_pcs)
+    deterministic_performance = load_deterministic_performance(args.deterministic_performance)
+    deterministic_performance.to_csv(
+        output / "tables/deterministic-refit-performance.csv", index=False,
+    )
+    _write_scientific_summary(
+        args.root, output, tables, comparison, important_pcs, deterministic_performance,
+    )
     _write_manifest(output)
 
 

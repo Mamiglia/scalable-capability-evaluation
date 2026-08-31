@@ -3,6 +3,7 @@
 import argparse
 from dataclasses import dataclass, replace
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -139,6 +140,54 @@ def _runnable_table(specifications) -> pd.DataFrame:
     ])
 
 
+def _same_hyperparameter(actual: object, expected: object) -> bool:
+    if expected is None:
+        return actual is None or pd.isna(actual)
+    try:
+        return math.isclose(float(actual), float(expected), rel_tol=1e-12, abs_tol=1e-12)
+    except (TypeError, ValueError):
+        return False
+
+
+def _validated_frozen_hyperparameters(
+    manifest: dict[str, object], diagnostics: dict[str, object], tuning: pd.DataFrame,
+) -> dict[str, float | None]:
+    names = ("C", "l1_ratio", "benchmark_deviation_penalty")
+    try:
+        frozen = {name: diagnostics[name] for name in names}
+    except KeyError as error:
+        raise RuntimeError("full fit lacks frozen capability hyperparameters") from error
+    c = float(frozen["C"])
+    ratio = float(frozen["benchmark_deviation_penalty"])
+    if not math.isfinite(ratio) or ratio <= 0:
+        raise RuntimeError("invalid fitted benchmark ratio")
+    penalty = diagnostics.get("penalty")
+    if (not math.isfinite(c) or c <= 0
+            or (penalty == "l1" and not _same_hyperparameter(frozen["l1_ratio"], 1.0))
+            or (penalty == "ridge" and frozen["l1_ratio"] is not None)
+            or penalty not in {"l1", "ridge"}):
+        raise RuntimeError("invalid frozen capability penalty")
+    recorded = manifest.get("frozen_hyperparameters")
+    if (not isinstance(recorded, dict) or set(recorded) != set(names)
+            or any(not _same_hyperparameter(recorded[name], frozen[name]) for name in names)):
+        raise RuntimeError("manifest frozen hyperparameters do not match diagnostics")
+    required = {"record_type", "selected", "converged", *names}
+    if missing := required - set(tuning):
+        raise RuntimeError(f"capability tuning missing columns: {sorted(missing)}")
+    selected = tuning[tuning.selected.fillna(False).astype(bool)]
+    if (len(selected) != 1 or not bool(selected.converged.iloc[0])
+            or any(not _same_hyperparameter(selected.iloc[0][name], frozen[name])
+                   for name in names)):
+        raise RuntimeError("selected capability tuning does not match frozen hyperparameters")
+    variance = tuning[tuning.record_type == "variance_component"]
+    if (len(variance) != 1 or not bool(variance.converged.iloc[0])
+            or not _same_hyperparameter(
+                variance.benchmark_deviation_penalty.iloc[0], ratio,
+            )):
+        raise RuntimeError("capability variance-component diagnostics are invalid")
+    return frozen
+
+
 def prepare_fold(fold_index: int, run: CapabilityLesionRun) -> Path:
     """Prepare one capability fold from its completed, pinned full fit."""
     config = run.analysis.validate()
@@ -201,7 +250,8 @@ def prepare_fold(fold_index: int, run: CapabilityLesionRun) -> Path:
     specifications = capability_specifications(prepared_dictionary, config)
     unique, aliases = unique_specifications(specifications)
     diagnostics = json.loads((fit_dir / "diagnostics.json").read_text())
-    frozen = {"C": diagnostics["C"], "l1_ratio": diagnostics["l1_ratio"]}
+    tuning = pd.read_csv(fit_dir / "tuning.csv")
+    frozen = _validated_frozen_hyperparameters(full_manifest, diagnostics, tuning)
 
     fold_dir.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(mkdtemp(prefix=f".{fold}-prepare-", dir=fold_dir.parent))
@@ -213,7 +263,7 @@ def prepare_fold(fold_index: int, run: CapabilityLesionRun) -> Path:
             stage / "specifications.csv", index=False,
         )
         _runnable_table(unique).to_csv(stage / "run-specifications.csv", index=False)
-        pd.read_csv(fit_dir / "tuning.csv").to_csv(stage / "tuning.csv", index=False)
+        tuning.to_csv(stage / "tuning.csv", index=False)
         (stage / "frozen-hyperparameters.json").write_text(
             json.dumps(frozen, indent=2, sort_keys=True) + "\n"
         )
@@ -232,9 +282,9 @@ def prepare_fold(fold_index: int, run: CapabilityLesionRun) -> Path:
         _item_metrics(full_predictions).to_parquet(
             stage / "item-metrics/full.parquet", index=False,
         )
-        null_metrics = _item_metrics(null_predictions)
-        null_metrics["accuracy"] = 0.5
-        null_metrics.to_parquet(stage / "item-metrics/null.parquet", index=False)
+        _item_metrics(null_predictions).to_parquet(
+            stage / "item-metrics/null.parquet", index=False,
+        )
         shutil.copy2(fit_dir / "diagnostics.json", stage / "diagnostics/full.json")
         (stage / "diagnostics/null.json").write_text(
             json.dumps({"reference": "fixed_probability", "probability": 0.5},

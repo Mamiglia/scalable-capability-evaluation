@@ -10,6 +10,7 @@ from . import pairwise_wrapper, pairwise_wrapper_lesions
 from .pairwise_wrapper import fit_fold
 from .pairwise_wrapper_lesions import (
     CapabilityLesionRun,
+    _validated_frozen_hyperparameters,
     capability_specifications,
     prepare_fold,
 )
@@ -91,6 +92,38 @@ def test_capability_specifications_use_null_and_keep_raw_groups_pc_features_only
     assert {spec.kind for spec in pc} == {"lesion-feature", "singular-feature"}
 
 
+def test_frozen_hyperparameters_require_matching_manifest_and_converged_tuning() -> None:
+    frozen = {"C": 1.0, "l1_ratio": 1.0, "benchmark_deviation_penalty": 0.3}
+    manifest = {"frozen_hyperparameters": frozen}
+    diagnostics = frozen | {"penalty": "l1"}
+    tuning = pd.DataFrame([
+        {"record_type": "variance_component", "selected": False, "converged": True,
+         "benchmark_deviation_penalty": 0.3},
+        {"record_type": "tuning", "selected": True, "converged": True,
+         "C": 1.0, "l1_ratio": 1.0, "benchmark_deviation_penalty": 0.30000000000000004},
+    ])
+
+    assert _validated_frozen_hyperparameters(manifest, diagnostics, tuning) == frozen
+
+    with pytest.raises(RuntimeError, match="manifest frozen hyperparameters"):
+        _validated_frozen_hyperparameters(
+            {"frozen_hyperparameters": frozen | {"benchmark_deviation_penalty": 3.0}},
+            diagnostics, tuning,
+        )
+    with pytest.raises(RuntimeError, match="selected capability tuning"):
+        _validated_frozen_hyperparameters(
+            manifest, diagnostics, tuning.assign(converged=[True, False]),
+        )
+    with pytest.raises(RuntimeError, match="invalid fitted benchmark ratio"):
+        _validated_frozen_hyperparameters(
+            manifest, diagnostics | {"benchmark_deviation_penalty": -0.3}, tuning,
+        )
+    with pytest.raises(RuntimeError, match="invalid frozen capability penalty"):
+        _validated_frozen_hyperparameters(
+            manifest, diagnostics | {"C": -1.0}, tuning,
+        )
+
+
 @pytest.mark.parametrize("feature_space", ("raw", "pc"))
 def test_prepare_fold_reconstructs_full_fit_and_uses_fixed_null_without_retuning(
     monkeypatch, tmp_path, feature_space,
@@ -104,11 +137,19 @@ def test_prepare_fold_reconstructs_full_fit_and_uses_fixed_null_without_retuning
     )
     frozen = json.loads((fold_dir / "frozen-hyperparameters.json").read_text())
     assert null.probability.eq(0.5).all()
-    assert null_metrics.accuracy.eq(0.5).all()
+    expected_accuracy = (null.assign(correct=null.observed.eq(1))
+                         .groupby(["bench", "item"], sort=False).correct.mean())
+    pd.testing.assert_series_equal(
+        null_metrics.set_index(["bench", "item"]).accuracy,
+        expected_accuracy.rename("accuracy"),
+    )
+    assert not null_metrics.accuracy.eq(0.5).all()
     assert set(specifications.loc[
         specifications.kind.str.startswith("singular-"), "reference"
     ]) == {"null"}
-    assert frozen == {"C": 1.0, "l1_ratio": 1.0}
+    assert set(frozen) == {"C", "l1_ratio", "benchmark_deviation_penalty"}
+    assert frozen["C"] == frozen["l1_ratio"] == 1.0
+    assert frozen["benchmark_deviation_penalty"] > 0
 
 
 @pytest.mark.parametrize("feature_space", ("raw", "pc"))
@@ -117,6 +158,7 @@ def test_specification_refits_use_capability_task_and_full_fit_hyperparameters(
 ) -> None:
     run, fold_dir = _prepared_run(monkeypatch, tmp_path, feature_space)
     specifications = pd.read_csv(fold_dir / "run-specifications.csv")
+    frozen = json.loads((fold_dir / "frozen-hyperparameters.json").read_text())
 
     for task_index in range(len(specifications)):
         pairwise_wrapper_lesions.run_specification(task_index, run)
@@ -127,6 +169,9 @@ def test_specification_refits_use_capability_task_and_full_fit_hyperparameters(
         )
         assert diagnostics["C"] == 1.0
         assert diagnostics["l1_ratio"] == 1.0
+        assert diagnostics["benchmark_deviation_penalty"] == frozen[
+            "benchmark_deviation_penalty"
+        ]
         assert (fold_dir / "predictions" / f"{specification}.parquet").is_file()
         assert (fold_dir / "coefficients" / f"{specification}.parquet").is_file()
         assert (fold_dir / "item-metrics" / f"{specification}.parquet").is_file()

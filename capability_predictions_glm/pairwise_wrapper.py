@@ -2,10 +2,18 @@
 
 import argparse
 from dataclasses import replace
+import json
 from pathlib import Path
 import re
 
+import jax.numpy as jnp
+from jax import random
 import numpy as np
+import numpyro
+from numpyro import distributions as dist
+from numpyro.infer import SVI, Trace_ELBO
+from numpyro.infer.autoguide import AutoNormal
+from numpyro.optim import Adam
 import pandas as pd
 from scipy import sparse
 
@@ -22,9 +30,37 @@ from scripts.judge_verdict_analysis.fit_frequentist import (
     tune_sparse,
 )
 from scripts.judge_verdict_analysis.hierarchy import outer_roles
+from scripts.judge_verdict_analysis.pooling import penalty_multiplier
 
 from .data import _sha256
 from .preprocessing import _model_item_rates, deduplicate_feature_pairs
+
+
+DETERMINISTIC_EXCLUDED_BLOCKS = frozenset({"rubric", "intermediate-errors", "annotations"})
+
+
+def deterministic_dictionary(dictionary: pd.DataFrame) -> pd.DataFrame:
+    """Return the predeclared 90-composite deterministic-only feature set."""
+    required = {"feature", "block", "leaf_members"}
+    if missing := required - set(dictionary):
+        raise ValueError(f"feature dictionary missing columns: {sorted(missing)}")
+
+    def contains_bare_answer(value: object) -> bool:
+        try:
+            members = json.loads(value)
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ValueError("leaf_members must be a JSON list of strings") from error
+        if not isinstance(members, list) or not all(isinstance(member, str) for member in members):
+            raise ValueError("leaf_members must be a JSON list of strings")
+        return "bare_answer" in members
+
+    selected = dictionary[
+        ~dictionary.block.isin(DETERMINISTIC_EXCLUDED_BLOCKS)
+        & ~dictionary.leaf_members.map(contains_bare_answer)
+    ].reset_index(drop=True)
+    if len(selected) != 90:
+        raise ValueError(f"expected 90 deterministic composites, found {len(selected)}")
+    return selected
 
 
 def _capability_levels(frame: pd.DataFrame) -> tuple[str, ...]:
@@ -36,7 +72,7 @@ def _capability_design(frame, features, levels, config):
     if missing:
         raise ValueError(f"capability frame missing columns: {missing}")
     values = frame[features].to_numpy(dtype=float)
-    multiplier = 1 / np.sqrt(float(config.benchmark_deviation_penalty))
+    multiplier = penalty_multiplier(config.benchmark_deviation_penalty, config.penalty)
     if not np.isfinite(values).all() or not np.isfinite(multiplier) or multiplier <= 0:
         raise ValueError("capability design values and penalty must be finite and positive")
     blocks = [sparse.csr_matrix(values)]
@@ -70,12 +106,78 @@ def _capability_coefficients(raw: np.ndarray, columns: pd.DataFrame) -> pd.DataF
     return rows[["feature", "benchmark", "population", "benchmark_deviation", "effective"]]
 
 
+def _capability_scale_model(
+    x: jnp.ndarray, y: jnp.ndarray, benchmark: jnp.ndarray,
+    benchmark_count: int, penalty: str, scale_prior: float,
+) -> None:
+    """No-intercept capability hierarchy used only to estimate block scales."""
+    family = dist.Laplace if penalty == "l1" else dist.Normal
+    population_scale = numpyro.sample("population_scale", dist.HalfNormal(scale_prior))
+    benchmark_scale = numpyro.sample("benchmark_scale", dist.HalfNormal(scale_prior))
+    population = numpyro.sample(
+        "population", family(0, population_scale).expand((x.shape[1],)).to_event(1),
+    )
+    deviations = numpyro.sample(
+        "benchmark",
+        family(0, benchmark_scale).expand((benchmark_count, x.shape[1])).to_event(2),
+    )
+    logits = jnp.sum(x * (population + deviations[benchmark]), axis=1)
+    numpyro.sample("obs", dist.Bernoulli(logits=logits), obs=y)
+
+
+def _estimate_capability_pooling_ratio(
+    train: pd.DataFrame, features: list[str], penalty: str, config: AnalysisConfig,
+) -> tuple[dict[str, float], pd.DataFrame]:
+    """Estimate the benchmark-deviation ratio from one outer-training fold."""
+    if penalty not in {"l1", "ridge"}:
+        raise ValueError("penalty must be 'l1' or 'ridge'")
+    required = {"bench", "left_stronger", *features}
+    if missing := sorted(required - set(train)):
+        raise ValueError(f"capability pooling rows missing columns: {missing}")
+    x = train[features].to_numpy(np.float32)
+    y = train.left_stronger.to_numpy(np.float32)
+    if not np.isfinite(x).all() or not np.isin(y, (0, 1)).all():
+        raise ValueError("capability pooling features must be finite and outcomes binary")
+    benchmark, levels = pd.factorize(train.bench.astype(str), sort=True)
+    guide = AutoNormal(_capability_scale_model)
+    result = SVI(
+        _capability_scale_model, guide,
+        Adam(config.pooling_svi_learning_rate), Trace_ELBO(),
+    ).run(
+        random.PRNGKey(config.random_seed), config.pooling_svi_steps,
+        jnp.asarray(x), jnp.asarray(y), jnp.asarray(benchmark.astype(np.int32)),
+        len(levels), penalty, float(config.pooling_scale_prior), progress_bar=False,
+    )
+    losses = np.asarray(result.losses, dtype=float)
+    if not np.isfinite(losses).all():
+        raise RuntimeError("capability variance-component fit produced non-finite loss")
+    median = guide.median(result.params)
+    population_scale = float(np.asarray(median["population_scale"]))
+    benchmark_scale = float(np.asarray(median["benchmark_scale"]))
+    if any(not np.isfinite(value) or value <= 0
+           for value in (population_scale, benchmark_scale)):
+        raise RuntimeError("capability variance-component fit produced invalid scales")
+    power = 1 if penalty == "l1" else 2
+    ratio = (population_scale / benchmark_scale) ** power
+    diagnostics = pd.DataFrame([{
+        "stage": "pooling", "record_type": "variance_component",
+        "penalty": penalty, "selected": False, "converged": True,
+        "svi_steps": config.pooling_svi_steps,
+        "svi_initial_loss": losses[0], "svi_final_loss": losses[-1],
+        "population_scale": population_scale, "benchmark_scale": benchmark_scale,
+        "benchmark_deviation_penalty": ratio,
+    }])
+    return {"benchmark_deviation_penalty": ratio}, diagnostics
+
+
 CAPABILITY_TASK = SparseTask(
     outcome="left_stronger",
     group_columns=("bench", "item"),
     levels=_capability_levels,
     design=_capability_design,
     coefficients=_capability_coefficients,
+    pooling_parameters=("benchmark_deviation_penalty",),
+    estimate_pooling=_estimate_capability_pooling_ratio,
 )
 
 
@@ -222,6 +324,9 @@ def fit_fold(
         train, test, features, config.penalty, frozen, config, tuning,
         task=CAPABILITY_TASK,
     )
+    selected = tuning[tuning.selected]
+    if not result.diagnostics["converged"] or selected.empty or not selected.converged.all():
+        raise RuntimeError(f"full capability fit or selected C tuning did not converge: {fold}")
     _write_result(
         result, train, test, config,
         prepared_dictionary=prepared_dictionary,
@@ -242,6 +347,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--feature-space", choices=("raw", "pc"), required=True)
     parser.add_argument("--penalty", choices=("l1", "ridge"), required=True,
                         help="L1 or ridge (L2)")
+    parser.add_argument("--deterministic-only", action="store_true")
     parser.add_argument("--max-iter", type=_positive_int, default=20_000)
     parser.add_argument("--pc-basis-root", type=Path)
     parser.add_argument("--pc-components", type=_positive_int)
@@ -259,6 +365,8 @@ def main(argv: list[str] | None = None) -> None:
             parser.error(f"{', '.join(missing)} required for PC features")
     elif any(value is not None for value in pc_arguments.values()):
         parser.error("PC-only arguments require --feature-space pc")
+    if args.deterministic_only and args.feature_space != "raw":
+        parser.error("--deterministic-only requires --feature-space raw")
     config = replace(
         CONFIG, processed_matrix_root=args.matrix, results_dir=args.output,
         processed_matrix_manifest_sha256=args.matrix_manifest_sha256,
@@ -289,12 +397,25 @@ def main(argv: list[str] | None = None) -> None:
             "pc_explained_variance": args.pc_explained_variance_sha256,
         })
     pairs, dictionary = _load_rows(config)
+    feature_subset = None
+    if args.deterministic_only:
+        dictionary = deterministic_dictionary(dictionary)
+        feature_subset = {
+            "kind": "deterministic-only",
+            "feature_count": len(dictionary),
+            "features": dictionary.feature.astype(str).tolist(),
+            "excluded_blocks": sorted(DETERMINISTIC_EXCLUDED_BLOCKS),
+            "excluded_leaf": "bare_answer",
+        }
+    manifest_provenance = {
+        "source_paths": source_paths,
+        "source_sha256": source_sha256,
+    }
+    if feature_subset is not None:
+        manifest_provenance["feature_subset"] = feature_subset
     fit_fold(
         pairs, pd.read_parquet(args.responses), dictionary, args.fold_index, config,
-        manifest_provenance={
-            "source_paths": source_paths,
-            "source_sha256": source_sha256,
-        },
+        manifest_provenance=manifest_provenance,
     )
 
 

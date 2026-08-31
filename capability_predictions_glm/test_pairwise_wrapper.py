@@ -16,6 +16,7 @@ from .pairwise_wrapper import (
     CAPABILITY_TASK,
     _capability_design,
     chance_predictions,
+    deterministic_dictionary,
     fit_fold,
     overall_model_accuracy,
     prepare_capability_fold,
@@ -83,6 +84,8 @@ def _config(tmp_path: Path, feature_space: str = "raw", penalty: str = "ridge"):
         model_folds=tuple((f"model-fold-{i}", (f"m{i}",)) for i in range(4)),
         item_folds=4, inner_folds=2, fit_n_jobs=1, fit_pca_components=2,
         elastic_net_cs=(1.0,), ridge_cs=(1.0,), glm_max_iter=1_000,
+        pooling_svi_steps=150, pooling_svi_learning_rate=0.03,
+        benchmark_deviation_penalty=123.0,
         feature_space=feature_space, penalty=penalty, execution_mode="prepare",
         pc_basis_root=_pc_basis(tmp_path) if feature_space == "pc" else None,
     )
@@ -105,6 +108,22 @@ def test_overall_accuracy_is_canonical_and_equal_item_weighted() -> None:
     for column in ("bench", "model", "item", "correct", "is_canonical"):
         with pytest.raises(ValueError, match="response table missing columns"):
             overall_model_accuracy(responses.drop(columns=column))
+
+
+def test_deterministic_dictionary_keeps_exactly_the_predeclared_90() -> None:
+    dictionary = pd.DataFrame([
+        {"feature": f"keep-{index}", "block": "surface", "leaf_members": '["signal"]'}
+        for index in range(90)
+    ] + [
+        {"feature": "rubric", "block": "rubric", "leaf_members": '["rubric"]'},
+        {"feature": "error", "block": "intermediate-errors", "leaf_members": '["error"]'},
+        {"feature": "annotation", "block": "annotations", "leaf_members": '["annotation"]'},
+        {"feature": "presentation", "block": "surface", "leaf_members": '["bare_answer", "prose"]'},
+    ])
+
+    selected = deterministic_dictionary(dictionary)
+
+    assert selected.feature.tolist() == [f"keep-{index}" for index in range(90)]
 
 
 def test_preparation_deduplicates_judges_checks_support_and_uses_shared_roles(tmp_path) -> None:
@@ -154,6 +173,24 @@ def test_design_and_null_are_exactly_antisymmetric(tmp_path) -> None:
     assert chance_predictions(frame, ["signal"]).probability.tolist() == [0.5]
 
 
+@pytest.mark.parametrize(("penalty", "multiplier"), (("l1", 0.25), ("ridge", 0.5)))
+def test_capability_design_uses_penalty_specific_benchmark_scaling(
+    tmp_path: Path, penalty: str, multiplier: float,
+) -> None:
+    frame = pd.DataFrame({
+        "bench": ["b"], "item": ["i"], "model_left": ["l"],
+        "model_right": ["r"], "signal": [2.0], "left_stronger": [1],
+    })
+    config = replace(
+        _config(tmp_path, penalty=penalty), benchmark_deviation_penalty=4.0,
+    )
+
+    design, columns = _capability_design(frame, ["signal"], ("b",), config)
+
+    assert columns.loc[columns.block == "benchmark_slope", "multiplier"].item() == multiplier
+    assert design[0, 1] == pytest.approx(2 * multiplier)
+
+
 @pytest.mark.parametrize("feature_space", ("raw", "pc"))
 @pytest.mark.parametrize("penalty", ("l1", "ridge"))
 def test_fit_fold_runs_every_supported_variant(tmp_path, feature_space, penalty) -> None:
@@ -186,10 +223,21 @@ def test_fit_fold_runs_every_supported_variant(tmp_path, feature_space, penalty)
     assert output == config.fit_dir / f"{feature_space}-{penalty}" / "model-fold-0__item-0"
     predictions = pd.read_parquet(output / "predictions.parquet")
     manifest = json.loads((output / "manifest.json").read_text())
+    diagnostics = json.loads((output / "diagnostics.json").read_text())
+    tuning = pd.read_csv(output / "tuning.csv")
     assert predictions.probability.between(0, 1).all()
     assert {"judge", "pick_left"}.isdisjoint(predictions)
     assert manifest["source_paths"] == manifest_provenance["source_paths"]
     assert manifest["source_sha256"] == manifest_provenance["source_sha256"]
+    ratio = diagnostics["benchmark_deviation_penalty"]
+    assert np.isfinite(ratio) and ratio > 0
+    assert ratio != config.benchmark_deviation_penalty
+    variance = tuning[tuning.record_type == "variance_component"]
+    selected = tuning[tuning.selected]
+    assert len(variance) == len(selected) == 1
+    assert variance.benchmark_deviation_penalty.item() == pytest.approx(ratio)
+    assert selected.benchmark_deviation_penalty.item() == pytest.approx(ratio)
+    assert manifest["frozen_hyperparameters"]["benchmark_deviation_penalty"] == ratio
     if feature_space == "raw":
         assert not any(key.startswith("pc_") for key in manifest["source_paths"])
         assert not any(key.startswith("pc_") for key in manifest["source_sha256"])
