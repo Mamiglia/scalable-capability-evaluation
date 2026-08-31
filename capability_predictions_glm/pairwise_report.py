@@ -283,6 +283,35 @@ def _quadrant_text(row: object) -> str:
             f"−+ {shares[2]:.0%}  −− {shares[3]:.0%}")
 
 
+def summarize_capability_predictions(
+    predictions: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Summarize saved held-out capability probabilities overall and by benchmark."""
+    required = {"variant", "bench", "observed", "probability"}
+    if missing := required - set(predictions):
+        raise ValueError(f"capability predictions missing columns: {sorted(missing)}")
+    rows = predictions.copy()
+    probability = rows.probability.to_numpy(float)
+    observed = rows.observed.to_numpy()
+    if (not np.isfinite(probability).all() or not np.isin(observed, (0, 1)).all()
+            or np.any((probability < 0) | (probability > 1))):
+        raise ValueError(
+            "capability predictions must contain finite probabilities and binary outcomes"
+        )
+    observed = observed.astype(int)
+    clipped = np.clip(probability, 1e-12, 1 - 1e-12)
+    rows["accuracy"] = ((probability >= 0.5) == observed).astype(float)
+    rows["log_loss"] = -(observed * np.log(clipped) + (1 - observed) * np.log1p(-clipped))
+
+    def aggregate(by: list[str]) -> pd.DataFrame:
+        return rows.groupby(by, as_index=False).agg(
+            rows=("observed", "size"), accuracy=("accuracy", "mean"),
+            log_loss=("log_loss", "mean"),
+        )
+
+    return aggregate(["variant"]), aggregate(["variant", "bench"])
+
+
 def build_core_tables(
     root: Path, basis_root: Path, provenance_path: Path, ablation_root: Path,
 ) -> dict[str, pd.DataFrame]:
@@ -300,6 +329,7 @@ def build_core_tables(
     blocks = raw_dictionary.set_index("feature").block.astype(str).to_dict()
 
     capability_coefficients, judge_coefficients, selections = [], [], []
+    prediction_tables, fit_diagnostics = [], []
     feature_tables, group_tables, benchmark_tables = [], [], []
     lesion_tables = []
     for variant, (fit_name, judge_name, space, penalty) in VARIANTS.items():
@@ -322,6 +352,16 @@ def build_core_tables(
         selection = _load_capability_selections(root, fit_name, variant)
         selection["space"], selection["penalty"] = space, penalty
         selections.append(selection)
+        prediction_tables.append(_load_capability_predictions(root, fit_name, variant))
+        diagnostic_paths = sorted(
+            (root / "fits" / fit_name).glob("model-fold-*__item-*/diagnostics.json")
+        )
+        if len(diagnostic_paths) != 16:
+            raise ValueError(f"expected 16 capability diagnostics for {variant}")
+        fit_diagnostics.extend({
+            "variant": variant, "fold": path.parent.name,
+            **json.loads(path.read_text()),
+        } for path in diagnostic_paths)
 
         lesion_dir = ablation_root / fit_name
         lesions = pd.read_csv(lesion_dir / "lesions.csv")
@@ -360,6 +400,9 @@ def build_core_tables(
     capability_coefficients = pd.concat(capability_coefficients, ignore_index=True)
     judge_coefficients = pd.concat(judge_coefficients, ignore_index=True)
     selections = pd.concat(selections, ignore_index=True)
+    variant_metrics, benchmark_metrics = summarize_capability_predictions(
+        pd.concat(prediction_tables, ignore_index=True),
+    )
     coefficient_overall, coefficient_benchmark, stability = [], [], []
     for variant, frame in capability_coefficients.groupby("variant", sort=False):
         coefficient_benchmark.append(_fold_summary(
@@ -424,6 +467,9 @@ def build_core_tables(
         "coefficient_overall": pd.concat(coefficient_overall, ignore_index=True),
         "coefficient_benchmark": pd.concat(coefficient_benchmark, ignore_index=True),
         "selection_stability": pd.DataFrame(stability),
+        "variant_metrics": variant_metrics,
+        "benchmark_metrics": benchmark_metrics,
+        "fit_diagnostics": pd.DataFrame(fit_diagnostics),
         "composite_sources": pd.DataFrame(source_rows),
         "loadings": loading_table,
         "explained_variance": variance,
@@ -1449,7 +1495,7 @@ def _write_scientific_summary(
     comparison: dict[str, pd.DataFrame],
     important_pcs: list[str],
 ) -> None:
-    metrics = pd.read_csv(source_root / "summary/variant-metrics.csv")
+    metrics = tables["variant_metrics"]
     top_features = (tables["feature_effects"].query("variant == 'raw-l1'")
                     .nlargest(5, "singular")[["label", "singular", "unique"]])
     top_pcs = (tables["feature_effects"].query("variant == 'pc-l2'")
