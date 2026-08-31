@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from .pairwise_report import (
+    _scatter_grid,
     backproject_pc_coefficients,
     expand_leaf_coefficients,
     judge_capability_overview,
@@ -54,6 +55,15 @@ def test_refit_validation_includes_fitted_benchmark_ratio() -> None:
     assert refit_matches_frozen(frozen | {"converged": True}, frozen)
     assert not refit_matches_frozen(frozen | {"benchmark_deviation_penalty": 3.0}, frozen)
     assert not refit_matches_frozen({"C": 0.1, "l1_ratio": 1.0}, frozen)
+
+
+def test_raw_pc_scatter_skips_an_unavailable_variant_pair(tmp_path) -> None:
+    points = pd.DataFrame(columns=["task", "penalty", "judge", "raw", "pc"])
+    statistics = pd.DataFrame(columns=["task", "penalty", "judge", "benchmark"])
+
+    _scatter_grid(points, statistics, "capability", "L1", tmp_path, "missing")
+
+    assert not tmp_path.exists()
 
 
 def test_judge_capability_overview_joins_prediction_and_representation_metrics() -> None:
