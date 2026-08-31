@@ -1,6 +1,11 @@
 import pandas as pd
+import pytest
 
-from .pairwise_report import backproject_pc_coefficients, expand_leaf_coefficients
+from .pairwise_report import (
+    backproject_pc_coefficients,
+    expand_leaf_coefficients,
+    judge_capability_overview,
+)
 
 
 def test_backprojection_uses_shared_loadings_and_benchmark_leaf_weights() -> None:
@@ -28,3 +33,32 @@ def test_backprojection_uses_shared_loadings_and_benchmark_leaf_weights() -> Non
 
     assert projected.set_index("feature").effective.to_dict() == {"c1": -2.0, "c2": 2.75}
     assert leaves.set_index("feature").effective.to_dict() == {"x": -1.0, "y": 6.5}
+
+
+def test_judge_capability_overview_joins_prediction_and_representation_metrics() -> None:
+    accuracy = pd.DataFrame([{
+        "variant": "raw-l1", "judge": "j", "capability_accuracy": 0.68,
+        "judge_accuracy": 0.60, "pair_count": 100,
+    }])
+    statistics = pd.DataFrame([{
+        "variant": "raw-l1", "judge": "j", "benchmark": "all",
+        "pearson": 0.4, "spearman": 0.3, "same_sign_share": 0.7,
+    }])
+    cosines = pd.DataFrame([{
+        "variant": "raw-l1", "judge": "j", "benchmark": "all",
+        "estimate": 0.5, "lower": 0.2, "upper": 0.8,
+    }])
+    eci = pd.DataFrame([{
+        "judge": "j", "eci": 140.0, "eci_ci_low": 135.0, "eci_ci_high": 145.0,
+    }])
+
+    overview = judge_capability_overview(accuracy, statistics, cosines, eci)
+
+    assert overview.to_dict("records") == [{
+        "variant": "raw-l1", "judge": "j", "capability_accuracy": 0.68,
+        "judge_accuracy": 0.60, "accuracy_difference": pytest.approx(0.08),
+        "pair_count": 100, "pearson": 0.4, "spearman": 0.3,
+        "same_sign_share": 0.7, "cosine": 0.5, "cosine_lower": 0.2,
+        "cosine_upper": 0.8, "eci": 140.0, "eci_ci_low": 135.0,
+        "eci_ci_high": 145.0,
+    }]
