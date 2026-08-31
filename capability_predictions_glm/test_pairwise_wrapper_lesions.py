@@ -98,11 +98,13 @@ def test_prepare_fold_reconstructs_full_fit_and_uses_fixed_null_without_retuning
     _, fold_dir = _prepared_run(monkeypatch, tmp_path, feature_space)
 
     null = pd.read_parquet(fold_dir / "predictions" / "null.parquet")
+    null_metrics = pd.read_parquet(fold_dir / "item-metrics" / "null.parquet")
     specifications = pd.read_csv(
         fold_dir / "specifications.csv", keep_default_na=False,
     )
     frozen = json.loads((fold_dir / "frozen-hyperparameters.json").read_text())
     assert null.probability.eq(0.5).all()
+    assert null_metrics.accuracy.eq(0.5).all()
     assert set(specifications.loc[
         specifications.kind.str.startswith("singular-"), "reference"
     ]) == {"null"}

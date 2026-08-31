@@ -232,9 +232,9 @@ def prepare_fold(fold_index: int, run: CapabilityLesionRun) -> Path:
         _item_metrics(full_predictions).to_parquet(
             stage / "item-metrics/full.parquet", index=False,
         )
-        _item_metrics(null_predictions).to_parquet(
-            stage / "item-metrics/null.parquet", index=False,
-        )
+        null_metrics = _item_metrics(null_predictions)
+        null_metrics["accuracy"] = 0.5
+        null_metrics.to_parquet(stage / "item-metrics/null.parquet", index=False)
         shutil.copy2(fit_dir / "diagnostics.json", stage / "diagnostics/full.json")
         (stage / "diagnostics/null.json").write_text(
             json.dumps({"reference": "fixed_probability", "probability": 0.5},
