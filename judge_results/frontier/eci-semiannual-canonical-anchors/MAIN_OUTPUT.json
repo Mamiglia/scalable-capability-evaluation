@@ -7,7 +7,7 @@
     {
       "analysis": "Pre-release time trend",
       "root": "analysis/rank_regression/time_trend_control",
-      "scientific_scope": "no ranking values or judge verdict outcomes; linear release-time extrapolation"
+      "scientific_scope": "same quarterly frontier points as judge figures; no ranking values or judge verdict outcomes"
     }
   ],
   "result_document": "../../../docs/results/2026-08-30-canonical-anchor-frontier-redo.md",
