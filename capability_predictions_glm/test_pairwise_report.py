@@ -6,6 +6,7 @@ from .pairwise_report import (
     backproject_pc_coefficients,
     expand_leaf_coefficients,
     judge_capability_overview,
+    pc_score_scales,
     summarize_capability_predictions,
 )
 
@@ -36,6 +37,14 @@ def test_backprojection_uses_shared_loadings_and_benchmark_leaf_weights() -> Non
 
     assert projected.set_index("feature").effective.to_dict() == {"c1": -0.5, "c2": 1.25}
     assert leaves.set_index("feature").effective.to_dict() == {"x": -0.25, "y": 2.75}
+
+
+def test_pc_score_scales_use_saved_explained_variance() -> None:
+    variance = pd.DataFrame({
+        "component": ["pc_001", "pc_002"], "explained_variance": [4.0, 9.0],
+    })
+
+    assert pc_score_scales(variance).to_dict() == {"pc_001": 2.0, "pc_002": 3.0}
 
 
 def test_judge_capability_overview_joins_prediction_and_representation_metrics() -> None:
