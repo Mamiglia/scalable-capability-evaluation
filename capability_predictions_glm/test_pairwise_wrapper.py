@@ -218,8 +218,8 @@ def test_fit_fold_runs_every_supported_variant(tmp_path, feature_space, penalty)
     variance = tuning[tuning.record_type == "variance_component"]
     selected = tuning[tuning.selected]
     assert len(variance) == len(selected) == 1
-    assert variance.benchmark_deviation_penalty.item() == ratio
-    assert selected.benchmark_deviation_penalty.item() == ratio
+    assert variance.benchmark_deviation_penalty.item() == pytest.approx(ratio)
+    assert selected.benchmark_deviation_penalty.item() == pytest.approx(ratio)
     assert manifest["frozen_hyperparameters"]["benchmark_deviation_penalty"] == ratio
     if feature_space == "raw":
         assert not any(key.startswith("pc_") for key in manifest["source_paths"])
