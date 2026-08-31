@@ -1,0 +1,12 @@
+{
+  "judges": [
+    "gpt-5.2",
+    "gemini-2.5-pro"
+  ],
+  "matched_pair_items": 1391,
+  "cot_on_configs": 200,
+  "estimated_cot_on_calls": 2782,
+  "models_scanned": 27,
+  "reasoning_models": 13,
+  "non_reasoning_models": 11
+}

@@ -1,0 +1,24 @@
+{
+  "method": "Existing per-judge token means scaled by measured CoT-on/off rendered-character ratios and live pinned-endpoint prices; excludes provider-cache discounts.",
+  "measured_character_ratios": {
+    "gpt-5.2": 1.3443271159324597,
+    "gemini-2.5-pro": 1.5181278118549097
+  },
+  "options": {
+    "full_exact_panel": {
+      "calls": 2782,
+      "estimated_usd": 105.2,
+      "with_20pct_contingency_usd": 126.24
+    },
+    "four_items_per_pair": {
+      "calls": 1516,
+      "estimated_usd": 57.3,
+      "with_20pct_contingency_usd": 68.76
+    }
+  },
+  "openrouter_credit_snapshot": {
+    "total_credits_usd": 18320.0,
+    "total_usage_usd": 17869.598478337,
+    "available_usd": 450.401521663
+  }
+}
