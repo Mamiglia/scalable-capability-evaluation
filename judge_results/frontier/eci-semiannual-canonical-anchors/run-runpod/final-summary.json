@@ -1,0 +1,12 @@
+{
+  "configs": 215,
+  "latest_success_status": 215,
+  "missing_success_logs": 0,
+  "raw_failure_rows": 1,
+  "final_key_usage": 2933.143196682,
+  "incremental_spend": 51.589830234000146,
+  "logged_api_cost": 51.58983073959,
+  "audited_calls": 2844,
+  "provider_mismatches": 0,
+  "endpoint_snapshot": "endpoints-20260831T001625Z.json"
+}

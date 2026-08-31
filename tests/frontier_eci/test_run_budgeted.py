@@ -30,6 +30,20 @@ def test_historical_spend_reduces_incremental_allowance():
     assert remaining_budget(total_limit=200, historical_spend=133.4) == 66.6
 
 
+def test_explicit_new_key_limit_is_independent_of_historical_spend(tmp_path, monkeypatch):
+    config, ledger = tmp_path / "pair.yaml", tmp_path / "ledger.jsonl"
+    write_config(config)
+    globals_ = budget["main"].__globals__
+    monkeypatch.setitem(globals_, "pair_successful", lambda *_: True)
+    monkeypatch.setattr(sys, "argv", [
+        "run_budgeted.py", str(config), "--baseline", "100", "--limit", "150",
+        "--ledger", str(ledger),
+    ])
+
+    assert budget["main"]() == 0
+    assert json.loads(ledger.read_text().splitlines()[0])["incremental_allowance"] == 150
+
+
 def test_pair_is_not_started_without_worst_case_reserve():
     assert not can_afford(spent=63.0, reserve=4.0, limit=66.6)
 

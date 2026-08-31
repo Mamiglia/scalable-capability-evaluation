@@ -1,6 +1,6 @@
 {
-  "identifiable_blocks": 63,
-  "top_up_blocks": 59,
-  "needs_historical_backfill_blocks": 17,
-  "pair_items": 1265
+  "identifiable_blocks": 74,
+  "top_up_blocks": 67,
+  "needs_historical_backfill_blocks": 6,
+  "pair_items": 1525
 }

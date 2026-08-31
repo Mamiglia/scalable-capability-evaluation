@@ -9,6 +9,9 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
+from inspect_ai.log import read_eval_log_samples
+
+from judge.util import extract_score
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -93,6 +96,9 @@ def coverage_blocks(config: dict, rollouts: pd.DataFrame, verdicts: pd.DataFrame
                     quartiles: pd.DataFrame) -> pd.DataFrame:
     releases = config["releases"]
     canonical = sorted(rollouts.loc[rollouts.is_canonical, "model"].dropna().unique())
+    backfill = sorted(rollouts.loc[
+        rollouts.get("is_historical_backfill", pd.Series(False, index=rollouts.index)),
+        "model"].dropna().unique())
     targets = config["candidates"]
     judges = [judge.split("/")[-1] for group in config["judges"].values() for judge in group]
     q1 = quartiles[quartiles.item_quartile == 1][["bench", "item"]].copy()
@@ -135,6 +141,25 @@ def coverage_blocks(config: dict, rollouts: pd.DataFrame, verdicts: pd.DataFrame
                 recommended = choose_pairs(existing, candidates, config["desired_direct_anchors"])
                 recommendations = recommended.opponent.tolist()
                 attainable = len(set(direct) | set(recommendations))
+                historical_recommendations = []
+                if attainable < config["minimum_anchors"]:
+                    historical = canonical_anchor_models(backfill, target, judge, releases)
+                    historical = [anchor for anchor in historical
+                                  if _joint_correct_items(q1_rollouts, bench, target, anchor)]
+                    already = sorted(set(direct) | set(recommendations))
+                    historical_candidates = pd.DataFrame({
+                        "target": target,
+                        "opponent": historical,
+                        "hard_accuracy": [accuracy.get((bench, anchor), float("nan"))
+                                          for anchor in historical],
+                    })
+                    historical_recommendations = choose_pairs(
+                        pd.DataFrame({"target": target, "opponent": already}),
+                        historical_candidates,
+                        config["minimum_anchors"],
+                    ).opponent.tolist()
+                    recommendations.extend(historical_recommendations)
+                    attainable = len(set(direct) | set(recommendations))
                 accuracies = [accuracy.get((bench, model)) for model in connected]
                 accuracies = [value for value in accuracies if pd.notna(value)]
                 abilities = [ability.get(model) for model in connected]
@@ -150,6 +175,7 @@ def coverage_blocks(config: dict, rollouts: pd.DataFrame, verdicts: pd.DataFrame
                     "bench": bench, "judge": judge, "target": target,
                     "eligible_anchors": _names(anchors), "connected_anchors": _names(connected),
                     "direct_anchors": _names(direct), "recommended_anchors": _names(recommendations),
+                    "historical_backfill_anchors": _names(historical_recommendations),
                     "eligible_anchor_count": len(anchors), "connected_anchor_count": len(connected),
                     "direct_anchor_count": len(direct), "attainable_direct_anchor_count": attainable,
                     "accuracy_proxy_min": min(accuracies) if accuracies else float("nan"),
@@ -170,6 +196,7 @@ def pair_items(blocks: pd.DataFrame, rollouts: pd.DataFrame, verdicts: pd.DataFr
     rows = []
     for block in blocks.itertuples(index=False):
         anchors = json.loads(block.recommended_anchors)
+        historical = set(json.loads(getattr(block, "historical_backfill_anchors", "[]")))
         bench = rollouts[(rollouts.bench == block.bench)
                          & (rollouts.item_quartile == 1)]
         for opponent in anchors:
@@ -177,7 +204,9 @@ def pair_items(blocks: pd.DataFrame, rollouts: pd.DataFrame, verdicts: pd.DataFr
             ordered = sorted(common, key=lambda item: hashlib.sha256(
                 f"{block.bench}|{block.target}|{opponent}|{item}".encode()).hexdigest())[:limit]
             rows.extend({"bench": block.bench, "judge": block.judge, "target": block.target,
-                         "opponent": opponent, "item": item, "reason": "missing_direct_anchor"}
+                         "opponent": opponent, "item": item,
+                         "reason": "historical_backfill" if opponent in historical
+                         else "missing_direct_anchor"}
                         for item in ordered)
     return pd.DataFrame(rows, columns=PAIR_COLUMNS)
 
@@ -203,6 +232,18 @@ def _load_config(path: Path) -> dict:
     return {**base, **config}
 
 
+def historical_rollouts(sources: dict[str, dict[str, str]]) -> pd.DataFrame:
+    rows = []
+    for bench, models in sources.items():
+        for model, path in models.items():
+            for sample in read_eval_log_samples(str(_path(path)), all_samples_required=False):
+                rows.append({"bench": bench, "model": model, "item": str(sample.id),
+                             "correct": extract_score(sample), "is_canonical": False,
+                             "is_historical_backfill": True})
+    return pd.DataFrame(rows, columns=[
+        "bench", "model", "item", "correct", "is_canonical", "is_historical_backfill"])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
@@ -212,11 +253,19 @@ def main() -> None:
                                 columns=["bench", "model", "item", "correct", "is_canonical"])
     frontier = pd.read_parquet(_path(config["frontier_rollouts"]))
     canonical = canonical[canonical.is_canonical]
+    canonical["is_historical_backfill"] = False
     frontier = frontier.copy()
     frontier["is_canonical"] = False
+    frontier["is_historical_backfill"] = False
     present = pd.MultiIndex.from_frame(canonical[["bench", "model"]]).unique()
     frontier_keys = pd.MultiIndex.from_frame(frontier[["bench", "model"]])
-    rollouts = pd.concat([canonical, frontier[~frontier_keys.isin(present)]], ignore_index=True)
+    historical = historical_rollouts(config.get("historical_backfill", {}))
+    historical_keys = pd.MultiIndex.from_frame(historical[["bench", "model"]])
+    rollouts = pd.concat([
+        canonical,
+        frontier[~frontier_keys.isin(present)],
+        historical[~historical_keys.isin(present)],
+    ], ignore_index=True)
     verdicts = pd.concat([pd.read_parquet(_path(path)) for path in config["verdicts"]], ignore_index=True)
     quartiles = pd.read_csv(_path(config["quartiles"]), dtype={"item": str})
     rollouts["item"] = rollouts.item.astype(str)

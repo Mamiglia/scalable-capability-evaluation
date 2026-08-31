@@ -14,6 +14,7 @@ stable_items = module["stable_items"]
 choose_pairs = module["choose_pairs"]
 coverage_blocks = module["coverage_blocks"]
 pair_items = module["pair_items"]
+historical_rollouts = module.get("historical_rollouts")
 
 
 def test_anchor_is_eligible_when_older_than_target_or_judge():
@@ -103,3 +104,55 @@ def test_coverage_skips_invalid_early_anchor_for_later_viable_topup():
     block = coverage_blocks(config, rollouts, verdicts, quartiles).iloc[0]
     assert json.loads(block.recommended_anchors) == ["z-valid"]
     assert block.status == "identifiable"
+
+
+def test_historical_backfill_is_used_only_below_four_viable_canonical_anchors():
+    config = {"releases": {"target": "2024-01-01", "judge": "2024-01-01",
+                           **{name: "2023-01-01" for name in
+                              ["a", "b", "c", "d", "old-1", "old-2", "old-3", "old-4"]}},
+              "candidates": ["target"], "judges": {"checkpoint": ["judge"]},
+              "desired_direct_anchors": 6, "minimum_anchors": 4}
+    quartiles = pd.DataFrame({"bench": ["bench"], "item": ["q1"], "item_quartile": [1]})
+    rollouts = pd.DataFrame({
+        "bench": ["bench"] * 9,
+        "model": ["target", "a", "b", "c", "d", "old-1", "old-2", "old-3", "old-4"],
+        "item": ["q1"] * 9,
+        "correct": [True] * 9,
+        "is_canonical": [True] * 5 + [False] * 4,
+        "is_historical_backfill": [False] * 5 + [True] * 4,
+    })
+    verdicts = pd.DataFrame(columns=[
+        "bench", "judge", "item", "model_left", "model_right", "pick_left"])
+
+    enough = coverage_blocks(config, rollouts, verdicts, quartiles).iloc[0]
+    assert json.loads(enough.recommended_anchors) == ["a", "b", "c", "d"]
+    assert json.loads(enough.historical_backfill_anchors) == []
+
+    rollouts.loc[rollouts.model == "d", "correct"] = False
+    short = coverage_blocks(config, rollouts, verdicts, quartiles).iloc[0]
+    assert json.loads(short.recommended_anchors) == ["a", "b", "c", "old-1"]
+    assert json.loads(short.historical_backfill_anchors) == ["old-1"]
+    assert short.attainable_direct_anchor_count == 4
+    selected = pair_items(pd.DataFrame([short]), rollouts.assign(item_quartile=1), verdicts, limit=8)
+    assert selected[selected.opponent == "old-1"].reason.tolist() == ["historical_backfill"]
+
+    rollouts.loc[rollouts.model.isin(["a", "b", "c", "d"]), "correct"] = False
+    early = coverage_blocks(config, rollouts, verdicts, quartiles).iloc[0]
+    assert json.loads(early.historical_backfill_anchors) == ["old-1", "old-2", "old-3", "old-4"]
+    assert early.status == "identifiable"
+
+
+def test_historical_rollouts_labels_only_configured_sources(tmp_path, monkeypatch):
+    source = tmp_path / "source.eval"
+    source.touch()
+    sample = type("Sample", (), {"id": "item-1"})()
+    globals_ = historical_rollouts.__globals__
+    monkeypatch.setitem(globals_, "read_eval_log_samples", lambda *_args, **_kwargs: [sample])
+    monkeypatch.setitem(globals_, "extract_score", lambda _: True)
+
+    rows = historical_rollouts({"gpqa": {"approved": str(source)}})
+
+    assert rows.to_dict("records") == [{
+        "bench": "gpqa", "model": "approved", "item": "item-1", "correct": True,
+        "is_canonical": False, "is_historical_backfill": True,
+    }]

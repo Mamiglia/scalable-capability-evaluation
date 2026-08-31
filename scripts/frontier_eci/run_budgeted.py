@@ -94,6 +94,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("configs", nargs="+", type=Path)
     parser.add_argument("--baseline", required=True, type=float)
+    parser.add_argument("--limit", type=float,
+                        help="incremental spend cap for this key/run")
     parser.add_argument("--total-limit", type=float, default=200)
     parser.add_argument("--historical-spend", type=float, default=133.4)
     parser.add_argument("--reserve-multiplier", type=float, default=1.5)
@@ -103,8 +105,11 @@ def main() -> int:
     parser.add_argument("--ledger", required=True, type=Path)
     args = parser.parse_args()
     upper = reserves(args.preflight) if args.preflight else {}
-    allowance = remaining_budget(
+    available = remaining_budget(
         total_limit=args.total_limit, historical_spend=args.historical_spend)
+    if args.limit is not None and args.limit <= 0:
+        parser.error("--limit must be positive")
+    allowance = args.limit if args.limit is not None else available
     header = ledger_header(args.ledger)
     if header:
         if header["baseline"] != args.baseline:
@@ -112,6 +117,8 @@ def main() -> int:
         if (header["historical_spend"], header["total_limit"]) != (
                 args.historical_spend, args.total_limit):
             raise ValueError("ledger budget conflicts with supplied budget")
+        if header["incremental_allowance"] != allowance:
+            raise ValueError("ledger incremental allowance conflicts with supplied limit")
         baseline = header["baseline"]
     else:
         if args.ledger.exists() and args.ledger.stat().st_size:
