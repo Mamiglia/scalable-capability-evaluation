@@ -1,0 +1,38 @@
+model,epoch_model,eci,mapping_status
+claude-3-opus,Claude 3 Opus,126.69,mapped
+claude-3.5-sonnet-0620,Claude 3.5 Sonnet,130.0,mapped
+claude-3.5-sonnet-1022,Claude 3.5 Sonnet (October 2024),134.21,mapped
+claude-3.7-sonnet,Claude 3.7 Sonnet,141.63,mapped
+claude-opus-4.6,Claude Opus 4.6,155.16,mapped
+claude-opus-4.7,Claude Opus 4.7,156.15,mapped
+claude-sonnet-4.5,Claude Sonnet 4.5,146.82,mapped
+deepseek-r1-0528,DeepSeek-R1 (May 2025),141.8,mapped
+deepseek-v3.2,DeepSeek-V3.2,146.37,mapped
+gemini-2.0-flash-001,Gemini 2.0 Flash (Feb 2025),135.6,mapped
+gemini-3-pro-preview,Gemini 3 Pro,153.19,mapped
+gemini-3.5-flash,Gemini 3.5 Flash,154.52,mapped
+gemma-3-12b-it,,,not_in_epoch_eci
+gemma-4-e2b-it,Gemma 4 31B IT,142.22,mapped
+glm-4.6,GLM-4.6,141.05,mapped
+glm-5.2,GLM-5.2,152.18,mapped
+glm-5.3,,,not_in_epoch_eci
+gpt-4-1106,GPT-4 Turbo (Nov 2023),125.9,mapped
+gpt-4.1,GPT-4.1,137.29,mapped
+gpt-4o-0806,GPT-4o (Aug 2024),128.77,mapped
+gpt-4o-1120,GPT-4o (Nov 2024),129.06,mapped
+gpt-5,GPT-5,150.0,mapped
+granite-4.1-8b,,,not_in_epoch_eci
+kimi-k2.6,Kimi K2.6,150.98,mapped
+kimi-k3,Kimi K3,157.05,mapped
+ling-2.6-flash,,,not_in_epoch_eci
+mistral-medium-3,Mistral Medium 3,135.13,mapped
+muse-glimmer-30b,,,not_in_epoch_eci
+nvidia-nemotron-3-ultra-550b-a55b-bf16,Nemotron 3 Ultra,142.82,mapped
+nvidia-nemotron-3.5-lightning-30b-a3b-bf16,,,not_in_epoch_eci
+o3,o3,147.02,mapped
+o3-mini-0131-medium,o3-mini,141.3,mapped
+qwen3-32b,,,not_in_epoch_eci
+qwen3.5-4b,,,not_in_epoch_eci
+qwen3.5-9b,,,not_in_epoch_eci
+qwen3.8-2.4t-a95b,,,not_in_epoch_eci
+qwen3.8-27b,,,not_in_epoch_eci

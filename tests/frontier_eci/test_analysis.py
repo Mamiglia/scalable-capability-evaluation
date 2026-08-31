@@ -11,6 +11,7 @@ merge_rollouts = module["merge_rollouts"]
 prefix_verdicts = module["prefix_verdicts"]
 consensus_verdicts = module["consensus_verdicts"]
 predict_block = module["predict_block"]
+plot_frontier_style = module["plot_frontier_style"]
 
 
 def test_target_actual_does_not_enter_calibration():
@@ -75,3 +76,22 @@ def test_canonical_rollouts_win_when_model_is_already_present():
                              "correct": [False, False], "is_canonical": [True, True]})
     merged = merge_rollouts(canonical, frontier)
     assert merged.set_index("model").correct.to_dict() == {"a": True, "b": False}
+
+
+def test_frontier_plot_is_narrow_and_keeps_svg_text_editable(tmp_path):
+    table = pd.DataFrame({
+        "target_release": ["2024-11-20", "2026-07-16"],
+        "judge_release": ["2025-03-25"] * 2,
+        "actual": [0.4, 0.8], "predicted": [0.5, 0.7],
+        "predicted_low": [0.3, 0.6], "predicted_high": [0.7, 0.8],
+    })
+    plot_frontier_style(table, "gpt-4o-2024-11-20", "gpqa", 2,
+                        tmp_path, "band")
+    stem = tmp_path / "gpt-4o-2024-11-20_gpqa_q2_frontier_band"
+    assert stem.with_suffix(".png").exists()
+    assert stem.with_suffix(".pdf").exists()
+    svg = stem.with_suffix(".svg")
+    assert "<text" in svg.read_text()
+    from PIL import Image
+    with Image.open(stem.with_suffix(".png")) as image:
+        assert image.width <= 650

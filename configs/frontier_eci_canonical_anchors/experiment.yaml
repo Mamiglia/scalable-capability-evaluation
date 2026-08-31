@@ -23,6 +23,9 @@ historical_backfill:
     claude-3.5-sonnet-1022: data/swe_bench_mini/frontier-eci-canonical-anchors/claude-3.5-sonnet-1022/0/claude-3.5-sonnet-1022.eval
     o3-mini-0131-medium: data/swe_bench_mini/frontier-eci-canonical-anchors/o3-mini-0131-medium/0/o3-mini-0131-medium.eval
     gemini-2.0-flash-001: data/swe_bench_mini/frontier-eci-canonical-anchors/gemini-2.0-flash-001/0/gemini-2.0-flash-001.eval
+actual_supplements:
+  swe_bench_mini:
+    gemini-3-pro-preview: data/swe_bench_mini/frontier-eci/gemini-3-pro-preview/0/gemini-3-pro-preview.eval
 extra_transcripts:
   gpqa:
     gpt-4-1106: data/gpqa/a288e1a9/gpt-4-1106/0/gpt-4-1106-preview.eval
