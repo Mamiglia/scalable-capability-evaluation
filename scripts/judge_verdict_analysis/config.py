@@ -136,7 +136,7 @@ class AnalysisConfig:
     fit_pca_algorithm: str = "randomized"  # Retained only for the obsolete fold-local PCA runners.
     pc_basis_root: Path | None = None  # Frozen global basis shared by every PC fold and lesion.
     resume_completed_folds: bool = False  # Skip complete atomic fold outputs when resuming a remote run.
-    elastic_net_cs: tuple[float, ...] = (0.01, 0.1, 1.0, 10.0)  # Elastic-net inverse penalties.
+    elastic_net_cs: tuple[float, ...] = (0.0001, 0.0003, 0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0)  # Broad pure-L1 bracket for raw and PC fits.
     elastic_net_l1_ratios: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)  # Elastic-net L1 shares.
     selection_min_fold_share: float = 2 / 3  # Inner-fold share required to retain a base feature.
     ridge_cs: tuple[float, ...] = (0.00001, 0.00003, 0.0001, 0.0003, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0)  # Broad bracket for raw and standardized-PC L2 fits.
