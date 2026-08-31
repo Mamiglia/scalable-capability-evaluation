@@ -27,7 +27,7 @@ while IFS= read -r table; do
 done < <(find "$fold_root" -name run-specifications.csv -type f | sort)
 tasks=$((folds * per_fold))
 ((tasks > 0)) || { echo "no lesion specifications" >&2; exit 2; }
-sbatch --parsable --array="0-$((tasks - 1))%128" \
+sbatch --parsable --array="0-$((tasks - 1))" \
   --export=ALL,JV_CODE_DIR,JV_PYTHON,JV_PACKAGES \
   "$repo/scripts/judge_verdict_analysis/lesion_spec.sbatch" \
   "$matrix_root" "$results_dir" "$feature_space" "$penalty" \
