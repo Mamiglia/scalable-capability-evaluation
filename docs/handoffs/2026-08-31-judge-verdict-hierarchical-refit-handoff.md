@@ -145,7 +145,7 @@ Expected Slurm inventory:
 
 The thousands of lesion jobs are therefore the expected
 fold-by-specification expansion, not repeated hyperparameter searches. Current
-Slurm scripts allow 24 hours for a full fold or lesion task and four hours for
+Slurm scripts allow 48 hours for a full fold, 24 hours for a lesion task, and four hours for
 the post-fit cell summary; verify the CPU partition limit before submission.
 
 `final_report.py` consumes the native rerun layout directly:

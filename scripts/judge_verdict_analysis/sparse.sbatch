@@ -4,7 +4,7 @@
 #SBATCH --array=0-15%4
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=16G
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --requeue
 #SBATCH --open-mode=append
 #SBATCH --output=logs/%x-%A_%a.out
