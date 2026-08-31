@@ -8,6 +8,10 @@ verdicts:
 pair_item_cap: 8
 minimum_anchors: 4
 desired_direct_anchors: 6
+releases:
+  claude-3.5-sonnet-1022: '2024-10-22'
+  o3-mini-0131-medium: '2025-01-31'
+  gemini-2.0-flash-001: '2025-02-05'
 historical_backfill:
   gpqa:
     gpt-4-1106: data/gpqa/a288e1a9/gpt-4-1106/0/gpt-4-1106-preview.eval

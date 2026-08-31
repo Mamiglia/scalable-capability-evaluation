@@ -15,6 +15,7 @@ choose_pairs = module["choose_pairs"]
 coverage_blocks = module["coverage_blocks"]
 pair_items = module["pair_items"]
 historical_rollouts = module.get("historical_rollouts")
+load_config = module["_load_config"]
 
 
 def test_anchor_is_eligible_when_older_than_target_or_judge():
@@ -156,3 +157,18 @@ def test_historical_rollouts_labels_only_configured_sources(tmp_path, monkeypatc
         "bench": "gpqa", "model": "approved", "item": "item-1", "correct": True,
         "is_canonical": False, "is_historical_backfill": True,
     }]
+
+
+def test_side_releases_extend_base_releases(tmp_path):
+    base = tmp_path / "base.yaml"
+    base.write_text("releases:\n  base-only: '2024-01-01'\n")
+    side = tmp_path / "side.yaml"
+    side.write_text(
+        f"base_experiment: {base}\n"
+        "releases:\n  historical-only: '2023-01-01'\n"
+    )
+
+    config = load_config(side)
+
+    assert config["releases"]["base-only"] == "2024-01-01"
+    assert config["releases"]["historical-only"] == "2023-01-01"

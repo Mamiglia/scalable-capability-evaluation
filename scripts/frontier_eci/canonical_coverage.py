@@ -228,8 +228,9 @@ def _load_config(path: Path) -> dict:
             if name:
                 releases.setdefault(name, str(spec["release_date"])[:10])
                 releases.setdefault(release_key(name), str(spec["release_date"])[:10])
+    releases.update(config.get("releases", {}))
     base["releases"] = releases
-    return {**base, **config}
+    return {**base, **config, "releases": releases}
 
 
 def historical_rollouts(sources: dict[str, dict[str, str]]) -> pd.DataFrame:
