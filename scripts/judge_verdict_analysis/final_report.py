@@ -1128,9 +1128,9 @@ def _pack_performance_figure(table: pd.DataFrame, output: Path) -> tuple[Path, P
     metrics = (
         ("accuracy", "Accuracy"), ("log_loss", "Log loss"),
         ("accuracy_fraction_of_ceiling", "Accuracy / ceiling"),
-        ("held_out_deviance_explained", "Deviance explained"),
+        ("held_out_deviance_explained", "Deviance recovery"),
     )
-    figure, axes = plt.subplots(2, 2, figsize=(3.35, 2.45))
+    figure, axes = plt.subplots(2, 2, figsize=(3.5, 2.45))
     positions = np.arange(len(PRIMARY_VARIANTS))[::-1]
     for index, (axis, (metric, label)) in enumerate(zip(axes.flat, metrics)):
         values = table[metric].to_numpy(float)
@@ -1148,8 +1148,8 @@ def _pack_performance_figure(table: pd.DataFrame, output: Path) -> tuple[Path, P
         axis.set_xlabel(label); _style(axis)
         axis.spines["bottom"].set_bounds(low, high)
         axis.spines["left"].set_bounds(positions.min(), positions.max())
-    figure.subplots_adjust(left=0.28, right=0.98, bottom=0.24, top=0.97,
-                           wspace=0.55, hspace=0.95)
+    figure.subplots_adjust(left=0.27, right=0.93, bottom=0.24, top=0.97,
+                           wspace=0.65, hspace=0.95)
     return _write_figure(figure, output, "performance")
 
 
