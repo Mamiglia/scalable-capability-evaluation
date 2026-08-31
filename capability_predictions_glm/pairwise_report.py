@@ -489,6 +489,11 @@ def build_core_tables(
     }
 
 
+def refit_matches_frozen(values: dict[str, object], frozen: dict[str, object]) -> bool:
+    """Return whether a refit diagnostic preserves every frozen hyperparameter."""
+    return all(key in values and values[key] == expected for key, expected in frozen.items())
+
+
 def validate_ablation_download(ablation_root: Path) -> pd.DataFrame:
     rows = []
     for variant, (fit_name, _, space, _) in VARIANTS.items():
@@ -511,13 +516,15 @@ def validate_ablation_download(ablation_root: Path) -> pd.DataFrame:
                     or manifest.get("unique_specifications") != expected_specs):
                 raise RuntimeError(f"invalid completed fold manifest: {fold}")
             frozen = json.loads((fold / "frozen-hyperparameters.json").read_text())
+            if set(frozen) != {"C", "l1_ratio", "benchmark_deviation_penalty"}:
+                raise RuntimeError(f"invalid frozen capability hyperparameters: {fold}")
             diagnostics = sorted((fold / "diagnostics").glob("*.json"))
             diagnostic_count += len(diagnostics)
             for path in diagnostics:
                 if path.stem in {"full", "null"}:
                     continue
                 values = json.loads(path.read_text())
-                if {key: values.get(key) for key in ("C", "l1_ratio")} != frozen:
+                if not refit_matches_frozen(values, frozen):
                     raise RuntimeError(f"refit hyperparameters changed: {path}")
                 converged += int(values.get("converged") is True)
         expected_diagnostics = 16 * (expected_specs + 2)
