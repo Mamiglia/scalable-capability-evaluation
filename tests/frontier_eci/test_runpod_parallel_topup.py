@@ -25,6 +25,15 @@ def test_partition_is_deterministic_disjoint_and_complete():
     assert len(assigned) == len(set(assigned)) == len(paths)
 
 
+def test_shard_groups_round_robins_each_judge_queue():
+    paths = [Path(f"runs/gpqa/j/{i}.yaml") for i in range(5)]
+    queues = module["shard_groups"]({"j": paths}, workers_per_judge=2)
+    assert queues == {
+        "j-0": ("j", paths[::2]),
+        "j-1": ("j", paths[1::2]),
+    }
+
+
 def test_watchdog_enforces_usage_and_inflight_thresholds():
     assert not should_stop(spent=100, active_workers=5, max_reserve=5.03076)
     assert should_stop(spent=125, active_workers=1, max_reserve=1)

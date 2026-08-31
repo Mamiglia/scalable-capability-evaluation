@@ -39,6 +39,15 @@ def partition_configs(paths, judges=JUDGES):
     return groups
 
 
+def shard_groups(groups, workers_per_judge):
+    queues = {}
+    for judge, configs in groups.items():
+        count = min(workers_per_judge, len(configs))
+        for shard in range(count):
+            queues[f"{judge}-{shard}"] = (judge, configs[shard::count])
+    return queues
+
+
 def should_stop(*, spent, active_workers, max_reserve,
                 usage_limit=125, aggregate_limit=150):
     return spent >= usage_limit or spent + active_workers * max_reserve >= aggregate_limit
@@ -93,12 +102,15 @@ def main():
     parser.add_argument("--reserve-multiplier", type=float, default=1.5)
     parser.add_argument("--poll-seconds", type=float, default=60)
     parser.add_argument("--max-resumes", type=int, default=2)
+    parser.add_argument("--judges", nargs="+", default=list(JUDGES))
+    parser.add_argument("--workers-per-judge", type=int, default=1)
     args = parser.parse_args()
 
     paths = sorted(args.config_root.glob("*/*/*.yaml"))
-    groups = partition_configs(paths)
+    groups = partition_configs(paths, judges=args.judges)
     if not paths or any(not group for group in groups.values()):
         raise ValueError("every judge must have at least one config")
+    queues = shard_groups(groups, args.workers_per_judge)
     with args.preflight.open(newline="") as handle:
         max_reserve = args.reserve_multiplier * max(
             float(row["upper_cost"]) for row in csv.DictReader(handle))
@@ -106,19 +118,19 @@ def main():
     args.run_root.mkdir(parents=True, exist_ok=True)
     workers = {}
 
-    def start(judge, attempt):
-        ledger = args.run_root / f"ledger-{judge}.jsonl"
-        log = (args.run_root / f"worker-{judge}-attempt{attempt}.log").open("a")
+    def start(worker_id, judge, configs, attempt):
+        ledger = args.run_root / f"ledger-{worker_id}.jsonl"
+        log = (args.run_root / f"worker-{worker_id}-attempt{attempt}.log").open("a")
         process = subprocess.Popen(
-            worker_command(judge, groups[judge], baseline=args.baseline,
+            worker_command(judge, configs, baseline=args.baseline,
                            limit=args.worker_limit, preflight=args.preflight, ledger=ledger),
             stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
         )
-        workers[judge] = {"process": process, "attempt": attempt, "log": log,
-                          "handled": False}
+        workers[worker_id] = {"process": process, "attempt": attempt, "log": log,
+                              "handled": False, "judge": judge, "configs": configs}
 
-    for judge in JUDGES:
-        start(judge, 0)
+    for worker_id, (judge, configs) in queues.items():
+        start(worker_id, judge, configs, 0)
 
     pid_path = args.run_root / "worker-pids.json"
     watchdog_path = args.run_root / "watchdog.csv"
@@ -127,7 +139,7 @@ def main():
 
     try:
         while True:
-            for judge, worker in list(workers.items()):
+            for worker_id, worker in list(workers.items()):
                 status = worker["process"].poll()
                 if status is None or worker["handled"]:
                     continue
@@ -138,13 +150,13 @@ def main():
                 if status == 2 or worker["attempt"] >= args.max_resumes:
                     terminate(workers)
                     return status or 1
-                start(judge, worker["attempt"] + 1)
+                start(worker_id, worker["judge"], worker["configs"], worker["attempt"] + 1)
 
-            active = {judge: worker for judge, worker in workers.items()
+            active = {worker_id: worker for worker_id, worker in workers.items()
                       if worker["process"].poll() is None}
             pid_path.write_text(json.dumps({
-                judge: {"pid": worker["process"].pid, "attempt": worker["attempt"]}
-                for judge, worker in workers.items()
+                worker_id: {"pid": worker["process"].pid, "attempt": worker["attempt"]}
+                for worker_id, worker in workers.items()
             }, indent=2) + "\n")
             if not active:
                 break
