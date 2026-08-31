@@ -39,20 +39,23 @@ For each outer fold and each raw/PC, L1/L2 variant:
 1. Build the complete crossed design: population, judge, benchmark, and
    judge-by-benchmark slopes; global, judge, benchmark, cell, and nested-item
    intercepts.
-2. Select the global `C` and four positive relative penalty ratios from only
-   the outer-training rows using grouped inner-CV log loss. Judge, benchmark,
-   and cell ratios use `0.1, 0.3, 1, 3, 10, 30`. The item-intercept grid adds
-   `100, 300, 1,000`, and `1,000,000`; the last value is the practical
-   zero-item-heterogeneity limit rather than an unresolved finite boundary.
-   Start at one and stop when unchanged or after two coordinate passes. No
-   Bayesian sampler or new dependency is required.
-3. Apply penalty-family-correct column scaling. For relative penalty `r`, use
+2. Estimate five coefficient-block scales from the outer-training likelihood
+   with the installed NumPyro variational backend: population, judge,
+   benchmark, judge-by-benchmark, and item. L1 uses Laplace coefficient priors;
+   L2 uses Gaussian coefficient priors. The relative penalties are
+   `b_population / b_group` for L1 and
+   `(sigma_population / sigma_group)^2` for L2. No outer-test rows or
+   held-out-item predictive loss participate in this variance-component fit.
+3. With those four relative ratios fixed, select only the global `C` by grouped
+   inner-CV log loss on the outer-training rows.
+4. Apply penalty-family-correct column scaling. For relative penalty `r`, use
    `1 / r` under L1 and `1 / sqrt(r)` under L2.
-4. Fit the outer-training full model and save `C`, the four ratios, tuning
+5. Fit the outer-training full model and save `C`, the five learned scales,
+   four relative ratios, tuning
    scores, coefficients, predictions, and convergence diagnostics.
-5. Freeze `C` and all four ratios for the intercept-only, Singular, Unique,
-   block, and family refits in that outer fold. Do not re-estimate any
-   hyperparameter during lesioning.
+6. Freeze `C` and all four ratios for the intercept-only, Singular, Unique,
+   block/family, and capability-adjusted refits in that outer fold. Do not
+   re-estimate any hyperparameter during these refits.
 
 The global intercept remains in the penalised design, matching the approved
 regularise-everything specification.
@@ -88,12 +91,13 @@ delta-log-loss contribution, and whether the leading raw/PC effects change.
 
 Report both:
 
-- repeat-limited accuracy headroom recovered,
-  `(accuracy - 0.5) / (repeat agreement - 0.5)`; and
+- direct accuracy as a fraction of the empirical repeat-agreement ceiling,
+  `accuracy / repeat agreement`, reported across both ceiling endpoints; and
 - held-out deviance explained relative to the intercept-only model,
   `1 - full log loss / intercept-only log loss`.
 
-Do not call accuracy-headroom recovery “variance explained”.
+Do not substitute chance-adjusted headroom for the requested direct
+accuracy/ceiling percentage.
 
 Retain the current overall figures and generate equivalent model-dependent
 result packs for:
@@ -162,36 +166,58 @@ the full jobs.
 
 ## Active SWC rerun
 
-The `98b5a3a` tree was cancelled and retained after its first four PC-L2 folds
-all selected the finite item-ratio maximum (`30`). Their loss curves were still
-improving slightly at that endpoint. Nothing was deleted or overwritten.
+The fixed-grid CV-ratio trees (`98b5a3a` and `cff3f13`) were cancelled and
+retained for audit after exposing why held-out-item CV drives the item penalty
+to infinity. Nothing was deleted or overwritten.
 
-Replacement staged code commit: `cff3f13` (core implementation `d0c221e`).
-
-```text
-staging/judge-hierarchical-refit-20260831-cff3f13/
-results/judge-hierarchical-refit-20260831-cff3f13-29e4b847-27dbd491/
-```
-
-Replacement full-fit arrays:
+Final estimator code lineage:
 
 ```text
-raw L1  3471491
-raw L2  3471490
-PC L1   3471500
-PC L2   3471505
+d0c221e  shared fitted-ratio/frozen-lesion plumbing
+6504dff  training-likelihood Laplace/Gaussian variance components
+919a31f  remove full/capability/lesion array throttles
+ef96a8f  bracket Raw-L2 C below 0.001
+915d3b4  bracket PC-L2 C above 0.05
+fdacbe0  bracket Raw-L1 C below 0.01
+b21dcf7  report direct accuracy / empirical ceiling
 ```
 
-Dependent jobs:
+Canonical result roots are split only because boundary checks were resolved
+without rerunning already valid variants:
 
 ```text
-primary aggregates:        raw-L1 3471518, raw-L2 3471512, PC-L1 3471511, PC-L2 3471515
-capability fold arrays:     raw-L1 3471517, raw-L2 3471521, PC-L1 3471514, PC-L2 3471513
-capability aggregates:      raw-L1 3471523, raw-L2 3471525, PC-L1 3471524, PC-L2 3471526
-lesion preparation arrays: raw-L1 3471510, raw-L2 3471519, PC-L1 3471520, PC-L2 3471516
-lesion orchestrators:       raw-L1 3471527, raw-L2 3471529, PC-L1 3471528, PC-L2 3471530
+PC L1:
+results/judge-hierarchical-refit-20260831-919a31f-29e4b847-27dbd491/
+
+Raw L2:
+results/judge-hierarchical-l2-20260831-ef96a8f-29e4b847-27dbd491/
+
+PC L2:
+results/judge-hierarchical-pcl2-20260831-915d3b4-29e4b847-27dbd491/
+
+Raw L1 (running):
+results/judge-hierarchical-rawl1-20260831-fdacbe0-29e4b847-27dbd491/
 ```
 
-The orchestrators verify the exact prepared inventory before releasing the
-large lesion arrays and record their dynamically assigned child IDs in the
-staging logs.
+PC L1, Raw L2, and PC L2 are complete through full fits, frozen-hyperparameter
+capability companions, lesions, and judge/benchmark/cell summaries. Their
+report bundles are hash-validated locally under:
+
+```text
+judge_results/verdict_interpretability/hierarchical-refit-20260831-final/
+```
+
+Final Raw-L1 jobs:
+
+```text
+full array      3478040
+aggregate       3478063
+capability      3478064
+prepare         3478062
+capability agg  3478066
+orchestrator    3478065
+```
+
+All arrays are unthrottled; Slurm controls concurrency through available
+resources and priority. The orchestrators still verify exact prepared
+inventories before releasing lesion jobs.

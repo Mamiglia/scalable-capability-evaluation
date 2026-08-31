@@ -3,6 +3,20 @@
   "main_analysis": "analysis/rank_regression",
   "main_glob": "analysis/rank_regression/**",
   "label": "Rank\u2013accuracy fit (in-sample)",
+  "supplemental_controls": [
+    {
+      "analysis": "Pre-release time trend",
+      "root": "analysis/rank_regression/time_trend_control",
+      "scientific_scope": "same quarterly frontier points as judge figures; no ranking values or judge verdict outcomes"
+    }
+  ],
+  "supplemental_analyses": [
+    {
+      "analysis": "Pooled pre-release judges",
+      "root": "analysis/rank_regression/pooled_judges",
+      "scientific_scope": "target-specific pool of raw verdicts from strictly earlier judges"
+    }
+  ],
   "result_document": "../../../docs/results/2026-08-30-canonical-anchor-frontier-redo.md",
   "lifecycle_manifest": "provenance/final-lifecycle.json",
   "discarded_provenance": [

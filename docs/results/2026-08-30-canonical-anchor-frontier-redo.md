@@ -67,6 +67,59 @@ Q2–Q4 items.
 The figures use model release date on x, combined Q2–Q4 accuracy on y, a dashed judge-release line,
 black actuals, blue fitted values, dotted residuals, and 95% item-bootstrap uncertainty.
 
+## Pre-release time-trend control
+
+The deliberately dumber control ignores ranking values and verdict outcomes. For each judge ×
+benchmark, it fits a free-intercept linear regression of combined Q2–Q4 hard accuracy on release
+date using only the same eight quarterly frontier points shown in the judge figures that were
+released strictly before the judge, then extrapolates to the remaining frontier points. Models
+released on the judge date do not enter the fit. Thus every control panel has exactly the same
+black actual points as its corresponding judge panel. GPT-4o has no fitted control line because no
+frontier point predates its release; this is recorded as two expected fit failures, one per benchmark.
+
+- [Control figures](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/figures/):
+  20 PNG, 20 PDF, and 20 editable-text SVG files.
+- [Control fits](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/fits.csv)
+- [Control predictions](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/predictions.csv)
+- [Control summary](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/summary.json)
+- [Judge-vs-trend overlays](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/comparison/figures/):
+  10 PNG, 10 PDF, and 10 editable-text SVG files. Black points are actuals, blue is the judge
+  prediction, orange is the time trend, and the grey dashed line is judge release.
+- [Overlay table](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/comparison/comparison.csv)
+
+The control intervals use 1,000 aggregate binomial item bootstraps from each model's observed
+success count and item count. This preserves each model's marginal item uncertainty but not paired
+item-difficulty covariance across models. The control is intended only to show how much of the
+visual pattern can arise from historical capability growth.
+
+## Pooled pre-release judges
+
+For each frontier target × benchmark, this extension pools the raw Q1 verdicts from every judge
+released strictly before the target. The eight-item cap is applied within judge × unordered pair
+before pooling. One joint BT ranking and the same combined-Q2–Q4 linear/sigmoid mapping are then
+fit for that target. As in the main analysis, this mapping is descriptive and in-sample: every
+joined model with observed hard accuracy, including the frontier target, enters the mapping fit.
+Each eligible judge contributes its full frozen Q1 protocol block; there is no additional
+model-release cutoff inside that block.
+The eligible judges are treated as the fixed available ensemble; 1,000 bootstrap draws jointly
+resample Q1 item IDs across the pool and combined Q2–Q4 item IDs.
+
+Fourteen of 16 target × benchmark predictions succeed with all 1,000 draws. The two expected gaps
+are GPT-4o as the frontier target, because no judge predates it. The pool grows from GPT-4o alone
+for Claude 3.7 and o3, to three judges for GPT-5 and Gemini 3 Pro, and four for Opus 4.6, Opus 4.7,
+and Kimi K3. DeepSeek is not eligible for any current target because it was released after Kimi K3.
+
+- [Pooled figures](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/pooled_judges/figures/):
+  GPQA and SWE-mini band/points variants in PNG, PDF, and editable-text SVG.
+- [Pooled predictions](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/pooled_judges/predictions.csv)
+- [Pooled fit details](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/pooled_judges/fits.csv)
+- [Target-specific BT abilities](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/pooled_judges/abilities.csv)
+- [Pooled summary](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/pooled_judges/summary.json)
+
+The RunPod balance decreased by approximately $1.654 during this compute-only extension; this is a
+balance observation including ongoing volume billing, not an invoice allocation. No API calls were
+made.
+
 ## Provenance and cost
 
 The final paid corpus contains 3,220 audited responses: 3,219 latest-success rows plus one retained

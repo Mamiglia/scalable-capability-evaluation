@@ -340,7 +340,7 @@ def stratified_performance(root: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.D
 def recovery_metrics(
     root: Path, cells: pd.DataFrame, ceiling_path: Path | None = None,
 ) -> pd.DataFrame:
-    """Report accuracy headroom and held-out deviance recovery at every scope."""
+    """Report accuracy/ceiling and held-out deviance recovery at every scope."""
     references = []
     for variant in PRIMARY_VARIANTS:
         cell_root = _variant_root(root, variant, "lesion-cells")
@@ -390,14 +390,12 @@ def recovery_metrics(
     output = pd.concat(scoped, ignore_index=True)
     output["benchmark"] = output.get("benchmark", pd.Series(index=output.index)).fillna(
         output.get("bench", pd.Series(index=output.index)))
-    output["accuracy_headroom_recovered_at_raw_agreement"] = (
-        (output.accuracy - 0.5) / (output.repeat_agreement_upper - 0.5)
-    )
-    output["accuracy_headroom_recovered_at_wilson_lower"] = (
-        (output.accuracy - 0.5) / (output.repeat_agreement_lower - 0.5)
-    )
-    output["accuracy_headroom_recovered"] = output[
-        "accuracy_headroom_recovered_at_raw_agreement"]
+    output["accuracy_fraction_of_ceiling_lower"] = (
+        output.accuracy / output.repeat_agreement_upper)
+    output["accuracy_fraction_of_ceiling_upper"] = (
+        output.accuracy / output.repeat_agreement_lower)
+    output["accuracy_fraction_of_ceiling"] = output[
+        "accuracy_fraction_of_ceiling_lower"]
     output["held_out_deviance_explained"] = 1 - output.log_loss / output.intercept_log_loss
     return output.drop(columns=[
         "bench", "intercept_rows", "raw_agreement", "wilson_95_low",
@@ -1119,7 +1117,7 @@ def _pack_performance_figure(table: pd.DataFrame, output: Path) -> tuple[Path, P
         return None
     metrics = (
         ("accuracy", "Accuracy"), ("log_loss", "Log loss"),
-        ("accuracy_headroom_recovered", "Headroom recovered"),
+        ("accuracy_fraction_of_ceiling", "Accuracy / ceiling"),
         ("held_out_deviance_explained", "Deviance explained"),
     )
     figure, axes = plt.subplots(2, 2, figsize=(3.2, 2.2))
@@ -1128,7 +1126,7 @@ def _pack_performance_figure(table: pd.DataFrame, output: Path) -> tuple[Path, P
         values = table[metric].to_numpy(float)
         axis.plot(values, positions, "o", color="#333333", ms=4)
         low, high = np.floor(values.min() * 20) / 20, np.ceil(values.max() * 20) / 20
-        if metric in {"accuracy_headroom_recovered", "held_out_deviance_explained"}:
+        if metric in {"accuracy_fraction_of_ceiling", "held_out_deviance_explained"}:
             low, high = min(0, low), max(0, high)
         if low == high:
             low, high = low - 0.05, high + 0.05

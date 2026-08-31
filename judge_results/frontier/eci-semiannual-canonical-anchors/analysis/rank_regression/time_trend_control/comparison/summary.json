@@ -1,0 +1,8 @@
+{
+  "analysis": "Judge prediction vs pre-release time trend",
+  "target": "combined Q2\u2013Q4 accuracy",
+  "rows": 80,
+  "judges": 5,
+  "benchmarks": 2,
+  "missing_time_trend_rows": 16
+}

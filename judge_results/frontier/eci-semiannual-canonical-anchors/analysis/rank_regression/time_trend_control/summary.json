@@ -1,0 +1,12 @@
+{
+  "analysis": "Pre-release time trend",
+  "target": "combined Q2\u2013Q4 accuracy",
+  "fit": "free-intercept linear OLS on frontier models released strictly before each judge",
+  "uncertainty": "95% aggregate binomial item bootstrap",
+  "resamples": 1000,
+  "fit_blocks": 10,
+  "fit_failures": 2,
+  "prediction_rows": 80,
+  "frontier_prediction_rows": 80,
+  "comparison_rows": 80
+}
