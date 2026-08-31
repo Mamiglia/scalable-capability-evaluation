@@ -180,6 +180,10 @@ ef96a8f  bracket Raw-L2 C below 0.001
 915d3b4  bracket PC-L2 C above 0.05
 fdacbe0  bracket Raw-L1 C below 0.01
 b21dcf7  report direct accuracy / empirical ceiling
+f49c27f  report per-judge direct accuracy / ceiling
+30cfd44  polish overall and stratified report layouts
+4fec93f  prevent scoped performance-label clipping
+3035cdc  separate scoped endpoint ticks; definitive report code
 ```
 
 Canonical result roots are split only because boundary checks were resolved
@@ -195,28 +199,42 @@ results/judge-hierarchical-l2-20260831-ef96a8f-29e4b847-27dbd491/
 PC L2:
 results/judge-hierarchical-pcl2-20260831-915d3b4-29e4b847-27dbd491/
 
-Raw L1 (running):
+Raw L1:
 results/judge-hierarchical-rawl1-20260831-fdacbe0-29e4b847-27dbd491/
 ```
 
-PC L1, Raw L2, and PC L2 are complete through full fits, frozen-hyperparameter
+All four variants are complete through full fits, frozen-hyperparameter
 capability companions, lesions, and judge/benchmark/cell summaries. Their
-report bundles are hash-validated locally under:
+fit/lesion bundles are hash-validated locally under:
 
 ```text
 judge_results/verdict_interpretability/hierarchical-refit-20260831-final/
 ```
 
-Final Raw-L1 jobs:
+Final Raw-L1 execution included the unthrottled lesion array and an exact retry
+of 13 cluster-launch/admin failures. No model fit failed. Every fold finished
+with 252 predictions, item metrics, coefficient files and diagnostics.
+
+Final Raw-L1 downstream jobs:
 
 ```text
-full array      3478040
-aggregate       3478063
-capability      3478064
-prepare         3478062
-capability agg  3478066
-orchestrator    3478065
+lesion array    3490000
+exact retry     3490785
+finalize        3494291
+summarize       3494292
+cell analysis   3494293
 ```
+
+The definitive tables and 276 PNG/SVG figure pairs are under:
+
+```text
+judge_results/verdict_interpretability/hierarchical-refit-20260831-report-final/
+```
+
+Definitive report render job `3494333` completed from code `3035cdc`. The
+written result is `docs/results/2026-08-31-judge-verdict-hierarchical-results.md`.
+The figure audit found 276 matched PNG/SVG stems, zero SVGs without editable
+text, 27 tables and a complete figure index.
 
 All arrays are unthrottled; Slurm controls concurrency through available
 resources and priority. The orchestrators still verify exact prepared

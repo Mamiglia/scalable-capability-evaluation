@@ -2,8 +2,8 @@
 
 > **Provisional / superseded:** these numerical results used fixed relative
 > hierarchy penalties (`3/3/10/10`). They must not be cited as final results.
-> The corrected refit is specified in
-> `docs/handoffs/2026-08-31-judge-verdict-hierarchical-refit-handoff.md`.
+> The corrected final results are in
+> `docs/results/2026-08-31-judge-verdict-hierarchical-results.md`.
 
 ## Main result
 
