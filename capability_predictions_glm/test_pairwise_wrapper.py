@@ -16,6 +16,7 @@ from .pairwise_wrapper import (
     CAPABILITY_TASK,
     _capability_design,
     chance_predictions,
+    deterministic_dictionary,
     fit_fold,
     overall_model_accuracy,
     prepare_capability_fold,
@@ -107,6 +108,22 @@ def test_overall_accuracy_is_canonical_and_equal_item_weighted() -> None:
     for column in ("bench", "model", "item", "correct", "is_canonical"):
         with pytest.raises(ValueError, match="response table missing columns"):
             overall_model_accuracy(responses.drop(columns=column))
+
+
+def test_deterministic_dictionary_keeps_exactly_the_predeclared_90() -> None:
+    dictionary = pd.DataFrame([
+        {"feature": f"keep-{index}", "block": "surface", "leaf_members": '["signal"]'}
+        for index in range(90)
+    ] + [
+        {"feature": "rubric", "block": "rubric", "leaf_members": '["rubric"]'},
+        {"feature": "error", "block": "intermediate-errors", "leaf_members": '["error"]'},
+        {"feature": "annotation", "block": "annotations", "leaf_members": '["annotation"]'},
+        {"feature": "presentation", "block": "surface", "leaf_members": '["bare_answer", "prose"]'},
+    ])
+
+    selected = deterministic_dictionary(dictionary)
+
+    assert selected.feature.tolist() == [f"keep-{index}" for index in range(90)]
 
 
 def test_preparation_deduplicates_judges_checks_support_and_uses_shared_roles(tmp_path) -> None:

@@ -2,6 +2,7 @@
 
 import argparse
 from dataclasses import replace
+import json
 from pathlib import Path
 import re
 
@@ -33,6 +34,33 @@ from scripts.judge_verdict_analysis.pooling import penalty_multiplier
 
 from .data import _sha256
 from .preprocessing import _model_item_rates, deduplicate_feature_pairs
+
+
+DETERMINISTIC_EXCLUDED_BLOCKS = frozenset({"rubric", "intermediate-errors", "annotations"})
+
+
+def deterministic_dictionary(dictionary: pd.DataFrame) -> pd.DataFrame:
+    """Return the predeclared 90-composite deterministic-only feature set."""
+    required = {"feature", "block", "leaf_members"}
+    if missing := required - set(dictionary):
+        raise ValueError(f"feature dictionary missing columns: {sorted(missing)}")
+
+    def contains_bare_answer(value: object) -> bool:
+        try:
+            members = json.loads(value)
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ValueError("leaf_members must be a JSON list of strings") from error
+        if not isinstance(members, list) or not all(isinstance(member, str) for member in members):
+            raise ValueError("leaf_members must be a JSON list of strings")
+        return "bare_answer" in members
+
+    selected = dictionary[
+        ~dictionary.block.isin(DETERMINISTIC_EXCLUDED_BLOCKS)
+        & ~dictionary.leaf_members.map(contains_bare_answer)
+    ].reset_index(drop=True)
+    if len(selected) != 90:
+        raise ValueError(f"expected 90 deterministic composites, found {len(selected)}")
+    return selected
 
 
 def _capability_levels(frame: pd.DataFrame) -> tuple[str, ...]:
@@ -319,6 +347,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--feature-space", choices=("raw", "pc"), required=True)
     parser.add_argument("--penalty", choices=("l1", "ridge"), required=True,
                         help="L1 or ridge (L2)")
+    parser.add_argument("--deterministic-only", action="store_true")
     parser.add_argument("--max-iter", type=_positive_int, default=20_000)
     parser.add_argument("--pc-basis-root", type=Path)
     parser.add_argument("--pc-components", type=_positive_int)
@@ -336,6 +365,8 @@ def main(argv: list[str] | None = None) -> None:
             parser.error(f"{', '.join(missing)} required for PC features")
     elif any(value is not None for value in pc_arguments.values()):
         parser.error("PC-only arguments require --feature-space pc")
+    if args.deterministic_only and args.feature_space != "raw":
+        parser.error("--deterministic-only requires --feature-space raw")
     config = replace(
         CONFIG, processed_matrix_root=args.matrix, results_dir=args.output,
         processed_matrix_manifest_sha256=args.matrix_manifest_sha256,
@@ -366,12 +397,25 @@ def main(argv: list[str] | None = None) -> None:
             "pc_explained_variance": args.pc_explained_variance_sha256,
         })
     pairs, dictionary = _load_rows(config)
+    feature_subset = None
+    if args.deterministic_only:
+        dictionary = deterministic_dictionary(dictionary)
+        feature_subset = {
+            "kind": "deterministic-only",
+            "feature_count": len(dictionary),
+            "features": dictionary.feature.astype(str).tolist(),
+            "excluded_blocks": sorted(DETERMINISTIC_EXCLUDED_BLOCKS),
+            "excluded_leaf": "bare_answer",
+        }
+    manifest_provenance = {
+        "source_paths": source_paths,
+        "source_sha256": source_sha256,
+    }
+    if feature_subset is not None:
+        manifest_provenance["feature_subset"] = feature_subset
     fit_fold(
         pairs, pd.read_parquet(args.responses), dictionary, args.fold_index, config,
-        manifest_provenance={
-            "source_paths": source_paths,
-            "source_sha256": source_sha256,
-        },
+        manifest_provenance=manifest_provenance,
     )
 
 
