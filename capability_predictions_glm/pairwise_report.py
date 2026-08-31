@@ -314,6 +314,19 @@ def summarize_capability_predictions(
     return aggregate(["variant"]), aggregate(["variant", "bench"])
 
 
+def pc_score_scales(explained_variance: pd.DataFrame) -> pd.Series:
+    """Return the saved standard deviation of each frozen global PC score."""
+    required = {"component", "explained_variance"}
+    if missing := required - set(explained_variance):
+        raise ValueError(f"PC variance table missing columns: {sorted(missing)}")
+    if explained_variance.component.duplicated().any():
+        raise ValueError("PC variance table contains duplicate components")
+    scales = explained_variance.set_index("component").explained_variance.astype(float).pow(0.5)
+    if not np.isfinite(scales).all() or (scales <= 0).any():
+        raise ValueError("PC score scales must be finite and positive")
+    return scales
+
+
 def build_core_tables(
     root: Path, basis_root: Path, provenance_path: Path, ablation_root: Path,
 ) -> dict[str, pd.DataFrame]:
@@ -324,7 +337,7 @@ def build_core_tables(
     labels = _feature_labels(composites)
     loadings = pd.read_parquet(basis_root / "loadings.parquet")
     variance = pd.read_csv(basis_root / "explained-variance.csv").head(30)
-    variance_scale = variance.set_index("component").explained_variance.pow(0.5)
+    variance_scale = pc_score_scales(variance)
     raw_dictionary = pd.read_parquet(
         root / "fits/raw-l1/model-fold-0__item-0/feature-dictionary.parquet"
     )
@@ -939,6 +952,7 @@ def build_backprojection_tables(
     composites = provenance["final_composites"]
     source_blocks = provenance["source_blocks"]
     loadings = tables["loadings"][["component", "feature", "loading"]]
+    variance_scale = pc_score_scales(tables["explained_variance"])
     leaves = []
     for task, coefficients in (("capability", tables["capability_coefficients"]),
                                ("judge", tables["judge_coefficients"])):
