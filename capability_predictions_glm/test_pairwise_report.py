@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -5,6 +6,7 @@ from .pairwise_report import (
     backproject_pc_coefficients,
     expand_leaf_coefficients,
     judge_capability_overview,
+    summarize_capability_predictions,
 )
 
 
@@ -62,3 +64,23 @@ def test_judge_capability_overview_joins_prediction_and_representation_metrics()
         "cosine_upper": 0.8, "eci": 140.0, "eci_ci_low": 135.0,
         "eci_ci_high": 145.0,
     }]
+
+
+def test_capability_prediction_summary_comes_from_saved_fold_predictions() -> None:
+    predictions = pd.DataFrame([
+        {"variant": "raw-l1", "bench": "a", "observed": 1, "probability": 0.8},
+        {"variant": "raw-l1", "bench": "a", "observed": 0, "probability": 0.4},
+        {"variant": "pc-l1", "bench": "b", "observed": 1, "probability": 0.4},
+        {"variant": "pc-l1", "bench": "b", "observed": 0, "probability": 0.7},
+    ])
+
+    variants, benchmarks = summarize_capability_predictions(predictions)
+
+    assert variants.set_index("variant").rows.to_dict() == {"pc-l1": 2, "raw-l1": 2}
+    assert variants.set_index("variant").accuracy.to_dict() == {"pc-l1": 0.0, "raw-l1": 1.0}
+    assert benchmarks.set_index(["variant", "bench"]).accuracy.to_dict() == {
+        ("pc-l1", "b"): 0.0, ("raw-l1", "a"): 1.0,
+    }
+    assert variants.set_index("variant").loc["raw-l1", "log_loss"] == pytest.approx(
+        (-np.log(0.8) - np.log(0.6)) / 2,
+    )
