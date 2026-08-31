@@ -1369,7 +1369,7 @@ def plot_judge_comparisons(comparison: dict[str, pd.DataFrame], root: Path) -> N
         _save(fig, directory, f"{variant}-original-leaf-cosine-drivers", leaf_drivers)
 
     accuracy = comparison["stronger_model_accuracy_summary"]
-    _style(); fig, axes = plt.subplots(2, 2, figsize=(3.5, 3.0), sharex=True, sharey=True,
+    _style(); fig, axes = plt.subplots(2, 2, figsize=(3.0, 2.6), sharex=True, sharey=True,
                                       layout="constrained")
     for ax, variant in zip(axes.flat, VARIANTS):
         frame = accuracy[accuracy.variant == variant].set_index("judge").reindex(JUDGE_LABELS)
@@ -1377,7 +1377,7 @@ def plot_judge_comparisons(comparison: dict[str, pd.DataFrame], root: Path) -> N
         ax.scatter(frame.capability_accuracy, y - .08, color="#2a78d6", s=9, label="Capability GLM")
         ax.scatter(frame.judge_accuracy, y + .08, color="#eb6834", s=9, label="Judge decision")
         ax.set_xlim(0, 1); ax.set_xticks([0, .5, 1]); ax.set_yticks(y, [JUDGE_LABELS[value]
-                    for value in frame.index], fontsize=6)
+                    for value in frame.index], fontsize=7)
         ax.set_xlabel(""); _ordinary(ax)
         ax.text(0, 1.02, f"{VARIANTS[variant][2].upper()} {VARIANTS[variant][3]}",
                 transform=ax.transAxes, fontsize=7, color="#666666")
