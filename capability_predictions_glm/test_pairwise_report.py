@@ -8,6 +8,7 @@ import pytest
 from .pairwise_report import (
     _benchmark_lesions,
     _correct_null_accuracy,
+    _markdown_table,
     _overall_lesions,
     backproject_pc_coefficients,
     expand_leaf_coefficients,
@@ -17,6 +18,14 @@ from .pairwise_report import (
     summarize_capability_predictions,
     validate_fold_manifest,
 )
+
+
+def test_markdown_table_needs_no_optional_dependency() -> None:
+    table = pd.DataFrame({"Name": ["A|B"], "Value": [1.5]})
+
+    assert _markdown_table(table) == (
+        "| Name | Value |\n| --- | --- |\n| A\\|B | 1.5 |"
+    )
 
 
 def test_capability_singular_accuracy_uses_same_row_null() -> None:

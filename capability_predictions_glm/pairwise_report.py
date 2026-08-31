@@ -1590,6 +1590,19 @@ def plot_deterministic_views(
     }, indent=2, sort_keys=True) + "\n")
 
 
+def _markdown_table(table: pd.DataFrame) -> str:
+    """Render a small DataFrame without pandas' optional tabulate dependency."""
+    def cell(value: object) -> str:
+        if pd.isna(value):
+            return ""
+        text = f"{value:g}" if isinstance(value, (float, np.floating)) else str(value)
+        return text.replace("|", "\\|").replace("\n", " ")
+
+    rows = [[cell(column) for column in table.columns], ["---"] * len(table.columns)]
+    rows.extend([cell(value) for value in row] for row in table.itertuples(index=False, name=None))
+    return "\n".join(f"| {' | '.join(row)} |" for row in rows)
+
+
 def _write_scientific_summary(
     source_root: Path, output_root: Path, tables: dict[str, pd.DataFrame],
     comparison: dict[str, pd.DataFrame],
@@ -1611,7 +1624,7 @@ def _write_scientific_summary(
         "Held-out accuracy and log loss are properties of the complete predictive models; "
         "they are not feature attribution measures.",
         "",
-        metrics.to_markdown(index=False),
+        _markdown_table(metrics),
         "",
         "## Judge–capability prediction and representation comparison",
         "",
@@ -1619,7 +1632,7 @@ def _write_scientific_summary(
         "target. Correlations, sign agreement, and coefficient cosine instead compare fitted "
         "representations; they are not predictive-performance measures.",
         "",
-        overview.to_markdown(index=False),
+        _markdown_table(overview),
         "",
         "## Singular contribution",
         "",
@@ -1627,11 +1640,11 @@ def _write_scientific_summary(
         "probability-0.5 null; paired log-loss gains are retained in the lesion tables. "
         "The leading raw-L1 singular predictors were:",
         "",
-        top_features.to_markdown(index=False),
+        _markdown_table(top_features),
         "",
         "The leading PC-L2 singular predictors were:",
         "",
-        top_pcs.to_markdown(index=False),
+        _markdown_table(top_pcs),
         "",
         "## Unique/drop-one contribution",
         "",
