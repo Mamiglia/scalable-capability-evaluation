@@ -1047,6 +1047,34 @@ def _load_capability_predictions(root: Path, fit_name: str, variant: str) -> pd.
     return pd.concat(frames, ignore_index=True)
 
 
+def judge_capability_overview(
+    accuracy: pd.DataFrame, statistics: pd.DataFrame,
+    cosines: pd.DataFrame, eci: pd.DataFrame,
+) -> pd.DataFrame:
+    """Join matched predictive accuracy and coefficient-alignment summaries."""
+    coefficient = statistics[statistics.benchmark == "all"][
+        ["variant", "judge", "pearson", "spearman", "same_sign_share"]
+    ]
+    cosine = cosines[cosines.benchmark == "all"][
+        ["variant", "judge", "estimate", "lower", "upper"]
+    ].rename(columns={
+        "estimate": "cosine", "lower": "cosine_lower", "upper": "cosine_upper",
+    })
+    output = (accuracy.merge(
+        coefficient, on=["variant", "judge"], how="left", validate="one_to_one",
+    ).merge(
+        cosine, on=["variant", "judge"], how="left", validate="one_to_one",
+    ).merge(
+        eci[["judge", "eci", "eci_ci_low", "eci_ci_high"]],
+        on="judge", how="left", validate="many_to_one",
+    ))
+    output.insert(
+        output.columns.get_loc("judge_accuracy") + 1, "accuracy_difference",
+        output.capability_accuracy - output.judge_accuracy,
+    )
+    return output.sort_values(["variant", "judge"], kind="stable").reset_index(drop=True)
+
+
 def build_judge_comparison_tables(
     tables: dict[str, pd.DataFrame], back: dict[str, pd.DataFrame],
     root: Path, eci_path: Path,
@@ -1140,7 +1168,7 @@ def build_judge_comparison_tables(
     ).contribution.mean())
 
     accuracy_rows = []
-    for variant in ("raw-l1", "raw-l2"):
+    for variant in VARIANTS:
         fit_name, judge_name, _, _ = VARIANTS[variant]
         capability = _load_capability_predictions(root, fit_name, variant)
         judge = pd.read_parquet(root / "canonical-judge-fits" / judge_name / "predictions.parquet")
@@ -1181,13 +1209,17 @@ def build_judge_comparison_tables(
         for judge, model in ECI_MODELS.items()
         if (eci.Model == model).any()
     ])
+    coefficient_statistics = pd.DataFrame(statistics)
+    overview = judge_capability_overview(
+        accuracy_summary, coefficient_statistics, cosine_summary, eci,
+    )
     relations = cosine_summary[cosine_summary.benchmark == "all"].merge(
         accuracy_summary.groupby("judge", as_index=False).judge_accuracy.mean(),
         on="judge", how="left", validate="many_to_one",
     ).merge(eci, on="judge", how="left", validate="many_to_one")
     return {
         "judge_coefficient_points": points,
-        "judge_coefficient_statistics": pd.DataFrame(statistics),
+        "judge_coefficient_statistics": coefficient_statistics,
         "judge_cosines": cosines,
         "judge_cosine_summary": cosine_summary,
         "judge_cosine_contributions": contribution_summary,
@@ -1197,6 +1229,7 @@ def build_judge_comparison_tables(
         "leaf_judge_contributions": leaf_contributions,
         "stronger_model_accuracy": accuracy,
         "stronger_model_accuracy_summary": accuracy_summary,
+        "judge_capability_overview": overview,
         "judge_eci": eci,
         "judge_relations": relations,
     }
@@ -1290,8 +1323,9 @@ def plot_judge_comparisons(comparison: dict[str, pd.DataFrame], root: Path) -> N
         _save(fig, directory, f"{variant}-original-leaf-cosine-drivers", leaf_drivers)
 
     accuracy = comparison["stronger_model_accuracy_summary"]
-    _style(); fig, axes = plt.subplots(1, 2, figsize=(3.0, 1.65), sharey=True, layout="constrained")
-    for ax, variant in zip(axes, ("raw-l1", "raw-l2")):
+    _style(); fig, axes = plt.subplots(2, 2, figsize=(3.5, 3.0), sharex=True, sharey=True,
+                                      layout="constrained")
+    for ax, variant in zip(axes.flat, VARIANTS):
         frame = accuracy[accuracy.variant == variant].set_index("judge").reindex(JUDGE_LABELS)
         y = np.arange(len(frame))
         ax.scatter(frame.capability_accuracy, y - .08, color="#2a78d6", s=9, label="Capability GLM")
@@ -1299,10 +1333,11 @@ def plot_judge_comparisons(comparison: dict[str, pd.DataFrame], root: Path) -> N
         ax.set_xlim(0, 1); ax.set_xticks([0, .5, 1]); ax.set_yticks(y, [JUDGE_LABELS[value]
                     for value in frame.index], fontsize=6)
         ax.set_xlabel(""); _ordinary(ax)
-        ax.text(0, 1.02, VARIANTS[variant][3], transform=ax.transAxes, fontsize=7, color="#666666")
+        ax.text(0, 1.02, f"{VARIANTS[variant][2].upper()} {VARIANTS[variant][3]}",
+                transform=ax.transAxes, fontsize=7, color="#666666")
     fig.supxlabel("Stronger-model accuracy", fontsize=8)
     fig.legend(loc="outside upper center", ncol=2, frameon=False)
-    _save(fig, directory, "raw-capability-vs-judge-accuracy", accuracy)
+    _save(fig, directory, "capability-vs-judge-accuracy", accuracy)
 
     relations = comparison["judge_relations"].dropna(subset=["eci"])
     _style(); fig, axes = plt.subplots(1, 2, figsize=(3.0, 1.5), layout="constrained")
@@ -1420,6 +1455,7 @@ def _write_scientific_summary(
     top_pcs = (tables["feature_effects"].query("variant == 'pc-l2'")
                .nlargest(5, "singular")[["feature", "singular", "unique"]])
     cosines = comparison["judge_cosine_summary"]
+    overview = comparison["judge_capability_overview"]
     best = cosines[cosines.benchmark == "all"].sort_values("estimate", ascending=False).iloc[0]
     lines = [
         "# Pairwise capability ablations and judge comparison",
@@ -1430,6 +1466,14 @@ def _write_scientific_summary(
         "they are not feature attribution measures.",
         "",
         metrics.to_markdown(index=False),
+        "",
+        "## Judge–capability prediction and representation comparison",
+        "",
+        "The matched accuracy columns compare prediction of the same held-out stronger-model "
+        "target. Correlations, sign agreement, and coefficient cosine instead compare fitted "
+        "representations; they are not predictive-performance measures.",
+        "",
+        overview.to_markdown(index=False),
         "",
         "## Singular contribution",
         "",
@@ -1461,7 +1505,7 @@ def _write_scientific_summary(
         "block mass, benchmark effects, and judge-task comparison; semantic descriptions are "
         "only shorthand.",
         "",
-        "## Judge–capability similarity",
+        "## Benchmark-specific judge–capability similarity",
         "",
         f"The largest mean coefficient cosine was {best.estimate:.3f} for "
         f"{JUDGE_LABELS.get(best.judge, best.judge)} under {best.variant}. Cosines, raw/PC leaf "
