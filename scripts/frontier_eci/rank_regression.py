@@ -32,8 +32,10 @@ from scripts.judge.verdict_tables import read_verdicts  # noqa: E402
 
 
 FIT_LABEL = "Rank–accuracy fit (in-sample)"
+TIME_TREND_LABEL = "Pre-release time trend"
 QUARTILES = (2, 3, 4)
 HARD_SLICE = "Q2–Q4"
+TIME_ORIGIN = pd.Timestamp("2024-01-01")
 REQUIRED_OUTPUTS = (
     "abilities.csv", "ranking_blocks.csv", "fits.csv", "training_fitted.csv",
     "frontier_fitted.csv", "checkpoint-main.json", "summary.json",
@@ -43,6 +45,11 @@ MAIN_OUTPUT_MANIFEST = {
     "main_analysis": "analysis/rank_regression",
     "main_glob": "analysis/rank_regression/**",
     "label": FIT_LABEL,
+    "supplemental_controls": [{
+        "analysis": TIME_TREND_LABEL,
+        "root": "analysis/rank_regression/time_trend_control",
+        "scientific_scope": "no ranking values or judge verdict outcomes; linear release-time extrapolation",
+    }],
     "result_document": "../../../docs/results/2026-08-30-canonical-anchor-frontier-redo.md",
     "lifecycle_manifest": "provenance/final-lifecycle.json",
     "discarded_provenance": [
@@ -289,6 +296,63 @@ def fit_combined_with_bootstrap(protocol: pd.DataFrame, hard_outcomes: pd.DataFr
     return abilities, ranking_blocks, fits, points
 
 
+def fit_time_trend_controls(actuals: pd.DataFrame, targets: list[str],
+                            judges: list[str], releases: dict[str, str],
+                            resamples: int = 1000, seed: int = 0
+                            ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fit hard accuracy on release time using only models older than each judge."""
+    actuals = actuals.drop_duplicates(["bench", "model"]).copy()
+    actuals["target_release"] = actuals.model.map(
+        lambda model: release_date(releases, model))
+    fits, predictions = [], []
+    for bench in sorted(actuals.bench.unique()):
+        bench_actuals = actuals[actuals.bench.eq(bench) & actuals.target_release.notna()]
+        for judge in judges:
+            judge_release = release_date(releases, judge)
+            training = bench_actuals[bench_actuals.target_release < judge_release].copy()
+            if len(training) < 2 or training.target_release.nunique() < 2:
+                raise ValueError(f"fewer than two pre-release points for {bench}/{judge}")
+            shown = bench_actuals[
+                bench_actuals.model.isin(set(training.model) | set(targets))
+            ].copy()
+            x_train = ((training.target_release - TIME_ORIGIN).dt.days / 365.25).to_numpy()
+            x_shown = ((shown.target_release - TIME_ORIGIN).dt.days / 365.25).to_numpy()
+            design = np.column_stack([np.ones(len(training)), x_train])
+            coefficients = np.linalg.lstsq(design, training.actual.to_numpy(), rcond=None)[0]
+            predicted = np.column_stack([np.ones(len(shown)), x_shown]) @ coefficients
+            rng = np.random.default_rng(_bootstrap_seed(seed + 1, bench, judge))
+            draws = []
+            n_items = training.n_items.astype(int).to_numpy()
+            for _ in range(resamples):
+                draw_actual = rng.binomial(n_items, training.actual.to_numpy()) / n_items
+                draw_coefficients = np.linalg.lstsq(design, draw_actual, rcond=None)[0]
+                draws.append(np.column_stack([np.ones(len(shown)), x_shown]) @ draw_coefficients)
+            low, high = np.quantile(np.asarray(draws), [0.025, 0.975], axis=0)
+            low, high = np.minimum(low, predicted), np.maximum(high, predicted)
+            residuals = design @ coefficients - training.actual.to_numpy()
+            training_ids = "|".join(sorted(training.model.astype(str)))
+            fits.append({
+                "bench": bench, "judge": judge, "fit_label": TIME_TREND_LABEL,
+                "intercept_2024": coefficients[0], "slope_per_year": coefficients[1],
+                "rmse": float(np.sqrt(np.mean(residuals ** 2))),
+                "n_training_models": len(training), "training_model_ids": training_ids,
+                "judge_release": judge_release, "target_slice": HARD_SLICE,
+                "n_bootstrap": resamples,
+                "bootstrap_unit": "hard-item outcomes within model (aggregate binomial)",
+            })
+            predictions.append(shown.assign(
+                judge=judge, judge_release=judge_release,
+                predicted=predicted, predicted_low=low, predicted_high=high,
+                is_fit_point=shown.model.isin(training.model),
+                is_frontier=shown.model.isin(targets),
+                post_judge_release=shown.target_release > judge_release,
+                residual=predicted - shown.actual.to_numpy(),
+                fit_label=TIME_TREND_LABEL, target_slice=HARD_SLICE,
+                n_bootstrap=resamples,
+            ))
+    return pd.DataFrame(fits), pd.concat(predictions, ignore_index=True)
+
+
 def combined_frontier_grid(points: pd.DataFrame, actual: pd.DataFrame,
                            targets: list[str], judges: list[str],
                            releases: dict[str, str], benches: list[str]) -> pd.DataFrame:
@@ -371,6 +435,43 @@ def _write_combined_figures(frontier: pd.DataFrame, out: Path) -> None:
                 clip_prediction_display=True, panel_label=f"{bench_label} · Q2–Q4",
                 y_label="Combined hard accuracy", file_quartile="2-q4",
             )
+
+
+def write_time_trend_figures(points: pd.DataFrame, out: Path) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+    for (bench, judge), table in points.groupby(["bench", "judge"], sort=True):
+        bench_label = "GPQA" if bench == "gpqa" else "SWE-mini"
+        for style in ("band", "points"):
+            plot_frontier_style(
+                table, judge, bench, "2-4", out, style,
+                prediction_label=TIME_TREND_LABEL, filename_prefix="time-trend_",
+                value_column="predicted", low_column="predicted_low",
+                high_column="predicted_high", clip_prediction_display=True,
+                panel_label=f"{bench_label} · Q2–Q4", y_label="Combined hard accuracy",
+                file_quartile="2-q4",
+            )
+
+
+def write_time_trend_output(fits: pd.DataFrame, points: pd.DataFrame,
+                            output: Path, resamples: int,
+                            figures: bool = True) -> dict:
+    output.mkdir(parents=True, exist_ok=True)
+    fits.to_csv(output / "fits.csv", index=False)
+    points.to_csv(output / "predictions.csv", index=False)
+    if figures:
+        write_time_trend_figures(points, output / "figures")
+    summary = {
+        "analysis": TIME_TREND_LABEL,
+        "target": f"combined {HARD_SLICE} accuracy",
+        "fit": "free-intercept linear OLS on models released strictly before each judge",
+        "uncertainty": "95% aggregate binomial item bootstrap",
+        "resamples": resamples,
+        "fit_blocks": len(fits),
+        "prediction_rows": len(points),
+        "frontier_prediction_rows": int(points.is_frontier.sum()),
+    }
+    _atomic_write_json(summary, output / "summary.json")
+    return summary
 
 
 def _validate_staged_output(staging: Path, require_figures: bool) -> None:
@@ -496,6 +597,9 @@ def main() -> None:
         benches = sorted(hard.bench.unique())
         frontier_fitted = combined_frontier_grid(
             training, actual, targets, judges, config["releases"], benches)
+        control_fits, control_points = fit_time_trend_controls(
+            actual, targets, judges, config["releases"],
+            resamples=args.resamples, seed=args.seed)
 
         _checkpoint_tables(staging, "main", {
             "abilities.csv": abilities,
@@ -506,6 +610,9 @@ def main() -> None:
         })
         if not args.no_figures:
             _write_combined_figures(frontier_fitted, staging / "figures")
+        write_time_trend_output(
+            control_fits, control_points, staging / "time_trend_control",
+            args.resamples, figures=not args.no_figures)
         missing = frontier_fitted[frontier_fitted.fit_status.ne("ok")]
         summary = {
             "analysis": FIT_LABEL,

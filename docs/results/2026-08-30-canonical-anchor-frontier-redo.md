@@ -67,6 +67,26 @@ Q2–Q4 items.
 The figures use model release date on x, combined Q2–Q4 accuracy on y, a dashed judge-release line,
 black actuals, blue fitted values, dotted residuals, and 95% item-bootstrap uncertainty.
 
+## Pre-release time-trend control
+
+The deliberately dumber control ignores ranking values and verdict outcomes. For each judge ×
+benchmark, it fits a free-intercept linear regression of combined Q2–Q4 hard accuracy on release
+date using every pool/frontier model with a materialized hard score that was released strictly
+before the judge, then extrapolates to the quarterly frontier.
+Models released on the judge date do not enter the fit. Black pre-release points are the fit data;
+later black points are frontier outcomes.
+
+- [Control figures](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/figures/):
+  20 PNG, 20 PDF, and 20 editable-text SVG files.
+- [Control fits](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/fits.csv)
+- [Control predictions](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/predictions.csv)
+- [Control summary](../../judge_results/frontier/eci-semiannual-canonical-anchors/analysis/rank_regression/time_trend_control/summary.json)
+
+The control intervals use 1,000 aggregate binomial item bootstraps from each model's observed
+success count and item count. This preserves each model's marginal item uncertainty but not paired
+item-difficulty covariance across models. The control is intended only to show how much of the
+visual pattern can arise from historical capability growth.
+
 ## Provenance and cost
 
 The final paid corpus contains 3,220 audited responses: 3,219 latest-success rows plus one retained

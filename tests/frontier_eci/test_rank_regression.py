@@ -136,6 +136,32 @@ def test_main_manifest_declares_combined_q2_q4_item_bootstrap():
     assert manifest["uncertainty"] == "95% two-source item bootstrap"
 
 
+def test_time_trend_control_fits_only_strictly_pre_judge_hard_scores():
+    actual = pd.DataFrame({
+        "bench": ["gpqa"] * 4,
+        "model": ["old-a", "old-b", "at-cutoff", "later"],
+        "actual": [0.2, 0.3, 0.4, 0.5],
+        "n_items": [100] * 4,
+    })
+    releases = {
+        "old-a": "2024-01-01", "old-b": "2024-01-11",
+        "judge": "2024-01-21", "at-cutoff": "2024-01-21",
+        "later": "2024-01-31",
+    }
+    fits, points = load_module()["fit_time_trend_controls"](
+        actual, ["at-cutoff", "later"], ["judge"], releases,
+        resamples=40, seed=7,
+    )
+    fit = fits.iloc[0]
+    assert fit.training_model_ids == "old-a|old-b"
+    assert fit.n_training_models == 2
+    indexed = points.set_index("model")
+    assert not bool(indexed.loc["at-cutoff", "is_fit_point"])
+    assert indexed.loc["at-cutoff", "predicted"] == pytest.approx(0.4)
+    assert indexed.loc["later", "predicted"] == pytest.approx(0.5)
+    assert indexed.loc["later", "predicted_low"] <= 0.5 <= indexed.loc["later", "predicted_high"]
+
+
 def test_one_bt_ranking_uses_all_protocol_rows_per_judge_benchmark():
     module = load_module()
     calls = []
