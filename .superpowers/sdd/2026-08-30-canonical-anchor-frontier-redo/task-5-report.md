@@ -1,5 +1,7 @@
 # Task 5 report: canonical forecasts, paired ECI baseline, and release-time figures
 
+> **Superseded main-analysis notice (Fix Round 1):** The final user-facing result is now the deliberately in-sample rank–accuracy analysis at `analysis/rank_regression/`. The anchor forecasts and ECI baseline documented in the original report below are retained only as discarded/non-main provenance. The final specification and evidence are appended under **Fix Round 1**.
+
 ## Outcome
 
 Task 5 completed. The final analysis contains all five judges, both benchmarks, Q2/Q3/Q4, capped headline forecasts, uncapped sensitivity, an exact mapped-anchor ECI diagnostic, and a judge sensitivity refit on the identical ECI-available anchor subset. The headline judge anchor sets remain unchanged by ECI availability.
@@ -162,3 +164,96 @@ Original-resolution visual inspection covered GPQA and SWE Q2/Q3/Q4 across GPT-4
 - Twelve successful point fits have fewer than 800 successful bootstrap refits and are marked unstable; consumers should use the exported flag.
 - Epoch ECI does not contain every canonical anchor. The ECI result is therefore a mapped-subset diagnostic paired with a judge refit on exactly the same IDs, not a replacement headline baseline.
 - OpenRouter endpoint precision labels remain provider testimony. The fresh endpoint snapshot and per-response served-provider audit are retained for reproducibility.
+
+## Fix Round 1: superseding in-sample rank–accuracy analysis
+
+### Final scientific contract
+
+The final main analysis deliberately does not estimate a held-out forecast. For each of the five judges and two benchmarks it fits one Bradley–Terry ranking from all 26,780 frozen-Q1, exact-epoch, both-correct protocol rows, after the primary deterministic cap of eight item IDs per unordered pair. There is no answer-model release cutoff and no target-specific rank refit.
+
+For each judge×benchmark ranking and each of Q2/Q3/Q4, every model with both BT ability and observed hard-quartile accuracy enters the in-sample curve fit. The two equal-parameter candidates are:
+
+- free-intercept ordinary least squares, computed by `np.linalg.lstsq([1, ability], accuracy)`;
+- free-intercept bounded-response sigmoid, `logistic(intercept + slope * ability)`, fit deterministically to binomial hard-outcome counts.
+
+Both candidates export coefficients, model-level SSE, and model-level RMSE. Selection is deterministic: sigmoid when any linear training fitted value is outside [0,1], or when sigmoid RMSE is strictly lower; linear otherwise. All fitted values are raw in the CSVs. Only plot display values are clipped to [0,1] if necessary. The exact canvas/export label is `Rank–accuracy fit (in-sample)`; the final tables and figures use neither forecast nor held-out language.
+
+The unambiguous main-output manifest is `judge_results/frontier/eci-semiannual-canonical-anchors/MAIN_OUTPUT.json`. It points to `analysis/rank_regression/` and marks the earlier `analysis/figures/frontier_style` and `capability_baseline/figures` roots discarded/non-main. ECI and anchor subsets do not enter the final main analysis.
+
+### Review defects fixed before the final ruling
+
+Before the main-analysis specification was superseded, the review correctly found target leakage in the anchor bootstrap implementation. The corrected code and retained regressions now ensure:
+
+- headline, uncapped, paired-judge, and old ECI-sensitivity point/bootstrap frames contain selected-anchor rows only;
+- changing target correctness and target-only item availability leaves point estimates, intervals, coefficients, successful-refit counts, and instability flags identical, changing only actual/residual values;
+- every requested selected anchor must exist in both ability and hard outcomes; a five-requested/four-present case fails explicitly;
+- fitted and residual anchor IDs exactly equal the requested IDs and order;
+- failed interior plotted values remain NaNs on the full release grid, so lines and fills break rather than bridge;
+- actual markers at 0 and 1 use `clip_on=False` while ticks remain 0/.5/1;
+- the discarded bootstrap implementation schedules deterministic one-block×quartile tasks dynamically and writes atomic phase markers.
+
+These fixes remain tested because they prevent the discarded sensitivity code from silently producing invalid results, but none of those anchor/ECI artifacts is the final main output.
+
+### RED/GREEN evidence
+
+The first review RED run produced seven expected failures across leakage invariance, missing selected anchors, residual ordering, ECI leakage, and plot-gap/clipping regressions. Scheduler/checkpoint REDs additionally showed missing singleton-task and atomic-marker interfaces. After implementation, the affected suite was green and the full local suite reached 201 passing tests.
+
+The final rank–accuracy ruling began with an eight-failure RED because `rank_regression.py` did not exist. The focused GREEN verifies exact OLS coefficients, all-model joins including frontier targets, intentional target-truth influence, method selection, Q2/Q3/Q4 coverage, absence of ECI inputs, missing-ability actual retention, and the exact plot label:
+
+```text
+$ uv run pytest tests/frontier_eci/test_rank_regression.py tests/frontier_eci/test_analysis.py -q
+18 passed
+```
+
+The broader affected local gate passed 55 tests; compilation and `git diff --check` exited zero. The same focused gate passed 18/18 on RunPod before the full-data execution.
+
+Final fresh repository-wide verification passed `211 passed` with one pre-existing Pydantic deprecation warning. Six multiprocessing tests initially failed inside workspace isolation because the sandbox denied their local manager socket; rerunning the identical suite with local IPC permission passed all 211 tests.
+
+### Final outputs and diagnostics
+
+`analysis/rank_regression/` contains:
+
+- `abilities.csv`: 234 model abilities from ten judge×benchmark BT rankings;
+- `ranking_blocks.csv`: ten block audits, including verdict counts and maximum pair-item count;
+- `fits.csv`: 30 Q2/Q3/Q4 two-candidate fits with equations, coefficients, SSE/RMSE, selection, and exact training IDs;
+- `training_fitted.csv`: every joined in-sample model point with both candidate fitted values and residuals;
+- `frontier_fitted.csv`: the complete 240-row judge×benchmark×quartile×frontier grid;
+- `summary.json` and atomic `checkpoint-main.json`;
+- `figures/`: 30 line stems and 30 points stems, each as PNG/PDF/editable-text SVG (180 files total).
+
+Full-data audit:
+
+- 10/10 rankings and 30/30 curve-fit blocks succeeded;
+- the cap audit maximum is exactly eight item IDs per unordered pair;
+- every fit's exported training IDs exactly equal its joined model rows;
+- 18–31 models enter each fit (median 23.5);
+- independently recomputed `np.linalg.lstsq` coefficients and all 30 selection decisions exactly match exports;
+- selected methods: 23 sigmoid, 7 linear; 21 sigmoid choices were forced by out-of-range linear training fits and two by lower sigmoid RMSE;
+- linear RMSE range 0.0896–0.2729 (median 0.1717); sigmoid RMSE range 0.0743–0.2775 (median 0.1686);
+- 240/240 frontier rows have actuals and fitted values across all eight frontier models;
+- after removing target-specific cutoffs, the pooled all-Q1 design yielded zero frontier BT-ability gaps. The earlier anticipated single gap therefore does not exist under the final specification and was not fabricated;
+- Gemini 3 Pro SWE-mini uses the explicit source denominators Q2/Q3/Q4 = 13/12/9, with accuracies 0.846/0.417/0.111.
+
+### Final RunPod lifecycle and visual QA
+
+Fix Round 1 used Secure H100 pod `a74kw8pd94zkuk` at $3.29/h on preserved AP-JP-1 volume `c16kxrwrr4`. It was provisioned only after the first local gate. A superseded 1,000-bootstrap run was terminated at headline task 77/240 when the main-analysis ruling changed; the pod was stopped during local-only work. It resumed at 08:00:49 UTC after the 55-test local gate. The final rank-regression run completed in about 86 seconds, then artifacts were recovered and checksum-verified before deterministic end-of-line whitespace normalization of generated SVG path data:
+
+```text
+remote/local combined SHA-256:
+dafbef21d5fbfa12fd9c817bfe0d954e311c08b65088ad371f50a5a3167e0b2b
+```
+
+The normalized committed main root has combined SHA-256 `2e2d74ba242dfa1cf194ff878db15882c6c44daa49c27e634e2b86908dbd792d`; normalization changes no pixels, geometry, or editable text.
+
+The pod was deleted immediately afterward; `runpodctl pod list` returned `[]`. The network volume remains. Final balance was $23.643660; the Fix Round 1 balance decrease from its pre-pod checkpoint was approximately $1.44, including volume billing.
+
+Automated visual audit found 60 PNG, 60 PDF, and 60 editable-text SVG files. Every PNG is 687×717 px at 300 dpi; all SVGs contain the exact in-sample label and editable `<text>`. There are 20 PNG panels for each of Q2/Q3/Q4 and equal GPQA/SWE-mini coverage.
+
+Original-resolution inspection covered both benchmarks and all three quartiles across GPT-4o, Gemini 2.5 Pro, GPT-5.2, o4-mini, and DeepSeek V4 Flash, including line and points variants. Legends are outside and readable; grey panel tags do not overlap; judge-release lines, black actuals, blue fitted values, and dotted residuals are visible; endpoint markers at 0/1 are not clipped; axes/ticks are identical across panels. No uncertainty band is drawn or implied.
+
+### Final concerns
+
+- This is intentionally descriptive and in-sample. Its RMSE and residuals do not estimate out-of-sample forecasting performance.
+- Model selection uses the same in-sample rows as fitting, exactly as specified.
+- The existing BT implementation uses its fixed ridge of 0.01 to keep unbeaten model abilities finite; the rank-regression layer adds no further regularization.
+- The four absent upstream Gemini SWE items remain absent; the explicit per-quartile denominators above are used without imputation.

@@ -1,0 +1,14 @@
+{
+  "analysis": "Rank\u2013accuracy fit (in-sample)",
+  "pair_item_cap": 8,
+  "q1_protocol_rows": 26780,
+  "ranking_blocks": 10,
+  "fit_blocks": 30,
+  "fit_failures": 0,
+  "frontier_rows": 240,
+  "frontier_actual_missing": 0,
+  "frontier_ability_gaps": 0,
+  "frontier_gap_ids": [],
+  "paid_success_rows": 3219,
+  "paid_candidate_logs": 43
+}

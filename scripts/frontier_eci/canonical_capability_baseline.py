@@ -1,5 +1,7 @@
 """Matched-anchor Epoch ECI baseline for canonical frontier forecasts."""
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
 from pathlib import Path
 import sys
 
@@ -10,7 +12,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from scripts.frontier_eci.canonical_analysis import (  # noqa: E402
-    _aggregate_outcomes, _resample_hard_items, predict_from_ability,
+    _resample_hard_items, _target_actual, predict_from_ability,
 )
 
 
@@ -119,10 +121,9 @@ def fit_eci_blocks(judge_fits: pd.DataFrame, eci: pd.Series,
         for column in ("bench", "target_quartile"):
             if column in outcomes and column in row and pd.notna(row[column]):
                 outcomes = outcomes[outcomes[column].eq(row[column])]
-        target_outcome = _aggregate_outcomes(outcomes[outcomes.model.eq(target)])
-        actual = (float(target_outcome.iloc[0].successes / target_outcome.iloc[0].total)
-                  if len(target_outcome) and target_outcome.iloc[0].total > 0 else np.nan)
+        anchor_outcomes = outcomes[outcomes.model.isin(anchors)].copy()
         if len(anchors) < 4:
+            actual = _target_actual(outcomes, target)
             row.update(predicted=np.nan, actual=actual, residual=np.nan,
                        intercept=np.nan, slope=np.nan, converged=False,
                        gradient_intercept=np.nan, gradient_slope=np.nan,
@@ -131,6 +132,7 @@ def fit_eci_blocks(judge_fits: pd.DataFrame, eci: pd.Series,
                        predicted_high=np.nan, n_bootstrap=0,
                        bootstrap_unstable=False, anchor_table=None)
         elif pd.isna(eci.get(target)):
+            actual = _target_actual(outcomes, target)
             row.update(predicted=np.nan, actual=actual, residual=np.nan,
                        intercept=np.nan, slope=np.nan, converged=False,
                        gradient_intercept=np.nan, gradient_slope=np.nan,
@@ -140,13 +142,14 @@ def fit_eci_blocks(judge_fits: pd.DataFrame, eci: pd.Series,
                        bootstrap_unstable=False, anchor_table=None)
         else:
             try:
-                fit = predict_from_ability(eci, outcomes, target, anchors)
+                fit = predict_from_ability(eci, anchor_outcomes, target, anchors)
                 draws = []
                 rng = np.random.default_rng(seed + int(index))
                 for _ in range(resamples):
                     try:
                         draws.append(predict_from_ability(
-                            eci, _resample_hard_items(outcomes, rng), target, anchors).predicted)
+                            eci, _resample_hard_items(anchor_outcomes, rng),
+                            target, anchors).predicted)
                     except (RuntimeError, ValueError):
                         continue
                 if resamples and not draws:
@@ -154,8 +157,9 @@ def fit_eci_blocks(judge_fits: pd.DataFrame, eci: pd.Series,
                 low, median, high = ((np.quantile(draws, [0.025, 0.5, 0.975])
                                       if draws else [np.nan, np.nan, np.nan]))
                 anchor_values = eci.reindex(anchors)
-                row.update(predicted=fit.predicted, actual=fit.actual,
-                           residual=fit.residual, intercept=fit.intercept,
+                actual = _target_actual(outcomes, target)
+                row.update(predicted=fit.predicted, actual=actual,
+                           residual=fit.predicted - actual, intercept=fit.intercept,
                            slope=fit.slope, converged=fit.converged,
                            gradient_intercept=fit.gradient_intercept,
                            gradient_slope=fit.gradient_slope,
@@ -170,6 +174,7 @@ def fit_eci_blocks(judge_fits: pd.DataFrame, eci: pd.Series,
                            fit_status="ok", failure_reason="",
                            anchor_table=fit.anchor_table)
             except (RuntimeError, ValueError) as error:
+                actual = _target_actual(outcomes, target)
                 row.update(predicted=np.nan, actual=actual, residual=np.nan,
                            intercept=np.nan, slope=np.nan, converged=False,
                            gradient_intercept=np.nan, gradient_slope=np.nan,
@@ -179,3 +184,32 @@ def fit_eci_blocks(judge_fits: pd.DataFrame, eci: pd.Series,
                            failure_reason=str(error), anchor_table=None)
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def _eci_tasks(judge_fits: pd.DataFrame) -> list[pd.DataFrame]:
+    return [judge_fits.iloc[[index]].copy() for index in range(len(judge_fits))]
+
+
+def fit_eci_blocks_parallel(judge_fits: pd.DataFrame, eci: pd.Series,
+                            hard_outcomes: pd.DataFrame, targets: dict[str, str],
+                            resamples: int = 0, seed: int = 0,
+                            workers: int = 1) -> pd.DataFrame:
+    tasks = _eci_tasks(judge_fits)
+    if not tasks:
+        return pd.DataFrame()
+    if workers <= 1:
+        return pd.concat([
+            fit_eci_blocks(task, eci, hard_outcomes, targets, resamples, seed)
+            for task in tasks
+        ], ignore_index=True) if tasks else pd.DataFrame()
+    count = min(workers, 18, len(tasks))
+    with ProcessPoolExecutor(max_workers=count,
+                             mp_context=multiprocessing.get_context("spawn")) as executor:
+        futures = {executor.submit(
+            fit_eci_blocks, task, eci, hard_outcomes, targets, resamples, seed): index
+                   for index, task in enumerate(tasks)}
+        results = [None] * len(tasks)
+        for completed, future in enumerate(as_completed(futures), 1):
+            results[futures[future]] = future.result()
+            print(f"ECI task {completed}/{len(tasks)} complete", flush=True)
+    return pd.concat(results, ignore_index=True)

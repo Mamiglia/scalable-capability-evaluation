@@ -353,28 +353,39 @@ def plot_visibility(summary, model_errors, candidates, benches, out):
 
 
 def plot_frontier_style(table, judge, bench, quartile, out, style,
-                        prediction_label="predicted", filename_prefix=""):
+                        prediction_label="Predicted", filename_prefix="",
+                        value_column="predicted", low_column="predicted_low",
+                        high_column="predicted_high", clip_prediction_display=False):
     """Original frontier figure grammar: release time, judge cutoff, actual vs prediction."""
     table = table.sort_values("target_release").copy()
     table["target_release"] = pd.to_datetime(table.target_release)
+    table["display_value"] = table[value_column]
+    table["display_low"] = table[low_column]
+    table["display_high"] = table[high_column]
+    if clip_prediction_display:
+        table[["display_value", "display_low", "display_high"]] = table[[
+            "display_value", "display_low", "display_high"]].clip(0, 1)
     judge_date = pd.Timestamp(table.judge_release.dropna().iloc[0])
-    predicted = table.dropna(subset=["predicted"])
+    predicted = table.dropna(subset=["display_value"])
     actual = table.dropna(subset=["actual"])
     fig, ax = plt.subplots(figsize=(1.75, 1.55))
     for row in predicted.itertuples():
         if pd.notna(row.actual):
-            ax.plot([row.target_release, row.target_release], [row.actual, row.predicted],
+            ax.plot([row.target_release, row.target_release], [row.actual, row.display_value],
                     ":", color="#222222", lw=1)
     if style == "band":
-        band = ax.fill_between(predicted.target_release, predicted.predicted_low,
-                               predicted.predicted_high, color="#2a78d6", alpha=0.18, lw=0)
-        line, = ax.plot(predicted.target_release, predicted.predicted, color="#2a78d6", lw=1)
+        band = ax.fill_between(table.target_release, table.display_low,
+                               table.display_high, color="#2a78d6", alpha=0.18, lw=0)
+        line, = ax.plot(table.target_release, table.display_value, color="#2a78d6", lw=1)
         prediction_handle = (band, line)
+    elif style == "line":
+        prediction_handle, = ax.plot(table.target_release, table.display_value,
+                                     color="#2a78d6", lw=1)
     else:
-        prediction_handle, = ax.plot(predicted.target_release, predicted.predicted, "o",
+        prediction_handle, = ax.plot(table.target_release, table.display_value, "o",
                                      ms=3, color="#2a78d6", clip_on=False)
     actual_handle, = ax.plot(actual.target_release, actual.actual, "o", ms=3.5,
-                             color="#222222")
+                             color="#222222", clip_on=False)
     judge_handle = ax.axvline(judge_date, color="#777777", lw=0.8, ls="--")
     first = min(table.target_release.min(), judge_date).replace(month=1, day=1)
     last = max(table.target_release.max(), judge_date).replace(month=1, day=1) + pd.DateOffset(years=1)
@@ -393,11 +404,12 @@ def plot_frontier_style(table, judge, bench, quartile, out, style,
         ax.spines[spine].set_position(("outward", 5))
     residual_handle, = ax.plot([], [], ":", color="#222222", lw=1)
     ax.legend([actual_handle, prediction_handle, residual_handle, judge_handle],
-              ["Actual", prediction_label.capitalize(), "Residual", "Judge release"],
+              ["Actual", prediction_label, "Residual", "Judge release"],
               handler_map={tuple: HandlerTuple(ndivide=1)}, loc="lower left",
               bbox_to_anchor=(0, 1.08), frameon=False, handletextpad=0.5,
               borderaxespad=0, ncol=1)
     save(fig, out / f"{filename_prefix}{judge}_{bench}_q{quartile}_frontier_{style}")
+    return ax
 
 
 def main():

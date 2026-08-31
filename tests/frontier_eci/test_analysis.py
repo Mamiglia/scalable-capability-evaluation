@@ -95,3 +95,43 @@ def test_frontier_plot_is_narrow_and_keeps_svg_text_editable(tmp_path):
     from PIL import Image
     with Image.open(stem.with_suffix(".png")) as image:
         assert image.width <= 650
+
+
+def test_frontier_plot_breaks_band_at_missing_prediction_and_does_not_clip_actuals(tmp_path):
+    table = pd.DataFrame({
+        "target_release": ["2024-11-20", "2025-06-01", "2026-07-16"],
+        "judge_release": ["2025-03-25"] * 3,
+        "actual": [0.0, 0.5, 1.0], "predicted": [0.2, np.nan, 0.8],
+        "predicted_low": [0.1, np.nan, 0.7],
+        "predicted_high": [0.3, np.nan, 0.9],
+    })
+    ax = plot_frontier_style(table, "gpt-4o-2024-11-20", "gpqa", 2,
+                             tmp_path, "band")
+    prediction = next(line for line in ax.lines
+                      if line.get_color() == "#2a78d6" and len(line.get_ydata()) == 3)
+    actual = next(line for line in ax.lines
+                  if line.get_color() == "#222222" and line.get_marker() == "o")
+    assert np.isnan(prediction.get_ydata()[1])
+    assert len(ax.collections[0].get_paths()) == 2
+    assert actual.get_clip_on() is False
+    assert ax.get_yticks().tolist() == [0.0, 0.5, 1.0]
+
+
+def test_rank_regression_plot_uses_exact_in_sample_label_and_clips_display_only(tmp_path):
+    table = pd.DataFrame({
+        "target_release": ["2024-11-20", "2025-06-01"],
+        "judge_release": ["2025-03-25"] * 2,
+        "actual": [0.0, 1.0], "fitted": [-0.2, 1.2],
+        "fitted_low": [-0.4, 1.0], "fitted_high": [0.0, 1.4],
+    })
+    original = table.copy()
+    ax = plot_frontier_style(
+        table, "gpt-4o-2024-11-20", "gpqa", 2, tmp_path, "line",
+        prediction_label="Rank–accuracy fit (in-sample)",
+        value_column="fitted", low_column="fitted_low", high_column="fitted_high",
+        clip_prediction_display=True,
+    )
+    blue = next(line for line in ax.lines if line.get_color() == "#2a78d6")
+    assert blue.get_ydata().tolist() == [0.0, 1.0]
+    assert ax.get_legend().get_texts()[1].get_text() == "Rank–accuracy fit (in-sample)"
+    pd.testing.assert_frame_equal(table, original)

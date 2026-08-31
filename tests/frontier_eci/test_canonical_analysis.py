@@ -11,6 +11,9 @@ from scripts.frontier_eci.canonical_analysis import analyze_blocks_parallel
 
 module = run_path(Path(__file__).parents[2] / "scripts/frontier_eci/canonical_analysis.py")
 analyze_blocks = module["analyze_blocks"]
+analysis_tasks = module["_analysis_tasks"]
+checkpoint_tables = module["_checkpoint_tables"]
+clear_checkpoints = module["_clear_checkpoints"]
 cap_pair_items = module["cap_pair_items"]
 filter_protocol_verdicts = module["filter_protocol_verdicts"]
 fit_binomial_logit = module["fit_binomial_logit"]
@@ -185,6 +188,63 @@ def test_target_hard_outcomes_never_change_prediction():
     assert second.residual == second.predicted - 1.0
 
 
+@pytest.mark.parametrize("pair_limit", [
+    pytest.param(8, id="headline-and-paired"),
+    pytest.param(None, id="uncapped"),
+])
+def test_target_truth_and_item_availability_never_change_bootstrap(pair_limit):
+    successes = {"a": 2, "b": 6, "c": 14, "d": 18, "frontier": 0}
+    patterns = {model: [int(item < successes[model]) for item in range(20)]
+                for model in successes}
+    models, verdicts, hard = bootstrap_inputs(patterns)
+    first, _ = predict_block(verdicts, hard, "frontier", models[:-1],
+                             resamples=30, seed=7, pair_limit=pair_limit)
+    changed = pd.concat([
+        hard[hard.model.ne("frontier")],
+        pd.DataFrame({"bench": ["gpqa"] * 7, "model": ["frontier"] * 7,
+                      "item": [f"target-only-{item}" for item in range(7)],
+                      "correct": [1] * 7}),
+    ], ignore_index=True)
+    second, _ = predict_block(verdicts, changed, "frontier", models[:-1],
+                              resamples=30, seed=7, pair_limit=pair_limit)
+    fit_fields = [
+        "predicted", "predicted_low", "predicted_median", "predicted_high",
+        "intercept", "slope", "n_bootstrap", "bootstrap_unstable",
+    ]
+    assert first["actual"] == 0.0 and second["actual"] == 1.0
+    assert first["residual"] != second["residual"]
+    assert {key: first[key] for key in fit_fields} == {key: second[key] for key in fit_fields}
+
+
+def test_selected_anchor_missing_from_hard_outcomes_fails_instead_of_fitting_subset():
+    anchors = ["a", "b", "c", "d", "e"]
+    ability = pd.Series({**dict(zip(anchors, [-2, -1, 0, 1, 2])), "frontier": 2.5})
+    outcomes = pd.DataFrame({"model": ["a", "b", "c", "d", "frontier"],
+                             "successes": [2, 6, 14, 18, 0], "total": [20] * 5})
+    with pytest.raises(ValueError, match="selected anchors unavailable.*outcomes=e"):
+        predict_from_ability(ability, outcomes, "frontier", anchors)
+
+
+def test_selected_anchor_missing_from_ability_fails_instead_of_fitting_subset():
+    anchors = ["a", "b", "c", "d", "e"]
+    ability = pd.Series({"a": -2.0, "b": -1.0, "c": 0.0, "d": 1.0,
+                         "frontier": 2.5})
+    outcomes = pd.DataFrame({"model": anchors,
+                             "successes": [2, 6, 10, 14, 18], "total": [20] * 5})
+    with pytest.raises(ValueError, match="selected anchors unavailable.*ability=e"):
+        predict_from_ability(ability, outcomes, "frontier", anchors)
+
+
+def test_fitted_anchor_rows_exactly_match_requested_ids_and_order():
+    anchors = ["e", "c", "a", "d", "b"]
+    ability = pd.Series({"a": -2.0, "b": -1.0, "c": 0.0, "d": 1.0,
+                         "e": 2.0, "frontier": 2.5})
+    outcomes = pd.DataFrame({"model": ["a", "b", "c", "d", "e"],
+                             "successes": [2, 6, 10, 14, 18], "total": [20] * 5})
+    fit = predict_from_ability(ability, outcomes, "frontier", anchors)
+    assert fit.anchor_table.model.tolist() == anchors
+
+
 def bootstrap_inputs(patterns, q1_items=10):
     models = ["a", "b", "c", "d", "frontier"]
     verdicts = []
@@ -321,6 +381,27 @@ def test_parallel_block_analysis_matches_serial_results():
                                        target_quartiles=(2,), workers=2)
     for serial_table, parallel_table in zip(serial, parallel):
         pd.testing.assert_frame_equal(serial_table, parallel_table)
+
+
+def test_analysis_tasks_are_single_block_quartile_in_stable_order():
+    coverage = pd.DataFrame({"target": ["first", "second"]})
+    tasks = analysis_tasks(coverage, (2, 3))
+    assert [(task.iloc[0].target, quartile) for task, quartile in tasks] == [
+        ("first", 2), ("first", 3), ("second", 2), ("second", 3),
+    ]
+    assert all(len(task) == 1 for task, _ in tasks)
+
+
+def test_phase_checkpoint_replaces_csvs_before_writing_complete_marker(tmp_path):
+    checkpoint_tables(tmp_path, "headline", {"predictions.csv": pd.DataFrame({"x": [1]})})
+    checkpoint_tables(tmp_path, "headline", {"predictions.csv": pd.DataFrame({"x": [2]})})
+    assert pd.read_csv(tmp_path / "predictions.csv").x.tolist() == [2]
+    marker = pd.read_json(tmp_path / "checkpoint-headline.json", typ="series")
+    assert marker["rows"] == {"predictions.csv": 1}
+    assert not list(tmp_path.glob("*.tmp"))
+    clear_checkpoints(tmp_path)
+    assert (tmp_path / "predictions.csv").exists()
+    assert not list(tmp_path.glob("checkpoint-*.json"))
 
 
 def test_bootstrap_marks_low_success_and_raises_on_zero_success():

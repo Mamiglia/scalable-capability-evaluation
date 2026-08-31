@@ -242,9 +242,8 @@ def analyze_blocks(coverage: pd.DataFrame, verdicts: pd.DataFrame,
         for quartile in target_quartiles:
             outcomes = hard_outcomes[(hard_outcomes.bench.eq(block.bench))
                                      & (hard_outcomes.target_quartile.eq(quartile))]
-            target_rows = outcomes[outcomes.model.eq(block.target)]
-            actual = float(target_rows.correct.mean()) if len(target_rows) else np.nan
             if failure:
+                actual = _target_actual(outcomes, block.target)
                 failed = _failed_prediction(
                     block.bench, block.judge, block.target, quartile, actual, failure, anchor_ids)
                 failed["block"] = block_id
@@ -271,6 +270,7 @@ def analyze_blocks(coverage: pd.DataFrame, verdicts: pd.DataFrame,
                     target=block.target, target_quartile=quartile))
             except (RuntimeError, ValueError) as error:
                 reason = str(error)
+                actual = _target_actual(outcomes, block.target)
                 failed = _failed_prediction(block.bench, block.judge, block.target,
                                              quartile, actual, reason, anchor_ids)
                 failed["block"] = block_id
@@ -284,6 +284,24 @@ def analyze_blocks(coverage: pd.DataFrame, verdicts: pd.DataFrame,
             pd.DataFrame(exported))
 
 
+def _analysis_tasks(coverage: pd.DataFrame,
+                    target_quartiles: tuple[int, ...]) -> list[tuple[pd.DataFrame, int]]:
+    return [(coverage.iloc[[index]].copy(), quartile)
+            for index in range(len(coverage)) for quartile in target_quartiles]
+
+
+def _combine_analysis_results(results) -> tuple[pd.DataFrame, pd.DataFrame,
+                                                    pd.DataFrame, pd.DataFrame]:
+    tables = []
+    for index in range(4):
+        parts = [result[index] for result in results if not result[index].empty]
+        table = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+        if index == 3 and not table.empty:
+            table = table.drop_duplicates("block", keep="first").reset_index(drop=True)
+        tables.append(table)
+    return tuple(tables)
+
+
 def analyze_blocks_parallel(coverage: pd.DataFrame, verdicts: pd.DataFrame,
                             hard_outcomes: pd.DataFrame,
                             canonical_models: dict[str, list[str]],
@@ -293,29 +311,55 @@ def analyze_blocks_parallel(coverage: pd.DataFrame, verdicts: pd.DataFrame,
                             workers: int = 1,
                             anchor_overrides: dict[str, list[str]] | None = None,
                             ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    tasks = _analysis_tasks(coverage, target_quartiles)
+    if not tasks:
+        return tuple(pd.DataFrame() for _ in range(4))
     if workers <= 1:
-        return analyze_blocks(coverage, verdicts, hard_outcomes, canonical_models,
-                              frontier_targets, releases, resamples, seed,
-                              pair_limit, target_quartiles, anchor_overrides)
-    count = min(workers, len(coverage))
-    bounds = np.linspace(0, len(coverage), count + 1, dtype=int)
-    chunks = [coverage.iloc[bounds[index]:bounds[index + 1]].copy()
-              for index in range(count)]
-    with ProcessPoolExecutor(max_workers=len(chunks),
+        return _combine_analysis_results([
+            analyze_blocks(task, verdicts, hard_outcomes, canonical_models,
+                           frontier_targets, releases, resamples, seed,
+                           pair_limit, (quartile,), anchor_overrides)
+            for task, quartile in tasks
+        ])
+    count = min(workers, 18, len(tasks))
+    with ProcessPoolExecutor(max_workers=count,
                              mp_context=multiprocessing.get_context("spawn")) as executor:
         futures = {executor.submit(
-            analyze_blocks, chunk, verdicts, hard_outcomes, canonical_models,
-            frontier_targets, releases, resamples, seed, pair_limit, target_quartiles,
-            anchor_overrides): index for index, chunk in enumerate(chunks)}
-        results = [None] * len(chunks)
+            analyze_blocks, task, verdicts, hard_outcomes, canonical_models,
+            frontier_targets, releases, resamples, seed, pair_limit, (quartile,),
+            anchor_overrides): index for index, (task, quartile) in enumerate(tasks)}
+        results = [None] * len(tasks)
         for completed, future in enumerate(as_completed(futures), 1):
             results[futures[future]] = future.result()
-            print(f"analysis shard {completed}/{len(chunks)} complete", flush=True)
-    tables = []
-    for index in range(4):
-        parts = [result[index] for result in results if not result[index].empty]
-        tables.append(pd.concat(parts, ignore_index=True) if parts else pd.DataFrame())
-    return tuple(tables)
+            print(f"analysis task {completed}/{len(tasks)} complete", flush=True)
+    return _combine_analysis_results(results)
+
+
+def _atomic_write_csv(table: pd.DataFrame, path: Path) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    table.to_csv(temporary, index=False)
+    temporary.replace(path)
+
+
+def _atomic_write_json(values: dict, path: Path) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(values, indent=2) + "\n")
+    temporary.replace(path)
+
+
+def _checkpoint_tables(out: Path, phase: str,
+                       tables: dict[str, pd.DataFrame]) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+    for name, table in tables.items():
+        _atomic_write_csv(table, out / name)
+    _atomic_write_json({"phase": phase, "rows": {name: len(table)
+                                                   for name, table in tables.items()}},
+                       out / f"checkpoint-{phase}.json")
+
+
+def _clear_checkpoints(out: Path) -> None:
+    for path in out.glob("checkpoint-*.json"):
+        path.unlink()
 
 
 def _aggregate_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
@@ -325,6 +369,33 @@ def _aggregate_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("hard outcomes need successes/total or item-level correct rows")
     return (outcomes.groupby("model", as_index=False).correct
             .agg(successes="sum", total="size"))
+
+
+def _target_actual(outcomes: pd.DataFrame, target: str) -> float:
+    target_outcome = _aggregate_outcomes(outcomes[outcomes.model.eq(target)])
+    return (float(target_outcome.iloc[0].successes / target_outcome.iloc[0].total)
+            if len(target_outcome) and target_outcome.iloc[0].total > 0 else np.nan)
+
+
+def _selected_anchor_inputs(ability: pd.Series, outcomes: pd.DataFrame,
+                            target: str, anchors: list[str],
+                            ) -> tuple[list[str], pd.Series, pd.DataFrame]:
+    if target not in ability or pd.isna(ability.get(target)):
+        raise ValueError(f"target {target!r} has no fitted ability")
+    anchor_ids = [anchor for anchor in anchors if anchor != target]
+    missing_ability = [anchor for anchor in anchor_ids
+                       if anchor not in ability or pd.isna(ability.get(anchor))]
+    present_outcomes = set(_aggregate_outcomes(outcomes).model.astype(str))
+    missing_outcomes = [anchor for anchor in anchor_ids if anchor not in present_outcomes]
+    missing = []
+    if missing_ability:
+        missing.append(f"ability={'|'.join(missing_ability)}")
+    if missing_outcomes:
+        missing.append(f"outcomes={'|'.join(missing_outcomes)}")
+    if missing:
+        raise ValueError(f"selected anchors unavailable: {'; '.join(missing)}")
+    return (anchor_ids, ability.reindex(anchor_ids),
+            outcomes[outcomes.model.isin(anchor_ids)].copy())
 
 
 def fit_binomial_logit(ability: pd.Series, outcomes: pd.DataFrame) -> Fit:
@@ -405,15 +476,13 @@ def fit_binomial_logit(ability: pd.Series, outcomes: pd.DataFrame) -> Fit:
 def predict_from_ability(ability: pd.Series, hard_outcomes: pd.DataFrame,
                          target: str, anchors: list[str]) -> Prediction:
     """Fit only anchor outcomes, then predict the target from its judged ability."""
-    if target not in ability:
-        raise ValueError(f"target {target!r} has no fitted ability")
-    anchor_ids = [anchor for anchor in anchors if anchor != target]
-    anchor_outcomes = hard_outcomes[hard_outcomes.model.isin(anchor_ids)].copy()
-    fit = fit_binomial_logit(ability.reindex(anchor_ids), anchor_outcomes)
+    anchor_ids, anchor_ability, anchor_outcomes = _selected_anchor_inputs(
+        ability, hard_outcomes, target, anchors)
+    fit = fit_binomial_logit(anchor_ability, anchor_outcomes)
+    fit.anchor_table = (fit.anchor_table.set_index("model").reindex(anchor_ids)
+                        .rename_axis("model").reset_index())
     predicted = float(expit(fit.intercept + fit.slope * ability[target]))
-    target_outcome = _aggregate_outcomes(hard_outcomes[hard_outcomes.model.eq(target)])
-    actual = (float(target_outcome.iloc[0].successes / target_outcome.iloc[0].total)
-              if len(target_outcome) and target_outcome.iloc[0].total > 0 else np.nan)
+    actual = _target_actual(hard_outcomes, target)
     return Prediction(predicted, fit.intercept, fit.slope, fit.converged,
                       fit.gradient_intercept, fit.gradient_slope, fit.anchor_table,
                       actual, predicted - actual)
@@ -436,22 +505,24 @@ def predict_block(verdicts: pd.DataFrame, hard_outcomes: pd.DataFrame, target: s
     """Fit one capped block and independently bootstrap judged and hard item IDs."""
     capped = cap_pair_items(verdicts, pair_limit) if pair_limit is not None else verdicts.copy()
     ability = rank(capped).set_index("model").ability
-    point = predict_from_ability(ability, hard_outcomes, target, anchors)
+    anchor_ids, _, anchor_outcomes = _selected_anchor_inputs(
+        ability, hard_outcomes, target, anchors)
+    point = predict_from_ability(ability, anchor_outcomes, target, anchor_ids)
     rng = np.random.default_rng(seed)
     draws = []
     for _ in range(resamples):
         try:
             draw_ability = rank(resample_items(capped, rng)).set_index("model").ability
-            draw_outcomes = _resample_hard_items(hard_outcomes, rng)
+            draw_outcomes = _resample_hard_items(anchor_outcomes, rng)
             draws.append(predict_from_ability(
-                draw_ability, draw_outcomes, target, anchors).predicted)
+                draw_ability, draw_outcomes, target, anchor_ids).predicted)
         except (RuntimeError, ValueError):
             continue
     if not draws:
         raise RuntimeError("every two-source item-bootstrap calibration failed")
 
     low, median, high = np.quantile(draws, [0.025, 0.5, 0.975])
-    anchor_ids = point.anchor_table.model.astype(str).tolist()
+    actual = _target_actual(hard_outcomes, target)
     anchor_ability = ability.reindex(anchor_ids)
     ability_min, ability_max = float(anchor_ability.min()), float(anchor_ability.max())
     target_ability = float(ability[target])
@@ -462,8 +533,8 @@ def predict_block(verdicts: pd.DataFrame, hard_outcomes: pd.DataFrame, target: s
     summary = {
         "model": target,
         "predicted": point.predicted,
-        "actual": point.actual,
-        "residual": point.residual,
+        "actual": actual,
+        "residual": point.predicted - actual,
         "predicted_low": float(low),
         "predicted_median": float(median),
         "predicted_high": float(high),
@@ -522,6 +593,8 @@ def main() -> None:
     result_root = _path(config["results"])
     analysis_out = result_root / "analysis"
     baseline_out = result_root / "capability_baseline"
+    _clear_checkpoints(analysis_out)
+    _clear_checkpoints(baseline_out)
     coverage = pd.read_csv(result_root / "coverage/blocks.csv")
     quartiles = pd.read_csv(_path(config["quartiles"]), dtype={"item": str})
 
@@ -557,31 +630,35 @@ def main() -> None:
     predictions, fits, residuals, exported_coverage = analyze_blocks_parallel(
         coverage, protocol, hard, canonical_models, targets, releases,
         args.resamples, args.seed, workers=args.workers)
+    predictions = _decorate_predictions(predictions, releases)
+    _checkpoint_tables(analysis_out, "headline", {
+        "predictions.csv": predictions,
+        "anchor_fits.csv": fits,
+        "anchor_residuals.csv": residuals,
+        "metrics.csv": summarize_metrics(predictions),
+        "coverage.csv": exported_coverage,
+    })
     print("fitting uncapped judge sensitivity", flush=True)
     uncapped, uncapped_fits, _, _ = analyze_blocks_parallel(
         coverage, protocol, hard, canonical_models, targets, releases,
         args.resamples, args.seed, pair_limit=None, workers=args.workers)
-    predictions = _decorate_predictions(predictions, releases)
     uncapped = _decorate_predictions(uncapped, releases)
-    analysis_out.mkdir(parents=True, exist_ok=True)
-    predictions.to_csv(analysis_out / "predictions.csv", index=False)
-    uncapped.to_csv(analysis_out / "predictions_uncapped.csv", index=False)
-    fits.to_csv(analysis_out / "anchor_fits.csv", index=False)
-    residuals.to_csv(analysis_out / "anchor_residuals.csv", index=False)
-    summarize_metrics(predictions).to_csv(analysis_out / "metrics.csv", index=False)
-    summarize_metrics(uncapped).to_csv(analysis_out / "metrics_uncapped.csv", index=False)
-    exported_coverage.to_csv(analysis_out / "coverage.csv", index=False)
-    pd.concat([
+    model_residuals = pd.concat([
         predictions.assign(analysis="capped"),
         uncapped.assign(analysis="uncapped"),
     ], ignore_index=True)[[
         "analysis", "bench", "judge", "target_quartile", "model", "actual",
         "predicted", "residual", "inside_anchor_range", "fit_status", "failure_reason",
-    ]].to_csv(analysis_out / "model_residuals.csv", index=False)
-    uncapped_fits.to_csv(analysis_out / "anchor_fits_uncapped.csv", index=False)
+    ]]
+    _checkpoint_tables(analysis_out, "uncapped", {
+        "predictions_uncapped.csv": uncapped,
+        "anchor_fits_uncapped.csv": uncapped_fits,
+        "metrics_uncapped.csv": summarize_metrics(uncapped),
+        "model_residuals.csv": model_residuals,
+    })
 
     from scripts.frontier_eci.canonical_capability_baseline import (
-        eci_anchor_subsets, eci_mapping, fit_eci_blocks,
+        eci_anchor_subsets, eci_mapping, fit_eci_blocks_parallel,
     )
     eci_models = sorted(
         targets
@@ -605,12 +682,20 @@ def main() -> None:
         "block", "headline_anchor_ids", "eci_anchor_ids", "dropped_missing_eci_ids"]]
     paired_predictions = paired_predictions.merge(subset_metadata, on="block", how="left")
     paired_fits = paired_fits.merge(subset_metadata, on="block", how="left")
+    _checkpoint_tables(baseline_out, "paired-judge", {
+        "eci_model_mapping.csv": mapping,
+        "paired_judge_predictions.csv": paired_predictions,
+        "paired_judge_anchor_fits.csv": paired_fits,
+        "paired_judge_anchor_residuals.csv": paired_residuals,
+        "paired_judge_metrics.csv": summarize_metrics(paired_predictions),
+    })
     target_by_block = coverage.assign(
         block=lambda frame: frame.bench + "|" + frame.judge + "|" + frame.target
     ).set_index("block").target.to_dict()
     print("fitting matched mapped-anchor ECI baseline", flush=True)
-    eci_table = fit_eci_blocks(paired_fits, eci, hard, target_by_block,
-                               resamples=args.resamples, seed=args.seed)
+    eci_table = fit_eci_blocks_parallel(
+        paired_fits, eci, hard, target_by_block, resamples=args.resamples,
+        seed=args.seed, workers=args.workers)
     eci_residuals = []
     for row in eci_table.itertuples(index=False):
         if isinstance(row.anchor_table, pd.DataFrame):
@@ -638,23 +723,20 @@ def main() -> None:
     eci_coverage["analysis_failure_reason"] = np.where(
         mapped_counts.lt(4), "only " + mapped_counts.astype(str) + " mapped ECI anchors",
         eci_coverage.analysis_failure_reason)
-    baseline_out.mkdir(parents=True, exist_ok=True)
-    mapping.to_csv(baseline_out / "eci_model_mapping.csv", index=False)
-    paired_predictions.to_csv(baseline_out / "paired_judge_predictions.csv", index=False)
-    paired_fits.to_csv(baseline_out / "paired_judge_anchor_fits.csv", index=False)
-    paired_residuals.to_csv(baseline_out / "paired_judge_anchor_residuals.csv", index=False)
-    summarize_metrics(paired_predictions).to_csv(
-        baseline_out / "paired_judge_metrics.csv", index=False)
-    eci_predictions.to_csv(baseline_out / "predictions.csv", index=False)
-    eci_fits.to_csv(baseline_out / "anchor_fits.csv", index=False)
-    (pd.concat(eci_residuals, ignore_index=True) if eci_residuals else pd.DataFrame()).to_csv(
-        baseline_out / "anchor_residuals.csv", index=False)
-    summarize_metrics(eci_predictions).to_csv(baseline_out / "metrics.csv", index=False)
-    eci_coverage.to_csv(baseline_out / "coverage.csv", index=False)
-    eci_predictions[[
+    eci_residual_table = (pd.concat(eci_residuals, ignore_index=True)
+                          if eci_residuals else pd.DataFrame())
+    eci_model_residuals = eci_predictions[[
         "bench", "judge", "target_quartile", "model", "actual", "predicted",
         "residual", "inside_anchor_range", "fit_status", "failure_reason",
-    ]].to_csv(baseline_out / "model_residuals.csv", index=False)
+    ]]
+    _checkpoint_tables(baseline_out, "eci", {
+        "predictions.csv": eci_predictions,
+        "anchor_fits.csv": eci_fits,
+        "anchor_residuals.csv": eci_residual_table,
+        "metrics.csv": summarize_metrics(eci_predictions),
+        "coverage.csv": eci_coverage,
+        "model_residuals.csv": eci_model_residuals,
+    })
 
     if not args.no_figures:
         print("rendering release-time figures", flush=True)
@@ -680,8 +762,8 @@ def main() -> None:
                 for anchor in str(value).split("|") if anchor)
             if pd.isna(eci.get(model))),
     }
-    (analysis_out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-    (baseline_out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    _atomic_write_json(summary, analysis_out / "summary.json")
+    _atomic_write_json(summary, baseline_out / "summary.json")
     print(json.dumps(summary, indent=2))
 
 

@@ -1,0 +1,9 @@
+{
+  "main_analysis": "analysis/rank_regression",
+  "label": "Rank\u2013accuracy fit (in-sample)",
+  "discarded_non_main": [
+    "analysis/figures/frontier_style",
+    "capability_baseline/figures"
+  ],
+  "scientific_scope": "in-sample; no temporal cutoff, anchors, target exclusion, or ECI"
+}

@@ -1,9 +1,15 @@
 from pathlib import Path
 from runpy import run_path
+import sys
 
 import pandas as pd
 import pytest
 
+sys.path.insert(0, str(Path(__file__).parents[2]))
+from scripts.frontier_eci.canonical_capability_baseline import (  # noqa: E402
+    _eci_tasks as eci_tasks,
+    fit_eci_blocks_parallel,
+)
 
 module = run_path(
     Path(__file__).parents[2] / "scripts/frontier_eci/canonical_capability_baseline.py"
@@ -32,6 +38,45 @@ def test_eci_baseline_excludes_target_truth():
     outcomes.loc[outcomes.model.eq("target"), "successes"] = 20
     second = fit_eci_blocks(judge_fit, eci, outcomes, targets={"b": "target"})
     assert first.iloc[0].predicted == second.iloc[0].predicted
+
+
+def test_eci_target_truth_and_item_availability_never_change_bootstrap():
+    judge_fit = pd.DataFrame({"block": ["b"], "anchor_ids": ["a|c|d|e"]})
+    eci = pd.Series({"a": 100.0, "c": 110.0, "d": 120.0, "e": 130.0, "target": 140.0})
+    successes = {"a": 2, "c": 7, "d": 13, "e": 18, "target": 0}
+    outcomes = pd.DataFrame([
+        {"model": model, "item": str(item), "correct": item < success}
+        for model, success in successes.items() for item in range(20)
+    ])
+    first = fit_eci_blocks(judge_fit, eci, outcomes, targets={"b": "target"},
+                           resamples=30, seed=4).iloc[0]
+    changed = pd.concat([
+        outcomes[outcomes.model.ne("target")],
+        pd.DataFrame({"model": ["target"] * 7,
+                      "item": [f"target-only-{item}" for item in range(7)],
+                      "correct": [1] * 7}),
+    ], ignore_index=True)
+    second = fit_eci_blocks(judge_fit, eci, changed, targets={"b": "target"},
+                            resamples=30, seed=4).iloc[0]
+    fit_fields = [
+        "predicted", "predicted_low", "predicted_median", "predicted_high",
+        "intercept", "slope", "n_bootstrap", "bootstrap_unstable",
+    ]
+    assert first.actual == 0.0 and second.actual == 1.0
+    assert first.residual != second.residual
+    assert first[fit_fields].to_dict() == second[fit_fields].to_dict()
+
+
+def test_eci_selected_anchor_missing_from_outcomes_fails_explicitly():
+    judge_fit = pd.DataFrame({"block": ["b"], "anchor_ids": ["a|b|c|d|e"]})
+    eci = pd.Series({"a": 100.0, "b": 110.0, "c": 120.0, "d": 130.0,
+                     "e": 140.0, "target": 150.0})
+    outcomes = pd.DataFrame({"model": ["a", "b", "c", "d", "target"],
+                             "successes": [2, 7, 13, 18, 0], "total": [20] * 5})
+    result = fit_eci_blocks(judge_fit, eci, outcomes, targets={"b": "target"}).iloc[0]
+    assert result.fit_status == "failed"
+    assert result.failure_reason == "selected anchors unavailable: outcomes=e"
+    assert result.anchor_table is None
 
 
 def test_eci_baseline_reports_missing_anchor_without_changing_the_set():
@@ -90,3 +135,25 @@ def test_eci_mapping_requires_each_reviewed_name_exactly_once(tmp_path):
     pd.DataFrame({"Model": ["DeepSeek-R1"], "eci": [139.52]}).to_csv(path, index=False)
     with pytest.raises(ValueError, match=r"DeepSeek-R1 \(May 2025\)"):
         eci_mapping(path, ["deepseek-r1-0528"])
+
+
+def test_eci_tasks_are_single_rows_and_parallel_matches_serial():
+    judge_fits = pd.DataFrame({"block": ["b1", "b2"],
+                               "anchor_ids": ["a|b|c|d", "a|b|c|d"]})
+    eci = pd.Series({"a": 100.0, "b": 110.0, "c": 120.0, "d": 130.0,
+                     "target-1": 140.0, "target-2": 145.0})
+    successes = {"a": 2, "b": 7, "c": 13, "d": 18,
+                 "target-1": 0, "target-2": 20}
+    outcomes = pd.DataFrame([
+        {"model": model, "item": str(item), "correct": item < success}
+        for model, success in successes.items() for item in range(20)
+    ])
+    assert [len(task) for task in eci_tasks(judge_fits)] == [1, 1]
+    targets = {"b1": "target-1", "b2": "target-2"}
+    serial = fit_eci_blocks(judge_fits, eci, outcomes, targets, resamples=5, seed=4)
+    parallel = fit_eci_blocks_parallel(
+        judge_fits, eci, outcomes, targets, resamples=5, seed=4, workers=2)
+    pd.testing.assert_frame_equal(serial.drop(columns="anchor_table"),
+                                  parallel.drop(columns="anchor_table"))
+    for left, right in zip(serial.anchor_table, parallel.anchor_table):
+        pd.testing.assert_frame_equal(left, right)
