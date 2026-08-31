@@ -7,6 +7,7 @@ from .pairwise_report import (
     expand_leaf_coefficients,
     judge_capability_overview,
     pc_score_scales,
+    refit_matches_frozen,
     summarize_capability_predictions,
 )
 
@@ -45,6 +46,14 @@ def test_pc_score_scales_use_saved_explained_variance() -> None:
     })
 
     assert pc_score_scales(variance).to_dict() == {"pc_001": 2.0, "pc_002": 3.0}
+
+
+def test_refit_validation_includes_fitted_benchmark_ratio() -> None:
+    frozen = {"C": 0.1, "l1_ratio": 1.0, "benchmark_deviation_penalty": 0.3}
+
+    assert refit_matches_frozen(frozen | {"converged": True}, frozen)
+    assert not refit_matches_frozen(frozen | {"benchmark_deviation_penalty": 3.0}, frozen)
+    assert not refit_matches_frozen({"C": 0.1, "l1_ratio": 1.0}, frozen)
 
 
 def test_judge_capability_overview_joins_prediction_and_representation_metrics() -> None:
