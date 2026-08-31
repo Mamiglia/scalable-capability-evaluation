@@ -1,0 +1,11 @@
+bench,judge,n_protocol_verdicts,n_ranked_models,n_pair_items_max,pair_item_cap
+gpqa,deepseek-v4-flash-0731,1308,24,8,8
+gpqa,gemini-2.5-pro,795,20,8,8
+gpqa,gpt-4o-2024-11-20,745,24,8,8
+gpqa,gpt-5.2,796,19,8,8
+gpqa,o4-mini,1436,28,8,8
+swe_bench_mini,deepseek-v4-flash-0731,1568,28,8,8
+swe_bench_mini,gemini-2.5-pro,514,19,8,8
+swe_bench_mini,gpt-4o-2024-11-20,592,23,8,8
+swe_bench_mini,gpt-5.2,678,18,8,8
+swe_bench_mini,o4-mini,1572,31,8,8

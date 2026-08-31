@@ -1,0 +1,14 @@
+{
+  "status": "complete",
+  "analysis": "Rank\u2013accuracy fit (in-sample)",
+  "required_files": [
+    "abilities.csv",
+    "ranking_blocks.csv",
+    "fits.csv",
+    "training_fitted.csv",
+    "frontier_fitted.csv",
+    "checkpoint-main.json",
+    "summary.json"
+  ],
+  "figures_required": true
+}
