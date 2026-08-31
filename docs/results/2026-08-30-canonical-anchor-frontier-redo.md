@@ -77,9 +77,11 @@ of 12/13/12/9; the Q2/Q3/Q4 accuracies are 0.846/0.417/0.111.
   60 PNG + 60 PDF + 60 editable-text SVG (180 files total), with 20 PNG panels for each of Q2,
   Q3, and Q4. Original-resolution visual QA reviewed both benchmarks, all quartiles, all five
   judges, and line/points variants; it found readable, unclipped, consistent panels.
-- The corrected main analysis passed 211 tests and independent review. Final local Task 6 checks
-  independently reconfirmed the 30 fits, all joins, free-intercept OLS recomputation, method
-  selection, full Q2/Q3/Q4/frontier coverage, exact label, cap, and editable SVGs.
+- Task 5's corrected main analysis passed 211 tests and independent review. Task 6 then ran
+  `uv run pytest tests/frontier_eci tests/test_ranking.py -q` → 98 passed; the requested
+  `tests/test_frontier_forecast.py` is absent from this checkout. The Task 6 artifact audit also
+  recomputed all 30 fits, joins, free-intercept OLS coefficients, and method choices, and checked
+  full Q2/Q3/Q4/frontier coverage, the exact label, cap, and editable SVGs.
 
 ## Provenance and cost
 
@@ -88,12 +90,26 @@ per unordered pair. The old 79/80 prior forecast-coverage result, anchored calib
 matched ECI analyses are retained provenance only; they are not a property or a limitation of this
 complete in-sample rank-regression grid.
 
-The final paid corpus contains 3,220 calls with zero provider issues. New-key logged API cost is
-approximately **$65.5190**: the original top-up was $51.589830740 and the Gemini SWE addition was
-$13.929153. Historical API spend of approximately $133.40 is separate and is not included in that
-new-key amount. RunPod figures are estimates rather than invoice allocations: Task 4 estimated
-$6.8993; the Task 5 start-to-final balance change ($46.143585 to $23.643660) is approximately
-$22.4999 and includes volume billing; together the new RunPod estimate is approximately **$29.40**.
+The [provider summary](../../judge_results/frontier/eci-semiannual-canonical-anchors/provenance/api_summary.csv)
+and [call-level audit](../../judge_results/frontier/eci-semiannual-canonical-anchors/provenance/api_calls.parquet)
+contain **3,220 audited paid response records**. Of these, 3,219 rows belong to latest-successful
+configs; one belongs to the retained raw local SIGABRT attempt, which was later recovered. Main
+verdict ingestion uses latest-success/deduplicated rows. There was one local raw failure event;
+`provider_mismatches=0` and zero missing paid-provider fields are narrower provenance-audit
+findings, not a claim of zero provider issues. The endpoint snapshots are
+[before the original top-up](../../judge_results/frontier/eci-semiannual-canonical-anchors/provenance/endpoints-20260831T001625Z.json)
+and [before the Gemini SWE addition](../../judge_results/frontier/eci-semiannual-canonical-anchors/provenance/endpoints-20260831T032308Z.json).
+The original top-up [final run summary](../../judge_results/frontier/eci-semiannual-canonical-anchors/run-runpod/final-summary.json),
+[consolidated ledger](../../judge_results/frontier/eci-semiannual-canonical-anchors/run-runpod/ledger.jsonl),
+and [monitor](../../judge_results/frontier/eci-semiannual-canonical-anchors/run-runpod/monitor.jsonl)
+retain the execution audit.
+
+**Cost totals (approximate, not invoice allocations):** new-key API is **$65.5190**
+($51.589830740 original top-up + $13.929153 Gemini SWE addition); Task 4 RunPod was estimated at
+$6.8993 and the Task 5 balance-based change was about $22.4999 (from $46.143585 to $23.643660,
+including volume billing), for estimated new RunPod of **$29.40**. Estimated new-work combined is
+therefore **$94.92**. Historical API spend of about **$133.40** is separate; including it produces
+an approximate **$228.32**, still not an invoice allocation.
 
 No scientifically unidentified cell remains in the main rank-regression grid. The four absent
 upstream Gemini SWE items remain absent rather than imputed, with the denominators above made
