@@ -1138,6 +1138,10 @@ def judge_capability_overview(
     cosines: pd.DataFrame, eci: pd.DataFrame,
 ) -> pd.DataFrame:
     """Join matched predictive accuracy and coefficient-alignment summaries."""
+    if ("coordinate_space" not in statistics or "coordinate_space" not in cosines
+            or not statistics.coordinate_space.eq("original_leaf").all()
+            or not cosines.coordinate_space.eq("original_leaf").all()):
+        raise ValueError("primary judge-capability similarity requires original-leaf coordinates")
     coefficient = statistics[statistics.benchmark == "all"][
         ["variant", "judge", "pearson", "spearman", "same_sign_share"]
     ]
@@ -1206,7 +1210,7 @@ def build_judge_comparison_tables(
     cosines = pd.DataFrame(cosines)
     cosine_summary = _fold_summary(
         cosines, ["variant", "judge", "benchmark"], "cosine",
-    )
+    ).assign(coordinate_space="native")
     contribution_summary = (pd.DataFrame(contributions).groupby(
         ["variant", "judge", "feature"], as_index=False,
     ).contribution.mean())
@@ -1249,6 +1253,9 @@ def build_judge_comparison_tables(
                     ).to_dict("records"))
     leaf_points = pd.concat(leaf_points, ignore_index=True)
     leaf_cosines = pd.DataFrame(leaf_cosines)
+    leaf_cosine_summary = _fold_summary(
+        leaf_cosines, ["variant", "judge", "benchmark"], "cosine",
+    ).assign(coordinate_space="original_leaf")
     leaf_contributions = (pd.DataFrame(leaf_contributions).groupby(
         ["variant", "judge", "feature", "block"], as_index=False,
     ).contribution.mean())
@@ -1295,11 +1302,14 @@ def build_judge_comparison_tables(
         for judge, model in ECI_MODELS.items()
         if (eci.Model == model).any()
     ])
-    coefficient_statistics = pd.DataFrame(statistics)
-    overview = judge_capability_overview(
-        accuracy_summary, coefficient_statistics, cosine_summary, eci,
+    coefficient_statistics = pd.DataFrame(statistics).assign(coordinate_space="native")
+    leaf_statistics_frame = pd.DataFrame(leaf_statistics).assign(
+        coordinate_space="original_leaf",
     )
-    relations = cosine_summary[cosine_summary.benchmark == "all"].merge(
+    overview = judge_capability_overview(
+        accuracy_summary, leaf_statistics_frame, leaf_cosine_summary, eci,
+    )
+    relations = leaf_cosine_summary[leaf_cosine_summary.benchmark == "all"].merge(
         accuracy_summary.groupby("judge", as_index=False).judge_accuracy.mean(),
         on="judge", how="left", validate="many_to_one",
     ).merge(eci, on="judge", how="left", validate="many_to_one")
@@ -1310,8 +1320,9 @@ def build_judge_comparison_tables(
         "judge_cosine_summary": cosine_summary,
         "judge_cosine_contributions": contribution_summary,
         "leaf_judge_points": leaf_points,
-        "leaf_judge_statistics": pd.DataFrame(leaf_statistics),
+        "leaf_judge_statistics": leaf_statistics_frame,
         "leaf_judge_cosines": leaf_cosines,
+        "leaf_judge_cosine_summary": leaf_cosine_summary,
         "leaf_judge_contributions": leaf_contributions,
         "stronger_model_accuracy": accuracy,
         "stronger_model_accuracy_summary": accuracy_summary,
@@ -1357,7 +1368,7 @@ def plot_judge_comparisons(comparison: dict[str, pd.DataFrame], root: Path) -> N
         _judge_scatter(comparison["leaf_judge_points"],
                        comparison["leaf_judge_statistics"], variant, directory,
                        suffix="original-leaf")
-        frame = comparison["judge_cosine_summary"].query("variant == @variant")
+        frame = comparison["leaf_judge_cosine_summary"].query("variant == @variant")
         _style(); fig, ax = plt.subplots(figsize=(2.45, 2.05), layout="constrained")
         y = np.arange(len(JUDGE_LABELS)); dodges = np.linspace(-.24, .24, 5)
         for dodge, benchmark, color in zip(dodges, ("all", *BENCHMARKS),
@@ -1540,7 +1551,7 @@ def _write_scientific_summary(
                     .nlargest(5, "singular")[["label", "singular", "unique"]])
     top_pcs = (tables["feature_effects"].query("variant == 'pc-l2'")
                .nlargest(5, "singular")[["feature", "singular", "unique"]])
-    cosines = comparison["judge_cosine_summary"]
+    cosines = comparison["leaf_judge_cosine_summary"]
     overview = comparison["judge_capability_overview"]
     best = cosines[cosines.benchmark == "all"].sort_values("estimate", ascending=False).iloc[0]
     lines = [
