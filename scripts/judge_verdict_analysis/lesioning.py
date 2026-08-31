@@ -17,7 +17,7 @@ from .config import AnalysisConfig, CONFIG
 from .fit import ARTIFACTS as FIT_ARTIFACTS
 from .fit import _guard_execution, _load_rows, _outer_folds, _positive_int, _resume_existing
 from .fit_common import prepare_features
-from .fit_frequentist import fit_sparse, tune_sparse
+from .fit_frequentist import JUDGE_TASK, SparseTask, fit_sparse, tune_sparse
 
 
 @dataclass(frozen=True)
@@ -345,6 +345,8 @@ def _config_settings(config: AnalysisConfig, fold_index: int | None = None) -> d
             "fit_pca_algorithm": config.fit_pca_algorithm,
             "pc_basis_root": str(config.pc_basis_root),
         })
+    if config.lesion_source_signature:
+        settings["lesion_source_signature"] = config.lesion_source_signature
     return settings
 
 
@@ -483,7 +485,13 @@ def prepare_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
     return fold_dir
 
 
-def run_specification(task_index: int, config: AnalysisConfig = CONFIG) -> Path | None:
+def run_specification(
+    task_index: int,
+    config: AnalysisConfig = CONFIG,
+    *,
+    task: SparseTask = JUDGE_TASK,
+    write_diagnostics: bool = False,
+) -> Path | None:
     """Fit one fold×specification task with frozen full-model hyperparameters."""
     config = config.validate()
     _guard_execution(config)
@@ -500,6 +508,9 @@ def run_specification(task_index: int, config: AnalysisConfig = CONFIG) -> Path 
         fold_dir / folder / f"{row.specification}.parquet"
         for folder in ("predictions", "coefficients", "item-metrics")
     ]
+    diagnostic = fold_dir / "diagnostics" / f"{row.specification}.json"
+    if write_diagnostics:
+        paths.append(diagnostic)
     if all(path.is_file() for path in paths):
         return paths[0]
     train = pd.read_parquet(fold_dir / "train.parquet")
@@ -507,11 +518,17 @@ def run_specification(task_index: int, config: AnalysisConfig = CONFIG) -> Path 
     all_features = pd.read_parquet(fold_dir / "feature-dictionary.parquet").feature.tolist()
     features = json.loads(row.features)
     frozen = json.loads((fold_dir / "frozen-hyperparameters.json").read_text())
-    result = fit_sparse(train, test, features, config.penalty, frozen, config)
+    result = fit_sparse(
+        train, test, features, config.penalty, frozen, config, task=task,
+    )
     predictions = result.predictions.drop(columns=all_features, errors="ignore")
     _atomic(paths[0], lambda path: predictions.to_parquet(path, index=False))
     _atomic(paths[1], lambda path: result.coefficients.to_parquet(path, index=False))
     _atomic(paths[2], lambda path: _item_metrics(predictions).to_parquet(path, index=False))
+    if write_diagnostics:
+        _atomic(diagnostic, lambda path: path.write_text(
+            json.dumps(result.diagnostics, indent=2, sort_keys=True) + "\n"
+        ))
     return paths[0]
 
 
@@ -544,7 +561,7 @@ def finalize_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
             for path in fold_dir.rglob("*") if path.is_file() and path != manifest_path
         },
         "labelled_specifications": len(pd.read_csv(fold_dir / "specifications.csv")),
-        "unique_specifications": len(table) - 1,
+        "unique_specifications": len(table) - int((table.kind == "reference").sum()),
         "aliases": json.loads((fold_dir / "aliases.json").read_text()),
     }
     _atomic(manifest_path, lambda path: path.write_text(
@@ -637,7 +654,12 @@ def aggregate_lesions(config: AnalysisConfig = CONFIG) -> Path:
     backend = f"{config.feature_space}-{config.penalty}"
     item_deltas, summaries, index_rows = [], [], []
     for fold, fold_dir in zip(fold_names, fold_dirs):
-        for reference in ("full", "intercept-only"):
+        references = [
+            "full", *dict.fromkeys(
+                reference for reference in tables[0].reference if reference != "full"
+            ),
+        ]
+        for reference in references:
             index_rows.append({
                 "fold": fold, "specification": reference, "kind": "reference",
                 "variable": reference, "reference": "", "artifact": reference,

@@ -67,6 +67,8 @@ JUDGES: tuple[str, ...] = (
 class AnalysisConfig:
     design_matrix_config: Path = ROOT / "configs/design_matrices.yaml"  # Existing matrix/source-path config.
     results_dir: Path = DEFAULT_RESULTS_DIR  # Canonical output root.
+    lesion_root: Path | None = None  # Optional separate root for lesion artifacts.
+    lesion_source_signature: str = ""  # Optional adapter-specific provenance pin.
     processed_matrix_root: Path | None = None  # Explicit override; production defaults to the shared 117-feature matrix.
     source_hf_repo: str = "LASR-G5/judging"  # Hugging Face repository used to build the source matrix.
     source_hf_revision: str = ""  # Required full commit SHA for non-test fitting; empty keeps schema fixtures unresolved.
@@ -204,7 +206,7 @@ class AnalysisConfig:
     @property
     def lesion_dir(self) -> Path:
         """Directory for paired held-out feature-lesion results."""
-        return self.results_dir / "lesions" / f"{self.feature_space}-{self.penalty}"
+        return (self.lesion_root or self.results_dir / "lesions") / f"{self.feature_space}-{self.penalty}"
 
     @property
     def model_figure_dir(self) -> Path:
