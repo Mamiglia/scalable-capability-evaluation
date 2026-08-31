@@ -22,6 +22,7 @@ from scripts.judge_verdict_analysis.fit_frequentist import (
     tune_sparse,
 )
 from scripts.judge_verdict_analysis.hierarchy import outer_roles
+from scripts.judge_verdict_analysis.pooling import penalty_multiplier
 
 from .data import _sha256
 from .preprocessing import _model_item_rates, deduplicate_feature_pairs
@@ -36,7 +37,7 @@ def _capability_design(frame, features, levels, config):
     if missing:
         raise ValueError(f"capability frame missing columns: {missing}")
     values = frame[features].to_numpy(dtype=float)
-    multiplier = 1 / np.sqrt(float(config.benchmark_deviation_penalty))
+    multiplier = penalty_multiplier(config.benchmark_deviation_penalty, config.penalty)
     if not np.isfinite(values).all() or not np.isfinite(multiplier) or multiplier <= 0:
         raise ValueError("capability design values and penalty must be finite and positive")
     blocks = [sparse.csr_matrix(values)]
