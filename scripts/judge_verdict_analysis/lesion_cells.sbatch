@@ -9,7 +9,7 @@
 #SBATCH --output=logs/%x-%j.out
 
 # From a staging directory containing repo/ and logs/:
-#   sbatch repo/scripts/judge_verdict_analysis/lesion_cells.sbatch ARTIFACT_INDEX OUTPUT_DIR [BOOTSTRAP_ITERATIONS] [SEED] [write-item-deltas]
+#   sbatch repo/scripts/judge_verdict_analysis/lesion_cells.sbatch ARTIFACT_INDEX OUTPUT_DIR [BOOTSTRAP_ITERATIONS] [SEED] [write-item-deltas] EXPECTED_LABELLED EXPECTED_UNIQUE
 set -euo pipefail
 
 artifact_index=${1:?usage: lesion_cells.sbatch ARTIFACT_INDEX OUTPUT_DIR [BOOTSTRAP_ITERATIONS] [SEED] [write-item-deltas]}
@@ -17,6 +17,8 @@ output_dir=${2:?usage: lesion_cells.sbatch ARTIFACT_INDEX OUTPUT_DIR [BOOTSTRAP_
 bootstrap_iterations=${3:-1000}
 seed=${4:-0}
 item_deltas=${5:-}
+expected_labelled=${6:?supply expected labelled specifications: raw=252, pc=60}
+expected_unique=${7:?supply expected unique artifacts: raw=250, pc=60}
 [[ -n ${SLURM_JOB_ID:-} ]] || { echo "lesion-cell summaries require a Slurm allocation" >&2; exit 2; }
 staging=$SLURM_SUBMIT_DIR
 [[ $artifact_index == /* ]] || artifact_index=$staging/$artifact_index
@@ -44,6 +46,7 @@ command=(
   "$python" -m scripts.judge_verdict_analysis.lesion_cells
   --artifact-index "$artifact_index" --output-dir "$output_dir"
   --bootstrap-iterations "$bootstrap_iterations" --seed "$seed"
+  --expected-labelled "$expected_labelled" --expected-unique "$expected_unique"
 )
 [[ $item_deltas == write-item-deltas ]] && command+=(--write-item-deltas)
 "${command[@]}"

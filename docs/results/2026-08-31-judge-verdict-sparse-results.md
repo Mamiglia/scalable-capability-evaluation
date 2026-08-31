@@ -1,5 +1,10 @@
 # What guides judge verdicts?
 
+> **Provisional / superseded:** these numerical results used fixed relative
+> hierarchy penalties (`3/3/10/10`). They must not be cited as final results.
+> The corrected refit is specified in
+> `docs/handoffs/2026-08-31-judge-verdict-hierarchical-refit-handoff.md`.
+
 ## Main result
 
 The primary specification is L1 throughout. It incurred no practically meaningful predictive loss relative to L2—accuracy was slightly higher in both representations, while log loss differed by at most 0.0018—and it supplies exact-zero coefficients. L2 is retained only as a sensitivity check.

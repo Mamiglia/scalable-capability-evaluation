@@ -23,6 +23,7 @@ from .lesioning import (
     prepare_lesions,
     reference_specifications,
 )
+from .lesion_cells import reference_cell_metrics
 from .preprocessing import apply_composites, fit_composites
 
 
@@ -339,8 +340,11 @@ def test_pc_basis_is_loaded_once_and_shared_across_outer_folds(tmp_path: Path) -
         provenance["explained_variance"], changed_provenance["explained_variance"],
     )
     assert prepared_dictionary.feature.tolist() == ["pc_001", "pc_002"]
-    np.testing.assert_allclose(prepared_train.pc_001, train.f0)
-    np.testing.assert_allclose(prepared_train.pc_002, 0.6 * train.f1 + 0.8 * train.f2)
+    np.testing.assert_allclose(prepared_train.pc_001, train.f0 / np.sqrt(3))
+    np.testing.assert_allclose(
+        prepared_train.pc_002, (0.6 * train.f1 + 0.8 * train.f2) / np.sqrt(2),
+    )
+    assert provenance["score_scaling"] == "divide-by-global-pc-sd"
 
     variance_path = config.pc_basis_root / "explained-variance.csv"
     variance = pd.read_csv(variance_path)
@@ -518,3 +522,28 @@ def test_fit_aggregation_reports_item_and_both_fold_dimensions() -> None:
     assert set(uncertainty.method) == {
         "item_clustered", "model_fold", "item_fold", "conservative_fold",
     }
+
+
+def test_lesion_cell_references_keep_absolute_intercept_log_loss(tmp_path: Path) -> None:
+    rows = pd.DataFrame({
+        "fold": ["fold-0", "fold-0"], "judge": ["j0", "j0"],
+        "bench": ["b0", "b0"], "item": ["i0", "i1"],
+        "observed": [1, 0], "probability": [0.75, 0.25],
+    })
+    plan = []
+    for reference, probabilities in (
+        ("full", [0.75, 0.25]), ("intercept-only", [0.5, 0.5]),
+    ):
+        path = tmp_path / f"{reference}.parquet"
+        rows.assign(probability=probabilities).to_parquet(path, index=False)
+        plan.append({
+            "fold": "fold-0", "specification": reference, "kind": "reference",
+            "variable": reference, "reference": "", "artifact": reference,
+            "predictions": path,
+        })
+
+    metrics = reference_cell_metrics(pd.DataFrame(plan)).set_index("reference")
+
+    assert metrics.loc["full", "log_loss"] < metrics.loc["intercept-only", "log_loss"]
+    assert metrics.loc["intercept-only", "log_loss"] == pytest.approx(np.log(2))
+    assert metrics.loc["intercept-only", "row_count"] == 2

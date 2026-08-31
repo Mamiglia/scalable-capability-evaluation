@@ -40,6 +40,7 @@ def _manifest_settings(config: AnalysisConfig) -> dict[str, object]:
         "penalty": config.penalty,
         "elastic_net_cs": list(config.elastic_net_cs),
         "ridge_cs": list(config.ridge_cs),
+        "pooling_penalty_ratios": list(config.pooling_penalty_ratios),
         "judge_deviation_penalty": config.judge_deviation_penalty,
         "benchmark_deviation_penalty": config.benchmark_deviation_penalty,
         "cell_deviation_penalty": config.cell_deviation_penalty,
@@ -177,7 +178,10 @@ def _load_rows(config: AnalysisConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
     return rows, dictionary.drop(columns="column", errors="ignore")
 
 
-def _resume_existing(output: Path, required: tuple[str, ...], config: AnalysisConfig) -> bool:
+def _resume_existing(
+    output: Path, required: tuple[str, ...], config: AnalysisConfig,
+    backend: str | None = None,
+) -> bool:
     """Resume only a complete, hash-valid fold with identical settings."""
     if not output.exists():
         return False
@@ -186,7 +190,7 @@ def _resume_existing(output: Path, required: tuple[str, ...], config: AnalysisCo
     if missing := [name for name in required if not (output / name).exists()]:
         raise RuntimeError(f"cannot resume partial output {output}; missing {missing}")
     manifest = json.loads((output / "manifest.json").read_text())
-    backend = f"{config.feature_space}-{config.penalty}"
+    backend = backend or f"{config.feature_space}-{config.penalty}"
     hashes = manifest.get("artifact_sha256")
     saved_settings = dict(manifest.get("settings", {}))
     expected_settings = _manifest_settings(config)
@@ -228,17 +232,21 @@ def run_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
     return config.fit_dir / result.backend / fold
 
 
-def aggregate_fits(config: AnalysisConfig = CONFIG) -> Path:
+def aggregate_fits(
+    config: AnalysisConfig = CONFIG, backend: str | None = None,
+) -> Path:
     """Aggregate all 16 full-fit checkpoints for one sparse variant."""
     config = config.validate()
-    backend = f"{config.feature_space}-{config.penalty}"
+    backend = backend or f"{config.feature_space}-{config.penalty}"
     fold_names = [
         f"{model_name}__item-{item_fold}"
         for model_name, _ in config.model_folds for item_fold in range(config.item_folds)
     ]
     fold_dirs = [config.fit_dir / backend / fold for fold in fold_names]
     for fold_dir in fold_dirs:
-        _resume_existing(fold_dir, ARTIFACTS, replace(config, resume_completed_folds=True))
+        _resume_existing(
+            fold_dir, ARTIFACTS, replace(config, resume_completed_folds=True), backend,
+        )
     fold_hashes = {
         fold: _file_sha256(fold_dir / "manifest.json")
         for fold, fold_dir in zip(fold_names, fold_dirs)
@@ -421,6 +429,9 @@ def fit_fold(
         prepared_train, prepared_test, features, config.penalty,
         frozen, config, tuning,
     )
+    selected = tuning[tuning.selected]
+    if not result.diagnostics["converged"] or selected.empty or not selected.converged.all():
+        raise RuntimeError(f"full fit or selected pooling/C tuning did not converge: {result.fold}")
     return result, prepared_dictionary, provenance | {
         "frozen_hyperparameters": frozen,
     }
@@ -471,6 +482,7 @@ def _write_result(
             "source_hf_revision": config.source_hf_revision,
             "source_status": "resolved" if config.source_hf_revision else "unresolved/test-only",
             "settings": _manifest_settings(config),
+            "frozen_hyperparameters": json_provenance.get("frozen_hyperparameters"),
             "artifact_sha256": {
                 path.name: _file_sha256(path) for path in stage.iterdir()
             },

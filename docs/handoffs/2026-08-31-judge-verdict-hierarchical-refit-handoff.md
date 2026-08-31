@@ -40,8 +40,9 @@ For each outer fold and each raw/PC, L1/L2 variant:
    judge-by-benchmark slopes; global, judge, benchmark, cell, and nested-item
    intercepts.
 2. Select the global `C` and four positive relative penalty ratios from only
-   the outer-training rows using grouped inner-CV log loss. A small coordinate
-   search over a fixed ratio grid is sufficient; no Bayesian sampler or new
+   the outer-training rows using grouped inner-CV log loss. Use deterministic
+   coordinate updates over `0.1, 0.3, 1, 3, 10, 30`, starting at one and
+   stopping when unchanged or after two passes. No Bayesian sampler or new
    dependency is required.
 3. Apply penalty-family-correct column scaling. For relative penalty `r`, use
    `1 / r` under L1 and `1 / sqrt(r)` under L2.
@@ -130,6 +131,28 @@ writes new immutable result directories:
 4. raw and PC-30 capability-added companion full fits only;
 5. aggregation, both recovery metrics, judge/benchmark/cell tables, all plot
    packs, and the revised results report.
+
+Expected Slurm inventory:
+
+- 64 full-fit fold tasks: 16 folds × raw/PC × L1/L2;
+- 64 capability-companion fold tasks, with no tuning or lesions;
+- raw lesion arrays contain 251 runnable tasks per fold (intercept-only plus
+  250 unique feature/block/family specifications), or 4,016 tasks per penalty;
+- PC lesion arrays contain 61 runnable tasks per fold, or 976 tasks per
+  penalty;
+- four lesion-cell summaries use explicit inventories: raw `252 labelled / 250
+  unique`, PC `60 / 60`.
+
+The thousands of lesion jobs are therefore the expected
+fold-by-specification expansion, not repeated hyperparameter searches. Current
+Slurm scripts allow 24 hours for a full fold or lesion task and four hours for
+the post-fit cell summary; verify the CPU partition limit before submission.
+
+`final_report.py` consumes the native rerun layout directly:
+`fits/<backend>/aggregate`, `fits/<backend>-capability/aggregate`,
+`lesions/<backend>`, and `lesion-cells/<backend>`. Supply the immutable inputs
+explicitly with `--matrix-root`, `--pc-basis-root`, and `--ceiling`; no manual
+renaming into the historical report layout is required.
 
 Never overwrite or delete the existing Ceph artifacts. Stage code and outputs
 to new paths, validate manifests/hashes, and commit code/docs before submitting

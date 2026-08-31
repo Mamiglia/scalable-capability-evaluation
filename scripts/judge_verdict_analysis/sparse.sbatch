@@ -11,7 +11,7 @@
 
 set -euo pipefail
 # Submit aggregate with --array=0-0; nonzero default-array tasks safely no-op.
-mode=${1:?usage: sparse.sbatch fold|aggregate MATRIX_ROOT RESULTS_DIR raw|pc l1|ridge [PC_BASIS_ROOT] [PC_COMPONENTS]}
+mode=${1:?usage: sparse.sbatch fold|aggregate|capability-fold|capability-aggregate MATRIX_ROOT RESULTS_DIR raw|pc l1|ridge [PC_BASIS_ROOT] [PC_COMPONENTS]}
 matrix_root=${2:?missing MATRIX_ROOT}
 results_dir=${3:?missing RESULTS_DIR}
 feature_space=${4:?missing raw|pc}
@@ -50,6 +50,15 @@ case "$mode" in
   aggregate)
     [[ ${SLURM_ARRAY_TASK_ID:-0} == 0 ]] || { echo "skipping nonzero aggregate task"; exit 0; }
     "$python" -m scripts.judge_verdict_analysis.fit aggregate "${args[@]}"
+    ;;
+  capability-fold)
+    : "${SLURM_ARRAY_TASK_ID:?capability-fold mode requires an array task}"
+    "$python" -m scripts.judge_verdict_analysis.capability fold \
+      --fold-index "$SLURM_ARRAY_TASK_ID" --processed-matrix-root "$matrix_root" "${args[@]}"
+    ;;
+  capability-aggregate)
+    [[ ${SLURM_ARRAY_TASK_ID:-0} == 0 ]] || { echo "skipping nonzero capability aggregate task"; exit 0; }
+    "$python" -m scripts.judge_verdict_analysis.capability aggregate "${args[@]}"
     ;;
   *) echo "unknown mode: $mode" >&2; exit 2 ;;
 esac

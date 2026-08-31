@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
+from .pooling import penalty_multiplier
+
 
 _PENALTIES = {
     "judge": "judge_deviation_penalty",
@@ -60,10 +62,11 @@ def hierarchical_design(
     levels: HierarchyLevels,
     penalties: Mapping[str, float],
     include_items: bool = True,
+    penalty: str = "ridge",
 ) -> tuple[sparse.csr_matrix, pd.DataFrame]:
     """Build the sparse intercept-and-slope hierarchy and its coefficient map."""
     _require_columns(frame, ("judge", "bench", "item", *features))
-    multipliers = _multipliers(penalties)
+    multipliers = _multipliers(penalties, penalty)
     n_rows = len(frame)
     rows = np.arange(n_rows)
     blocks: list[sparse.csr_matrix] = []
@@ -144,14 +147,14 @@ def _add_pairs(add, block, first, second, categories, rows, n_rows, multiplier, 
             **{first_name: first_category, second_name: second_category})
 
 
-def _multipliers(penalties: Mapping[str, float]) -> dict[str, float]:
+def _multipliers(penalties: Mapping[str, float], penalty: str) -> dict[str, float]:
     missing = set(_PENALTIES.values()) - set(penalties)
     if missing:
         raise ValueError(f"missing hierarchy penalties: {sorted(missing)}")
-    result = {name: 1 / np.sqrt(float(penalties[key])) for name, key in _PENALTIES.items()}
-    if any(not np.isfinite(value) or value <= 0 for value in result.values()):
-        raise ValueError("hierarchy penalties must be finite and positive")
-    return result
+    return {
+        name: penalty_multiplier(penalties[key], penalty)
+        for name, key in _PENALTIES.items()
+    }
 
 
 def _feature_values(frame: pd.DataFrame, feature: str) -> np.ndarray:

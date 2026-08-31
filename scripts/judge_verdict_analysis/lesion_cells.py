@@ -26,6 +26,10 @@ ITEM_DELTA_COLUMNS = (
     "specification", "kind", "variable", "reference", "artifact",
     "fold", "judge", "bench", "item", "delta_log_loss", "delta_accuracy", "row_count",
 )
+REFERENCE_METRIC_COLUMNS = (
+    "reference", "judge", "benchmark", "log_loss", "accuracy",
+    "fold_count", "row_count",
+)
 
 
 def _validate_production_inventory(
@@ -202,6 +206,28 @@ def pair_predictions(
     else:
         raise ValueError(f"unknown reference: {reference_name}")
     return output
+
+
+def reference_cell_metrics(plan: pd.DataFrame) -> pd.DataFrame:
+    """Return absolute held-out metrics for full and intercept-only references."""
+    rows = []
+    for row in plan[plan.kind == "reference"].itertuples(index=False):
+        frame = read_predictions(row.predictions, str(row.fold))
+        observed = frame.observed.to_numpy(int)
+        probability = frame.probability.to_numpy(float)
+        values = frame[["fold", "judge", "bench"]].copy()
+        values["reference"] = row.specification
+        values["log_loss"] = _log_loss(observed, probability)
+        values["accuracy"] = ((probability >= 0.5) == observed).astype(float)
+        rows.append(values)
+    combined = pd.concat(rows, ignore_index=True)
+    output = combined.groupby(
+        ["reference", "judge", "bench"], sort=True, as_index=False,
+    ).agg(
+        log_loss=("log_loss", "mean"), accuracy=("accuracy", "mean"),
+        fold_count=("fold", "nunique"), row_count=("accuracy", "size"),
+    ).rename(columns={"bench": "benchmark"})
+    return output[list(REFERENCE_METRIC_COLUMNS)]
 
 
 def summarize_cells(
@@ -405,7 +431,7 @@ def _settings(
     specification_plan = (plan[(plan.fold == first_fold) & (plan.kind != "reference")][columns]
                           .sort_values("specification").to_dict(orient="records"))
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "source_artifact_index": str(index),
         "source_artifact_index_sha256": _sha256(index),
         "bootstrap_iterations": bootstrap_iterations,
@@ -430,7 +456,7 @@ def _validate_outputs(directory: Path, settings: dict[str, object]) -> dict[str,
         raise RuntimeError(f"summary settings mismatch at {directory}")
     inventory = settings["expected_inventory"]
     expected_manifest = {
-        "state": "completed", "schema_version": 1,
+        "state": "completed", "schema_version": 2,
         "settings_signature": expected_settings["signature"],
         "plan_signature": settings["plan_signature"],
         "source_artifact_index_sha256": settings["source_artifact_index_sha256"],
@@ -443,6 +469,7 @@ def _validate_outputs(directory: Path, settings: dict[str, object]) -> dict[str,
         raise RuntimeError(f"invalid completion manifest at {directory}")
     expected_artifacts = {
         "settings.json", "input-signatures.csv", "cell-summary.csv",
+        "reference-cell-metrics.csv",
         *(["item-cell-deltas.parquet"] if settings["write_item_deltas"] else []),
     }
     hashes = manifest.get("artifact_sha256")
@@ -455,6 +482,13 @@ def _validate_outputs(directory: Path, settings: dict[str, object]) -> dict[str,
     expected_labelled = int(settings["expected_inventory"][1])
     summary = pd.read_csv(directory / "cell-summary.csv", keep_default_na=False)
     _validate_summary(summary, expected_labelled)
+    reference_metrics = pd.read_csv(
+        directory / "reference-cell-metrics.csv", keep_default_na=False)
+    if (reference_metrics.columns.tolist() != list(REFERENCE_METRIC_COLUMNS)
+            or set(reference_metrics.reference) != {"full", "intercept-only"}
+            or not np.isfinite(reference_metrics[
+                ["log_loss", "accuracy", "fold_count", "row_count"]].to_numpy(float)).all()):
+        raise RuntimeError("reference cell metrics are not recoverable")
     if settings["write_item_deltas"]:
         _validate_item_deltas(
             pd.read_parquet(directory / "item-cell-deltas.parquet"), expected_labelled)
@@ -502,6 +536,7 @@ def build(
     _write_frame_once(stage / "input-signatures.csv", signatures)
 
     summary_path = stage / "cell-summary.csv"
+    reference_path = stage / "reference-cell-metrics.csv"
     item_path = stage / "item-cell-deltas.parquet"
     if summary_path.exists():
         _validate_summary(
@@ -510,23 +545,27 @@ def build(
         if not write_item_deltas:
             raise RuntimeError(f"unexpected staged item deltas: {item_path}")
         _validate_item_deltas(pd.read_parquet(item_path), expected_inventory[1])
-    required_outputs = [summary_path, *([item_path] if write_item_deltas else [])]
+    required_outputs = [
+        summary_path, reference_path, *([item_path] if write_item_deltas else []),
+    ]
     if not all(path.is_file() for path in required_outputs):
         item_deltas = _item_cell_deltas(plan)
         summary = summarize_cells(item_deltas, bootstrap_iterations, seed)
         summary = summary[list(SUMMARY_COLUMNS)].sort_values(
             ["specification", "scope", "judge", "benchmark"]).reset_index(drop=True)
         _write_frame_once(summary_path, summary)
+        _write_frame_once(reference_path, reference_cell_metrics(plan))
         if write_item_deltas:
             _write_frame_once(item_path, item_deltas)
     summary_rows = len(pd.read_csv(summary_path))
     item_rows = len(pd.read_parquet(item_path)) if write_item_deltas else 0
     artifact_names = [
         "settings.json", "input-signatures.csv", "cell-summary.csv",
+        "reference-cell-metrics.csv",
         *(["item-cell-deltas.parquet"] if write_item_deltas else []),
     ]
     manifest = {
-        "state": "completed", "schema_version": 1,
+        "state": "completed", "schema_version": 2,
         "settings_signature": settings_payload["signature"],
         "plan_signature": settings["plan_signature"],
         "source_artifact_index_sha256": settings["source_artifact_index_sha256"],
@@ -555,11 +594,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--bootstrap-iterations", type=int, default=1_000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--write-item-deltas", action="store_true")
+    parser.add_argument("--expected-folds", type=int, default=16)
+    parser.add_argument("--expected-labelled", type=int, default=262)
+    parser.add_argument("--expected-unique", type=int, default=260)
     args = parser.parse_args(argv)
     build(
         args.artifact_index, args.output_dir,
         bootstrap_iterations=args.bootstrap_iterations, seed=args.seed,
         write_item_deltas=args.write_item_deltas,
+        expected_inventory=(
+            args.expected_folds, args.expected_labelled, args.expected_unique),
     )
 
 

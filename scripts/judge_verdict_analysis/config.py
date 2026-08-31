@@ -140,10 +140,11 @@ class AnalysisConfig:
     elastic_net_l1_ratios: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)  # Elastic-net L1 shares.
     selection_min_fold_share: float = 2 / 3  # Inner-fold share required to retain a base feature.
     ridge_cs: tuple[float, ...] = (0.001, 0.005, 0.01, 0.05)  # Ridge inverse penalties around the prior lower-bound choice.
-    judge_deviation_penalty: float = 3.0  # Shrinkage penalty for judge slope deviations.
-    benchmark_deviation_penalty: float = 3.0  # Shrinkage penalty for benchmark slope deviations.
-    cell_deviation_penalty: float = 10.0  # Shrinkage penalty for judge-by-benchmark deviations.
-    item_intercept_penalty: float = 10.0  # Shrinkage penalty for item intercepts.
+    pooling_penalty_ratios: tuple[float, ...] = (0.1, 0.3, 1.0, 3.0, 10.0, 30.0)  # Inner-CV grid for every hierarchical deviation block.
+    judge_deviation_penalty: float = 1.0  # Neutral working value; each outer fold replaces it with its fitted ratio.
+    benchmark_deviation_penalty: float = 1.0  # Neutral working value; each outer fold replaces it with its fitted ratio.
+    cell_deviation_penalty: float = 1.0  # Neutral working value; each outer fold replaces it with its fitted ratio.
+    item_intercept_penalty: float = 1.0  # Neutral working value; each outer fold replaces it with its fitted ratio.
     lesion_backends: tuple[str, ...] = ("frequentist",)  # Backends included in paired lesions.
     lesion_feature_scope: str = "all"  # Lesion every processed regressor, not elastic-net selections.
     lesion_metric: str = "log_loss"  # Primary held-out lesion metric.
@@ -302,11 +303,14 @@ class AnalysisConfig:
             "elastic_net_cs": self.elastic_net_cs,
             "elastic_net_l1_ratios": self.elastic_net_l1_ratios,
             "ridge_cs": self.ridge_cs,
+            "pooling_penalty_ratios": self.pooling_penalty_ratios,
         }
         if invalid := [name for name, values in grids.items() if not values or any(value <= 0 for value in values)]:
             raise ValueError(f"{', '.join(invalid)} must be non-empty and positive")
         if any(value > 1 for value in self.elastic_net_l1_ratios):
             raise ValueError("elastic_net_l1_ratios must be at most 1")
+        if 1.0 not in self.pooling_penalty_ratios:
+            raise ValueError("pooling_penalty_ratios must contain 1")
         if not 0 < self.selection_min_fold_share <= 1:
             raise ValueError("selection_min_fold_share must be between 0 and 1")
         penalties = {

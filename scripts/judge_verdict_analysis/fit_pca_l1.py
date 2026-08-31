@@ -176,8 +176,9 @@ def fit_fixed_l1(
         raise ValueError("train and test must contain exactly one shared fold")
     levels = HierarchyLevels.from_training(train)
     train_x, column_map = hierarchical_design(
-        train, features, levels, _penalties(config))
-    test_x, _ = hierarchical_design(test, features, levels, _penalties(config))
+        train, features, levels, _penalties(config), penalty="l1")
+    test_x, _ = hierarchical_design(
+        test, features, levels, _penalties(config), penalty="l1")
     model, n_iter, converged = _fit_model(
         _l1_model(config, c), train_x, train.pick_left.to_numpy(dtype=int))
     raw = model.coef_[0]

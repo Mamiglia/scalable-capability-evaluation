@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from inspect import signature
 from itertools import product
 from typing import Literal, TypeVar
@@ -20,6 +20,7 @@ from scipy.sparse import csr_matrix
 from .config import AnalysisConfig
 from .fit_common import FitResult
 from .hierarchy import HierarchyLevels, effective_coefficients, hierarchical_design
+from .pooling import POOLING_PARAMETERS, coordinate_search
 
 
 Input = TypeVar("Input")
@@ -50,7 +51,9 @@ def _penalties(config: AnalysisConfig) -> dict[str, float]:
 
 
 def _judge_design(frame, features, levels, config):
-    return hierarchical_design(frame, features, levels, _penalties(config))
+    return hierarchical_design(
+        frame, features, levels, _penalties(config), penalty=config.penalty,
+    )
 
 
 JUDGE_TASK = SparseTask(
@@ -140,13 +143,47 @@ def tune_sparse(
         raise ValueError("penalty must be 'l1' or 'ridge'")
     levels = task.levels(train)
     y = train[task.outcome].to_numpy(dtype=int)
+    splits = _splits(train, config, task)
+    ratios = (1.0,) if penalty == "l1" else (None,)
+    cs = config.elastic_net_cs if penalty == "l1" else config.ridge_cs
+
+    if task is JUDGE_TASK:
+        def score(parameters: dict[str, float]) -> tuple[float, int, bool]:
+            candidate_config = replace(
+                config, penalty=penalty,
+                **{name: parameters[name] for name in POOLING_PARAMETERS},
+            )
+            losses, iterations, convergence = [], [], []
+            for fit_rows, check_rows in splits:
+                fit_x, check_x, _ = _designs(
+                    train, fit_rows, check_rows, features, levels,
+                    candidate_config, task,
+                )
+                model, n_iter, converged = _fit_model(
+                    _model(config, c=parameters["C"], l1_ratio=ratios[0]),
+                    fit_x, y[fit_rows],
+                )
+                losses.append(log_loss(
+                    y[check_rows], model.predict_proba(check_x)[:, 1], labels=[0, 1]))
+                iterations.append(n_iter)
+                convergence.append(converged)
+            return float(np.mean(losses)), max(iterations), all(convergence)
+
+        frozen, rows = coordinate_search(
+            cs, config.pooling_penalty_ratios,
+            lambda candidates: _parallel_map(score, candidates, config.fit_n_jobs),
+        )
+        l1_ratio = ratios[0]
+        tuning = pd.DataFrame(rows).assign(
+            stage=penalty, record_type="tuning", l1_ratio=l1_ratio,
+        )
+        return frozen | {"l1_ratio": l1_ratio}, tuning
+
     designs = [
         (fit_rows, check_rows, *_designs(
             train, fit_rows, check_rows, features, levels, config, task))
-        for fit_rows, check_rows in _splits(train, config, task)
+        for fit_rows, check_rows in splits
     ]
-    ratios = (1.0,) if penalty == "l1" else (None,)
-    cs = config.elastic_net_cs if penalty == "l1" else config.ridge_cs
     candidates = list(product(cs, ratios))
 
     def score(parameters: tuple[float, float | None]) -> tuple[float, float | None, float, int, bool]:
@@ -203,13 +240,27 @@ def fit_sparse(
         raise ValueError("pure L1 requires l1_ratio=1")
     if penalty == "ridge" and l1_ratio is not None:
         raise ValueError("ridge requires l1_ratio=None")
+    fit_config = replace(config, penalty=penalty)
+    if task is JUDGE_TASK:
+        try:
+            pooling = {
+                name: float(frozen_hyperparameters[name])
+                for name in POOLING_PARAMETERS
+            }
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("frozen_hyperparameters require four pooling ratios") from error
+        if any(not np.isfinite(value) or value <= 0 for value in pooling.values()):
+            raise ValueError("frozen pooling ratios must be finite and positive")
+        fit_config = replace(fit_config, **pooling)
+    else:
+        pooling = {}
     folds = pd.concat([train.fold, test.fold]).drop_duplicates().tolist()
     if len(folds) != 1:
         raise ValueError("train and test must contain exactly one shared fold")
 
     levels = task.levels(train)
-    train_x, column_map = task.design(train, features, levels, config)
-    test_x, _ = task.design(test, features, levels, config)
+    train_x, column_map = task.design(train, features, levels, fit_config)
+    test_x, _ = task.design(test, features, levels, fit_config)
     model, n_iter, converged = _fit_model(
         _model(config, c=c, l1_ratio=l1_ratio), train_x,
         train[task.outcome].to_numpy(dtype=int),
@@ -237,6 +288,7 @@ def fit_sparse(
         }),
         diagnostics={
             "penalty": penalty, "C": c, "l1_ratio": l1_ratio,
+            **pooling,
             "sklearn_penalty": "l1" if penalty == "l1" else "l2",
             "solver": model.solver,
             "n_iter": n_iter, "converged": converged,

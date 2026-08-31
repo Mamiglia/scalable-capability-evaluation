@@ -18,6 +18,7 @@ from .fit import ARTIFACTS as FIT_ARTIFACTS
 from .fit import _guard_execution, _load_rows, _outer_folds, _positive_int, _resume_existing
 from .fit_common import prepare_features
 from .fit_frequentist import JUDGE_TASK, SparseTask, fit_sparse, tune_sparse
+from .pooling import POOLING_PARAMETERS
 
 
 @dataclass(frozen=True)
@@ -331,6 +332,7 @@ def _config_settings(config: AnalysisConfig, fold_index: int | None = None) -> d
         "inner_folds": config.inner_folds,
         "elastic_net_cs": list(config.elastic_net_cs),
         "ridge_cs": list(config.ridge_cs),
+        "pooling_penalty_ratios": list(config.pooling_penalty_ratios),
         "judge_deviation_penalty": config.judge_deviation_penalty,
         "benchmark_deviation_penalty": config.benchmark_deviation_penalty,
         "cell_deviation_penalty": config.cell_deviation_penalty,
@@ -417,7 +419,10 @@ def prepare_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
     fit_dir = config.fit_dir / f"{config.feature_space}-{config.penalty}" / fold
     _resume_existing(fit_dir, FIT_ARTIFACTS, replace(config, resume_completed_folds=True))
     diagnostics = json.loads((fit_dir / "diagnostics.json").read_text())
-    frozen = {"C": diagnostics["C"], "l1_ratio": diagnostics["l1_ratio"]}
+    frozen = {
+        name: diagnostics[name]
+        for name in ("C", "l1_ratio", *POOLING_PARAMETERS)
+    }
     tuning = pd.read_csv(fit_dir / "tuning.csv")
     rows, dictionary = _load_rows(config)
     selected_fold, train, test = list(_outer_folds(rows, config))[fold_index]
@@ -474,6 +479,7 @@ def prepare_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
         manifest = {
             "state": "prepared", "fold": fold,
             "backend": f"{config.feature_space}-{config.penalty}",
+            "frozen_hyperparameters": plan["frozen_hyperparameters"],
             "config_signature": _settings_signature(_config_settings(config, fold_index)),
             "fit_manifest_sha256": _sha256(fit_dir / "manifest.json"),
             "artifact_sha256": {
@@ -569,14 +575,14 @@ def finalize_fold(fold_index: int, config: AnalysisConfig = CONFIG) -> Path:
         )
         if (
             not diagnostics.get("converged")
-            or diagnostics.get("C") != frozen["C"]
-            or diagnostics.get("l1_ratio") != frozen["l1_ratio"]
+            or any(diagnostics.get(name) != value for name, value in frozen.items())
         ):
             raise RuntimeError(f"invalid lesion diagnostics: {specification}")
     manifest_path = fold_dir / "manifest.json"
     manifest = {
         "state": "completed", "fold": _fold_names(config)[fold_index],
         "backend": f"{config.feature_space}-{config.penalty}",
+        "frozen_hyperparameters": frozen,
         "config_signature": _settings_signature(_config_settings(config, fold_index)),
         "fit_manifest_sha256": _validate_prepared(
             fold_dir, config, fold_index)["fit_manifest_sha256"],

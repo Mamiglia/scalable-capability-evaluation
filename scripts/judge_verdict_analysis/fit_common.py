@@ -97,23 +97,28 @@ def prepare_features(
     if not np.isfinite(train_values).all() or not np.isfinite(test_values).all():
         raise ValueError("PC features must be finite")
 
-    def project(frame: pd.DataFrame, values: np.ndarray) -> pd.DataFrame:
-        metadata = frame.drop(columns=features).reset_index(drop=True)
-        scores = pd.DataFrame(values @ matrix.T, columns=components)
-        return pd.concat([metadata, scores], axis=1)
-
     selected_loadings = pd.DataFrame({
         "component": np.repeat(components, len(features)),
         "feature": features * len(components),
         "loading": matrix.ravel(),
     })
     selected_variance = variance.set_index("component").loc[components].reset_index()
+    score_scales = np.sqrt(selected_variance.explained_variance.to_numpy(dtype=float))
+    if np.any(score_scales <= 0):
+        raise ValueError("global PC explained variance must be positive")
+
+    def project(frame: pd.DataFrame, values: np.ndarray) -> pd.DataFrame:
+        metadata = frame.drop(columns=features).reset_index(drop=True)
+        scores = pd.DataFrame(values @ matrix.T / score_scales, columns=components)
+        return pd.concat([metadata, scores], axis=1)
+
     prepared_dictionary = pd.DataFrame({"feature": components, "block": "pc"})
     return project(train, train_values), project(test, test_values), prepared_dictionary, {
         "feature_space": "pc",
         "features": components,
         "source_features": features,
         "pc_basis_root": str(config.pc_basis_root),
+        "score_scaling": "divide-by-global-pc-sd",
         "loadings": selected_loadings,
         "explained_variance": selected_variance,
     }
