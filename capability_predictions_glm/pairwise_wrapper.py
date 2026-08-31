@@ -5,7 +5,14 @@ from dataclasses import replace
 from pathlib import Path
 import re
 
+import jax.numpy as jnp
+from jax import random
 import numpy as np
+import numpyro
+from numpyro import distributions as dist
+from numpyro.infer import SVI, Trace_ELBO
+from numpyro.infer.autoguide import AutoNormal
+from numpyro.optim import Adam
 import pandas as pd
 from scipy import sparse
 
@@ -71,12 +78,78 @@ def _capability_coefficients(raw: np.ndarray, columns: pd.DataFrame) -> pd.DataF
     return rows[["feature", "benchmark", "population", "benchmark_deviation", "effective"]]
 
 
+def _capability_scale_model(
+    x: jnp.ndarray, y: jnp.ndarray, benchmark: jnp.ndarray,
+    benchmark_count: int, penalty: str, scale_prior: float,
+) -> None:
+    """No-intercept capability hierarchy used only to estimate block scales."""
+    family = dist.Laplace if penalty == "l1" else dist.Normal
+    population_scale = numpyro.sample("population_scale", dist.HalfNormal(scale_prior))
+    benchmark_scale = numpyro.sample("benchmark_scale", dist.HalfNormal(scale_prior))
+    population = numpyro.sample(
+        "population", family(0, population_scale).expand((x.shape[1],)).to_event(1),
+    )
+    deviations = numpyro.sample(
+        "benchmark",
+        family(0, benchmark_scale).expand((benchmark_count, x.shape[1])).to_event(2),
+    )
+    logits = jnp.sum(x * (population + deviations[benchmark]), axis=1)
+    numpyro.sample("obs", dist.Bernoulli(logits=logits), obs=y)
+
+
+def _estimate_capability_pooling_ratio(
+    train: pd.DataFrame, features: list[str], penalty: str, config: AnalysisConfig,
+) -> tuple[dict[str, float], pd.DataFrame]:
+    """Estimate the benchmark-deviation ratio from one outer-training fold."""
+    if penalty not in {"l1", "ridge"}:
+        raise ValueError("penalty must be 'l1' or 'ridge'")
+    required = {"bench", "left_stronger", *features}
+    if missing := sorted(required - set(train)):
+        raise ValueError(f"capability pooling rows missing columns: {missing}")
+    x = train[features].to_numpy(np.float32)
+    y = train.left_stronger.to_numpy(np.float32)
+    if not np.isfinite(x).all() or not np.isin(y, (0, 1)).all():
+        raise ValueError("capability pooling features must be finite and outcomes binary")
+    benchmark, levels = pd.factorize(train.bench.astype(str), sort=True)
+    guide = AutoNormal(_capability_scale_model)
+    result = SVI(
+        _capability_scale_model, guide,
+        Adam(config.pooling_svi_learning_rate), Trace_ELBO(),
+    ).run(
+        random.PRNGKey(config.random_seed), config.pooling_svi_steps,
+        jnp.asarray(x), jnp.asarray(y), jnp.asarray(benchmark.astype(np.int32)),
+        len(levels), penalty, float(config.pooling_scale_prior), progress_bar=False,
+    )
+    losses = np.asarray(result.losses, dtype=float)
+    if not np.isfinite(losses).all():
+        raise RuntimeError("capability variance-component fit produced non-finite loss")
+    median = guide.median(result.params)
+    population_scale = float(np.asarray(median["population_scale"]))
+    benchmark_scale = float(np.asarray(median["benchmark_scale"]))
+    if any(not np.isfinite(value) or value <= 0
+           for value in (population_scale, benchmark_scale)):
+        raise RuntimeError("capability variance-component fit produced invalid scales")
+    power = 1 if penalty == "l1" else 2
+    ratio = (population_scale / benchmark_scale) ** power
+    diagnostics = pd.DataFrame([{
+        "stage": "pooling", "record_type": "variance_component",
+        "penalty": penalty, "selected": False, "converged": True,
+        "svi_steps": config.pooling_svi_steps,
+        "svi_initial_loss": losses[0], "svi_final_loss": losses[-1],
+        "population_scale": population_scale, "benchmark_scale": benchmark_scale,
+        "benchmark_deviation_penalty": ratio,
+    }])
+    return {"benchmark_deviation_penalty": ratio}, diagnostics
+
+
 CAPABILITY_TASK = SparseTask(
     outcome="left_stronger",
     group_columns=("bench", "item"),
     levels=_capability_levels,
     design=_capability_design,
     coefficients=_capability_coefficients,
+    pooling_parameters=("benchmark_deviation_penalty",),
+    estimate_pooling=_estimate_capability_pooling_ratio,
 )
 
 
@@ -223,6 +296,9 @@ def fit_fold(
         train, test, features, config.penalty, frozen, config, tuning,
         task=CAPABILITY_TASK,
     )
+    selected = tuning[tuning.selected]
+    if not result.diagnostics["converged"] or selected.empty or not selected.converged.all():
+        raise RuntimeError(f"full capability fit or selected C tuning did not converge: {fold}")
     _write_result(
         result, train, test, config,
         prepared_dictionary=prepared_dictionary,

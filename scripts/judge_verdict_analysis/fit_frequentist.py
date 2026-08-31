@@ -36,6 +36,11 @@ class SparseTask:
     levels: Callable[[pd.DataFrame], object]
     design: Callable[[pd.DataFrame, list[str], object, AnalysisConfig], tuple[csr_matrix, pd.DataFrame]]
     coefficients: Callable[[np.ndarray, pd.DataFrame], pd.DataFrame]
+    pooling_parameters: tuple[str, ...] = ()
+    estimate_pooling: Callable[
+        [pd.DataFrame, list[str], str, AnalysisConfig],
+        tuple[dict[str, float], pd.DataFrame],
+    ] | None = None
 
 
 def _penalties(config: AnalysisConfig) -> dict[str, float]:
@@ -62,6 +67,8 @@ JUDGE_TASK = SparseTask(
     levels=HierarchyLevels.from_training,
     design=_judge_design,
     coefficients=effective_coefficients,
+    pooling_parameters=POOLING_PARAMETERS,
+    estimate_pooling=estimate_pooling_ratios,
 )
 
 
@@ -147,10 +154,12 @@ def tune_sparse(
     ratios = (1.0,) if penalty == "l1" else (None,)
     cs = config.elastic_net_cs if penalty == "l1" else config.ridge_cs
 
-    if task is JUDGE_TASK:
-        pooling, variance_tuning = estimate_pooling_ratios(
+    if task.estimate_pooling is not None:
+        pooling, variance_tuning = task.estimate_pooling(
             train, features, penalty, config,
         )
+        if set(pooling) != set(task.pooling_parameters):
+            raise ValueError("pooling estimator returned unexpected parameters")
         fit_config = replace(config, penalty=penalty, **pooling)
         designs = [
             (fit_rows, check_rows, *_designs(
@@ -244,14 +253,14 @@ def fit_sparse(
     if penalty == "ridge" and l1_ratio is not None:
         raise ValueError("ridge requires l1_ratio=None")
     fit_config = replace(config, penalty=penalty)
-    if task is JUDGE_TASK:
+    if task.pooling_parameters:
         try:
             pooling = {
                 name: float(frozen_hyperparameters[name])
-                for name in POOLING_PARAMETERS
+                for name in task.pooling_parameters
             }
         except (KeyError, TypeError, ValueError) as error:
-            raise ValueError("frozen_hyperparameters require four pooling ratios") from error
+            raise ValueError("frozen_hyperparameters require task pooling ratios") from error
         if any(not np.isfinite(value) or value <= 0 for value in pooling.values()):
             raise ValueError("frozen pooling ratios must be finite and positive")
         fit_config = replace(fit_config, **pooling)
