@@ -36,7 +36,8 @@ def main() -> None:
     )
 
     output = rank_root / "time_trend_control"
-    print(json.dumps(write_time_trend_output(fits, points, output, args.resamples), indent=2))
+    print(json.dumps(
+        write_time_trend_output(fits, points, source, output, args.resamples), indent=2))
 
 
 if __name__ == "__main__":

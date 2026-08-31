@@ -12,6 +12,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+from matplotlib.legend_handler import HandlerTuple
 from scipy.special import expit
 
 
@@ -20,7 +23,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 from ranking import rank  # noqa: E402
 from ranking.scoring import resample_items  # noqa: E402
-from scripts.frontier_eci.analyze import plot_frontier_style  # noqa: E402
+from scripts.frontier_eci.analyze import plot_frontier_style, save  # noqa: E402
 from scripts.frontier_eci.canonical_analysis import (  # noqa: E402
     _atomic_write_json, _checkpoint_tables, cap_pair_items, filter_protocol_verdicts,
     fit_binomial_logit, merge_rollout_sources, _resample_hard_items,
@@ -372,6 +375,44 @@ def fit_time_trend_controls(actuals: pd.DataFrame, targets: list[str],
     return pd.DataFrame(fits), pd.concat(predictions, ignore_index=True)
 
 
+def merge_prediction_comparison(judge: pd.DataFrame,
+                                trend: pd.DataFrame) -> pd.DataFrame:
+    """Join judge and time predictions only when their frontier cells match exactly."""
+    keys = ["bench", "judge", "model"]
+    judge_columns = keys + [
+        "actual", "n_items", "target_release", "judge_release",
+        "fitted", "fitted_low", "fitted_high",
+    ]
+    trend_columns = keys + [
+        "actual", "target_release", "judge_release",
+        "predicted", "predicted_low", "predicted_high",
+    ]
+    comparison = judge[judge_columns].merge(
+        trend[trend_columns], on=keys, how="outer", validate="one_to_one",
+        suffixes=("_judge", "_trend"), indicator=True,
+    )
+    if not comparison._merge.eq("both").all():
+        raise ValueError("judge and time control must contain exact frontier cells")
+    if not np.allclose(comparison.actual_judge, comparison.actual_trend, equal_nan=True):
+        raise ValueError("judge and time control must contain exact frontier actuals")
+    for column in ("target_release", "judge_release"):
+        if not pd.to_datetime(comparison[f"{column}_judge"]).equals(
+                pd.to_datetime(comparison[f"{column}_trend"])):
+            raise ValueError(f"judge and time control must contain exact frontier {column}s")
+    comparison = comparison.rename(columns={
+        "actual_judge": "actual", "target_release_judge": "target_release",
+        "judge_release_judge": "judge_release", "fitted": "judge_predicted",
+        "fitted_low": "judge_low", "fitted_high": "judge_high",
+        "predicted": "trend_predicted", "predicted_low": "trend_low",
+        "predicted_high": "trend_high",
+    })
+    comparison["post_judge_release"] = (
+        pd.to_datetime(comparison.target_release) > pd.to_datetime(comparison.judge_release))
+    return (comparison.drop(columns=[
+        "actual_trend", "target_release_trend", "judge_release_trend", "_merge",
+    ]).sort_values(["bench", "judge", "target_release", "model"]).reset_index(drop=True))
+
+
 def combined_frontier_grid(points: pd.DataFrame, actual: pd.DataFrame,
                            targets: list[str], judges: list[str],
                            releases: dict[str, str], benches: list[str]) -> pd.DataFrame:
@@ -471,14 +512,77 @@ def write_time_trend_figures(points: pd.DataFrame, out: Path) -> None:
             )
 
 
+def write_prediction_comparison(comparison: pd.DataFrame, out: Path) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+    for (bench, judge), table in comparison.groupby(["bench", "judge"], sort=True):
+        table = table.sort_values("target_release").copy()
+        table["target_release"] = pd.to_datetime(table.target_release)
+        columns = ["judge_predicted", "judge_low", "judge_high",
+                   "trend_predicted", "trend_low", "trend_high"]
+        table[columns] = table[columns].clip(0, 1)
+        judge_date = pd.Timestamp(table.judge_release.iloc[0])
+        fig, ax = plt.subplots(figsize=(1.75, 1.55))
+        judge_band = ax.fill_between(
+            table.target_release, table.judge_low, table.judge_high,
+            color="#2a78d6", alpha=0.16, lw=0)
+        judge_line, = ax.plot(
+            table.target_release, table.judge_predicted, color="#2a78d6", lw=1)
+        trend_band = ax.fill_between(
+            table.target_release, table.trend_low, table.trend_high,
+            color="#eb6834", alpha=0.16, lw=0)
+        trend_line, = ax.plot(
+            table.target_release, table.trend_predicted, color="#eb6834", lw=1)
+        actual, = ax.plot(
+            table.target_release, table.actual, "o", ms=3.5,
+            color="#222222", clip_on=False, zorder=4)
+        release = ax.axvline(judge_date, color="#777777", lw=0.8, ls="--")
+        first = min(table.target_release.min(), judge_date).replace(month=1, day=1)
+        last = (max(table.target_release.max(), judge_date).replace(month=1, day=1)
+                + pd.DateOffset(years=1))
+        ax.set_xticks(pd.date_range(first, last, freq="YS"))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+        ax.set_xlim(first, last)
+        ax.set_ylim(0, 1)
+        ax.set_yticks([0, 0.5, 1])
+        ax.set_ylabel("Combined hard accuracy")
+        ax.set_xlabel("Model release")
+        bench_label = "GPQA" if bench == "gpqa" else "SWE-mini"
+        ax.text(0, 1.02, f"{bench_label} · Q2–Q4", color="#777777", fontsize=7,
+                ha="left", va="bottom", transform=ax.transAxes)
+        ax.spines["left"].set_bounds(0, 1)
+        for spine in ("left", "bottom"):
+            ax.spines[spine].set_position(("outward", 5))
+        ax.legend(
+            [actual, (judge_band, judge_line), (trend_band, trend_line), release],
+            ["Actual", "Judge prediction", "Time trend", "Judge release"],
+            handler_map={tuple: HandlerTuple(ndivide=1)}, loc="lower left",
+            bbox_to_anchor=(0, 1.08), frameon=False, handletextpad=0.5,
+            borderaxespad=0, ncol=1)
+        save(fig, out / f"comparison_{judge}_{bench}_q2-q4_frontier")
+
+
 def write_time_trend_output(fits: pd.DataFrame, points: pd.DataFrame,
-                            output: Path, resamples: int,
+                            judge_predictions: pd.DataFrame, output: Path, resamples: int,
                             figures: bool = True) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     fits.to_csv(output / "fits.csv", index=False)
     points.to_csv(output / "predictions.csv", index=False)
     if figures:
         write_time_trend_figures(points, output / "figures")
+    comparison = merge_prediction_comparison(judge_predictions, points)
+    comparison_root = output / "comparison"
+    comparison_root.mkdir(parents=True, exist_ok=True)
+    comparison.to_csv(comparison_root / "comparison.csv", index=False)
+    if figures:
+        write_prediction_comparison(comparison, comparison_root / "figures")
+    _atomic_write_json({
+        "analysis": "Judge prediction vs pre-release time trend",
+        "target": f"combined {HARD_SLICE} accuracy",
+        "rows": len(comparison),
+        "judges": int(comparison.judge.nunique()),
+        "benchmarks": int(comparison.bench.nunique()),
+        "missing_time_trend_rows": int(comparison.trend_predicted.isna().sum()),
+    }, comparison_root / "summary.json")
     summary = {
         "analysis": TIME_TREND_LABEL,
         "target": f"combined {HARD_SLICE} accuracy",
@@ -489,6 +593,7 @@ def write_time_trend_output(fits: pd.DataFrame, points: pd.DataFrame,
         "fit_failures": int(fits.fit_status.ne("ok").sum()),
         "prediction_rows": len(points),
         "frontier_prediction_rows": int(points.is_frontier.sum()),
+        "comparison_rows": len(comparison),
     }
     _atomic_write_json(summary, output / "summary.json")
     return summary
@@ -631,7 +736,8 @@ def main() -> None:
         if not args.no_figures:
             _write_combined_figures(frontier_fitted, staging / "figures")
         write_time_trend_output(
-            control_fits, control_points, staging / "time_trend_control",
+            control_fits, control_points, frontier_fitted,
+            staging / "time_trend_control",
             args.resamples, figures=not args.no_figures)
         missing = frontier_fitted[frontier_fitted.fit_status.ne("ok")]
         summary = {

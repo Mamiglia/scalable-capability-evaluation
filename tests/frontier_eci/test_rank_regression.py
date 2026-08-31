@@ -162,6 +162,44 @@ def test_time_trend_control_fits_only_strictly_pre_judge_frontier_scores():
     assert indexed.loc["later", "predicted_low"] <= 0.5 <= indexed.loc["later", "predicted_high"]
 
 
+def test_prediction_comparison_joins_same_frontier_cells():
+    judge = pd.DataFrame({
+        "bench": ["gpqa", "gpqa"], "judge": ["j", "j"],
+        "model": ["a", "b"], "actual": [0.2, 0.4], "n_items": [10, 10],
+        "target_release": ["2025-01-01", "2025-04-01"],
+        "judge_release": ["2025-02-01", "2025-02-01"],
+        "fitted": [0.25, 0.45], "fitted_low": [0.15, 0.35],
+        "fitted_high": [0.35, 0.55],
+    })
+    trend = pd.DataFrame({
+        "bench": ["gpqa", "gpqa"], "judge": ["j", "j"],
+        "model": ["b", "a"], "actual": [0.4, 0.2],
+        "target_release": ["2025-04-01", "2025-01-01"],
+        "judge_release": ["2025-02-01", "2025-02-01"],
+        "predicted": [0.5, 0.3], "predicted_low": [0.4, 0.2],
+        "predicted_high": [0.6, 0.4],
+    })
+    comparison = load_module()["merge_prediction_comparison"](judge, trend)
+    assert comparison.model.tolist() == ["a", "b"]
+    assert comparison.judge_predicted.tolist() == [0.25, 0.45]
+    assert comparison.trend_predicted.tolist() == [0.3, 0.5]
+
+
+def test_prediction_comparison_rejects_different_frontier_cells():
+    judge = pd.DataFrame({
+        "bench": ["gpqa"], "judge": ["j"], "model": ["a"],
+        "actual": [0.2], "n_items": [10], "target_release": ["2025-01-01"],
+        "judge_release": ["2025-02-01"], "fitted": [0.25],
+        "fitted_low": [0.15], "fitted_high": [0.35],
+    })
+    trend = pd.DataFrame(columns=[
+        "bench", "judge", "model", "actual", "target_release", "judge_release",
+        "predicted", "predicted_low", "predicted_high",
+    ])
+    with pytest.raises(ValueError, match="exact frontier cells"):
+        load_module()["merge_prediction_comparison"](judge, trend)
+
+
 def test_one_bt_ranking_uses_all_protocol_rows_per_judge_benchmark():
     module = load_module()
     calls = []
