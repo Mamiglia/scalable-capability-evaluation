@@ -85,10 +85,12 @@ def test_judge_capability_overview_joins_prediction_and_representation_metrics()
     statistics = pd.DataFrame([{
         "variant": "raw-l1", "judge": "j", "benchmark": "all",
         "pearson": 0.4, "spearman": 0.3, "same_sign_share": 0.7,
+        "coordinate_space": "original_leaf",
     }])
     cosines = pd.DataFrame([{
         "variant": "raw-l1", "judge": "j", "benchmark": "all",
         "estimate": 0.5, "lower": 0.2, "upper": 0.8,
+        "coordinate_space": "original_leaf",
     }])
     eci = pd.DataFrame([{
         "judge": "j", "eci": 140.0, "eci_ci_low": 135.0, "eci_ci_high": 145.0,
@@ -104,6 +106,10 @@ def test_judge_capability_overview_joins_prediction_and_representation_metrics()
         "cosine_upper": 0.8, "eci": 140.0, "eci_ci_low": 135.0,
         "eci_ci_high": 145.0,
     }]
+    with pytest.raises(ValueError, match="original-leaf coordinates"):
+        judge_capability_overview(
+            accuracy, statistics.assign(coordinate_space="native"), cosines, eci,
+        )
 
 
 def test_capability_prediction_summary_comes_from_saved_fold_predictions() -> None:
