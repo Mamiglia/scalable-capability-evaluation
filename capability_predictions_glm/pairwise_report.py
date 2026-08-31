@@ -641,7 +641,9 @@ def _importance_plot(frame: pd.DataFrame, directory: Path, name: str, *, top: in
     if top is not None:
         values = values.nlargest(min(top, len(values)), "rank_score")
     values = values.sort_values("rank_score")
-    height = min(3.15, max(1.35, 0.17 * len(values) + 0.65))
+    tick_labels = [textwrap.fill(value, 24) for value in values.label]
+    line_count = sum(label.count("\n") + 1 for label in tick_labels)
+    height = min(3.2, max(1.35, 0.17 * line_count + 0.65))
     _style()
     fig, axes = plt.subplots(1, 3, figsize=(3.35, height), sharey=True, layout="constrained")
     colors = {"singular": "#2a78d6", "unique": "#eb6834", "coefficient": "#4a3aa7"}
@@ -662,7 +664,7 @@ def _importance_plot(frame: pd.DataFrame, directory: Path, name: str, *, top: in
                 ha="left", va="bottom", fontsize=7, color="#666666")
         ax.set_yticks(y)
         if index == 0:
-            ax.set_yticklabels([textwrap.fill(value, 20) for value in values.label], fontsize=6)
+            ax.set_yticklabels(tick_labels, fontsize=6)
         else:
             ax.tick_params(axis="y", labelleft=False)
         ax.tick_params(axis="y", length=0)
@@ -892,7 +894,7 @@ def _pc_definition_figure(
                   .rename(columns={"standardized_effect": "judge_effect"}))
     comparison["capability_effect"] = comparison.penalty.map(cap_overall)
 
-    _style(); fig, axes = plt.subplots(1, 2, figsize=(3.5, 2.2), layout="constrained")
+    _style(); fig, axes = plt.subplots(1, 2, figsize=(3.5, 2.35), layout="constrained")
     ax = axes[0]; y = np.arange(len(loading))
     colors = [BLOCK_COLORS.get(block, "#777777") for block in loading.block]
     ax.hlines(y, 0, loading.loading, color=colors, lw=1)
@@ -900,7 +902,7 @@ def _pc_definition_figure(
     limit = max(.05, float(loading.loading.abs().max()))
     ax.set_xlim(-limit, limit)
     ax.set_xticks([-limit, limit], [f"{-limit:.1g}", f"{limit:.1g}"])
-    ax.set_yticks(y, [textwrap.shorten(value, width=17, placeholder="…")
+    ax.set_yticks(y, [textwrap.fill(value, width=18)
                       for value in loading.label], fontsize=5.5)
     ax.set_xlabel("Signed loading"); ax.axvline(0, color="#999999", lw=.8, ls="--"); _ordinary(ax)
     ax.text(0, 1.03, "Loading definition", transform=ax.transAxes, fontsize=7, color="#666666")
@@ -1482,7 +1484,10 @@ def plot_judge_comparisons(comparison: dict[str, pd.DataFrame], root: Path) -> N
         ax.text(0, 1.02, f"{VARIANTS[variant][2].upper()} {VARIANTS[variant][3]}",
                 transform=ax.transAxes, fontsize=7, color="#666666")
     fig.supxlabel("Stronger-model accuracy", fontsize=8)
-    fig.legend(loc="outside upper center", ncol=2, frameon=False)
+    fig.legend(handles=[
+        Line2D([], [], marker="o", lw=0, color="#2a78d6", label="Capability GLM"),
+        Line2D([], [], marker="o", lw=0, color="#eb6834", label="Judge decision"),
+    ], loc="outside upper center", ncol=2, frameon=False)
     _save(fig, directory, "capability-vs-judge-accuracy", accuracy)
 
     relations = comparison["judge_relations"].dropna(subset=["eci"])
