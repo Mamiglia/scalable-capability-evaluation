@@ -26,5 +26,7 @@
       "glob": "calibration-audit/**"
     }
   ],
-  "scientific_scope": "in-sample; no temporal cutoff, anchors, target exclusion, or ECI"
+  "scientific_scope": "in-sample; no temporal cutoff, anchors, target exclusion, or ECI",
+  "target": "combined Q2\u2013Q4 accuracy",
+  "uncertainty": "95% two-source item bootstrap"
 }

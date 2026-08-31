@@ -3,8 +3,8 @@
   "rows": {
     "abilities.csv": 234,
     "ranking_blocks.csv": 10,
-    "fits.csv": 30,
-    "training_fitted.csv": 702,
-    "frontier_fitted.csv": 240
+    "fits.csv": 10,
+    "training_fitted.csv": 234,
+    "frontier_fitted.csv": 80
   }
 }
