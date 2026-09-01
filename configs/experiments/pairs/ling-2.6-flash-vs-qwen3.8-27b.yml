@@ -1,0 +1,3 @@
+name: ling-2.6-flash-vs-qwen3.8-27b
+major: !include ../../models/inclusionai/ling-2.6-flash.yml
+minor: !include ../../models/qwen/qwen3.8-27b.yml
