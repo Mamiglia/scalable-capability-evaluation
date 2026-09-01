@@ -8,6 +8,7 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -256,8 +257,9 @@ def diagnostics(verdicts, new_verdicts, features, quartiles):
 
 
 def save(fig, path):
-    fig.savefig(f"{path}.png", dpi=300, bbox_inches="tight")
-    fig.savefig(f"{path}.pdf", bbox_inches="tight")
+    fig.savefig(f"{path}.png", dpi=300, bbox_inches="tight", pad_inches=0.03)
+    fig.savefig(f"{path}.pdf", bbox_inches="tight", pad_inches=0.03)
+    fig.savefig(f"{path}.svg", bbox_inches="tight", pad_inches=0.03)
     plt.close(fig)
 
 
@@ -351,47 +353,80 @@ def plot_visibility(summary, model_errors, candidates, benches, out):
 
 
 def plot_frontier_style(table, judge, bench, quartile, out, style,
-                        prediction_label="predicted", filename_prefix=""):
+                        prediction_label="Predicted", filename_prefix="",
+                        value_column="predicted", low_column="predicted_low",
+                        high_column="predicted_high", clip_prediction_display=False,
+                        panel_label=None, y_label="Hard accuracy", file_quartile=None,
+                        show_judge_release=True):
     """Original frontier figure grammar: release time, judge cutoff, actual vs prediction."""
     table = table.sort_values("target_release").copy()
     table["target_release"] = pd.to_datetime(table.target_release)
-    judge_date = pd.Timestamp(table.judge_release.dropna().iloc[0])
-    predicted = table.dropna(subset=["predicted"])
+    table["display_value"] = table[value_column]
+    table["display_low"] = table[low_column]
+    table["display_high"] = table[high_column]
+    if clip_prediction_display:
+        table[["display_value", "display_low", "display_high"]] = table[[
+            "display_value", "display_low", "display_high"]].clip(0, 1)
+    judge_date = (pd.Timestamp(table.judge_release.dropna().iloc[0])
+                  if show_judge_release else pd.NaT)
+    predicted = table.dropna(subset=["display_value"])
     actual = table.dropna(subset=["actual"])
-    fig, ax = plt.subplots(figsize=(3.6, 2.4))
-    ax.axvspan(judge_date, table.target_release.max() + pd.Timedelta(days=400),
-               color="#f2f2f2", lw=0, zorder=0)
+    fig, ax = plt.subplots(figsize=(1.75, 1.55))
     for row in predicted.itertuples():
-        ax.plot([row.target_release, row.target_release], [row.actual, row.predicted],
-                ":", color="k", lw=0.8)
+        if pd.notna(row.actual):
+            ax.plot([row.target_release, row.target_release], [row.actual, row.display_value],
+                    ":", color="#222222", lw=1)
     if style == "band":
-        band = ax.fill_between(predicted.target_release, predicted.predicted_low,
-                               predicted.predicted_high, color="#2a78d6", alpha=0.18, lw=0)
-        line, = ax.plot(predicted.target_release, predicted.predicted, color="#2a78d6", lw=1)
+        band = ax.fill_between(table.target_release, table.display_low,
+                               table.display_high, color="#2a78d6", alpha=0.18, lw=0)
+        line, = ax.plot(table.target_release, table.display_value, color="#2a78d6", lw=1)
         prediction_handle = (band, line)
+    elif style == "line":
+        prediction_handle, = ax.plot(table.target_release, table.display_value,
+                                     color="#2a78d6", lw=1)
     else:
-        prediction_handle, = ax.plot(predicted.target_release, predicted.predicted, "o",
-                                     ms=3, color="#2a78d6", clip_on=False)
-    actual_handle, = ax.plot(actual.target_release, actual.actual, "o", ms=3,
-                             color="#333333", clip_on=False)
-    ax.axvline(judge_date, color="grey", lw=0.8, ls="--")
-    ax.text(judge_date, 1.0, f" {JUDGE_LABELS[judge]} released", color="grey",
-            fontsize=6, va="top", ha="left")
-    first, last = min(table.target_release.min(), judge_date), max(table.target_release.max(), judge_date)
-    ticks = pd.date_range(first.replace(month=1, day=1), last + pd.DateOffset(months=6), freq="6MS")
+        error = predicted[["display_value", "display_low", "display_high"]].copy()
+        lower = (error.display_value - error.display_low).clip(lower=0)
+        upper = (error.display_high - error.display_value).clip(lower=0)
+        prediction_handle = ax.errorbar(
+            predicted.target_release, predicted.display_value,
+            yerr=np.vstack([lower, upper]), fmt="o", ms=3, lw=1,
+            color="#2a78d6", capsize=0, clip_on=False)
+    actual_handle, = ax.plot(actual.target_release, actual.actual, "o", ms=3.5,
+                             color="#222222", clip_on=False)
+    judge_handle = (ax.axvline(judge_date, color="#777777", lw=0.8, ls="--")
+                    if show_judge_release else None)
+    first_date = min(table.target_release.min(), judge_date) if show_judge_release else table.target_release.min()
+    last_date = max(table.target_release.max(), judge_date) if show_judge_release else table.target_release.max()
+    first = first_date.replace(month=1, day=1)
+    last = last_date.replace(month=1, day=1) + pd.DateOffset(years=1)
+    ticks = pd.date_range(first, last, freq="YS")
     ax.set_xticks(ticks)
-    ax.set_xticklabels([tick.strftime("%b %Y") for tick in ticks])
-    ax.set_xlim(ticks[0] - pd.Timedelta(days=30), ticks[-1] + pd.Timedelta(days=30))
-    ax.set_ylim(-0.02, 1.02)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax.set_xlim(first, last)
+    ax.set_ylim(0, 1)
     ax.set_yticks([0, 0.5, 1])
-    ax.set_ylabel(f"Q{quartile} hard-item accuracy")
-    ax.set_xlabel(f"{'GPQA' if bench == 'gpqa' else 'SWE-mini'}: model release date")
+    ax.set_ylabel(y_label)
+    ax.set_xlabel("Model release")
+    label = panel_label or f"{'GPQA' if bench == 'gpqa' else 'SWE-mini'} · Q{quartile}"
+    ax.text(0, 1.02, label,
+            color="#777777", fontsize=7, ha="left", va="bottom", transform=ax.transAxes)
     ax.spines["left"].set_bounds(0, 1)
-    ax.legend([actual_handle, prediction_handle],
-              ["actual (best model per quarter)", prediction_label],
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_position(("outward", 5))
+    residual_handle, = ax.plot([], [], ":", color="#222222", lw=1)
+    handles = [actual_handle, prediction_handle, residual_handle]
+    labels = ["Actual", prediction_label, "Residual"]
+    if show_judge_release:
+        handles.append(judge_handle)
+        labels.append("Judge release")
+    ax.legend(handles, labels,
               handler_map={tuple: HandlerTuple(ndivide=1)}, loc="lower left",
-              bbox_to_anchor=(0, 1.02), frameon=False, handletextpad=0.5)
-    save(fig, out / f"{filename_prefix}{judge}_{bench}_q{quartile}_frontier_{style}")
+              bbox_to_anchor=(0, 1.08), frameon=False, handletextpad=0.5,
+              borderaxespad=0, ncol=1)
+    file_tag = file_quartile or str(quartile)
+    save(fig, out / f"{filename_prefix}{judge}_{bench}_q{file_tag}_frontier_{style}")
+    return ax
 
 
 def main():

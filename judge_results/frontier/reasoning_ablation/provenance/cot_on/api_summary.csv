@@ -1,0 +1,3 @@
+source,judge,provider,calls,cost,input_tokens,output_tokens,reasoning_tokens
+cot_on,gemini-2.5-pro,Google AI Studio,674,22.72777390125,10962494,969623,900872
+cot_on,gpt-5.2,OpenAI,746,20.580225435,12442790,227164,139087

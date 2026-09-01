@@ -1,12 +1,19 @@
 # Canonical-Anchor Frontier Redo Implementation Plan
 
+> **SUPERSEDED FOR MAIN INTERPRETATION BY THE LATEST USER REQUIREMENT.** This plan records the
+> historical anchor/ECI workflow only. The sole authoritative result is the deliberately
+> in-sample [rank–accuracy result](../../results/2026-08-30-canonical-anchor-frontier-redo.md),
+> whose machine-readable authority and complete discarded-provenance rules are in
+> [MAIN_OUTPUT.json](../../../judge_results/frontier/eci-semiannual-canonical-anchors/MAIN_OUTPUT.json).
+> Do not interpret the forecast, anchor, or ECI steps below as main results.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rebuild the noncanonical quarterly-frontier forecasts using temporally eligible canonical-pool anchors, broad low-item pair coverage, explicit-intercept calibration, and matched ECI baselines for GPQA and SWE-mini.
 
-**Architecture:** A coverage pass merges frozen canonical outcomes, frontier outcomes, and every compatible existing verdict, then freezes only the missing pair/item top-ups. A separate analysis entry point caps dense pair influence, fits Bradley-Terry abilities and binomial-logit calibration without target truth, validates the intercept score equation, and reuses the established release-time plotting grammar. Heavy log processing and all paid judging run on SWC HPC; local work is limited to code, small tests, and final figure inspection.
+**Architecture:** A coverage pass merges frozen canonical outcomes, frontier outcomes, and every compatible existing verdict, then freezes only the missing pair/item top-ups. A separate analysis entry point caps dense pair influence, fits Bradley-Terry abilities and binomial-logit calibration without target truth, validates the intercept score equation, and reuses the established release-time plotting grammar. Heavy log processing and all paid judging run on RunPod; local work is limited to code, small tests, control-plane operations, and final figure inspection.
 
-**Tech Stack:** Python 3.11, pandas, NumPy, SciPy, PyYAML, Inspect AI, matplotlib, pytest, Slurm/SWC HPC, OpenRouter.
+**Tech Stack:** Python 3.11, pandas, NumPy, SciPy, PyYAML, Inspect AI, matplotlib, pytest, RunPod/runpodctl, OpenRouter.
 
 **Spec:** `docs/superpowers/specs/2026-08-30-canonical-anchor-frontier-redo-design.md`
 
@@ -21,7 +28,7 @@
 - New unordered pairs use at most eight deterministic jointly-correct Q1 item IDs and both presentation orders.
 - Primary Bradley-Terry fits cap every unordered pair at eight item IDs; uncapped fits are sensitivity outputs.
 - Headline calibration is unregularized binomial logistic regression with a free intercept; target hard outcomes never enter its fit.
-- Heavy source-log work, full analysis, and paid calls run on SWC HPC, not the laptop.
+- Heavy source-log work, full analysis, and paid calls run on RunPod, not the laptop.
 - Incremental API spend stops before the estimated total project spend exceeds $200 unless the user gives new authorization.
 - OpenRouter research calls must use hard endpoint pins where available, disabled fallbacks, denied data collection, compatible parameter enforcement, endpoint snapshots, and per-response served-provider logs.
 - Primary figures use answer-model release time on x, hard-quartile accuracy on y, and a dashed vertical judge-release line; save PDF and 300 dpi PNG in Nature-manuscript style.
@@ -329,31 +336,31 @@ git push origin judge-dissect
 
 ---
 
-### Task 4: Stage and run the top-up on SWC HPC
+### Task 4: Stage and run the top-up on RunPod
 
 **Files:**
-- Create: `scripts/frontier_eci/hpc/run_canonical_topup.sbatch`
-- Create: `scripts/frontier_eci/hpc/run_canonical_analysis.sbatch`
-- Generate: `judge_results/frontier/eci-semiannual-canonical-anchors/run-hpc/ledger.jsonl`
+- Create: `scripts/frontier_eci/runpod/run_canonical_topup.sh`
+- Create: `scripts/frontier_eci/runpod/run_canonical_analysis.sh`
+- Generate: `judge_results/frontier/eci-semiannual-canonical-anchors/run-runpod/ledger.jsonl`
 - Generate: `judge_results/frontier/eci-semiannual-canonical-anchors/provenance/endpoints-<timestamp>.json`
 
 **Interfaces:**
-- Consumes: committed code/configs, the personal OpenRouter key supplied through the existing secure HPC environment, and staged transcript/result inputs.
-- Produces: resumable Inspect logs, Slurm logs, budget ledger, endpoint snapshot, and per-response provider provenance.
+- Consumes: committed code/configs, the new personal OpenRouter key from the laptop `.env`, the RunPod API key resolved from `.env`, and staged transcript/result inputs.
+- Produces: resumable Inspect logs, RunPod job logs, budget ledger, endpoint snapshot, and per-response provider provenance.
 
-- [ ] **Step 1: Load the SWC and OpenRouter safety instructions before the first SSH or API call**
+- [ ] **Step 1: Load the RunPod and OpenRouter safety instructions before the first infrastructure or API call**
 
-Read `/Users/moriohamada/.agents/skills/swc-hpc/SKILL.md` and `/Users/moriohamada/.agents/skills/use-openrouter-safely/SKILL.md` completely. Follow their current staging, secret-handling, Slurm, endpoint-pin, and provenance requirements.
+Read the RunPod router, matching pod golden path, runpodctl, and OpenRouter safety skills completely. Follow their current auth, pod lifecycle, transfer, secret-handling, endpoint-pin, and provenance requirements. Treat live `runpodctl --help` output as authoritative for CLI syntax.
 
 - [ ] **Step 2: Audit the five judge model YAMLs and snapshot OpenRouter endpoints**
 
 Run the OpenRouter safety scanner and inspect each critical route. Confirm `allow_fallbacks: false`, `data_collection: deny`, the intended provider/endpoint, adequate context/output limits, and compatible required parameters. Save the endpoint responses under the new provenance root before judging.
 
-- [ ] **Step 3: Stage the committed branch and required data on SWC**
+- [ ] **Step 3: Provision or reuse a cost-guarded RunPod and stage required data**
 
-Use the SWC skill's prescribed repository path and transfer method. Stage only the frozen identity/quartile tables, source transcript logs referenced by generated configs, existing verdict parquet files, and new configs; do not copy unrelated T7 collections.
+Run `runpodctl user` before the first billable action and record the account identity without exposing either key. Reuse the prior stopped project pod only if it belongs to this account and retains sufficient disk; otherwise create the cheapest available CPU pod with at least 8 vCPU, 32 GB RAM, and 80 GB disk, or the cheapest GPU pod meeting those host-memory/disk requirements when CPU inventory is unavailable. Record pod ID, image, resources, storage, and hourly price. Clone `canonical-anchor-redo`, then transfer only the frozen identity/quartile tables, source transcript logs referenced by generated configs, existing verdict parquet files, and new configs; do not copy unrelated T7 collections. Transfer the new OpenRouter key via the authenticated pod channel into a mode-600 `.env`; never print it, include it in commands captured by the ledger, or commit it.
 
-Download the four public historical SWE artifacts on SWC into the isolated source directory:
+Download the four public historical SWE artifacts on the pod into the isolated source directory:
 
 ```bash
 curl -fL --retry 3 -o external_data/frontier-eci-canonical-anchors/epoch-swe/H2sQhavY5BPYxyYHva8mgS.eval https://epoch-benchmarks-production-public.s3.us-east-2.amazonaws.com/inspect_ai_logs/H2sQhavY5BPYxyYHva8mgS.eval
@@ -372,26 +379,26 @@ uv run python scripts/judge/trim_epoch_swe_logs.py \
   --message-limit 100
 ```
 
-Regenerate the coverage audit and one-pair configs on SWC after the backfill paths exist; verify that backfill enters only blocks still below four canonical anchors.
+Regenerate the coverage audit and one-pair configs on the pod after the backfill paths exist; verify that backfill enters only blocks still below four canonical anchors. Run a real `run_judging.py --dry-run` against staged `.eval` sources before any paid call.
 
 - [ ] **Step 4: Submit the resumable paid top-up**
 
-The sbatch script activates the established project environment and runs every generated one-pair config through:
+The RunPod script activates the project environment and runs every generated one-pair config through:
 
 ```bash
 uv run python scripts/frontier_eci/run_budgeted.py \
   configs/frontier_eci_canonical_anchors/runs/*/*/*.yaml \
   --baseline "$OPENROUTER_BASELINE_USAGE" \
   --limit 66.6 \
-  --preflight judge_results/frontier/eci-semiannual-canonical-anchors/run-hpc/preflight.csv \
-  --ledger judge_results/frontier/eci-semiannual-canonical-anchors/run-hpc/ledger.jsonl
+  --preflight judge_results/frontier/eci-semiannual-canonical-anchors/run-runpod/preflight.csv \
+  --ledger judge_results/frontier/eci-semiannual-canonical-anchors/run-runpod/ledger.jsonl
 ```
 
 Set the task-specific baseline variable from the key-usage response immediately before submission; never reuse `$HOME`, `$home`, or `$CODEX_HOME`.
 
 - [ ] **Step 5: Monitor every 20 minutes while the job is active**
 
-At each check, record Slurm state, completed/failed pair count, OpenRouter incremental usage, projected final spend, and unexpected-provider count. Resume failed or preempted jobs from completed logs; do not rerun successful pair directories.
+At each check, record RunPod state, completed/failed pair count, OpenRouter incremental usage, projected final spend, pod cost, and unexpected-provider count. Resume interrupted work from completed logs; do not rerun successful pair directories. Stop the pod whenever the workload is not actively progressing.
 
 - [ ] **Step 6: Audit completed API calls before analysis**
 
@@ -408,7 +415,7 @@ Expected: every paid response has provider provenance, every provider matches th
 - [ ] **Step 7: Commit and push run manifests, not secrets or bulky logs**
 
 ```bash
-git add scripts/frontier_eci/hpc judge_results/frontier/eci-semiannual-canonical-anchors/run-hpc judge_results/frontier/eci-semiannual-canonical-anchors/provenance
+git add scripts/frontier_eci/runpod judge_results/frontier/eci-semiannual-canonical-anchors/run-runpod judge_results/frontier/eci-semiannual-canonical-anchors/provenance
 git commit -m "Record canonical anchor topup run"
 git push origin judge-dissect
 ```
@@ -461,9 +468,9 @@ Expected: FAIL because the matched baseline does not exist.
 
 Use the exact anchor identity list exported by each judge block; fail visibly if an ECI value is unavailable rather than silently changing the set. Reuse `fit_binomial_logit` with ECI as x. Export judge and baseline equations as plain CSV columns (`intercept`, `slope`), not LaTeX text in figures.
 
-- [ ] **Step 4: Run the full analysis on HPC**
+- [ ] **Step 4: Run the full analysis on RunPod**
 
-Submit `run_canonical_analysis.sbatch` with 1,000 bootstrap resamples. Expected outputs include all five judges, both benchmarks, all three hard quartiles, an explicit reason for every missing prediction, and separate capped/uncapped sensitivity metrics.
+Run `scripts/frontier_eci/runpod/run_canonical_analysis.sh` with 1,000 bootstrap resamples. Expected outputs include all five judges, both benchmarks, all three hard quartiles, an explicit reason for every missing prediction, and separate capped/uncapped sensitivity metrics.
 
 - [ ] **Step 5: Generate the release-time figures**
 
@@ -484,7 +491,7 @@ Expected: PASS.
 
 - [ ] **Step 7: Pull only final tables and figures to the laptop and inspect representative PNGs**
 
-Inspect GPQA and SWE Q2/Q3/Q4 plots for GPT-4o, Gemini 2.5 Pro, GPT-5.2, o4-mini, and DeepSeek V4 Flash at original resolution. Verify readable text, consistent axes, correct release lines, no clipped labels, and no unexplained missing points. Regenerate on HPC after any plotting fix.
+Inspect GPQA and SWE Q2/Q3/Q4 plots for GPT-4o, Gemini 2.5 Pro, GPT-5.2, o4-mini, and DeepSeek V4 Flash at original resolution. Verify readable text, consistent axes, correct release lines, no clipped labels, and no unexplained missing points. Regenerate on RunPod after any plotting fix, recover compact outputs, then stop the pod.
 
 - [ ] **Step 8: Commit analysis code and compact result artifacts**
 

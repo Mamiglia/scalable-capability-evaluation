@@ -1,0 +1,17 @@
+model,ability,rank,n_comparisons,n_wins,n_ties,bench,judge
+gpt-4.1,0.6604742144489608,1,32,22.0,4,gpqa,gemini-2.5-pro
+gpt-4o-1120,0.33713300581109024,2,48,29.0,5,gpqa,gemini-2.5-pro
+mistral-medium-3,-0.30865254370868556,3,32,15.0,3,gpqa,gemini-2.5-pro
+claude-3.7-sonnet,-0.6889546765513654,4,48,14.0,4,gpqa,gemini-2.5-pro
+claude-3.7-sonnet,0.5292402590033408,1,16,11.0,1,gpqa,gpt-5.2
+gpt-4.1,0.2561407766518148,2,32,21.0,3,gpqa,gpt-5.2
+gpt-4o-1120,-0.25614081115943077,3,32,11.0,3,gpqa,gpt-5.2
+mistral-medium-3,-0.5292402244957249,4,16,5.0,1,gpqa,gpt-5.2
+gpt-4.1,1.5534164179016048,1,20,15.0,3,swe_bench_mini,gemini-2.5-pro
+claude-3.7-sonnet,0.9224088254453398,2,32,21.0,7,swe_bench_mini,gemini-2.5-pro
+gpt-4o-1120,-0.5583412489998157,3,28,7.0,3,swe_bench_mini,gemini-2.5-pro
+mistral-medium-3,-1.917483994347129,4,8,1.0,1,swe_bench_mini,gemini-2.5-pro
+claude-3.7-sonnet,1.4653097785985842,1,28,19.0,3,swe_bench_mini,gpt-5.2
+gpt-4.1,1.2237524765838454,2,24,15.0,3,swe_bench_mini,gpt-5.2
+gpt-4o-1120,0.28170406116400487,3,24,6.0,4,swe_bench_mini,gpt-5.2
+mistral-medium-3,-2.970766316346434,4,4,0.0,0,swe_bench_mini,gpt-5.2

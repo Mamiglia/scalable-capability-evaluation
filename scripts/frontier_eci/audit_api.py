@@ -44,20 +44,22 @@ def collect(roots):
     return pd.DataFrame(rows)
 
 
+def validate_provider_provenance(calls):
+    missing_provider = calls[calls.provider.isna()]
+    if not missing_provider.empty:
+        raise ValueError(f"{len(missing_provider)} responses lack provider provenance")
+    bad = calls[calls.provider != calls.judge.map(EXPECTED)]
+    if not bad.empty:
+        raise ValueError(f"{len(bad)} responses came from an unexpected provider")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("roots", nargs="+", type=Path)
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
     calls = collect(args.roots)
-    missing_provider_with_usage = calls[calls.provider.isna() &
-                                        ((calls.cost > 0) | (calls.input_tokens > 0) |
-                                         (calls.output_tokens > 0))]
-    if not missing_provider_with_usage.empty:
-        raise ValueError(f"{len(missing_provider_with_usage)} paid responses lack provider provenance")
-    bad = calls[calls.provider.notna() & (calls.provider != calls.judge.map(EXPECTED))]
-    if not bad.empty:
-        raise ValueError(f"{len(bad)} responses came from an unexpected provider")
+    validate_provider_provenance(calls)
     args.out.mkdir(parents=True, exist_ok=True)
     calls.to_parquet(args.out / "api_calls.parquet", index=False)
     calls["provider"] = calls.provider.fillna("Inspect cache (unattributed)")

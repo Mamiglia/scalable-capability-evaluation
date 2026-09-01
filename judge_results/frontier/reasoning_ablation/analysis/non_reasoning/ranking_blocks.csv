@@ -1,0 +1,5 @@
+bench,judge,n_protocol_verdicts,n_ranked_models,n_pair_items_max,pair_item_cap
+gpqa,gemini-2.5-pro,80,4,8,
+gpqa,gpt-5.2,48,4,8,
+swe_bench_mini,gemini-2.5-pro,44,4,8,
+swe_bench_mini,gpt-5.2,40,4,8,

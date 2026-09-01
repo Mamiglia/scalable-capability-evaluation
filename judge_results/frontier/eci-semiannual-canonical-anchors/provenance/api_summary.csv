@@ -1,0 +1,6 @@
+source,judge,provider,calls,cost,input_tokens,output_tokens,reasoning_tokens
+frontier-eci-canonical-anchors,deepseek-v4-flash-0731,DeepInfra,498,0.78808598352,8829503,548592,514979
+frontier-eci-canonical-anchors,gemini-2.5-pro,Google AI Studio,652,18.41171099625,7304988,996050,928972
+frontier-eci-canonical-anchors,gpt-4o-2024-11-20,OpenAI,680,19.1121183,8226872,69975,0
+frontier-eci-canonical-anchors,gpt-5.2,OpenAI,816,18.753858585,11983714,256240,157365
+frontier-eci-canonical-anchors,o4-mini,OpenAI,574,8.45321004,7247944,327228,264192

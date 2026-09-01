@@ -1,5 +1,11 @@
 # Canonical-anchor frontier judging redo
 
+> **SUPERSEDED FOR MAIN INTERPRETATION BY THE LATEST USER REQUIREMENT.** This design specifies a
+> historical anchor/ECI analysis retained as provenance only. The sole authoritative result is the
+> deliberately in-sample [rank–accuracy result](../../results/2026-08-30-canonical-anchor-frontier-redo.md),
+> named and scoped by [MAIN_OUTPUT.json](../../../judge_results/frontier/eci-semiannual-canonical-anchors/MAIN_OUTPUT.json).
+> No anchor/ECI output described below is a current main result.
+
 **Status:** Revised design awaiting written review. This is a noncanonical side analysis. It does
 not modify the canonical pool, canonical verdicts, or frozen difficulty estimates.
 
@@ -189,9 +195,11 @@ directory.
 
 ## Execution, cost, and completion criteria
 
-Large source-log downloads, trimming, judging, and full analysis run on SWC HPC. The laptop is
-limited to source inspection, small tests, file edits, and final figure inspection. API calls are
-resumable and run only after exact reuse coverage is computed.
+Large source-log downloads, trimming, judging, and full analysis run on a disposable RunPod
+CPU/GPU pod. The laptop is limited to source inspection, small tests, file edits, control-plane
+operations, and final figure inspection. API calls are resumable and run only after exact reuse
+coverage is computed. The pod is stopped whenever no job is active and is deleted after compact
+tables, provenance, and figures have been recovered.
 
 OpenRouter routes are hard-pinned where possible, fallbacks are disabled, data collection is
 denied, required parameters are enforced when compatible, endpoint metadata is snapshotted, and

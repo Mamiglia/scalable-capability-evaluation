@@ -1,0 +1,12 @@
+{
+  "matched_verdict_rows": 1420,
+  "cot_fit_blocks": 8,
+  "non_reasoning_models": [
+    "claude-3.7-sonnet",
+    "gpt-4.1",
+    "gpt-4o-1120",
+    "mistral-medium-3"
+  ],
+  "non_reasoning_fit_blocks": 4,
+  "resamples": 1000
+}

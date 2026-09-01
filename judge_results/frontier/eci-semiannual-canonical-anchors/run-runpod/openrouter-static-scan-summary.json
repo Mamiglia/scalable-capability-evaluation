@@ -1,0 +1,52 @@
+{
+  "scanner_exit": 1,
+  "whole_repo_counts": {
+    "openrouter_files": 452,
+    "high": 859,
+    "med": 20
+  },
+  "critical_reports": [
+    {
+      "path": "scripts/frontier_eci/run_budgeted.py",
+      "router_signals": [
+        "openrouter_base_url",
+        "openrouter_api_key"
+      ],
+      "findings": [
+        {
+          "mistake_id": "M1",
+          "name": "Unpinned quantization",
+          "severity": "High",
+          "file": "scripts/frontier_eci/run_budgeted.py",
+          "line": 40,
+          "detail": "No `quantizations` restriction found \u2014 provider may serve int4/fp4/int8."
+        },
+        {
+          "mistake_id": "M3",
+          "name": "Probabilistic provider routing",
+          "severity": "High",
+          "file": "scripts/frontier_eci/run_budgeted.py",
+          "line": 40,
+          "detail": "No `order`/`only`/`sort` \u2014 default load-balancing across providers; run-to-run drift."
+        },
+        {
+          "mistake_id": "M5",
+          "name": "Data-policy not restricted",
+          "severity": "Med",
+          "file": "scripts/frontier_eci/run_budgeted.py",
+          "line": 40,
+          "detail": "No `data_collection:'deny'` \u2014 prompts may route to train-on-your-data providers."
+        },
+        {
+          "mistake_id": "M4",
+          "name": "No provenance logging",
+          "severity": "High",
+          "file": "scripts/frontier_eci/run_budgeted.py",
+          "line": 1,
+          "detail": "No sign the served `provider` / generation id is recorded \u2014 can't reproduce/diagnose."
+        }
+      ]
+    }
+  ],
+  "note": "Heuristic file-local findings; authoritative route audit uses model YAMLs, endpoint snapshot, and response provenance."
+}

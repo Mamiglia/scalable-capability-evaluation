@@ -1,0 +1,241 @@
+bench,judge,target_quartile,model,actual,predicted,residual,inside_anchor_range,fit_status,failure_reason
+gpqa,gpt-4o-2024-11-20,2,gpt-4o-1120,0.56,0.5602318068542868,0.000231806854286698,True,ok,
+gpqa,gpt-4o-2024-11-20,3,gpt-4o-1120,0.2857142857142857,0.43595780860772937,0.15024352289344367,True,ok,
+gpqa,gpt-4o-2024-11-20,4,gpt-4o-1120,0.28,0.3020221291373081,0.022022129137308055,True,ok,
+gpqa,gpt-4o-2024-11-20,2,claude-3.7-sonnet,0.82,0.8916485790354957,0.07164857903549571,False,ok,
+gpqa,gpt-4o-2024-11-20,3,claude-3.7-sonnet,0.42857142857142855,0.9606116413552953,0.5320402127838668,False,ok,
+gpqa,gpt-4o-2024-11-20,4,claude-3.7-sonnet,0.32,0.8689648122491093,0.5489648122491093,False,ok,
+gpqa,gpt-4o-2024-11-20,2,o3,0.99,,,,failed,only 3 mapped ECI anchors
+gpqa,gpt-4o-2024-11-20,3,o3,0.9081632653061225,,,,failed,only 3 mapped ECI anchors
+gpqa,gpt-4o-2024-11-20,4,o3,0.4,,,,failed,only 3 mapped ECI anchors
+gpqa,gpt-4o-2024-11-20,2,gpt-5,0.99,,,,failed,only 3 mapped ECI anchors
+gpqa,gpt-4o-2024-11-20,3,gpt-5,0.9387755102040817,,,,failed,only 3 mapped ECI anchors
+gpqa,gpt-4o-2024-11-20,4,gpt-5,0.42,,,,failed,only 3 mapped ECI anchors
+gpqa,gpt-4o-2024-11-20,2,gemini-3-pro-preview,0.98,0.9936641992083165,0.013664199208316519,False,ok,
+gpqa,gpt-4o-2024-11-20,3,gemini-3-pro-preview,0.9795918367346939,0.9469188811439683,-0.03267295559072558,False,ok,
+gpqa,gpt-4o-2024-11-20,4,gemini-3-pro-preview,0.76,0.4359249350830248,-0.3240750649169752,False,ok,
+gpqa,gpt-4o-2024-11-20,2,claude-opus-4.6,0.98,0.9944342213558042,0.014434221355804189,False,ok,
+gpqa,gpt-4o-2024-11-20,3,claude-opus-4.6,0.9795918367346939,0.9822662199193916,0.002674383184697704,False,ok,
+gpqa,gpt-4o-2024-11-20,4,claude-opus-4.6,0.6,0.7000177141888718,0.10001771418887184,False,ok,
+gpqa,gpt-4o-2024-11-20,2,claude-opus-4.7,0.95,0.9884815237552816,0.03848152375528169,False,ok,
+gpqa,gpt-4o-2024-11-20,3,claude-opus-4.7,0.9591836734693877,0.9802457316974571,0.02106205822806939,False,ok,
+gpqa,gpt-4o-2024-11-20,4,claude-opus-4.7,0.63,0.7252297361626837,0.09522973616268371,False,ok,
+gpqa,gpt-4o-2024-11-20,2,kimi-k3,0.98,0.9892370408843714,0.009237040884371384,False,ok,
+gpqa,gpt-4o-2024-11-20,3,kimi-k3,0.9795918367346939,0.9792609767668126,-0.0003308599678812918,False,ok,
+gpqa,gpt-4o-2024-11-20,4,kimi-k3,0.76,0.7567620796116635,-0.0032379203883364793,False,ok,
+gpqa,gemini-2.5-pro,2,gpt-4o-1120,0.56,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,3,gpt-4o-1120,0.2857142857142857,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,4,gpt-4o-1120,0.28,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,2,claude-3.7-sonnet,0.82,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,3,claude-3.7-sonnet,0.42857142857142855,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,4,claude-3.7-sonnet,0.32,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,2,o3,0.99,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,3,o3,0.9081632653061225,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,4,o3,0.4,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,2,gpt-5,0.99,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,3,gpt-5,0.9387755102040817,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,4,gpt-5,0.42,,,,failed,only 3 mapped ECI anchors
+gpqa,gemini-2.5-pro,2,gemini-3-pro-preview,0.98,0.9936641992083165,0.013664199208316519,False,ok,
+gpqa,gemini-2.5-pro,3,gemini-3-pro-preview,0.9795918367346939,0.9469188811439683,-0.03267295559072558,False,ok,
+gpqa,gemini-2.5-pro,4,gemini-3-pro-preview,0.76,0.4359249350830248,-0.3240750649169752,False,ok,
+gpqa,gemini-2.5-pro,2,claude-opus-4.6,0.98,0.9944342213558042,0.014434221355804189,False,ok,
+gpqa,gemini-2.5-pro,3,claude-opus-4.6,0.9795918367346939,0.9822662199193916,0.002674383184697704,False,ok,
+gpqa,gemini-2.5-pro,4,claude-opus-4.6,0.6,0.7000177141888718,0.10001771418887184,False,ok,
+gpqa,gemini-2.5-pro,2,claude-opus-4.7,0.95,0.9884815237552816,0.03848152375528169,False,ok,
+gpqa,gemini-2.5-pro,3,claude-opus-4.7,0.9591836734693877,0.9802457316974571,0.02106205822806939,False,ok,
+gpqa,gemini-2.5-pro,4,claude-opus-4.7,0.63,0.7252297361626837,0.09522973616268371,False,ok,
+gpqa,gemini-2.5-pro,2,kimi-k3,0.98,0.9892370408843714,0.009237040884371384,False,ok,
+gpqa,gemini-2.5-pro,3,kimi-k3,0.9795918367346939,0.9792609767668126,-0.0003308599678812918,False,ok,
+gpqa,gemini-2.5-pro,4,kimi-k3,0.76,0.7567620796116635,-0.0032379203883364793,False,ok,
+gpqa,gpt-5.2,2,gpt-4o-1120,0.56,0.93940944496361,0.37940944496360995,False,ok,
+gpqa,gpt-5.2,3,gpt-4o-1120,0.2857142857142857,0.40822766008741257,0.12251337437312687,False,ok,
+gpqa,gpt-5.2,4,gpt-4o-1120,0.28,0.20017440005983517,-0.07982559994016486,False,ok,
+gpqa,gpt-5.2,2,claude-3.7-sonnet,0.82,0.9531437461119178,0.13314374611191782,True,ok,
+gpqa,gpt-5.2,3,claude-3.7-sonnet,0.42857142857142855,0.7474493625931028,0.31887793402167425,True,ok,
+gpqa,gpt-5.2,4,claude-3.7-sonnet,0.32,0.32363142967328284,0.0036314296732828377,True,ok,
+gpqa,gpt-5.2,2,o3,0.99,0.9580784484811276,-0.03192155151887244,False,ok,
+gpqa,gpt-5.2,3,o3,0.9081632653061225,0.8467761664477997,-0.06138709885832272,False,ok,
+gpqa,gpt-5.2,4,o3,0.4,0.3871660256408728,-0.012833974359127198,False,ok,
+gpqa,gpt-5.2,2,gpt-5,0.99,0.9605893563559689,-0.02941064364403112,False,ok,
+gpqa,gpt-5.2,3,gpt-5,0.9387755102040817,0.8864314705025406,-0.05234403970154111,False,ok,
+gpqa,gpt-5.2,4,gpt-5,0.42,0.4241889686667604,0.00418896866676044,False,ok,
+gpqa,gpt-5.2,2,gemini-3-pro-preview,0.98,0.9631171900534656,-0.01688280994653435,False,ok,
+gpqa,gpt-5.2,3,gemini-3-pro-preview,0.9795918367346939,0.9186682533864647,-0.060923583348229116,False,ok,
+gpqa,gpt-5.2,4,gemini-3-pro-preview,0.76,0.46477505704597444,-0.29522494295402557,False,ok,
+gpqa,gpt-5.2,2,claude-opus-4.6,0.98,0.9907209081301607,0.010720908130160689,False,ok,
+gpqa,gpt-5.2,3,claude-opus-4.6,0.9795918367346939,0.980710021563464,0.0011181848287701301,False,ok,
+gpqa,gpt-5.2,4,claude-opus-4.6,0.6,0.7122107690132857,0.11221076901328575,False,ok,
+gpqa,gpt-5.2,2,claude-opus-4.7,0.95,0.9886052034011329,0.03860520340113294,False,ok,
+gpqa,gpt-5.2,3,claude-opus-4.7,0.9591836734693877,0.9817395958507527,0.022555922381364946,False,ok,
+gpqa,gpt-5.2,4,claude-opus-4.7,0.63,0.7416363107233074,0.11163631072330737,False,ok,
+gpqa,gpt-5.2,2,kimi-k3,0.98,0.9891554577398124,0.009155457739812412,False,ok,
+gpqa,gpt-5.2,3,kimi-k3,0.9795918367346939,0.9796630756366737,7.123890197979765e-05,False,ok,
+gpqa,gpt-5.2,4,kimi-k3,0.76,0.769550276395746,0.009550276395746016,False,ok,
+gpqa,o4-mini,2,gpt-4o-1120,0.56,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,3,gpt-4o-1120,0.2857142857142857,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,4,gpt-4o-1120,0.28,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,2,claude-3.7-sonnet,0.82,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,3,claude-3.7-sonnet,0.42857142857142855,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,4,claude-3.7-sonnet,0.32,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,2,o3,0.99,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,3,o3,0.9081632653061225,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,4,o3,0.4,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,2,gpt-5,0.99,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,3,gpt-5,0.9387755102040817,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,4,gpt-5,0.42,,,,failed,only 3 mapped ECI anchors
+gpqa,o4-mini,2,gemini-3-pro-preview,0.98,0.9936641992083165,0.013664199208316519,False,ok,
+gpqa,o4-mini,3,gemini-3-pro-preview,0.9795918367346939,0.9469188811439683,-0.03267295559072558,False,ok,
+gpqa,o4-mini,4,gemini-3-pro-preview,0.76,0.4359249350830248,-0.3240750649169752,False,ok,
+gpqa,o4-mini,2,claude-opus-4.6,0.98,0.9944342213558042,0.014434221355804189,False,ok,
+gpqa,o4-mini,3,claude-opus-4.6,0.9795918367346939,0.9822662199193916,0.002674383184697704,False,ok,
+gpqa,o4-mini,4,claude-opus-4.6,0.6,0.7000177141888718,0.10001771418887184,False,ok,
+gpqa,o4-mini,2,claude-opus-4.7,0.95,0.9884815237552816,0.03848152375528169,False,ok,
+gpqa,o4-mini,3,claude-opus-4.7,0.9591836734693877,0.9802457316974571,0.02106205822806939,False,ok,
+gpqa,o4-mini,4,claude-opus-4.7,0.63,0.7252297361626837,0.09522973616268371,False,ok,
+gpqa,o4-mini,2,kimi-k3,0.98,0.9892370408843714,0.009237040884371384,False,ok,
+gpqa,o4-mini,3,kimi-k3,0.9795918367346939,0.9792609767668126,-0.0003308599678812918,False,ok,
+gpqa,o4-mini,4,kimi-k3,0.76,0.7567620796116635,-0.0032379203883364793,False,ok,
+gpqa,deepseek-v4-flash-0731,2,gpt-4o-1120,0.56,0.6481921700073858,0.08819217000738577,False,ok,
+gpqa,deepseek-v4-flash-0731,3,gpt-4o-1120,0.2857142857142857,0.1700430515176439,-0.1156712341966418,False,ok,
+gpqa,deepseek-v4-flash-0731,4,gpt-4o-1120,0.28,0.09227282592595783,-0.1877271740740422,False,ok,
+gpqa,deepseek-v4-flash-0731,2,claude-3.7-sonnet,0.82,0.9142693494128714,0.09426934941287146,True,ok,
+gpqa,deepseek-v4-flash-0731,3,claude-3.7-sonnet,0.42857142857142855,0.7021941429380927,0.27362271436666413,True,ok,
+gpqa,deepseek-v4-flash-0731,4,claude-3.7-sonnet,0.32,0.3208714914389664,0.0008714914389664208,True,ok,
+gpqa,deepseek-v4-flash-0731,2,o3,0.99,0.9577023319223186,-0.03229766807768142,True,ok,
+gpqa,deepseek-v4-flash-0731,3,o3,0.9081632653061225,0.8704972126703575,-0.037666052635764946,True,ok,
+gpqa,deepseek-v4-flash-0731,4,o3,0.4,0.477277463996861,0.07727746399686097,True,ok,
+gpqa,deepseek-v4-flash-0731,2,gpt-5,0.99,0.9716965476451213,-0.018303452354878735,True,ok,
+gpqa,deepseek-v4-flash-0731,3,gpt-5,0.9387755102040817,0.9230516961453767,-0.015723814058704932,True,ok,
+gpqa,deepseek-v4-flash-0731,4,gpt-5,0.42,0.5679006727838094,0.14790067278380942,True,ok,
+gpqa,deepseek-v4-flash-0731,2,gemini-3-pro-preview,0.98,0.9816867581588404,0.0016867581588404512,True,ok,
+gpqa,deepseek-v4-flash-0731,3,gemini-3-pro-preview,0.9795918367346939,0.9570802867979235,-0.022511549936770403,True,ok,
+gpqa,deepseek-v4-flash-0731,4,gemini-3-pro-preview,0.76,0.6599795469594623,-0.10002045304053775,True,ok,
+gpqa,deepseek-v4-flash-0731,2,claude-opus-4.6,0.98,0.9860306662738458,0.006030666273845853,False,ok,
+gpqa,deepseek-v4-flash-0731,3,claude-opus-4.6,0.9795918367346939,0.970328362639956,-0.009263474094737822,False,ok,
+gpqa,deepseek-v4-flash-0731,4,claude-opus-4.6,0.6,0.7117698128010516,0.11176981280105158,False,ok,
+gpqa,deepseek-v4-flash-0731,2,claude-opus-4.7,0.95,0.9878128235338726,0.03781282353387261,False,ok,
+gpqa,deepseek-v4-flash-0731,3,claude-opus-4.7,0.9591836734693877,0.9753941671715575,0.01621049370216976,False,ok,
+gpqa,deepseek-v4-flash-0731,4,claude-opus-4.7,0.63,0.735945845063454,0.10594584506345395,False,ok,
+gpqa,deepseek-v4-flash-0731,2,kimi-k3,0.98,0.9892370408843714,0.009237040884371384,False,ok,
+gpqa,deepseek-v4-flash-0731,3,kimi-k3,0.9795918367346939,0.9792609767668126,-0.0003308599678812918,False,ok,
+gpqa,deepseek-v4-flash-0731,4,kimi-k3,0.76,0.7567620796116635,-0.0032379203883364793,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,2,gpt-4o-1120,0.15384615384615385,,,,failed,only 2 mapped ECI anchors
+swe_bench_mini,gpt-4o-2024-11-20,3,gpt-4o-1120,0.16666666666666666,,,,failed,only 2 mapped ECI anchors
+swe_bench_mini,gpt-4o-2024-11-20,4,gpt-4o-1120,0.0,,,,failed,only 2 mapped ECI anchors
+swe_bench_mini,gpt-4o-2024-11-20,2,claude-3.7-sonnet,0.7692307692307693,0.2984436752697316,-0.4707870939610377,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,3,claude-3.7-sonnet,0.08333333333333333,0.30114588909862017,0.21781255576528685,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,4,claude-3.7-sonnet,0.0,,,,failed,binomial logit outcomes are separated
+swe_bench_mini,gpt-4o-2024-11-20,2,o3,0.7692307692307693,0.04682225348919473,-0.7224085157415745,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,3,o3,0.16666666666666666,0.5828710415003496,0.416204374833683,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,4,o3,0.0,,,,failed,binomial logit outcomes are separated
+swe_bench_mini,gpt-4o-2024-11-20,2,gpt-5,0.8846153846153846,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gpt-4o-2024-11-20,3,gpt-5,0.2916666666666667,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gpt-4o-2024-11-20,4,gpt-5,0.0,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gpt-4o-2024-11-20,2,gemini-3-pro-preview,0.8461538461538461,0.994584069076249,0.14843022292240282,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,3,gemini-3-pro-preview,0.4166666666666667,0.7351261758815903,0.31845950921492366,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,4,gemini-3-pro-preview,0.1111111111111111,0.2663871213362143,0.15527601022510318,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,2,claude-opus-4.6,0.9230769230769231,0.9783665352064563,0.055289612129533205,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,3,claude-opus-4.6,0.75,0.6038501310411188,-0.14614986895888116,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,4,claude-opus-4.6,0.2222222222222222,0.23416028956288776,0.011938067340665548,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,2,claude-opus-4.7,0.9615384615384616,0.9821030492780964,0.020564587739634876,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,3,claude-opus-4.7,0.8333333333333334,0.6603301388414727,-0.17300319449186063,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,4,claude-opus-4.7,0.2692307692307692,0.2921558799585433,0.02292511072777409,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,2,kimi-k3,0.9615384615384616,0.9250660173351257,-0.03647244420333584,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,3,kimi-k3,0.875,0.7135413515870762,-0.1614586484129238,False,ok,
+swe_bench_mini,gpt-4o-2024-11-20,4,kimi-k3,0.46153846153846156,0.07712315857465649,-0.3844153029638051,False,ok,
+swe_bench_mini,gemini-2.5-pro,2,gpt-4o-1120,0.15384615384615385,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,3,gpt-4o-1120,0.16666666666666666,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,4,gpt-4o-1120,0.0,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,2,claude-3.7-sonnet,0.7692307692307693,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,3,claude-3.7-sonnet,0.08333333333333333,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,4,claude-3.7-sonnet,0.0,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,2,o3,0.7692307692307693,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,3,o3,0.16666666666666666,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,4,o3,0.0,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,2,gpt-5,0.8846153846153846,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,3,gpt-5,0.2916666666666667,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,4,gpt-5,0.0,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,gemini-2.5-pro,2,gemini-3-pro-preview,0.8461538461538461,0.994584069076249,0.14843022292240282,False,ok,
+swe_bench_mini,gemini-2.5-pro,3,gemini-3-pro-preview,0.4166666666666667,0.7351261758815903,0.31845950921492366,False,ok,
+swe_bench_mini,gemini-2.5-pro,4,gemini-3-pro-preview,0.1111111111111111,0.2663871213362143,0.15527601022510318,False,ok,
+swe_bench_mini,gemini-2.5-pro,2,claude-opus-4.6,0.9230769230769231,0.9783665352064563,0.055289612129533205,False,ok,
+swe_bench_mini,gemini-2.5-pro,3,claude-opus-4.6,0.75,0.6038501310411188,-0.14614986895888116,False,ok,
+swe_bench_mini,gemini-2.5-pro,4,claude-opus-4.6,0.2222222222222222,0.23416028956288776,0.011938067340665548,False,ok,
+swe_bench_mini,gemini-2.5-pro,2,claude-opus-4.7,0.9615384615384616,0.9821030492780964,0.020564587739634876,False,ok,
+swe_bench_mini,gemini-2.5-pro,3,claude-opus-4.7,0.8333333333333334,0.6603301388414727,-0.17300319449186063,False,ok,
+swe_bench_mini,gemini-2.5-pro,4,claude-opus-4.7,0.2692307692307692,0.2921558799585433,0.02292511072777409,False,ok,
+swe_bench_mini,gemini-2.5-pro,2,kimi-k3,0.9615384615384616,0.9250660173351257,-0.03647244420333584,False,ok,
+swe_bench_mini,gemini-2.5-pro,3,kimi-k3,0.875,0.7135413515870762,-0.1614586484129238,False,ok,
+swe_bench_mini,gemini-2.5-pro,4,kimi-k3,0.46153846153846156,0.07712315857465649,-0.3844153029638051,False,ok,
+swe_bench_mini,gpt-5.2,2,gpt-4o-1120,0.15384615384615385,0.005885855689559242,-0.14796029815659462,False,ok,
+swe_bench_mini,gpt-5.2,3,gpt-4o-1120,0.16666666666666666,0.04661117683000889,-0.12005548983665776,False,ok,
+swe_bench_mini,gpt-5.2,4,gpt-4o-1120,0.0,0.00430981018396096,0.00430981018396096,False,ok,
+swe_bench_mini,gpt-5.2,2,claude-3.7-sonnet,0.7692307692307693,0.49139518370755453,-0.27783558552321475,True,ok,
+swe_bench_mini,gpt-5.2,3,claude-3.7-sonnet,0.08333333333333333,0.2042922858222109,0.12095895248887757,True,ok,
+swe_bench_mini,gpt-5.2,4,claude-3.7-sonnet,0.0,0.03491900235144723,0.03491900235144723,True,ok,
+swe_bench_mini,gpt-5.2,2,o3,0.7692307692307693,0.8956925295119451,0.12646176028117584,False,ok,
+swe_bench_mini,gpt-5.2,3,o3,0.16666666666666666,0.343323914560778,0.17665724789411133,False,ok,
+swe_bench_mini,gpt-5.2,4,o3,0.0,0.08251272415408747,0.08251272415408747,False,ok,
+swe_bench_mini,gpt-5.2,2,gpt-5,0.8846153846153846,0.9663693727497038,0.08175398813431922,False,ok,
+swe_bench_mini,gpt-5.2,3,gpt-5,0.2916666666666667,0.4365116951268244,0.14484502846015773,False,ok,
+swe_bench_mini,gpt-5.2,4,gpt-5,0.0,0.12951026513808053,0.12951026513808053,False,ok,
+swe_bench_mini,gpt-5.2,2,gemini-3-pro-preview,0.8461538461538461,0.9905390921352262,0.14438524598138003,False,ok,
+swe_bench_mini,gpt-5.2,3,gemini-3-pro-preview,0.4166666666666667,0.541296056738009,0.12462939007134227,False,ok,
+swe_bench_mini,gpt-5.2,4,gemini-3-pro-preview,0.1111111111111111,0.20319698268319775,0.09208587157208664,False,ok,
+swe_bench_mini,gpt-5.2,2,claude-opus-4.6,0.9230769230769231,0.9660513219091277,0.04297439883220455,False,ok,
+swe_bench_mini,gpt-5.2,3,claude-opus-4.6,0.75,0.51313580768695,-0.23686419231305,False,ok,
+swe_bench_mini,gpt-5.2,4,claude-opus-4.6,0.2222222222222222,0.20135415039516927,-0.020868071827052942,False,ok,
+swe_bench_mini,gpt-5.2,2,claude-opus-4.7,0.9615384615384616,0.9781549259461936,0.016616464407732012,False,ok,
+swe_bench_mini,gpt-5.2,3,claude-opus-4.7,0.8333333333333334,0.5902944459772265,-0.2430388873561069,False,ok,
+swe_bench_mini,gpt-5.2,4,claude-opus-4.7,0.2692307692307692,0.2617538694397216,-0.007476899791047598,False,ok,
+swe_bench_mini,gpt-5.2,2,kimi-k3,0.9615384615384616,0.9056476434867343,-0.05589081805172724,False,ok,
+swe_bench_mini,gpt-5.2,3,kimi-k3,0.875,0.687411582989457,-0.18758841701054296,False,ok,
+swe_bench_mini,gpt-5.2,4,kimi-k3,0.46153846153846156,0.06424967159381013,-0.39728878994465144,False,ok,
+swe_bench_mini,o4-mini,2,gpt-4o-1120,0.15384615384615385,0.44314413591533536,0.2892979820691815,False,ok,
+swe_bench_mini,o4-mini,3,gpt-4o-1120,0.16666666666666666,0.03477662468030684,-0.1318900419863598,False,ok,
+swe_bench_mini,o4-mini,4,gpt-4o-1120,0.0,,,,failed,binomial logit outcomes are separated
+swe_bench_mini,o4-mini,2,claude-3.7-sonnet,0.7692307692307693,0.101778004476797,-0.6674527647539723,False,ok,
+swe_bench_mini,o4-mini,3,claude-3.7-sonnet,0.08333333333333333,0.3179449321628853,0.23461159882955196,False,ok,
+swe_bench_mini,o4-mini,4,claude-3.7-sonnet,0.0,,,,failed,binomial logit outcomes are separated
+swe_bench_mini,o4-mini,2,o3,0.7692307692307693,0.04682225348919473,-0.7224085157415745,False,ok,
+swe_bench_mini,o4-mini,3,o3,0.16666666666666666,0.5828710415003496,0.416204374833683,False,ok,
+swe_bench_mini,o4-mini,4,o3,0.0,,,,failed,binomial logit outcomes are separated
+swe_bench_mini,o4-mini,2,gpt-5,0.8846153846153846,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,o4-mini,3,gpt-5,0.2916666666666667,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,o4-mini,4,gpt-5,0.0,,,,failed,only 3 mapped ECI anchors
+swe_bench_mini,o4-mini,2,gemini-3-pro-preview,0.8461538461538461,0.994584069076249,0.14843022292240282,False,ok,
+swe_bench_mini,o4-mini,3,gemini-3-pro-preview,0.4166666666666667,0.7351261758815903,0.31845950921492366,False,ok,
+swe_bench_mini,o4-mini,4,gemini-3-pro-preview,0.1111111111111111,0.2663871213362143,0.15527601022510318,False,ok,
+swe_bench_mini,o4-mini,2,claude-opus-4.6,0.9230769230769231,0.9783665352064563,0.055289612129533205,False,ok,
+swe_bench_mini,o4-mini,3,claude-opus-4.6,0.75,0.6038501310411188,-0.14614986895888116,False,ok,
+swe_bench_mini,o4-mini,4,claude-opus-4.6,0.2222222222222222,0.23416028956288776,0.011938067340665548,False,ok,
+swe_bench_mini,o4-mini,2,claude-opus-4.7,0.9615384615384616,0.9821030492780964,0.020564587739634876,False,ok,
+swe_bench_mini,o4-mini,3,claude-opus-4.7,0.8333333333333334,0.6603301388414727,-0.17300319449186063,False,ok,
+swe_bench_mini,o4-mini,4,claude-opus-4.7,0.2692307692307692,0.2921558799585433,0.02292511072777409,False,ok,
+swe_bench_mini,o4-mini,2,kimi-k3,0.9615384615384616,0.9270985537322484,-0.0344399078062132,False,ok,
+swe_bench_mini,o4-mini,3,kimi-k3,0.875,0.7106803969747784,-0.16431960302522164,False,ok,
+swe_bench_mini,o4-mini,4,kimi-k3,0.46153846153846156,0.07683106794014916,-0.3847073935983124,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,2,gpt-4o-1120,0.15384615384615385,0.06427097246126359,-0.08957518138489026,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,3,gpt-4o-1120,0.16666666666666666,0.019212130945519924,-0.14745453572114672,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,4,gpt-4o-1120,0.0,0.014628329013602292,0.014628329013602292,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,2,claude-3.7-sonnet,0.7692307692307693,0.41740181702623785,-0.3518289522045314,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,3,claude-3.7-sonnet,0.08333333333333333,0.1464101755296649,0.06307684219633157,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,4,claude-3.7-sonnet,0.0,0.03119231663879749,0.03119231663879749,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,2,o3,0.7692307692307693,0.6619476668908392,-0.1072831023399301,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,3,o3,0.16666666666666666,0.3030867970267661,0.13642013036009945,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,4,o3,0.0,0.04294529198066862,0.04294529198066862,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,2,gpt-5,0.8846153846153846,0.7734448380212705,-0.11117054659411407,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,3,gpt-5,0.2916666666666667,0.4211028443942219,0.12943617772755522,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,4,gpt-5,0.0,0.05115425927104148,0.05115425927104148,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,2,gemini-3-pro-preview,0.8461538461538461,0.8609159876423635,0.0147621414885174,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,3,gemini-3-pro-preview,0.4166666666666667,0.5578387701730545,0.1411721035063878,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,4,gemini-3-pro-preview,0.1111111111111111,0.061575757387033185,-0.04953535372407792,True,ok,
+swe_bench_mini,deepseek-v4-flash-0731,2,claude-opus-4.6,0.9230769230769231,0.899383797908204,-0.02369312516871913,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,3,claude-opus-4.6,0.75,0.6393277849989524,-0.11067221500104762,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,4,claude-opus-4.6,0.2222222222222222,0.06897095570768569,-0.15325126651453652,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,2,claude-opus-4.7,0.9615384615384616,0.91490626014237,-0.04663220139609159,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,3,claude-opus-4.7,0.8333333333333334,0.6777251312899338,-0.15560820204339953,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,4,claude-opus-4.7,0.2692307692307692,0.07299062981267056,-0.19624013941809865,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,2,kimi-k3,0.9615384615384616,0.9270985537322484,-0.0344399078062132,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,3,kimi-k3,0.875,0.7106803969747784,-0.16431960302522164,False,ok,
+swe_bench_mini,deepseek-v4-flash-0731,4,kimi-k3,0.46153846153846156,0.07683106794014916,-0.3847073935983124,False,ok,

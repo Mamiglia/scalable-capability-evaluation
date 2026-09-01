@@ -38,6 +38,7 @@ from inspect_ai import eval_set
 from inspect_ai.log import read_eval_log
 
 from configs import ModelConfig
+from judge.logs import has_success_log
 from judge.task import DEFAULT_SYSTEM_PROMPT, judge_task
 from model import Model
 
@@ -67,21 +68,6 @@ def judge_config(slug: str) -> ModelConfig:
         paths = [str(path) for path, _ in found] or "none"
         raise ValueError(f"judge {slug}: need exactly one model YAML in {MODEL_CONFIGS}, found {paths}")
     return found[0][1]
-
-
-def has_success_log(directory: Path) -> bool:
-    """Whether this phase already produced a finished log, so it can be skipped.
-
-    Phase logs always carry a sample_id block, so configs.paths.is_successful_eval
-    (which rejects partial runs) would call every phase pending; the log status alone
-    decides here."""
-    for path in directory.glob("*.eval"):
-        try:
-            if read_eval_log(str(path), header_only=True).status == "success":
-                return True
-        except Exception:
-            continue
-    return False
 
 
 def correct_count(path: str | Path) -> int:

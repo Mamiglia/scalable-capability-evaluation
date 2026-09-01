@@ -1,0 +1,119 @@
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/deepseek-v4-flash-0731/claude-opus-4.7-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 deepseek-v4-flash-0731       claude-opus-4.7-vs-gemini-3-pro-preview (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/deepseek-v4-flash-0731/claude-sonnet-4.5-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 deepseek-v4-flash-0731       claude-sonnet-4.5-vs-gemini-3-pro-preview (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/deepseek-v4-flash-0731/deepseek-r1-0528-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 deepseek-v4-flash-0731       deepseek-r1-0528-vs-gemini-3-pro-preview (4 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/deepseek-v4-flash-0731/deepseek-v3.2-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 deepseek-v4-flash-0731       deepseek-v3.2-vs-gemini-3-pro-preview (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/deepseek-v4-flash-0731/gemini-3-pro-preview-vs-gemini-3.5-flash.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 deepseek-v4-flash-0731       gemini-3-pro-preview-vs-gemini-3.5-flash (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/deepseek-v4-flash-0731/gemini-3-pro-preview-vs-gemma-4-e2b-it.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 deepseek-v4-flash-0731       gemini-3-pro-preview-vs-gemma-4-e2b-it (2 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gemini-2.5-pro/claude-sonnet-4.5-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gemini-2.5-pro               claude-sonnet-4.5-vs-gemini-3-pro-preview (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gemini-2.5-pro/deepseek-r1-0528-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gemini-2.5-pro               deepseek-r1-0528-vs-gemini-3-pro-preview (4 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gemini-2.5-pro/gemini-3-pro-preview-vs-glm-4.6.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gemini-2.5-pro               gemini-3-pro-preview-vs-glm-4.6 (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gemini-2.5-pro/gemini-3-pro-preview-vs-gpt-4.1.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gemini-2.5-pro               gemini-3-pro-preview-vs-gpt-4.1 (6 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gemini-2.5-pro/gemini-3-pro-preview-vs-gpt-5.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gemini-2.5-pro               gemini-3-pro-preview-vs-gpt-5 (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gemini-2.5-pro/gemini-3-pro-preview-vs-mistral-medium-3.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gemini-2.5-pro               gemini-3-pro-preview-vs-mistral-medium-3 (2 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-4o-2024-11-20/claude-sonnet-4.5-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-4o-2024-11-20            claude-sonnet-4.5-vs-gemini-3-pro-preview (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-4o-2024-11-20/deepseek-r1-0528-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-4o-2024-11-20            deepseek-r1-0528-vs-gemini-3-pro-preview (4 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-4o-2024-11-20/gemini-3-pro-preview-vs-glm-4.6.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-4o-2024-11-20            gemini-3-pro-preview-vs-glm-4.6 (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-4o-2024-11-20/gemini-3-pro-preview-vs-gpt-4.1.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-4o-2024-11-20            gemini-3-pro-preview-vs-gpt-4.1 (6 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-4o-2024-11-20/gemini-3-pro-preview-vs-gpt-5.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-4o-2024-11-20            gemini-3-pro-preview-vs-gpt-5 (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-4o-2024-11-20/gemini-3-pro-preview-vs-mistral-medium-3.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-4o-2024-11-20            gemini-3-pro-preview-vs-mistral-medium-3 (2 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-5.2/claude-sonnet-4.5-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-5.2                      claude-sonnet-4.5-vs-gemini-3-pro-preview (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-5.2/deepseek-r1-0528-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-5.2                      deepseek-r1-0528-vs-gemini-3-pro-preview (4 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-5.2/deepseek-v3.2-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-5.2                      deepseek-v3.2-vs-gemini-3-pro-preview (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-5.2/gemini-3-pro-preview-vs-glm-4.6.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-5.2                      gemini-3-pro-preview-vs-glm-4.6 (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-5.2/gemini-3-pro-preview-vs-gpt-4.1.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-5.2                      gemini-3-pro-preview-vs-gpt-4.1 (6 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/gpt-5.2/gemini-3-pro-preview-vs-gpt-5.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 gpt-5.2                      gemini-3-pro-preview-vs-gpt-5 (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/o4-mini/claude-sonnet-4.5-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 o4-mini                      claude-sonnet-4.5-vs-gemini-3-pro-preview (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/o4-mini/deepseek-r1-0528-vs-gemini-3-pro-preview.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 o4-mini                      deepseek-r1-0528-vs-gemini-3-pro-preview (4 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/o4-mini/gemini-3-pro-preview-vs-glm-4.6.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 o4-mini                      gemini-3-pro-preview-vs-glm-4.6 (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/o4-mini/gemini-3-pro-preview-vs-gpt-4.1.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 o4-mini                      gemini-3-pro-preview-vs-gpt-4.1 (6 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/o4-mini/gemini-3-pro-preview-vs-gpt-5.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 o4-mini                      gemini-3-pro-preview-vs-gpt-5 (8 items)
+
+## configs/frontier_eci_canonical_anchors/runs/swe_bench_mini/o4-mini/gemini-3-pro-preview-vs-mistral-medium-3.yaml exit=0
+1 phase-runs pending (of 2 possible)
+  phase1 o4-mini                      gemini-3-pro-preview-vs-mistral-medium-3 (2 items)
