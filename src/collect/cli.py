@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from inspect_ai import eval as inspect_eval
 from inspect_ai import eval_set
 
 from collect.runner import eval_runner
@@ -23,6 +24,7 @@ def _run_eval_worker(
     task_arg: list | None,
     model_arg: list | None,
     eval_extra_args: dict,
+    sample_ids: list[str] | None = None,
 ) -> int:
     bench = TaskConfig.from_cli(bench_path)
     if task_arg:
@@ -40,7 +42,7 @@ def _run_eval_worker(
     log_to(target_dir)
     logger.info("Running repeat %d/%d for benchmark '%s' and model '%s'",
                 repeat + 1, repeats, bench.name, model_config.slug)
-    if any(is_successful_eval(path) for path in target_dir.glob("*.eval")):
+    if sample_ids is None and any(is_successful_eval(path) for path in target_dir.glob("*.eval")):
         logger.info("Skipping completed repeat %d: %s", repeat + 1, target_dir)
         return 0
 
@@ -58,6 +60,19 @@ def _run_eval_worker(
         # No seed: several pinned endpoints reject it under require_parameters,
         # and a fixed seed can collapse epochs into identical generations.
         eval_kwargs = model.eval_kwargs() | bench.eval_kwargs() | kwargs
+        if sample_ids is not None:
+            # Plain eval, not eval_set: eval_set keys reuse on task+model identity, ignores
+            # sample_id, and would treat the finished full log in this dir as done and run
+            # nothing. The partial log it writes here is never canonical (is_successful_eval).
+            logs = inspect_eval(
+                tasks=bench.task,
+                task_args=bench.task_args or {},
+                log_dir=str(target_dir),
+                display="plain",
+                sample_id=sample_ids,
+                **eval_kwargs,
+            )
+            return 0 if all(log.status == "success" for log in logs) else 1
         success, _ = eval_set(
             tasks=bench.task,
             task_args=bench.task_args or {},
@@ -72,7 +87,9 @@ def _run_eval_worker(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run benchmark evaluations for model(s) and benchmark(s)."
+        description="Run benchmark evaluations for model(s) and benchmark(s).",
+        epilog="Any other --flag value goes straight to inspect's eval/eval_set and overrides "
+        "the model config, e.g. --max-tokens 32768 or --max-connections 4.",
     )
     parser.add_argument(
         "-b",
@@ -104,6 +121,20 @@ def main() -> int:
         "(default: 1). Distinct from the task's internal 'epochs' argument.",
     )
     parser.add_argument(
+        "--repeat",
+        type=int,
+        help="Run only this repeat (0-based), writing into <model>/<repeat>/. Default: all repeats.",
+    )
+    parser.add_argument(
+        "--sample-id",
+        type=lambda ids: ids.split(","),
+        dest="sample_ids",
+        metavar="ID[,ID...]",
+        help="Re-run only these sample ids, even if the repeat already has a full log. Writes a "
+        "separate partial log into the same <model>/<repeat>/ dir; merge it with "
+        "scripts/collect/splice_rerun.py.",
+    )
+    parser.add_argument(
         "--runpod",
         action="store_true",
         help="Force Runpod for selected model(s), overriding runpod.use=false.",
@@ -132,6 +163,10 @@ def main() -> int:
     )
     args, extra = parser.parse_known_args()
     eval_extra_args = flag_parse(extra) if extra else {}
+    if args.sample_ids is not None and args.repeat is None:
+        parser.error("--sample-id requires --repeat")
+    if args.repeat is not None and not 0 <= args.repeat < args.epochs:
+        parser.error(f"--repeat must be between 0 and {args.epochs - 1} for -n {args.epochs}")
 
     jobs = [
         (
@@ -145,12 +180,13 @@ def main() -> int:
                 args.task_arg,
                 args.model_arg,
                 eval_extra_args,
+                args.sample_ids,
             ),
             f"{bench_path.stem}/{model_path.stem} (repeat {repeat})",
         )
         for bench_path in args.bench
         for model_path in args.model
-        for repeat in range(args.epochs)
+        for repeat in ([args.repeat] if args.repeat is not None else range(args.epochs))
     ]
 
     return eval_runner(jobs, max_workers=args.jobs)
