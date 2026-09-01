@@ -40,21 +40,32 @@ def flag_parse(extra: list[str] | str) -> dict[str, Any]:
     """Parse trailing CLI flags into a dictionary.
 
     Accepts both ``--flag value`` and ``--flag=value``; a flag with no value is True.
+    A flag repeated several times collects its values into a list, so the list-valued
+    eval_set arguments (``--sample_id a --sample_id b``) arrive intact instead of the
+    last one silently winning.
     """
     vals = extra.split(" ") if isinstance(extra, str) else list(extra)
     res: dict[str, Any] = {}
+
+    def add(flag: str, value: Any) -> None:
+        if flag not in res:
+            res[flag] = value
+        elif isinstance(res[flag], list):
+            res[flag].append(value)
+        else:
+            res[flag] = [res[flag], value]
 
     while vals and _is_flag(vals[0]):
         flag = vals.pop(0).lstrip("-")
         if "=" in flag:
             flag, _, value = flag.partition("=")
-            res[flag.replace("-", "_")] = coerce_value(value)
+            add(flag.replace("-", "_"), coerce_value(value))
             continue
         flag = flag.replace("-", "_")
         if vals and not _is_flag(vals[0]):
-            res[flag] = coerce_value(vals.pop(0))
+            add(flag, coerce_value(vals.pop(0)))
         else:
-            res[flag] = True
+            add(flag, True)
     if vals:
         raise ValueError(f"Unparsed CLI arguments: {vals}")
     return res
