@@ -9,8 +9,10 @@ description: Sweep the collected .eval logs in data/ for defects that would corr
 by hand, and you must not try. The job is: **run the three scripted sweeps, then hand-triage
 only what they flag.** Coverage comes from the scripts; judgement comes from you.
 
-Read `CLAUDE.md` (research framing) and `AGENTS.md` (§Known failure modes, §Data hygiene)
-first if they are not already in context. The `reading-logs` and `analyzing-logs` skills
+Read `data/CONTRACT.md` (the binding rules for `data/`: layout, repeats, log validity,
+edit stamping, sync), then `CLAUDE.md` (research framing) and `AGENTS.md` (§Known failure
+modes) if they are not already in context. What this skill finds is measured against that
+contract; `bash scripts/audit/logs/check.sh` is its structural gate. The `reading-logs` and `analyzing-logs` skills
 cover the Inspect log APIs — use them for triage, and never unzip a `.eval`.
 
 ## Why these defects matter here

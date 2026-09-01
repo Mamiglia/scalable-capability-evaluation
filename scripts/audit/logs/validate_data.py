@@ -13,10 +13,15 @@ Flags, per model dir:
 
 Exit code 1 if anything is flagged. ``--delete`` removes what is flagged as unusable: incomplete
 logs, the higher repeat of a replay pair, and repeat dirs left without a log.
+
+Per-log reads are cached in ``analysis/validate_cache.json`` keyed by (mtime, size), so a
+re-run only reads logs that changed. Delete the file to force a full rescan.
 """
 
 import argparse
+import hashlib
 import itertools
+import json
 import shutil
 from pathlib import Path
 
@@ -24,18 +29,48 @@ from inspect_ai.log import read_eval_log, read_eval_log_samples
 
 from configs.paths import is_successful_eval
 
+CACHE_PATH = Path("analysis/validate_cache.json")
+_cache: dict = {}
+
+
+def _cached(path: Path, kind: str, compute) -> dict:
+    """compute(path) memoized by the log's (mtime, size); logs only change when stamped."""
+    stat = path.stat()
+    key = [stat.st_mtime, stat.st_size]
+    entry = _cache.get(str(path), {})
+    if entry.get("key") != key:
+        entry = {"key": key}
+    if kind not in entry:
+        entry[kind] = compute(path)
+        _cache[str(path)] = entry
+    return entry[kind]
+
+
+def log_info(path: Path) -> dict:
+    """Header facts needed for validation, cached."""
+    def compute(path):
+        if not is_successful_eval(path):
+            return {"successful": False}
+        header = read_eval_log(str(path), header_only=True)
+        return {
+            "successful": True,
+            "imported": any("imported" in tag for tag in header.eval.tags or []),
+            "done": header.results.completed_samples,
+            "total": header.results.total_samples,
+        }
+    return _cached(path, "info", compute)
+
 
 def complete_log(repeat_dir: Path, delete: bool = False) -> tuple[Path | None, bool, list[str]]:
     """The one full successful log of a repeat dir, whether it is imported, and problems found."""
     problems, good = [], []
     for path in sorted(repeat_dir.glob("*.eval")):
-        if not is_successful_eval(path):
+        info = log_info(path)
+        if not info["successful"]:
             if delete:  # crashed / partial (--limit) leftovers do not count, by design
                 path.unlink()
             continue
-        header = read_eval_log(str(path), header_only=True)
-        imported = any("imported" in tag for tag in header.eval.tags or [])
-        done, total = header.results.completed_samples, header.results.total_samples
+        imported, done, total = info["imported"], info["done"], info["total"]
         if done < total - 1 and not imported:  # one failed sample is tolerated; imports are as they come
             problems.append(f"{path}: only {done}/{total} samples")
             if delete:
@@ -69,6 +104,15 @@ def completions(path: Path, limit: int) -> dict:
     return out
 
 
+def completion_hashes(path: Path, limit: int) -> dict:
+    """MD5 per sample of (assistant text, output tokens) — equality is all the replay check
+    needs, and hashes keep the cache small. Cached; keyed by limit too."""
+    def compute(path):
+        return {f"{sid}\x00{epoch}": hashlib.md5(repr(val).encode()).hexdigest()
+                for (sid, epoch), val in completions(path, limit).items()}
+    return _cached(path, f"hashes:{limit}", compute)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("roots", nargs="*", type=Path, default=[Path("data")])
@@ -77,6 +121,9 @@ def main() -> int:
     parser.add_argument("--dup", type=float, default=0.5, help="Identical share at which two repeats count as replays.")
     parser.add_argument("--delete", action="store_true", help="Remove incomplete logs and replayed repeats.")
     args = parser.parse_args()
+
+    if CACHE_PATH.exists():
+        _cache.update(json.loads(CACHE_PATH.read_text()))
 
     problems = []
     # A model dir is any dir holding numbered repeat dirs, so roots can be data/, a bench, or a hash dir.
@@ -108,7 +155,7 @@ def main() -> int:
         texts = {}
         for repeat, path in usable.items():
             try:
-                texts[repeat] = completions(path, args.samples)
+                texts[repeat] = completion_hashes(path, args.samples)
             except Exception as exc:  # e.g. sandbox plugin missing for cyber benches
                 problems.append(f"{path}: cannot read samples ({str(exc).splitlines()[0][:80]})")
         for a, b in itertools.combinations(sorted(texts), 2):
@@ -120,6 +167,9 @@ def main() -> int:
                     shutil.rmtree(model_dir / str(b))
         if args.delete and not any(model_dir.iterdir()):
             model_dir.rmdir()
+
+    CACHE_PATH.parent.mkdir(exist_ok=True)
+    CACHE_PATH.write_text(json.dumps(_cache))
 
     for line in problems:
         print(line)
