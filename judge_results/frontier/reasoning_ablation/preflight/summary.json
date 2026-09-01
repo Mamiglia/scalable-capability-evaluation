@@ -3,9 +3,14 @@
     "gpt-5.2",
     "gemini-2.5-pro"
   ],
-  "matched_pair_items": 1391,
-  "cot_on_configs": 200,
-  "estimated_cot_on_calls": 2782,
+  "full_matched_pair_items": 1391,
+  "available_matched_pair_items": 1295,
+  "selected_cot_pair_items": 710,
+  "items_per_pair": 4,
+  "cot_on_configs": 188,
+  "estimated_cot_on_calls": 1420,
+  "non_reasoning_topup_configs": 3,
+  "estimated_non_reasoning_topup_calls": 36,
   "models_scanned": 27,
   "reasoning_models": 13,
   "non_reasoning_models": 11

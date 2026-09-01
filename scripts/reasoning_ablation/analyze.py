@@ -108,7 +108,7 @@ def write_cot_figures(off: pd.DataFrame, cot: pd.DataFrame, out: Path) -> None:
 
 def write_non_reasoning_figures(points: pd.DataFrame, out: Path) -> None:
     labels = {"gpt-4o-1120": "GPT-4o", "gpt-4.1": "GPT-4.1",
-              "claude-3.7-sonnet": "Claude 3.7", "mistral-medium-3": "Mistral Medium 3"}
+              "claude-3.7-sonnet": "Claude 3.7", "mistral-medium-3": "Mistral M3"}
     order = list(labels)
     out.mkdir(parents=True, exist_ok=True)
     for (bench, judge), block in points.groupby(["bench", "judge"], sort=True):
@@ -125,7 +125,8 @@ def write_non_reasoning_figures(points: pd.DataFrame, out: Path) -> None:
         for position, truth, fitted in zip(x, block.actual, value):
             ax.plot([position, position], [truth, fitted], ":", color="#222222", lw=1)
         ax.set_xlim(-0.5, len(block) - 0.5)
-        ax.set_xticks(x, [labels[model] for model in block.index], rotation=90, ha="center")
+        ax.set_xticks(x, [labels[model] for model in block.index])
+        ax.tick_params(axis="x", labelrotation=45)
         ax.set_ylim(0, 1)
         ax.set_yticks([0, 0.5, 1])
         ax.set_ylabel("Combined hard accuracy")
@@ -140,6 +141,9 @@ def write_non_reasoning_figures(points: pd.DataFrame, out: Path) -> None:
         ax.legend([actual, predicted, residual], ["Actual", "Predicted", "Residual"],
                   loc="lower left", bbox_to_anchor=(0, 1.08), frameon=False,
                   handletextpad=0.5, borderaxespad=0)
+        for label in ax.get_xticklabels():
+            label.set_ha("right")
+            label.set_rotation_mode("anchor")
         save(fig, out / f"non-reasoning_{judge}_{bench}")
 
 

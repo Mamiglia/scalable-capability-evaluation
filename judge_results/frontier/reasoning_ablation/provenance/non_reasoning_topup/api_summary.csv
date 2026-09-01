@@ -1,0 +1,2 @@
+source,judge,provider,calls,cost,input_tokens,output_tokens,reasoning_tokens
+non_reasoning_topup,gpt-5.2,OpenAI,36,0.310236003,88270,12185,8047
