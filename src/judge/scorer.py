@@ -17,11 +17,19 @@ def parse_judge_output(output_text: str):
     if not output_text:
         return None, None, None
 
-    # Parse ANSWER (e.g., 'ANSWER: 1', '**ANSWER:** 1', 'ANSWER: Model 2', 'ANSWER: $1$';
-    # some models wrap the answer in $..$, imitating the prompt's '$LETTER' placeholder).
+    # Parse ANSWER (e.g., 'ANSWER: 1', '**ANSWER:** 1', '**ANSWER**: 1', 'ANSWER : 2',
+    # '"ANSWER": "2"' from judges that write JSON, 'ANSWER: Model 2', 'ANSWER: $1$'; some
+    # models wrap the answer in $..$, imitating the prompt's '$LETTER' placeholder).
+    # Quotes, markdown emphasis and whitespace are allowed around the colon and the digit.
+    # A heading line that is only 'Answer' ('### Answer', '**Answer**') followed by a line
+    # that is only the digit also counts (r1 writes this).
     # The last match wins and the digit must stand alone: a judge that quotes a transcript's
     # own 'ANSWER: 128' before its verdict must not be read as '1'.
-    answers = re.findall(r'ANSWER:[*_]*\s*(?:(?:Model|Transcript)\s+)?[*_$]*([12])(?!\d)', output_text, re.IGNORECASE)
+    verdicts = re.finditer(
+        r'ANSWER[\s"\'*_]*:[\s"\'*_$]*(?:(?:Model|Transcript)\s+)?[\s"\'*_$]*([12])(?!\d)'
+        r'|^[#*_ \t]*ANSWER[*_: \t]*\n\s*([12])[ \t]*$',
+        output_text, re.IGNORECASE | re.MULTILINE)
+    answers = [match.group(1) or match.group(2) for match in verdicts]
     answer = answers[-1] if answers else None
 
     # Parse CONFIDENCE on a 1-5 scale (e.g., 'CONFIDENCE: 4', '**CONFIDENCE:** 5')
