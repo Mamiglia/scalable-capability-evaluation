@@ -1,0 +1,3 @@
+name: gemma3-12b-it-vs-qwen3.5-9b
+major: !include ../../models/google/gemma3-12b-it.yml
+minor: !include ../../models/qwen/qwen3.5-9b.yml
