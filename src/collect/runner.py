@@ -9,6 +9,8 @@ import multiprocessing as mp
 import re
 import sys
 import tempfile
+import ctypes
+import signal
 import traceback
 from concurrent.futures import ProcessPoolExecutor, wait
 from pathlib import Path
@@ -69,6 +71,8 @@ class _QueueDisplay(PlainDisplay):
 def _worker(worker_fn: Callable[..., int], args: tuple[Any, ...], queue, label: str, log_file: Path) -> int:
     """Run one job with its output going to ``log_file``, so only the parent owns the terminal."""
     active_display._active_display = _QueueDisplay(queue, label)
+    # die with the parent: a killed `collect` must not leave evals running (Linux only)
+    ctypes.CDLL(None).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
 
     stdout, stderr = sys.stdout, sys.stderr
     with open(log_file, "w", buffering=1) as out:  # line-buffered: tail -f works while it runs

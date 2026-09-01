@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -116,14 +117,30 @@ def _deadline(value: Any) -> str:
     )
 
 
+@functools.cache
+def _supports_terminate_after() -> bool:
+    """Whether the installed runpodctl still accepts --terminate-after (2.12 removed it)."""
+    help_text = subprocess.run(
+        ["runpodctl", "pod", "create", "--help"], text=True, capture_output=True
+    )
+    return "--terminate-after" in (help_text.stdout or "") + (help_text.stderr or "")
+
+
+def _redact(command: list[str]) -> str:
+    """``--env`` carries HF_TOKEN, so it must never reach a log, a traceback or a job file."""
+    return shlex.join("--env=<redacted>" if arg.startswith("--env=") else arg for arg in command)
+
+
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(command, check=True, text=True, capture_output=True)
     except FileNotFoundError as exc:
         raise RuntimeError("runpodctl is not installed") from exc
     except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or str(exc)).strip()
-        raise RuntimeError(f"runpodctl failed: {detail}") from exc
+        detail = (exc.stderr or exc.stdout or "").strip()
+        # `from None`, not `from exc`: CalledProcessError stringifies the whole command, so
+        # the chained traceback would print the token that --env carries.
+        raise RuntimeError(f"runpodctl failed: {detail}\n  command: {_redact(command)}") from None
 
 
 # Tried in order when the configured GPU has no capacity. Substituting silently would make
@@ -160,7 +177,6 @@ def _create_pod_once(config: dict[str, Any], gpu_id: str) -> str:
         f"--gpu-count={config['gpu_count']}",
         f"--container-disk-in-gb={config['container_disk_in_gb']}",
         f"--ports={config['port']}/http,{config['port']}/tcp",
-        f"--terminate-after={_deadline(config['terminate_after'])}",
         "--docker-args="
         + shlex.join(
             [
@@ -171,6 +187,17 @@ def _create_pod_once(config: dict[str, Any], gpu_id: str) -> str:
             ]
         ),
     ]
+    # runpodctl 2.12 dropped --terminate-after with no replacement. It is only a backstop --
+    # session.py terminates the pod when the last user exits -- so run without it rather than
+    # not at all, but say so: after a crash nothing stops the pod billing.
+    if _supports_terminate_after():
+        command.append(f"--terminate-after={_deadline(config['terminate_after'])}")
+    else:
+        logger.warning(
+            "runpodctl has no --terminate-after; pod %s has no expiry backstop. If this run "
+            "crashes, terminate it by hand (runpodctl pod list) or it bills until you do.",
+            config.get("name") or config["model"],
+        )
     if config.get("name"):
         command.append(f"--name={config['name']}")
     command.extend(create_args)
