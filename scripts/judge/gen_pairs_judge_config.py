@@ -1,9 +1,12 @@
 """Generate per-judge judging configs (run_judging.py schema) from the pair configs.
 
-For every configs/experiments/pairs/*.yml whose two models both have a finished
-transcript log for the epoch, one [judge, major, minor] row per judge. Pairs with no
-both-correct instance are left out. The judge list and endpoint pins are copied from a
-template config (an existing run_judging.py config).
+For every configs/experiments/pairs/*.yml (or those listed in --pairs) whose two models
+both have a finished transcript log for the epoch, one [judge, major, minor] row per
+judge. Pairs with no both-correct instance are left out. The judges come from the
+template's `judges` list (or its comparisons), with per-judge `judge_model_args`
+(endpoint pins), `judge_generate_args` and `judge_max_connections` copied over.
+A --transcripts map (model -> log path) pins the log a model is judged from; other
+models get the largest finished log in their data dir.
 
 Writes <out-dir>/epoch-<n>/<judge>.yaml, one file per judge so judges can run side by
 side, and prints per-model solve counts and per-pair both-correct counts.
@@ -51,6 +54,26 @@ def correct_ids(path: Path) -> set[str]:
     return {str(s.id) for s in read_eval_log_samples(str(path), all_samples_required=False) if extract_score(s)}
 
 
+def judge_overrides(
+    template: dict, judges: list[str], judge: str, pod_max_connections: int
+) -> dict:
+    """Generation and concurrency settings for one generated judge config."""
+    out = {}
+    per_judge_generate = template.get("judge_generate_args") or {}
+    per_judge_connections = template.get("judge_max_connections") or {}
+    if judge in per_judge_generate:
+        out["generate_args"] = per_judge_generate[judge]
+    elif len(judges) == 1 and template.get("generate_args"):
+        out["generate_args"] = template["generate_args"]
+    if judge in per_judge_connections:
+        out["max_connections"] = per_judge_connections[judge]
+    elif len(judges) == 1 and template.get("max_connections"):
+        out["max_connections"] = template["max_connections"]
+    elif judge.startswith("openai-api/"):
+        out["max_connections"] = pod_max_connections
+    return out
+
+
 def pair_models(pair_yml: Path) -> dict[str, tuple[str, str]]:
     """role -> (config key, data dir name) for the pair's major and minor."""
     out = {}
@@ -68,20 +91,44 @@ def main() -> int:
     parser.add_argument("--template", type=Path, required=True, help="config to copy judges and pins from")
     parser.add_argument("--log-root", required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument("--pairs", type=Path, help="file of pair names to include (default: all)")
+    parser.add_argument("--judges", help="comma-separated judge slugs (default: all in the template)")
+    parser.add_argument("--transcripts", type=Path, help="yaml of model -> log path to judge from")
     parser.add_argument("--pod-max-connections", type=int, default=8,
-                        help="max_connections for judges served from a pod (openai-api/ slugs)")
+                        help="fallback max_connections for openai-api judges")
     args = parser.parse_args()
 
     template = yaml.safe_load(args.template.read_text())
-    judges = list(dict.fromkeys(row[0] for row in template["comparisons"]))
+    judges = template.get("judges") or list(dict.fromkeys(row[0] for row in template["comparisons"]))
+    if args.judges:
+        requested = args.judges.split(",")
+        unknown = set(requested) - set(judges)
+        if unknown:
+            parser.error(f"--judges not present in template: {sorted(unknown)}")
+        judges = requested
     pins = template.get("judge_model_args") or {}
+    pinned_logs = (yaml.safe_load(args.transcripts.read_text()) or {}) if args.transcripts else {}
+    pair_ymls = sorted(PAIRS_DIR.glob("*.yml"))
+    if args.pairs:
+        wanted = set(args.pairs.read_text().split())
+        pair_ymls = [p for p in pair_ymls if p.stem in wanted]
+        missing = wanted - {p.stem for p in pair_ymls}
+        if missing:
+            raise SystemExit(f"pairs not in {PAIRS_DIR}: {sorted(missing)}")
 
     logs, correct = {}, {}
-    for pair_yml in sorted(PAIRS_DIR.glob("*.yml")):
+    for pair_yml in pair_ymls:
         for key, dirname in pair_models(pair_yml).values():
             if key in logs:
                 continue
-            logs[key] = canonical_log(args.data_dir / dirname / str(args.epoch))
+            if key in pinned_logs and Path(pinned_logs[key]).is_file():
+                logs[key] = Path(pinned_logs[key])
+            else:
+                if key in pinned_logs:
+                    print(f"PINNED LOG GONE {key}: {pinned_logs[key]}")
+                logs[key] = canonical_log(args.data_dir / dirname / str(args.epoch))
+                if logs[key] is not None and pinned_logs:
+                    print(f"NOT PINNED {key}: using {logs[key]}")
             if logs[key] is not None:
                 correct[key] = correct_ids(logs[key])
     for key in sorted(logs):
@@ -89,7 +136,7 @@ def main() -> int:
         print(f"{key:42s} {status}")
 
     pairs, used = [], set()
-    for pair_yml in sorted(PAIRS_DIR.glob("*.yml")):
+    for pair_yml in pair_ymls:
         models = pair_models(pair_yml)
         major, minor = models["major"][0], models["minor"][0]
         if logs.get(major) is None or logs.get(minor) is None:
@@ -115,8 +162,7 @@ def main() -> int:
         }
         if judge in pins:
             cfg["judge_model_args"] = {judge: pins[judge]}
-        if judge.startswith("openai-api/"):
-            cfg["max_connections"] = args.pod_max_connections
+        cfg.update(judge_overrides(template, judges, judge, args.pod_max_connections))
         path = out_dir / f"{judge.split('/')[-1]}.yaml"
         path.write_text(yaml.safe_dump(cfg, sort_keys=False, width=200))
         print(f"wrote {path}")
