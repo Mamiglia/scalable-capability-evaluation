@@ -10,5 +10,9 @@ generate_args:
 model_args:
   provider:
     only:
-    - akashml/bf16
+    # 2026-08-31: akashml's bf16 endpoint is gone (404; akashml now declares fp8, no bf16
+    # anywhere - reka/chutes/parasail/coreweave/venice/io-net are fp8 too). Repinned to
+    # akashml/fp8: same provider, ctx 262144, max output 131072. NOTE precision drop vs
+    # the bf16 used for earlier benches (gpqa/aime/hle) - a cross-bench confound.
+    - akashml/fp8
     allow_fallbacks: false

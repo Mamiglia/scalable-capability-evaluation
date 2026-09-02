@@ -2,6 +2,10 @@ name: openai/gpt-5
 slug: openrouter/openai/gpt-5
 release_date: '2025-08-07'
 model_args:
+  # 2026-08-31: OpenAI strictly validates tool schemas and 400s on harbor's update_plan
+  # (its optional params lack a full `required` array). inspect's strict_tools defaults
+  # to true; disable it so tool defs are sent non-strict, as every other provider gets.
+  strict_tools: false
   provider:
     only:
     - openai

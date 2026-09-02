@@ -16,5 +16,10 @@ generate_args:
 model_args:
   provider:
     only:
-    - together
+    # 2026-08-31: OpenRouter no longer routes this slug to together (404 "permits only:
+    # together"; live endpoints deepinfra/fp4, baseten/fp4, venice/fp8). Repinned to
+    # baseten/fp4 - same nominal precision as together's NVFP4, and the only non-venice
+    # endpoint with output headroom (182520; venice hard-caps 16384, see above).
+    # gpqa/hle data collected earlier via together; terminal_bench_2_1 onward is baseten.
+    - baseten/fp4
     allow_fallbacks: false

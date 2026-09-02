@@ -1,3 +1,5 @@
+# 2026-08-31: RETIRED from OpenRouter - the slug 404s ("transitioned to a paid model")
+# and /models/.../endpoints returns none. Uncollectable until it reappears; no repin exists.
 # Quantization: Proprietary Direct (Novita)
 # pin: sole endpoint; Novita does not declare a quantization for this model.
 name: inclusionai/ling-2.6-flash
