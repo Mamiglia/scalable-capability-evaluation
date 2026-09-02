@@ -22,8 +22,6 @@ const plotDiv = $("plot");
 const emptyNote = $("empty-note");
 const hintEl = $("ctl-hint");
 const ctlDataset = $("ctl-dataset");
-const ctlView = $("ctl-view");
-const rankWrap = $("rank-wrap"), rankPlot = $("rank-plot");
 const ctlTrunc = $("ctl-trunc"), ctlSubset = $("ctl-subset"), ctlSource = $("ctl-source"),
       ctlColorby = $("ctl-colorby"), ctlCurves = $("ctl-curves"), ctlXmetric = $("ctl-xmetric");
 
@@ -35,19 +33,9 @@ function gapOf(r) {
   if (M && N && M[f] != null && N[f] != null) return Math.abs(M[f] - N[f]);
   return r.d_acc;
 }
-/* the dataset may ship its own x-axis choices (INDEX.xmetrics); these are the
-   fallback titles for the ones hardcoded in index.html */
 const X_TITLES = { eci: "capability gap (ECI)", gpqa: "capability gap (GPQA accuracy difference)",
-                   domain: "capability gap (ground-truth quartile accuracy difference)",
-                   mbpp: "capability gap (MBPP accuracy difference)",
                    aime2025: "capability gap (AIME 2025 accuracy difference)",
                    aime2026: "capability gap (AIME 2026 accuracy difference)" };
-const xmetric = key => ((INDEX && INDEX.xmetrics) || []).find(m => m.key === key);
-const xTitle = () => {
-  const m = xmetric(ctlXmetric.value);
-  return (m && m.title) || X_TITLES[ctlXmetric.value] || X_TITLES.eci;
-};
-const XMETRIC_HTML = $("ctl-xmetric").innerHTML;   // the static fallback list
 const overlay = $("modal");
 
 /* --- utils --------------------------------------------------------------- */
@@ -84,11 +72,14 @@ let ansCache = new Map();    // stem -> Promise<{item:letter}>
 
 let MODAL = null;  // { run, swapped, item, filter, search, pair, tMajor, tMinor }
 
-/* --- theme (Plotly needs explicit colours; these mirror style.css) -------
-   Light only, deliberately: the page no longer follows prefers-color-scheme. */
+/* --- theme (Plotly needs explicit colours; read them from CSS) ----------- */
 function themeColors() {
-  return { surface: "#ffffff", panel: "#f6f4ee", ink: "#0b0b0b", ink2: "#33322f",
-           muted: "#4a4844", grid: "#d3d2c9", border: "#d9d7ce" };
+  const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return dark
+    ? { surface: "#14140f", panel: "#1d1d17", ink: "#f2f0e9", ink2: "#dcdad0",
+        muted: "#9c9a90", grid: "#33322f", border: "#35342d" }
+    : { surface: "#ffffff", panel: "#f6f4ee", ink: "#0b0b0b", ink2: "#33322f",
+        muted: "#4a4844", grid: "#d3d2c9", border: "#d9d7ce" };
 }
 
 /* --- metadata helpers ---------------------------------------------------- */
@@ -97,17 +88,6 @@ function modelMeta(m) {
   return { label: x.label || m, acc: x.accuracy, rel: x.release || "" };
 }
 const judgeLabel = j => modelMeta(j).label;
-/* Accuracy of one model under the selected x-metric — the ranking view plots and ranks by
-   it, so switching the axis re-scores the ranking against a different slice of the domain. */
-function accOf(m) {
-  const x = (INDEX && INDEX.models && INDEX.models[m]) ? INDEX.models[m] : {};
-  const v = x["acc_" + ctlXmetric.value];
-  return v === null || v === undefined ? num(x.accuracy) : v;
-}
-const xmetricLabel = () => {
-  const m = xmetric(ctlXmetric.value);
-  return m ? m.label : (INDEX.metric_label || "accuracy");
-};
 const relYM = rel => (rel ? String(rel).slice(0, 7) : "–");
 const metaStr = m => "(" + fmt(modelMeta(m).acc) + ", " + relYM(modelMeta(m).rel) + ")";
 
@@ -205,14 +185,14 @@ function hoverData(r) {
           r.n_items, r.slot_a];
 }
 const MAIN_HOVER =
-  "<b>%{customdata[0]}</b> — judge · accuracy %{customdata[1]:.2f} · %{customdata[2]}<br>" +
-  "<b>major:</b> %{customdata[3]} (accuracy %{customdata[4]:.2f} · %{customdata[5]})<br>" +
-  "<b>minor:</b> %{customdata[6]} (accuracy %{customdata[7]:.2f} · %{customdata[8]})<br>" +
+  "<b>%{customdata[0]}</b> — judge · GPQA %{customdata[1]:.2f} · %{customdata[2]}<br>" +
+  "<b>major:</b> %{customdata[3]} (GPQA %{customdata[4]:.2f} · %{customdata[5]})<br>" +
+  "<b>minor:</b> %{customdata[6]} (GPQA %{customdata[7]:.2f} · %{customdata[8]})<br>" +
   "<b>gap:</b> %{customdata[9]:.3f} · <b>judge acc:</b> %{customdata[10]:.2f} " +
   "[%{customdata[11]:.2f}, %{customdata[12]:.2f}]<br>" +
   "<b>n:</b> %{customdata[13]} · <b>slot-1 rate:</b> %{customdata[14]:.2f}<extra></extra>";
 const SELF_HOVER =
-  "<b>%{customdata[0]}</b> — judge · accuracy %{customdata[1]:.2f} · %{customdata[2]}<br>" +
+  "<b>%{customdata[0]}</b> — judge · GPQA %{customdata[1]:.2f} · %{customdata[2]}<br>" +
   "<b>self-pair control:</b> %{customdata[3]} vs itself (should sit at chance)<br>" +
   "<b>judge acc:</b> %{customdata[10]:.2f} [%{customdata[11]:.2f}, %{customdata[12]:.2f}]<br>" +
   "<b>n:</b> %{customdata[13]} · <b>slot-1 rate:</b> %{customdata[14]:.2f}<extra></extra>";
@@ -272,7 +252,7 @@ function baseLayout(theme) {
     yaxis2: { domain: [0, 1], range: [0, 1], matches: "y", anchor: "x",
               showticklabels: false, gridcolor: theme.grid, showgrid: true, zeroline: false },
     xaxis: { domain: [0.24, 1], range: [0, XMAX], anchor: "y2",
-             title: { text: xTitle() },
+             title: { text: X_TITLES[ctlXmetric.value] || X_TITLES.eci },
              gridcolor: theme.grid, zeroline: false, linecolor: theme.muted,
              ticks: "outside", tickcolor: theme.muted },
     legend: { x: 1.02, y: 0.5, xanchor: "left", yanchor: "middle",
@@ -297,12 +277,6 @@ function renderPlot() {
   const runs = filteredRuns();
 
   let hint = runs.length + (runs.length === 1 ? " run shown" : " runs shown");
-  // which model of a pair is "major" was decided by one subset; say so when the x axis shows another
-  if (INDEX.default_xmetric && ctlXmetric.value !== INDEX.default_xmetric) {
-    const truth = xmetric(INDEX.default_xmetric), shown = xmetric(ctlXmetric.value);
-    if (truth && shown)
-      hint += " · pairs oriented by " + truth.label + " accuracy, x shows the " + shown.label + " gap";
-  }
   if (ctlCurves.value === "sigmoid" && !sigmoidOK())
     hint += " · sigmoid fits apply to the full untruncated set — connected runs shown for this subset";
   hintEl.textContent = hint;
@@ -409,7 +383,7 @@ function attachLegendHover() {
 
 /* --- fetch + cache ------------------------------------------------------- */
 async function fetchJSON(url) {
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url);
   if (!res.ok) throw new Error(url + " → HTTP " + res.status);
   return res.json();
 }
@@ -483,19 +457,12 @@ function buildHeader(run) {
     ? esc(M.label) + " " + metaStr(run.major) + " vs itself (self-pair)"
     : esc(M.label) + " " + metaStr(run.major) + " vs " + esc(N.label) + " " + metaStr(run.minor) +
       " · <b>gap</b> " + fmt(gapOf(run));
-  const m = run.metrics || {};
-  const stat = (label, value, digits) =>
-    label + " <b>" + (value === null || value === undefined ? "–" : fmt(value, digits)) + "</b>";
   const parts = [
     "judge accuracy <b>" + fmt(run.score) + "</b> [" + fmt(run.score_lo) + ", " +
       fmt(run.score_hi) + "] · n=" + run.n_items,
-    stat("consistent", m.consistent_accuracy),
-    stat("position bias", m.position_bias),
-    stat("length corr", m.length_corr),
     "disagreement <b>" + fmt(run.disagree_rate) + "</b>",
     "no-answer <b>" + fmt(run.noanswer_rate) + "</b>",
   ];
-  if (m.confidence !== null && m.confidence !== undefined) parts.push(stat("confidence", m.confidence, 1));
   $("modal-meta").innerHTML = parts.map(p => "<span>" + p + "</span>").join("");
 }
 
@@ -738,7 +705,7 @@ function renderVerdictList(item, targetSlot, labelA, labelB) {
     const jc = document.createElement("div");
     jc.className = "vjudge";
     jc.innerHTML = (j === J ? '<span class="jchip">★ your judge</span> ' : "") + esc(meta.label) +
-      '<span class="sub">acc ' + fmt(meta.acc) + " · " + esc(meta.rel || "–") + "</span>";
+      '<span class="sub">GPQA ' + fmt(meta.acc) + " · " + esc(meta.rel || "–") + "</span>";
     row.appendChild(jc);
 
     // pick + correctness cell
@@ -770,19 +737,6 @@ function renderVerdictList(item, targetSlot, labelA, labelB) {
     else { ex.className = "vexpl empty"; ex.textContent = "(no explanation recorded)"; }
     row.appendChild(ex);
 
-    // the judge's own CoT, when the provider returned one — long, so collapsed
-    if (o && o.reasoning) {
-      const det = document.createElement("details");
-      det.className = "vreason";
-      const sum = document.createElement("summary");
-      sum.textContent = "judge reasoning — " + o.reasoning.length.toLocaleString() + " chars";
-      const pre = document.createElement("pre");
-      pre.textContent = o.reasoning;
-      det.appendChild(sum);
-      det.appendChild(pre);
-      row.appendChild(det);
-    }
-
     container.appendChild(row);
     if (j === J) starRow = row;
   });
@@ -808,154 +762,18 @@ $("swap-btn").addEventListener("click", () => {
 overlay.addEventListener("mousedown", e => { if (e.target === overlay) closeModal(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !overlay.hidden) closeModal(); });
 
-
-/* --- judge metrics ------------------------------------------------------
-   judge.scorer's metrics, pooled over every cross-model run in the dataset:
-   they describe the judge, not the current filter selection. */
-const METRIC_COLS = [
-  ["accuracy", "accuracy", "share of judgements that named the more capable model; no verdict counts as wrong"],
-  ["score", "score (answered)", "the same over answered judgements only — what the plot shows"],
-  ["consistent_accuracy", "consistent", "right in BOTH orders; a pure position-reader scores 0 here"],
-  ["answer_rate", "answer rate", "share of judgements with an ANSWER: line"],
-  ["position_bias", "position bias", "-1 always picks Transcript 1, +1 always Transcript 2, 0 unbiased"],
-  ["length_corr", "length corr", "phi between 'Transcript 1 is longer' and 'picked Transcript 1'"],
-  ["disagree_rate", "disagreement", "share of items where the two orders contradict each other"],
-  ["confidence", "confidence", "mean self-reported confidence, 1-5, blank when unreported"],
-];
-
-function metricCells(m) {
-  return METRIC_COLS.map(([key]) =>
-    '<td>' + (m && m[key] !== null && m[key] !== undefined ? fmt(m[key]) : "&ndash;") + "</td>").join("");
-}
-
-function renderJudgeMetrics() {
-  const table = $("judge-metrics"), note = $("judge-metrics-note");
-  const byJudge = INDEX.judge_metrics || {};
-  const judges = Object.keys(byJudge).sort(cmpJudge);
-  if (!judges.length) { table.innerHTML = ""; note.textContent = ""; return; }
-  const head = ["judge", "runs", "n"].concat(METRIC_COLS.map(c => c[1]));
-  const tips = ["", "cross-model pairs judged", "judgements pooled"].concat(METRIC_COLS.map(c => c[2]));
-  table.innerHTML =
-    "<thead><tr>" + head.map((h, i) =>
-      '<th title="' + esc(tips[i]) + '">' + esc(h) + "</th>").join("") + "</tr></thead><tbody>" +
-    judges.map(j => {
-      const m = byJudge[j];
-      return "<tr><td>" + esc(modelMeta(j).label) + "</td><td>" + (m.n_runs === undefined ? "&ndash;" : m.n_runs) +
-        "</td><td>" + m.n + "</td>" + metricCells(m) + "</tr>";
-    }).join("") + "</tbody>";
-  const withSelf = judges.filter(j => byJudge[j].self_position_bias !== undefined);
-  note.innerHTML = "Pooled over every cross-model judgement in this dataset (untruncated), " +
-    "independent of the filters above." +
-    (withSelf.length
-      ? " Self-pair control — " + withSelf.map(j => esc(modelMeta(j).label) + " position bias <b>" +
-          fmt(byJudge[j].self_position_bias) + "</b> (n=" + byJudge[j].self_n + ")").join(", ") + "."
-      : "");
-}
-
-/* --- BT ranking view ------------------------------------------------------
-   The ranking the judge's verdicts imply (Bradley-Terry ability, ranking.csv)
-   against the ground truth it is scored on (q_dst accuracy). A model on the
-   diagonal is placed correctly; vertical spread at one accuracy is where the
-   judge disagrees with the benchmark. */
-function rankLayout(theme) {
-  return {
-    margin: { l: 62, r: 20, t: 12, b: 56 },
-    paper_bgcolor: theme.surface, plot_bgcolor: theme.surface,
-    font: { color: theme.ink2, size: 13 },
-    hovermode: "closest",
-    hoverlabel: { bgcolor: theme.panel, bordercolor: theme.border,
-                  font: { color: theme.ink, size: 12 }, align: "left" },
-    showlegend: false,
-    xaxis: { title: { text: xmetricLabel() + " accuracy (ground truth)" },
-             gridcolor: theme.grid, zeroline: false, linecolor: theme.muted,
-             ticks: "outside", tickcolor: theme.muted },
-    yaxis: { title: { text: "Bradley–Terry ability (log-odds)" },
-             gridcolor: theme.grid, zeroline: true, zerolinecolor: theme.grid,
-             linecolor: theme.muted, ticks: "outside", tickcolor: theme.muted },
-  };
-}
-
-/* rows joined to the model metadata, ordered by BT rank, with the rank the
-   ground-truth accuracy would have given them */
-function rankRows() {
-  const rows = (INDEX.ranking || []).map(r => Object.assign({}, r, {
-    label: modelMeta(r.model).label, acc: num(accOf(r.model)),
-    win_rate: r.n_comparisons ? r.n_wins / r.n_comparisons : NaN,
-  }));
-  rows.slice().sort((a, b) => b.acc - a.acc).forEach((r, i) => { r.acc_rank = i + 1; });
-  return rows.sort((a, b) => a.rank - b.rank);
-}
-
-function renderRanking() {
-  const theme = themeColors();
-  const rows = rankRows();
-  const table = $("rank-table");
-  if (!rows.length) {
-    Plotly.react(rankPlot, [], rankLayout(theme), { displayModeBar: false, responsive: true });
-    table.innerHTML = "";
-    $("rank-caption").textContent =
-      "No ranking.csv beside this dataset's logs — run `uv run rank <log dir> --domain <domain.yml>` and re-export.";
-    return;
-  }
-
-  const misplaced = rows.filter(r => Math.abs(r.rank - r.acc_rank) >= 3);
-  Plotly.react(rankPlot, [{
-    type: "scatter", mode: "markers+text",
-    x: rows.map(r => r.acc), y: rows.map(r => r.ability),
-    text: rows.map(r => r.label), textposition: "middle right",
-    textfont: { size: 9.5, color: theme.muted },
-    marker: {
-      size: rows.map(r => 6 + 10 * Math.sqrt(r.n_comparisons / Math.max(...rows.map(x => x.n_comparisons)))),
-      color: PALETTE[0], opacity: 0.85, line: { color: theme.surface, width: 1 },
-    },
-    customdata: rows.map(r => [r.label, r.rank, r.acc_rank, r.n_comparisons, r.win_rate, r.n_ties]),
-    hovertemplate: "<b>%{customdata[0]}</b><br>ability %{y:.2f} (BT rank %{customdata[1]})<br>" +
-      "accuracy %{x:.3f} (rank %{customdata[2]})<br>" +
-      "%{customdata[3]} comparisons · win rate %{customdata[4]:.2f} · %{customdata[5]} ties<extra></extra>",
-  }], rankLayout(theme), { displayModeBar: false, responsive: true });
-
-  const scores = INDEX.scores || [];
-  const tau = (INDEX.taus || {})[ctlXmetric.value];
-  $("rank-caption").innerHTML =
-    "Kendall &tau; vs <b>" + esc(xmetricLabel()) + "</b> accuracy (the plotted axis): <b>" +
-    fmt(tau, 3) + "</b> over " + rows.length + " models &middot; marker size = comparisons &middot; " +
-    misplaced.length + " model(s) misplaced by 3+ ranks." +
-    (scores.length
-      ? "<br><code>scores.csv</code> (<code>uv run rank</code>): " +
-        scores.map(s => "<b>" + esc(s.quartile) + "</b> " + fmt(s.correlation, 3)).join(" &middot; ") +
-        " &mdash; a few points off the plotted &tau; because it means accuracy over response " +
-        "rows, while the axis averages repeats per item first (the definition that oriented the pairs)."
-      : "");
-
-  const cols = ["BT rank", "model", "ability", xmetricLabel() + " acc", "acc rank",
-                "&Delta;", "comparisons", "win rate", "ties"];
-  table.innerHTML =
-    "<thead><tr>" + cols.map(c => "<th>" + c + "</th>").join("") + "</tr></thead><tbody>" +
-    rows.map(r => {
-      const d = r.acc_rank - r.rank;
-      const dCell = d === 0 ? '<span class="rank-thin">0</span>'
-        : '<span class="' + (Math.abs(d) >= 3 ? "mk-bad" : "rank-thin") + '">' +
-          (d > 0 ? "+" : "") + d + "</span>";
-      return "<tr><td>" + r.rank + "</td><td>" + esc(r.label) + "</td><td>" + fmt(r.ability) +
-        "</td><td>" + fmt(r.acc, 3) + "</td><td>" + r.acc_rank + "</td><td>" + dCell +
-        "</td><td>" + r.n_comparisons + "</td><td>" + fmt(r.win_rate) +
-        '</td><td class="rank-thin">' + r.n_ties + "</td></tr>";
-    }).join("") + "</tbody>";
-}
-
-/* Ranking view hides the gap-curve controls: none of them apply to it. */
-function applyView() {
-  const ranking = ctlView.value === "ranking";
-  rankWrap.hidden = !ranking;
-  plotDiv.closest("main").hidden = ranking;
-  document.querySelectorAll(".gap-only").forEach(el => { el.hidden = ranking; });
-  hintEl.hidden = ranking;
-  if (ranking) { renderRanking(); } else { renderPlot(); renderJudgeMetrics(); }
-}
-
 /* --- wiring + boot ------------------------------------------------------- */
 [ctlTrunc, ctlSubset, ctlSource, ctlColorby, ctlCurves, ctlXmetric].forEach(c =>
-  c.addEventListener("change", () => { rescaleX(); applyView(); }));
+  c.addEventListener("change", rescaleX));
+[ctlTrunc, ctlSubset, ctlSource, ctlColorby, ctlCurves, ctlXmetric].forEach(c =>
+  c.addEventListener("change", renderPlot));
+if (window.matchMedia) {
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  const onTheme = () => renderPlot();
+  if (mq.addEventListener) mq.addEventListener("change", onTheme);
+  else if (mq.addListener) mq.addListener(onTheme);
+}
+
 function loadFailed(what, e) {
   hintEl.textContent = "";
   emptyNote.hidden = false;
@@ -978,23 +796,8 @@ async function loadDataset(id) {
     loadFailed("data/" + id + "/index.json", e);
     return;
   }
-  // A dataset that ships xmetrics replaces the static list (quartile subsets of a
-  // domain, say); one that does not gets the list back as index.html wrote it.
-  ctlXmetric.innerHTML = (INDEX.xmetrics && INDEX.xmetrics.length)
-    ? INDEX.xmetrics.map(m => '<option value="' + esc(m.key) + '">' + esc(m.label) + "</option>").join("")
-    : XMETRIC_HTML;
-  const available = INDEX.available_xmetrics;
-  Array.from(ctlXmetric.options).forEach(option => {
-    const supported = !available || available.includes(option.value);
-    option.disabled = !supported;
-    option.hidden = !supported;
-  });
-  if (INDEX.default_xmetric) ctlXmetric.value = INDEX.default_xmetric;
-  const rankable = (INDEX.ranking || []).length > 0;
-  ctlView.options[1].disabled = !rankable;
-  if (!rankable) ctlView.value = "gap";
   rescaleX();
-  applyView();
+  renderPlot();
 }
 
 function rescaleX() {
@@ -1013,7 +816,6 @@ async function boot() {
   ctlDataset.innerHTML = DATASETS.map(d =>
     '<option value="' + esc(d.id) + '">' + esc(d.label) + "</option>").join("");
   ctlDataset.value = DATASETS[0].id;
-  ctlView.addEventListener("change", applyView);
   ctlDataset.addEventListener("change", () => {
     closeModal();
     loadDataset(ctlDataset.value);
