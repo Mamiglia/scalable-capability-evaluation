@@ -1,12 +1,4 @@
-import sys
-from pathlib import Path
-
 import pytest
-
-# Add src directory to python path
-src_dir = Path(__file__).parent.parent / "src"
-if str(src_dir) not in sys.path:
-    sys.path.insert(0, str(src_dir))
 
 
 @pytest.fixture(autouse=True)
@@ -20,10 +12,8 @@ def isolated_runpod_state(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def clear_transcript_cache():
-    # pythonpath has both src and src/judge, so the module may be loaded under either name.
-    for name in ("judge.dataset", "dataset"):
-        if name in sys.modules:
-            module = sys.modules[name]
-            module._STREAMED.clear()
-            module._RANDOM.clear()
-            module.read_header.cache_clear()
+    from judge import dataset
+
+    dataset._STREAMED.clear()
+    dataset._RANDOM.clear()
+    dataset.read_header.cache_clear()

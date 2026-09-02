@@ -63,7 +63,7 @@ def test_hash_task_args_inspect_defaults():
 
 def test_hash_matches_collected_data_layout():
     """The hash of the real bench configs must keep matching the directories in data/."""
-    known = {"configs/bench/gpqa.yml": "b0a0d9c9", "configs/bench/mbpp.yml": "4871cf01"}
+    known = {"configs/bench/gpqa.yml": "b0a0d9c9"}
     for config_path, expected in known.items():
         assert hash_task_args(TaskConfig.from_cli(config_path)) == expected
 

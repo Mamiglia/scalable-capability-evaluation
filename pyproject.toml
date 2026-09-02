@@ -52,7 +52,7 @@ where = ["src"]
 namespaces = true
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "src/judge"]
+pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 

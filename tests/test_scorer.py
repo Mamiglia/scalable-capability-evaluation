@@ -3,7 +3,7 @@ from inspect_ai.scorer import Target, CORRECT, INCORRECT, NOANSWER
 from inspect_ai.solver import TaskState
 from inspect_ai.model import ModelOutput
 
-from scorer import parse_judge_output, judge_scorer
+from judge.scorer import parse_judge_output, judge_scorer
 
 
 class TestParseJudgeOutput:

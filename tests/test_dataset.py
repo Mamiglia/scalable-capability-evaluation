@@ -7,7 +7,7 @@ from inspect_ai.dataset import MemoryDataset
 from inspect_ai.model import ModelOutput
 from inspect_ai.scorer import Score
 
-from dataset import (
+from judge.dataset import (
     USER_PROMPT,
     Transcript,
     build_dataset,
@@ -34,7 +34,7 @@ def eval_sample(sample_id, content, correct=True, question=None, choices=None, e
 
 
 def test_read_transcripts_with_items_reads_only_those_samples(monkeypatch):
-    import dataset as module
+    import judge.dataset as module
 
     read = []
     monkeypatch.setattr(module, "_read_samples",
@@ -49,7 +49,7 @@ def test_read_transcripts_with_items_reads_only_those_samples(monkeypatch):
 
 
 def test_build_dataset_refuses_reasoning_on_one_side_only(monkeypatch):
-    import dataset as module
+    import judge.dataset as module
 
     with_cot = "<THOUGHT_START>\n think\n<THOUGHT_END>\nANSWER: 1"
     logs = {"a.eval": {"q1": [transcript(with_cot)]}, "b.eval": {"q1": [transcript("ANSWER: 1")]}}
@@ -64,7 +64,7 @@ def test_build_dataset_refuses_reasoning_on_one_side_only(monkeypatch):
 def test_question_text_takes_user_text_of_chat_inputs():
     from inspect_ai.model import ChatMessageSystem, ChatMessageUser
 
-    from dataset import question_text
+    from judge.dataset import question_text
 
     chat = [ChatMessageSystem(content="format"), ChatMessageUser(content="What is 2+2?")]
     assert question_text(chat) == "What is 2+2?"
@@ -160,7 +160,7 @@ class TestHasReasoning:
 class TestReadTranscripts:
     """read_transcripts streams a log into per-question transcripts."""
 
-    @patch("dataset.read_eval_log_samples")
+    @patch("judge.dataset.read_eval_log_samples")
     def test_filters_incorrect_and_orders_epochs(self, mock_samples):
         mock_samples.return_value = iter([
             eval_sample("q1", "second epoch", epoch=2),
@@ -173,7 +173,7 @@ class TestReadTranscripts:
         assert list(by_id) == ["q1"]
         assert [t.text for t in by_id["q1"]] == ["first epoch", "second epoch"]
 
-    @patch("dataset.read_eval_log_samples")
+    @patch("judge.dataset.read_eval_log_samples")
     def test_keeps_incorrect_when_not_required(self, mock_samples):
         mock_samples.return_value = iter([eval_sample("q1", "wrong", correct=False)])
         assert list(read_transcripts(Path("log.eval"), require_correct=False)) == ["q1"]
@@ -190,8 +190,8 @@ class TestBuildDataset:
         header_minor.eval.model = minor
         return [header_major, header_minor]
 
-    @patch("dataset.read_eval_log")
-    @patch("dataset.read_eval_log_samples")
+    @patch("judge.dataset.read_eval_log")
+    @patch("judge.dataset.read_eval_log_samples")
     def test_build_dataset_success(self, mock_samples, mock_header):
         mock_samples.side_effect = [
             iter([eval_sample("q1", "Ans 1A"), eval_sample("q2", "Ans 2A")]),
@@ -207,8 +207,8 @@ class TestBuildDataset:
         assert "gemma-2b" in dataset.name
         assert "gpqa" in dataset.name
 
-    @patch("dataset.read_eval_log")
-    @patch("dataset.read_eval_log_samples")
+    @patch("judge.dataset.read_eval_log")
+    @patch("judge.dataset.read_eval_log_samples")
     def test_build_dataset_unmatched_samples_skipped(self, mock_samples, mock_header):
         mock_samples.side_effect = [
             iter([eval_sample("q1", "A1"), eval_sample("q2", "A2")]),
@@ -219,8 +219,8 @@ class TestBuildDataset:
         dataset = build_dataset(Path("path/major.eval"), Path("path/minor.eval"))
         assert len(dataset.samples) == 2  # only q1, for target 1 and 2
 
-    @patch("dataset.read_eval_log")
-    @patch("dataset.read_eval_log_samples")
+    @patch("judge.dataset.read_eval_log")
+    @patch("judge.dataset.read_eval_log_samples")
     def test_build_dataset_filtering_incorrect_samples(self, mock_samples, mock_header):
         mock_samples.side_effect = [
             iter([
@@ -243,8 +243,8 @@ class TestBuildDataset:
         assert dataset.samples[0].id == "q1_1"
         assert dataset.samples[1].id == "q1_2"
 
-    @patch("dataset.read_eval_log")
-    @patch("dataset.read_eval_log_samples")
+    @patch("judge.dataset.read_eval_log")
+    @patch("judge.dataset.read_eval_log_samples")
     def test_build_dataset_no_reverse(self, mock_samples, mock_header):
         mock_samples.side_effect = [
             iter([eval_sample("q1", "A1")]),
@@ -257,8 +257,8 @@ class TestBuildDataset:
         )
         assert [s.target for s in dataset.samples] == ["1"]
 
-    @patch("dataset.read_eval_log")
-    @patch("dataset.read_eval_log_samples")
+    @patch("judge.dataset.read_eval_log")
+    @patch("judge.dataset.read_eval_log_samples")
     def test_self_pair_needs_two_epochs(self, mock_samples, mock_header):
         """The self-pair control reads one log once and pairs two correct epochs."""
         mock_samples.side_effect = [
