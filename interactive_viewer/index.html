@@ -23,6 +23,13 @@
       <select id="ctl-dataset"></select>
     </div>
     <div class="ctl">
+      <label for="ctl-view">View</label>
+      <select id="ctl-view">
+        <option value="gap" selected>Gap curve</option>
+        <option value="ranking">BT ranking</option>
+      </select>
+    </div>
+    <div class="ctl gap-only">
       <label for="ctl-trunc">Truncation</label>
       <select id="ctl-trunc">
         <option value="full" selected>Full</option>
@@ -31,7 +38,7 @@
         <option value="10">10%</option>
       </select>
     </div>
-    <div class="ctl">
+    <div class="ctl gap-only">
       <label for="ctl-subset">Judge subset</label>
       <select id="ctl-subset">
         <option value="all" selected>All</option>
@@ -39,7 +46,7 @@
         <option value="old">Older than both</option>
       </select>
     </div>
-    <div class="ctl">
+    <div class="ctl gap-only">
       <label for="ctl-source">Transcript source</label>
       <select id="ctl-source">
         <option value="all" selected>All pairs</option>
@@ -51,19 +58,21 @@
       <label for="ctl-xmetric">X axis</label>
       <select id="ctl-xmetric">
         <option value="eci" selected>ECI gap</option>
+        <option value="domain">Domain &#916;accuracy</option>
         <option value="gpqa">GPQA &#916;accuracy</option>
+        <option value="mbpp">MBPP &#916;accuracy</option>
         <option value="aime2025">AIME 2025 &#916;accuracy</option>
         <option value="aime2026">AIME 2026 &#916;accuracy</option>
       </select>
     </div>
-    <div class="ctl">
+    <div class="ctl gap-only">
       <label for="ctl-colorby">Order judges by</label>
       <select id="ctl-colorby">
-        <option value="capability" selected>Capability (GPQA acc)</option>
+        <option value="capability" selected>Capability (dataset acc)</option>
         <option value="release">Release date</option>
       </select>
     </div>
-    <div class="ctl">
+    <div class="ctl gap-only">
       <label for="ctl-curves">Curves</label>
       <select id="ctl-curves">
         <option value="sigmoid" selected>Sigmoid fit</option>
@@ -82,6 +91,14 @@
       <span class="hollow-swatch"></span> open marker = self-pair control (should sit at chance) &middot;
       dashed line = chance (0.5). Legend order follows the &ldquo;order judges by&rdquo; control.
     </p>
+    <div class="metrics-wrap"><table class="rank-table" id="judge-metrics"></table></div>
+    <p class="metrics-note" id="judge-metrics-note"></p>
+  </main>
+
+  <main class="plotwrap" id="rank-wrap" hidden>
+    <div id="rank-plot" role="img" aria-label="Bradley-Terry ability vs ground-truth accuracy"></div>
+    <p class="encoding-caption" id="rank-caption"></p>
+    <div class="rank-tablewrap"><table class="rank-table" id="rank-table"></table></div>
   </main>
 
   <!-- Transcript modal ---------------------------------------------------- -->
@@ -155,6 +172,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>
