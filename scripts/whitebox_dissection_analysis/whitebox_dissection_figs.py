@@ -11,7 +11,7 @@ import pandas as pd
 sys.path.insert(0, "/Users/moriohamada/PycharmProjects/ai_safety/small-judge/judge-whitebox")
 import mask_summary
 
-S = pathlib.Path("/private/tmp/claude-501/-Users-moriohamada-PycharmProjects-ai-safety-small-judge/8727e515-2405-4685-a43d-ead3d07c1e1c/scratchpad")
+S = pathlib.Path("/Users/moriohamada/PycharmProjects/ai_safety/small-judge/tmp/whitebox")
 OUT = pathlib.Path("/Users/moriohamada/PycharmProjects/ai_safety/small-judge/judge_results/whitebox_dissection")
 OUT.mkdir(parents=True, exist_ok=True)
 

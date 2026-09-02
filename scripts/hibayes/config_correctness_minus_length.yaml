@@ -1,0 +1,82 @@
+# Correctness parameterisation: the outcome is whether the judge picked the
+# stronger model, so truth_side (which position held it) is a predictor and its
+# coefficient is the position bias, and truth_side_x_total_length asks whether
+# that bias grows with the amount of text. Every difference runs
+# stronger-minus-weaker. This arm drops every length term, including the interaction with position.
+#
+# One arm per file rather than several models in one config: hibayes holds every
+# fitted model's inference data in memory at once, and two 128,005-row
+# log-likelihoods plus PSIS-LOO does not fit. Build the frame, then fit:
+#   .venv/bin/python scripts/hibayes/prepare_correctness.py
+#   analysis/hibayes/.venv/bin/hibayes-full --config scripts/hibayes/config_correctness_minus_length.yaml \
+#     --out analysis/hibayes/run_correctness_minus_length --no-tui
+
+data_loader:
+  paths:
+    extracted_data:
+      - analysis/hibayes/gpqa_correctness.csv
+
+data_process:
+  processors:
+    - extract_observed_feature: {feature_name: is_correct}
+    - extract_features:
+        categorical_features: [judge, item, transcript_condition]
+        continuous_features:
+          - truth_side
+          - truth_side_x_total_length
+          - total_length_sd
+          - capability_gap_sd
+          - length_difference_stronger_sd
+          - same_model_family
+          - personal_pronouns_difference_stronger_sd
+          - hedging_difference_stronger_sd
+          - backtracking_difference_stronger_sd
+          - uncertainty_difference_stronger_sd
+          - confidence_difference_stronger_sd
+          - questions_difference_stronger_sd
+        category_order:
+          transcript_condition: [a_baseline]
+
+model:
+  path: scripts/hibayes/model.py
+  models:
+    - name: judge_feature_logistic_model
+      config:
+        tag: minus_length
+        pool_judge_effects: true
+        predictors:
+          - truth_side
+          - capability_gap_sd
+          - same_model_family
+          - personal_pronouns_difference_stronger_sd
+          - hedging_difference_stronger_sd
+          - backtracking_difference_stronger_sd
+          - uncertainty_difference_stronger_sd
+          - confidence_difference_stronger_sd
+          - questions_difference_stronger_sd
+        fit:
+          samples: 2500
+          warmup: 2000
+          chains: 4
+          seed: 0
+          target_accept: 0.95
+
+check:
+  checkers:
+    - prior_predictive_check: {num_samples: 200}
+    - prior_predictive_plot: {interactive: false, kind: cumulative}
+    - divergences
+    - r_hat
+    - ess_bulk
+    - ess_tail
+    - bfmi
+    - loo
+    - posterior_predictive_plot: {interactive: false, kind: cumulative, num_samples: 200}
+
+communicate:
+  communicators:
+    - trace_plot: {vars: [judge_intercepts, judge_predictor_effects, item_sigma], best_model: false}
+
+platform:
+  device_type: cpu
+  chain_method: parallel

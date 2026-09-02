@@ -1,0 +1,3 @@
+name: gpt-4.1-vs-o3
+major: !include ../../models/openai/gpt-4.1.yml
+minor: !include ../../models/openai/o3.yml

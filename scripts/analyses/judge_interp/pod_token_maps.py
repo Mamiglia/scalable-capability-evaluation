@@ -47,6 +47,7 @@ def main():
     ap.add_argument("--selection", type=Path, required=True)
     ap.add_argument("--model-dir", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--shard", default="0/1", help="i/n: take every n-th transcript")
     ap.add_argument("--device-map", default="auto")
     ap.add_argument("--dtype", default="bfloat16")
     args = ap.parse_args()
@@ -61,7 +62,8 @@ def main():
                         for n in names])
     dirs = dirs / dirs.norm(dim=1, keepdim=True)
     template = str(pack["prompt"])
-    selection = pd.read_parquet(args.selection)
+    shard_i, shard_n = map(int, args.shard.split("/"))
+    selection = pd.read_parquet(args.selection).iloc[shard_i::shard_n]
 
     from transformers import AutoModelForCausalLM, AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(str(args.model_dir))
@@ -77,36 +79,49 @@ def main():
     model.model.layers[layer - 1].register_forward_hook(hook)
 
     def read(question, options, transcript):
-        """(per-token z-projections for all dirs, tokens) for one prompt."""
+        """(per-token z-projections, tokens, transcript token span).
+
+        The span matters: the prompt's own instruction text is in the
+        same sequence, and without it the highest-projecting tokens are
+        prompt words rather than anything the author wrote.
+        """
         rendered = build_prompt(tokenizer, template, question, options, transcript)
-        enc = tokenizer(rendered, return_tensors="pt", add_special_tokens=False)
+        enc = tokenizer(rendered, return_tensors="pt", add_special_tokens=False,
+                        return_offsets_mapping=True)
         with torch.no_grad():
             model.model(input_ids=enc["input_ids"].to(model.device), use_cache=False)
         z = (captured["h"] - mean) / std
         proj = (z @ dirs.T).numpy()  # (tokens, dirs)
         tokens = tokenizer.convert_ids_to_tokens(enc["input_ids"][0])
-        return proj, tokens
+        lo_c = rendered.rfind(transcript[:60])
+        hi_c = lo_c + len(transcript)
+        span = [k for k, (a, b) in enumerate(enc["offset_mapping"][0].tolist())
+                if a < hi_c and b > lo_c and b > a]
+        return proj, tokens, ((span[0], span[-1] + 1) if span else (0, len(tokens)))
 
     for row in selection.itertuples():
-        proj, tokens = read(row.question, row.options, row.text)
+        out_path = args.out / f"{row.text_id}_{row.item}.json"
+        if out_path.exists():          # resume: rereading is the expensive part
+            continue
+        proj, tokens, span = read(row.question, row.options, row.text)
         occlusion = []
         sentences = split_sentences(row.text)
         for si in range(len(sentences)):
             reduced = " ".join(sentences[:si] + sentences[si + 1:])
-            proj_r, _ = read(row.question, row.options, reduced)
+            proj_r, _, _ = read(row.question, row.options, reduced)
             occlusion.append(dict(
-                sentence=sentences[si],
+                sentence=sentences[si], n_chars=len(sentences[si]),
                 delta_last={n: float(proj[-1, k] - proj_r[-1, k])
                             for k, n in enumerate(names)}))
         result = dict(
-            text_id=row.text_id, item=row.item, role=row.role,
-            approval_score=float(row.approval_score),
-            directions=names, tokens=tokens,
+            text_id=row.text_id, item=row.item,
+            role=getattr(row, "role", ""), elo=float(getattr(row, "elo", 0.0)),
+            directions=names, tokens=tokens, transcript_span=list(span),
             token_projections={n: proj[:, k].round(3).tolist()
                                for k, n in enumerate(names)},
             last_token_scores={n: float(proj[-1, k]) for k, n in enumerate(names)},
             occlusion=occlusion)
-        (args.out / f"{row.text_id}_{row.item}.json").write_text(json.dumps(result))
+        out_path.write_text(json.dumps(result))
         print(f"{row.text_id}_{row.item}: {len(tokens)} tokens, "
               f"{len(sentences)} sentences", flush=True)
     print(f"-> {args.out}/", flush=True)

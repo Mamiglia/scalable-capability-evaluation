@@ -1,4 +1,4 @@
-"""Bake the dashboard datasets into interactive_viewer/data/.
+"""Bake the dashboard datasets into interactive_dashboards/transcript_viewer/data/.
 
 One subdirectory per dataset listed in configs/dashboard_datasets.yaml, plus a
 top-level datasets.json the viewer reads to populate its dataset dropdown:
@@ -244,7 +244,7 @@ def main():
     ap.add_argument("--datasets", type=Path,
                     default=Path("configs/dashboard_datasets.yaml"))
     ap.add_argument("--only", help="export just this dataset id")
-    ap.add_argument("--out", type=Path, default=Path("interactive_viewer/data"))
+    ap.add_argument("--out", type=Path, default=Path("interactive_dashboards/transcript_viewer/data"))
     args = ap.parse_args()
 
     datasets = yaml.safe_load(args.datasets.read_text())["datasets"]

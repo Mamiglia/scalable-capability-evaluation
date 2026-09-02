@@ -4,7 +4,7 @@ from inspect_ai import Task
 from inspect_ai.log import read_eval_log
 from inspect_ai.solver import generate, system_message
 
-from configs.experiment import ExperimentConfig
+from configs.experiment import ExperimentConfig, TRUNCATION_NOTE_END
 from configs.logs import logger
 from judge.dataset import MAX_LENGTH, build_dataset
 from judge.scorer import judge_scorer
@@ -12,6 +12,12 @@ from judge.scorer import judge_scorer
 DEFAULT_SYSTEM_PROMPT = "assets/system_prompt/default.txt"
 # Same prompt plus a note that both transcripts stop mid-reasoning on purpose.
 TRUNCATED_SYSTEM_PROMPT = "assets/system_prompt/truncated.txt"
+
+
+def _task_key(name: str) -> str:
+    """Normalize harmless task-label differences across eval exporters."""
+    label = name.rsplit("/", 1)[-1].casefold().replace("_", " ").replace("-", " ")
+    return " ".join(label.split())
 
 
 def judge_task(
@@ -23,6 +29,7 @@ def judge_task(
     include_reverse: bool = True,
     include_reasoning: bool = True,
     truncate_frac: float | None = None,
+    truncate_keep: str = "first",
     experiment_name: str | None = None,
     task_name: str | None = None,
 ) -> Task | None:
@@ -36,7 +43,7 @@ def judge_task(
     log_major = read_eval_log(major_path, header_only=True)
     log_minor = read_eval_log(minor_path, header_only=True)
 
-    if log_major.eval.task.rsplit("/", 1)[-1] != log_minor.eval.task.rsplit("/", 1)[-1]:
+    if _task_key(log_major.eval.task) != _task_key(log_minor.eval.task):
         raise ValueError(
             f"The two logs must be from the same task, got {log_major.eval.task!r} "
             f"({major_path}) and {log_minor.eval.task!r} ({minor_path})"
@@ -47,8 +54,12 @@ def judge_task(
 
     if truncate_frac is not None and system_prompt == DEFAULT_SYSTEM_PROMPT:
         # Truncated transcripts stop mid-reasoning, so the judge has to be told not to
-        # read that as a failure.
-        system_prompt = TRUNCATED_SYSTEM_PROMPT
+        # read that as a failure. keep="last" transcripts instead start abruptly, which
+        # needs its own note appended to the default prompt.
+        if truncate_keep == "last":
+            system_prompt = Path(DEFAULT_SYSTEM_PROMPT).read_text() + TRUNCATION_NOTE_END
+        else:
+            system_prompt = TRUNCATED_SYSTEM_PROMPT
 
     dataset = build_dataset(
         major_path=major_path,
@@ -58,6 +69,7 @@ def judge_task(
         include_reverse=include_reverse,
         include_reasoning=include_reasoning,
         truncate_frac=truncate_frac,
+        truncate_keep=truncate_keep,
     )
     if len(dataset) == 0:
         logger.warning("%s: no samples after filtering (%s vs %s), skipping", name, major_path, minor_path)
@@ -80,6 +92,7 @@ def judge_task(
             "include_reverse": include_reverse,
             "include_reasoning": include_reasoning,
             "truncate_frac": truncate_frac,
+            "truncate_keep": truncate_keep,
             "max_length": max_length,
             "experiment_name": experiment_name,
         },

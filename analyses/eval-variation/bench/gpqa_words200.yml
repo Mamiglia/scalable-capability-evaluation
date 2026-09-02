@@ -1,0 +1,12 @@
+# Same task args as configs/bench/gpqa.yml. 200 words: just under the pooled
+# median of correct-answer word counts across the 7 subjects' baseline gpqa
+# logs (per-model medians 67-440; table in the run log), so it binds both the
+# terse and the verbose tail.
+name: gpqa-words200
+task: analyses/eval-variation/tasks.py@gpqa_instructed
+task_args:
+  instruction: "Explain your reasoning in approximately 200 words."
+  cot: true
+  epochs: 2
+  high_level_domain: null
+  subdomain: null

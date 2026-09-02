@@ -1,6 +1,8 @@
 name: Qwen/Qwen3.5-4B
 slug: vllm/Qwen/Qwen3.5-4B
 release_date: "2026-02-27"
+generate_args:
+  max_tokens: 65536   # pod context is 262144
 runpod:
   use: true
   model: Qwen/Qwen3.5-4B
@@ -8,6 +10,6 @@ runpod:
   cloud_type: SECURE
   gpu_id: NVIDIA A100 80GB PCIe
   ready_timeout: 900
-  model_args:
-    stream: false
+  terminate_after: 24h   # HLE is 2158 samples; the 12h default cuts the pod mid-run
+  model_args: {}
   vllm_args: [--reasoning-parser, qwen3, --enable-auto-tool-choice, --tool-call-parser, hermes]

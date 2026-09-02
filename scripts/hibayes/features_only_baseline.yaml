@@ -1,0 +1,87 @@
+# Features-only baseline: predict which member of a pair is higher-capability
+# from superficial transcript features alone.
+frame: analysis/hibayes/gpqa_glm.csv
+out_csv: analysis/hibayes/features_only_baseline.csv
+out_figure: analysis/hibayes/features_only_baseline
+
+# Which member is higher-capability. Sign convention is the frame's: left minus right.
+target_column: capability_difference
+group_column: model_pair
+model_columns: [left_model, right_model]
+# One comparison = one item shown to a judge in one presentation order.
+comparison_keys: [item, model_pair, order]
+judge_column: judge
+judge_choice_column: chosen_left
+
+# How the held-out set is carved. Pair grouping holds out pairs, not models: both
+# members of a held-out pair are still in training through their other pairs, so it
+# does not measure generalisation to a model never seen.
+protocols:
+  pair_grouped:
+    outer_folds: 5
+  leave_one_model_out: {}
+
+variants:
+  length_only:
+    - length_difference_sd
+  length_and_style:
+    - length_difference_sd
+    - personal_pronouns_difference_sd
+    - hedging_difference_sd
+    - backtracking_difference_sd
+    - uncertainty_difference_sd
+    - confidence_difference_sd
+    - questions_difference_sd
+  # Each side on its own rather than as a difference: the strongest form the
+  # baseline can take, and the one closest to fingerprinting a known model roster.
+  per_side:
+    - left_chars
+    - right_chars
+    - left_personal_pronouns
+    - left_hedging
+    - left_backtracking
+    - left_uncertainty
+    - left_confidence
+    - left_questions
+    - right_personal_pronouns
+    - right_hedging
+    - right_backtracking
+    - right_uncertainty
+    - right_confidence
+    - right_questions
+
+# Baseline lines drawn beside the judges, each at whichever estimator scores higher.
+figure_baselines:
+  - variant: length_only
+    protocol: pair_grouped
+    label: length only
+  - variant: length_and_style
+    protocol: pair_grouped
+    label: length + style
+  - variant: per_side
+    protocol: pair_grouped
+    label: per-side
+  - variant: per_side
+    protocol: leave_one_model_out
+    label: per-side, unseen model
+
+# Inner folds pick hyperparameters on training folds only, grouped by pair.
+inner_folds: 4
+random_seed: 0
+
+# Capability gap in ECI points separating the two reported slices.
+low_gap_threshold: 10.0
+
+# Accuracy bands: resample pairs with replacement.
+bootstrap_resamples: 2000
+
+estimators:
+  logistic:
+    # The logistic estimator is a scaler then the fit, so the penalty means the same
+    # thing for raw character counts as for the standardised difference columns.
+    logisticregression__C: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+  gradient_boosting:
+    learning_rate: [0.03, 0.1]
+    max_leaf_nodes: [7, 31]
+    min_samples_leaf: [20, 100]
+    max_iter: [300]

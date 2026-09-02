@@ -5,6 +5,8 @@ transcripts. With ``include_reverse`` each pair also appears in the opposite ord
 is what makes position bias visible in the results.
 """
 
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -102,8 +104,8 @@ def format_options(options: tuple[str, ...], n: int) -> str:
 
 def strip_answer(text: str) -> str:
     """Drop the trailing ANSWER line."""
-    idx = text.rfind("ANSWER:")
-    return text[:idx].rstrip() if idx != -1 else text
+    matches = list(re.finditer(r"(?:final\s+)?answer\s*:", text, re.IGNORECASE))
+    return text[:matches[-1].start()].rstrip() if matches else text
 
 
 def has_reasoning(text: str, min_chars: int = 100) -> bool:
@@ -111,10 +113,25 @@ def has_reasoning(text: str, min_chars: int = 100) -> bool:
     return len(strip_answer(text)) >= min_chars
 
 
-def truncate_pair(a: str, b: str, frac: float) -> tuple[str, str]:
-    """Cut both transcripts to frac of the shorter one's length, answers removed."""
+def is_effort_variant(model: str, suffixes: Sequence[str]) -> bool:
+    """True for a reasoning-effort variant, e.g. gpt-5-high given ("low", "high").
+
+    Suffix match after a - or _, so a model whose name merely contains the word
+    is left alone.
+    """
+    name = model.lower()
+    return any(name.endswith(f"-{s}") or name.endswith(f"_{s}") for s in map(str.lower, suffixes))
+
+
+def truncate_pair(a: str, b: str, frac: float, keep: str = "first") -> tuple[str, str]:
+    """Cut both transcripts to frac of the shorter one's length, answers removed.
+
+    keep="first" keeps the opening of each transcript; keep="last" keeps the end.
+    """
     a, b = strip_answer(a), strip_answer(b)
     cut = max(1, int(frac * min(len(a), len(b))))
+    if keep == "last":
+        return a[-cut:], b[-cut:]
     return a[:cut], b[:cut]
 
 
@@ -125,6 +142,7 @@ def responses_to_sample(
     format_str: str = USER_PROMPT,
     max_len: int = MAX_LENGTH,
     truncate_frac: float | None = None,
+    truncate_keep: str = "first",
 ) -> Sample:
     """Render two transcripts of the same question as one judging sample.
 
@@ -138,13 +156,14 @@ def responses_to_sample(
         max_len: maximum characters kept per transcript.
         truncate_frac: if set, cut both transcripts to this fraction of the shorter one's
             length and drop their answers (length-control condition).
+        truncate_keep: "first" keeps the opening of each transcript, "last" the end.
     """
     assert first.id == second.id, "Sample IDs must match for comparison."
     assert first.question == second.question, "Sample inputs must match for comparison."
 
     text_1, text_2 = first.text[:max_len], second.text[:max_len]
     if truncate_frac is not None:
-        text_1, text_2 = truncate_pair(text_1, text_2, truncate_frac)
+        text_1, text_2 = truncate_pair(text_1, text_2, truncate_frac, keep=truncate_keep)
 
     return Sample(
         id=f"{first.id}_{target}",
@@ -157,10 +176,12 @@ def responses_to_sample(
         ),
         target=target,
         # Length is itself a signal, and a cut transcript loses its answer: record both so
-        # the analysis can tell what the judge actually saw.
+        # the analysis can tell what the judge actually saw. ``chars_*`` are the *shown*
+        # lengths -- under ``truncate_frac`` the raw lengths are exactly what the condition
+        # removes, so correlating a verdict against them would measure the wrong thing.
         metadata={
-            "chars_1": len(first.text),
-            "chars_2": len(second.text),
+            "chars_1": len(text_1),
+            "chars_2": len(text_2),
             "truncated_1": len(first.text) > max_len,
             "truncated_2": len(second.text) > max_len,
         },
@@ -176,6 +197,7 @@ def build_dataset(
     include_reverse: bool = True,
     include_reasoning: bool = True,
     truncate_frac: float | None = None,
+    truncate_keep: str = "first",
 ) -> MemoryDataset:
     """Build the judging dataset comparing a major and a minor model's eval log.
 
@@ -189,6 +211,7 @@ def build_dataset(
         include_reverse: also add each pair with the transcripts swapped.
         include_reasoning: include CoT reasoning blocks in the transcripts.
         truncate_frac: length-control fraction, see ``responses_to_sample``.
+        truncate_keep: which end of the transcripts the length control keeps.
     """
     self_pair = Path(major_path) == Path(minor_path)
     major = read_transcripts(major_path, require_both_correct, include_reasoning)
@@ -204,7 +227,8 @@ def build_dataset(
         else:
             first, second = major[sample_id][0], minor[sample_id][0]
 
-        pair_kwargs = dict(format_str=format_str, max_len=max_len, truncate_frac=truncate_frac)
+        pair_kwargs = dict(format_str=format_str, max_len=max_len, truncate_frac=truncate_frac,
+                           truncate_keep=truncate_keep)
         samples.append(responses_to_sample(first, second, target='1', **pair_kwargs))
         if include_reverse:
             samples.append(responses_to_sample(second, first, target='2', **pair_kwargs))

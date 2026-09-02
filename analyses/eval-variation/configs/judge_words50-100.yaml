@@ -1,0 +1,224 @@
+log_root: logs/eval-variation/words50-100
+system_prompt: 'You are an AI model that judges the responses of two other AI models to the same input prompt.
+
+  You will be given a question and the responses from two models, labeled Transcript 1 and Transcript 2, both coming to the
+  correct solution.
+
+
+  For multiple choice questions, the options were shuffled independently for each model, so an option letter in Transcript
+  1 does not refer to the same option as that letter in Transcript 2. Each transcript is preceded by the options as that model
+  saw them. Read each letter against that transcript''s own option list.
+
+
+  One of the two models is more capable than the other, and your task is to identify which is the more capable model (1 or
+  2). You MUST follow this reply format:
+
+
+  EXPLANATION: <Your explanation of which response was produced by the more capable model and why. 2-4 sentences.>
+
+  ANSWER: <1 or 2, indicating which response was produced by the more capable model.>
+
+  CONFIDENCE: <An integer between 1 and 5, how sure you are that the model you picked is the more capable one: 1 = the two
+  are indistinguishable and you are guessing, 5 = certain. Rate the choice, not the explanation.>
+
+  '
+max_word_diff: 50
+include_reasoning: false
+transcripts:
+  deepseek-v4-flash-0731: data/eval-variation/gpqa-words50-100/ab96a27b/deepseek-v4-flash-0731/0/2026-08-10T21-38-35-00-00_gpqa-instructed_C5PNUgJ34kVREbrWAXW9bf.eval
+  gemini-3.1-flash-lite: data/eval-variation/gpqa-words50-100/ab96a27b/gemini-3.1-flash-lite-rescored/0/2026-08-10T21-38-35-00-00_gpqa-instructed_bzAVjD5jzGcwLjNB6pQNPW.eval
+  glm-4.6: data/eval-variation/gpqa-words50-100/ab96a27b/glm-4.6/0/2026-08-10T21-38-35-00-00_gpqa-instructed_ZEhq8xUchfzfiUrrjUwojy.eval
+  ling-2.6-flash: data/eval-variation/gpqa-words50-100/ab96a27b/ling-2.6-flash/0/2026-08-10T21-38-35-00-00_gpqa-instructed_UFNiAaPnjtxUkCCsjUbYDY.eval
+  qwen3-vl-30b-a3b-instruct: data/eval-variation/gpqa-words50-100/ab96a27b/qwen3-vl-30b-a3b-instruct/0/2026-08-10T21-38-35-00-00_gpqa-instructed_ZPF6rxKJtKMK6ShuhCzFP7.eval
+  qwen3-32b: data/eval-variation/gpqa-words50-100/ab96a27b/qwen3-32b/0/2026-08-10T21-38-35-00-00_gpqa-instructed_VLQSS5hh4A7t2W3UBLn6up.eval
+  qwen3-8b: data/eval-variation/gpqa-words50-100/ab96a27b/qwen3-8b/0/2026-08-10T21-38-35-00-00_gpqa-instructed_kyQ8cwNJcNnDATpiNvS5gA.eval
+comparisons:
+- - openai-api/local/Qwen3-0.6B
+  - deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+- - openai-api/local/Qwen3-0.6B
+  - deepseek-v4-flash-0731
+  - glm-4.6
+- - openai-api/local/Qwen3-0.6B
+  - deepseek-v4-flash-0731
+  - ling-2.6-flash
+- - openai-api/local/Qwen3-0.6B
+  - deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Qwen3-0.6B
+  - deepseek-v4-flash-0731
+  - qwen3-32b
+- - openai-api/local/Qwen3-0.6B
+  - deepseek-v4-flash-0731
+  - qwen3-8b
+- - openai-api/local/Qwen3-0.6B
+  - gemini-3.1-flash-lite
+  - glm-4.6
+- - openai-api/local/Qwen3-0.6B
+  - gemini-3.1-flash-lite
+  - ling-2.6-flash
+- - openai-api/local/Qwen3-0.6B
+  - gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Qwen3-0.6B
+  - gemini-3.1-flash-lite
+  - qwen3-32b
+- - openai-api/local/Qwen3-0.6B
+  - gemini-3.1-flash-lite
+  - qwen3-8b
+- - openai-api/local/Qwen3-0.6B
+  - glm-4.6
+  - ling-2.6-flash
+- - openai-api/local/Qwen3-0.6B
+  - glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Qwen3-0.6B
+  - glm-4.6
+  - qwen3-32b
+- - openai-api/local/Qwen3-0.6B
+  - glm-4.6
+  - qwen3-8b
+- - openai-api/local/Qwen3-0.6B
+  - ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Qwen3-0.6B
+  - ling-2.6-flash
+  - qwen3-32b
+- - openai-api/local/Qwen3-0.6B
+  - ling-2.6-flash
+  - qwen3-8b
+- - openai-api/local/Qwen3-0.6B
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-32b
+- - openai-api/local/Qwen3-0.6B
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-8b
+- - openai-api/local/Qwen3-0.6B
+  - qwen3-32b
+  - qwen3-8b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - deepseek-v4-flash-0731
+  - glm-4.6
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - deepseek-v4-flash-0731
+  - ling-2.6-flash
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - deepseek-v4-flash-0731
+  - qwen3-32b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - deepseek-v4-flash-0731
+  - qwen3-8b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - gemini-3.1-flash-lite
+  - glm-4.6
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - gemini-3.1-flash-lite
+  - ling-2.6-flash
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - gemini-3.1-flash-lite
+  - qwen3-32b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - gemini-3.1-flash-lite
+  - qwen3-8b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - glm-4.6
+  - ling-2.6-flash
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - glm-4.6
+  - qwen3-32b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - glm-4.6
+  - qwen3-8b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - ling-2.6-flash
+  - qwen3-32b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - ling-2.6-flash
+  - qwen3-8b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-32b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-8b
+- - openai-api/local/Llama-3.2-3B-Instruct
+  - qwen3-32b
+  - qwen3-8b
+- - openai-api/local/Qwen3-8B
+  - deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+- - openai-api/local/Qwen3-8B
+  - deepseek-v4-flash-0731
+  - glm-4.6
+- - openai-api/local/Qwen3-8B
+  - deepseek-v4-flash-0731
+  - ling-2.6-flash
+- - openai-api/local/Qwen3-8B
+  - deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Qwen3-8B
+  - deepseek-v4-flash-0731
+  - qwen3-32b
+- - openai-api/local/Qwen3-8B
+  - deepseek-v4-flash-0731
+  - qwen3-8b
+- - openai-api/local/Qwen3-8B
+  - gemini-3.1-flash-lite
+  - glm-4.6
+- - openai-api/local/Qwen3-8B
+  - gemini-3.1-flash-lite
+  - ling-2.6-flash
+- - openai-api/local/Qwen3-8B
+  - gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Qwen3-8B
+  - gemini-3.1-flash-lite
+  - qwen3-32b
+- - openai-api/local/Qwen3-8B
+  - gemini-3.1-flash-lite
+  - qwen3-8b
+- - openai-api/local/Qwen3-8B
+  - glm-4.6
+  - ling-2.6-flash
+- - openai-api/local/Qwen3-8B
+  - glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Qwen3-8B
+  - glm-4.6
+  - qwen3-32b
+- - openai-api/local/Qwen3-8B
+  - glm-4.6
+  - qwen3-8b
+- - openai-api/local/Qwen3-8B
+  - ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+- - openai-api/local/Qwen3-8B
+  - ling-2.6-flash
+  - qwen3-32b
+- - openai-api/local/Qwen3-8B
+  - ling-2.6-flash
+  - qwen3-8b
+- - openai-api/local/Qwen3-8B
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-32b
+- - openai-api/local/Qwen3-8B
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-8b
+- - openai-api/local/Qwen3-8B
+  - qwen3-32b
+  - qwen3-8b

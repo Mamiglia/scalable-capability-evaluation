@@ -1,0 +1,16 @@
+log_root: logs/more-pairs-extra/swe_bench_mini/epoch-0
+transcripts:
+  claude-opus-4.7: data/swe_bench_mini/477dc96c/claude-opus-4.7/0/2026-08-20T23-13-16-00-00_swe-bench-verified-mini_C23Xjrx4ncyHYoggcGydA3.eval
+  glm-4.6: data/swe_bench_mini/477dc96c/glm-4.6/0/2026-08-21T16-40-20-00-00_swe-bench-verified-mini_mUsS2eHmsTMm5LcKEsczXe.eval
+comparisons:
+- - openrouter/openai/gpt-oss-120b
+  - claude-opus-4.7
+  - glm-4.6
+judge_model_args:
+  openrouter/openai/gpt-oss-120b:
+    provider:
+      only:
+      - deepinfra/bf16
+      allow_fallbacks: false
+      quantizations:
+      - bf16

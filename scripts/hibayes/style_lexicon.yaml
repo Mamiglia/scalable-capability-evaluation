@@ -1,0 +1,71 @@
+# Hand-curated style lexicon for feature_rates (style_features.py).
+# One key per category, terms matched as whole words/phrases, case-insensitive
+# except the standalone pronoun "I".
+#
+# Changed from the starter lexicon after spot-validation on real transcripts
+# (judge_results/rewrites/originals.jsonl): "clearly", "my" and "correction"
+# dropped, "appears" tightened to "appears to" - reasons at each category.
+#
+# The trims all remove terms whose false positives track the SUBJECT of the
+# item rather than the writer's style, which is the damaging kind here: GPQA is
+# physics- and chemistry-heavy, so a term that fires on technical vocabulary
+# makes the category partly a measure of "this item is a QED problem".
+#
+# "my" removed: 20 of its 40 hits are the uppercase variable "My"/"mY" - the
+# mass of atom Y in the reduced-mass formula mu = (Mx*My)/(Mx+My) - and all 20
+# sit in one diatomic-molecule item. Most of the 20 lowercase hits are not the
+# model's own voice either: they are the model quoting the question's dialogue
+# back ("my compounds are on top of each other", "I need to be on my way").
+# That leaves roughly 6 genuine uses, against 2,452 hits from the other five
+# terms, so dropping "my" costs the category ~0.2% of its volume and removes
+# an item-correlated contaminant. Matching lowercase-only would keep the
+# question-quote hits and buys too little to be worth the extra rule.
+personal_pronouns: [I, me, we, our, us]
+# "us" kept: 3 of 81 hits are the country ("implemented industrially in the
+# US"), all in one item about industrial processes. Real but small, and not
+# technical vocabulary, so it stays.
+#
+# "appears" tightened to "appears to": of 76 bare "appears" hits, about 37 are
+# a technical or perceptual sense, not hedging - "=CH-CH3 appears as a doublet"
+# (NMR term of art), "the dye appears red/orange/magenta" (what colour a
+# compound looks), "(x^2+v^2) appears in the numerator", "the 21 cm line
+# appears in absorption", "a Goldstone boson appears". They concentrate in the
+# dye-colour and NMR-structure items. Every one of the 31 "appears to" hits is
+# the hedging sense. The trim gives up about 8 genuine hits ("this statement
+# appears correct/questionable") to drop all 37 false ones.
+# "seems" kept as a bare term: it has no technical sense in this corpus - its
+# hits are "seems to", "seems too small", "seems plausible", "seems
+# mismatched" and so on, all hedging.
+hedging: [perhaps, possibly, might, may, seems, appears to, likely, presumably, arguably, I think, I believe, could be]
+# "correction" removed: 17 of its 18 hits are standard technical vocabulary -
+# "Ampere's law with Maxwell's correction", "the relativistic correction to
+# T1", "the radiative correction to the pseudo-Goldstone boson mass", "error
+# correction during RNA synthesis" - concentrated in four physics and biology
+# items. Exactly one hit is genuine backtracking ("**Correction:** Upon closer
+# inspection..."). No tightening survives that ratio on one true positive.
+# "wait" kept: 132 hits, of which 40 were read in context and all 40 are genuine
+# self-interruption ("Wait, let me reconsider", "But wait - this doesn't match
+# the options").
+# "actually" kept: roughly 17 of 134 hits are contrastive emphasis rather than
+# backtracking ("the ribosome actually will NOT terminate"), but they spread
+# evenly across physics, chemistry and biology items, so they add noise rather
+# than a subject-matter bias.
+backtracking: [wait, actually, on second thought, let me reconsider, oh wait, scratch that, I made a mistake]
+uncertainty: [unsure, not sure, uncertain, unclear, ambiguous, guess, hard to say]
+# "clearly" removed: 66 hits in the transcript text feature_rates actually
+# sees (a whole-file grep also matches "clearly" inside this item's own
+# *question* wording and returns more - the extractor never sees the
+# question). 54 of those 66 (82%) come from one GPQA item whose own question
+# text reads "we want to clearly distinguish these two energy levels" -
+# nearly every model answering it echoes "clearly resolve/distinguish" as
+# the resolution-criterion term of art, not as a confidence marker. That one
+# item is 54/75 = 72% of the whole category's pre-trim hit volume.
+# Read the other 12 transcript hits by hand too, since a false positive
+# confined to one item is a weaker case than one that generalises: none were
+# a clean, manner-free confidence marker. About half ("clearly defined",
+# "clearly given", sentence-initial "Clearly,") are the same resolution/
+# proof-idiom pattern; the rest ("clearly support", "it's clearly green")
+# are genuinely ambiguous between manner and confidence, not clean positives
+# - so the risk isn't confined to the one item.
+confidence: [obviously, certainly, definitely, undoubtedly, of course]
+questions: ["?"]

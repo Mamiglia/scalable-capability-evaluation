@@ -12,8 +12,11 @@ from dataset import (
     Transcript,
     build_dataset,
     has_reasoning,
+    is_effort_variant,
     read_transcripts,
     responses_to_sample,
+    strip_answer,
+    truncate_pair,
 )
 
 
@@ -59,7 +62,7 @@ class TestResponsesToSample:
             transcript("A" * 100), transcript("Short answer"), target="1", max_len=10
         )
         assert "Transcript 1:\n---\n\n" + ("A" * 10) + "\n\n---" in res.input
-        assert res.metadata["truncated_1"] and res.metadata["chars_1"] == 100
+        assert res.metadata["truncated_1"] and res.metadata["chars_1"] == 10  # shown, not raw
 
     def test_responses_to_sample_options_per_transcript(self):
         """Each transcript is shown the options in the order its own model saw them."""
@@ -253,3 +256,33 @@ class TestBuildDataset:
 def test_user_prompt_placeholders():
     for field in ("question", "options_1", "options_2", "transcript_1", "transcript_2"):
         assert "{" + field + "}" in USER_PROMPT
+
+
+class TestTruncatePair:
+    """Unit tests for truncate_pair and strip_answer in dataset.py."""
+
+    def test_truncate_pair_keeps_first_by_default(self):
+        a, b = truncate_pair("x" * 100 + "ANSWER: A", "y" * 50 + "ANSWER: B", 0.5)
+        assert a == "x" * 25 and b == "y" * 25
+
+    def test_truncate_pair_keep_last(self):
+        a, b = truncate_pair("abcdefghij", "0123456789012345", 0.5, keep="last")
+        assert a == "fghij" and b == "23456789012345"[-5:]
+
+    def test_truncate_pair_full_fraction_length_matches(self):
+        a, b = truncate_pair("a" * 80, "b" * 40, 1.0, keep="last")
+        assert len(a) == len(b) == 40 and a == "a" * 40
+
+    def test_strip_answer_recognises_final_answer_variant(self):
+        assert strip_answer("reasoning\nFinal Answer: C") == "reasoning"
+
+
+def test_is_effort_variant_matches_only_a_suffix():
+    suffixes = ("low", "high")
+    assert is_effort_variant("gpt-5-high", suffixes)
+    assert is_effort_variant("gpt-5-nano-2025-08-07_low", suffixes)
+    assert is_effort_variant("GPT-5-HIGH", suffixes)
+    # the word is present but is not the effort suffix
+    assert not is_effort_variant("highlight-7b", suffixes)
+    assert not is_effort_variant("gpt-5-high-mini", suffixes)
+    assert not is_effort_variant("gemini-3.1-flash-lite", suffixes)

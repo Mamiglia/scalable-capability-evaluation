@@ -1,0 +1,6 @@
+vllm>=0.10
+transformers>=4.51
+peft>=0.14
+pandas
+pyarrow
+pyyaml

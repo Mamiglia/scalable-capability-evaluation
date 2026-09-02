@@ -1,7 +1,7 @@
 """Model configuration dataclass."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from configs.base import DraccusConfig
 
@@ -18,11 +18,11 @@ class ModelConfig(DraccusConfig):
     ``vllm/<name>`` when this config is served from a Runpod pod.
     """
 
-    # Optional[...] on these fields breaks draccus on py3.14; None means unset.
+    # Plain types with None defaults: Optional[...] breaks Draccus on Python 3.14.
     slug: str = ''
-    release_date: Optional[str] = None
-    model_args: Optional[Dict[str, Any]] = None
-    generate_args: Optional[Dict[str, Any]] = None
+    release_date: str = None
+    model_args: Dict[str, Any] = None
+    generate_args: Dict[str, Any] = None
     # Consumed by the Model context manager when enabled.
     runpod: Dict[str, Any] = field(default_factory=dict)
 

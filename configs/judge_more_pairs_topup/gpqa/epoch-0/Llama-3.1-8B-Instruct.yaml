@@ -1,0 +1,171 @@
+log_root: logs/more-pairs-topup/gpqa/epoch-0
+transcripts:
+  claude-opus-4.7: data/gpqa/b0a0d9c9/claude-opus-4.7/0/2026-08-28T05-24-53+00-00_gpqa_diamond_7JHHoqTM7H33ALVptbJqq7.eval
+  claude-sonnet-4.5: data/gpqa/b0a0d9c9/claude-sonnet-4.5/0/2026-08-28T05-24-59+00-00_gpqa_diamond_B7corai7sVmuCiiq3xYQcZ.eval
+  deepseek-r1-0528: data/gpqa/b0a0d9c9/deepseek-r1-0528/0/2026-08-28T02-10-10+00-00_gpqa_diamond_3yJMK2QVuyqUmnVb9rkjpA.eval
+  deepseek-v3.2: data/gpqa/b0a0d9c9/deepseek-v3.2/0/2026-08-28T08-59-40+00-00_gpqa_diamond_A5XgeLjfs3bqLCj8CdTBnX.eval
+  gemini-3.5-flash: data/gpqa/b0a0d9c9/gemini-3.5-flash/0/2026-08-28T02-10-20+00-00_gpqa_diamond_YUUNg56sQyHxBniJgRhBGC.eval
+  gemma3-12b-it: data/gpqa/b0a0d9c9/gemma-3-12b-it/0/2026-08-28T02-10-24+00-00_gpqa_diamond_6USfPQojRtSQxx2Cx4YGE6.eval
+  gemma4-e2b-it: data/gpqa/b0a0d9c9/gemma-4-e2b-it/0/2026-08-28T02-10-28+00-00_gpqa_diamond_FhQ8tVwno2J2QazMCuDRPc.eval
+  glm-4.6: data/gpqa/b0a0d9c9/glm-4.6/0/2026-08-28T09-00-14+00-00_gpqa_diamond_47fJFav9MFkPhQDegAqTNz.eval
+  glm-5.2: data/gpqa/b0a0d9c9/glm-5.2/0/2026-08-28T05-25-16+00-00_gpqa_diamond_cfrWQv8tJD29TJ6WfosvZ6.eval
+  glm-5.3: data/gpqa/b0a0d9c9/glm-5.3/0/2026-08-28T05-25-26+00-00_gpqa_diamond_2aaMaQmTNNijcWVD2YmkTa.eval
+  gpt-4.1: data/gpqa/b0a0d9c9/gpt-4.1/0/2026-08-28T02-10-32+00-00_gpqa_diamond_5RBxUUwDYDFqkbks9r4zpX.eval
+  gpt-5: data/gpqa/b0a0d9c9/gpt-5/0/2026-08-28T02-10-36+00-00_gpqa_diamond_Nk7nEERazkHe7PRXaBDKza.eval
+  ling-2.6-flash: data/gpqa/b0a0d9c9/ling-2.6-flash/0/2026-08-28T02-10-45+00-00_gpqa_diamond_RSoczfTJ99LfYxKHTNpaV4.eval
+  muse-glimmer-30b: data/gpqa/b0a0d9c9/muse-glimmer-30b/0/2026-08-28T05-26-10+00-00_gpqa_diamond_c297vAe2pT346tgkVrMUko.eval
+  nemotron-3-ultra-550b-a55b: data/gpqa/b0a0d9c9/nvidia-nemotron-3-ultra-550b-a55b-bf16/0/2026-08-28T09-00-30+00-00_gpqa_diamond_cUMcmsd5daV5z4qXFnxu5k.eval
+  nemotron-3.5-lightning: data/gpqa/b0a0d9c9/nvidia-nemotron-3.5-lightning-30b-a3b-bf16/0/2026-08-28T02-10-54+00-00_gpqa_diamond_UFDRePBsbFePLPWWSVPhxF.eval
+  o3: data/gpqa/b0a0d9c9/o3/0/2026-08-28T05-26-15+00-00_gpqa_diamond_LqUgLNJhVb7Tdo8PEvnnCF.eval
+  qwen3-32b: data/gpqa/b0a0d9c9/qwen3-32b/0/2026-08-28T02-11-02+00-00_gpqa_diamond_CYyjxZJ6gdZjA824LHQZZs.eval
+  qwen3.8-2.4t-a95b: data/gpqa/b0a0d9c9/qwen3.8-2.4t-a95b/0/2026-08-28T01-22-56+00-00_gpqa_diamond_KmqWx8AaJwmQcsC3fSM8bd.eval
+  qwen3.8-27b: data/gpqa/b0a0d9c9/qwen3.8-27b/0/2026-08-28T09-00-46+00-00_gpqa_diamond_JZCJzGVfYNctt4erhR6Gh6.eval
+comparisons:
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - claude-opus-4.7
+  - glm-4.6
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - deepseek-v3.2
+  - claude-sonnet-4.5
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - deepseek-v3.2
+  - gemma3-12b-it
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - deepseek-v3.2
+  - glm-4.6
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - deepseek-v3.2
+  - qwen3-32b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - gemini-3.5-flash
+  - glm-4.6
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - glm-5.2
+  - glm-4.6
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - glm-5.2
+  - qwen3.8-27b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - glm-5.3
+  - nemotron-3-ultra-550b-a55b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - gpt-4.1
+  - glm-4.6
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - gpt-5
+  - glm-4.6
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - ling-2.6-flash
+  - deepseek-v3.2
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - nemotron-3-ultra-550b-a55b
+  - deepseek-r1-0528
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - nemotron-3-ultra-550b-a55b
+  - deepseek-v3.2
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - nemotron-3-ultra-550b-a55b
+  - gemma4-e2b-it
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - nemotron-3-ultra-550b-a55b
+  - muse-glimmer-30b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - o3
+  - deepseek-v3.2
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.8-2.4t-a95b
+  - nemotron-3-ultra-550b-a55b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.8-2.4t-a95b
+  - qwen3.8-27b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.8-27b
+  - glm-4.6
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.8-27b
+  - nemotron-3.5-lightning
+only_items:
+  claude-opus-4.7-vs-glm-4.6:
+  - recVEXvhYxAhELVqB
+  deepseek-v3.2-vs-claude-sonnet-4.5:
+  - recLrRirj7iXoB0rU
+  - recQ8oxSY2aCwFRS8
+  - recXvQ6gWAmyakrpD
+  - recYt8xx80OTyDsL0
+  deepseek-v3.2-vs-gemma3-12b-it:
+  - recYt8xx80OTyDsL0
+  deepseek-v3.2-vs-glm-4.6:
+  - recLrRirj7iXoB0rU
+  - recQ8oxSY2aCwFRS8
+  - recVEXvhYxAhELVqB
+  - recXvQ6gWAmyakrpD
+  - recYt8xx80OTyDsL0
+  deepseek-v3.2-vs-qwen3-32b:
+  - recLrRirj7iXoB0rU
+  - recQ8oxSY2aCwFRS8
+  - recXvQ6gWAmyakrpD
+  - recYt8xx80OTyDsL0
+  gemini-3.5-flash-vs-glm-4.6:
+  - recVEXvhYxAhELVqB
+  glm-5.2-vs-glm-4.6:
+  - recVEXvhYxAhELVqB
+  glm-5.2-vs-qwen3.8-27b:
+  - recVvpD8miVjmmyfe
+  glm-5.3-vs-nemotron-3-ultra-550b-a55b:
+  - recHVUd2DkoKfedJZ
+  - recJZ3QEfRKjYw9a7
+  - recK9F5aqdaybl8bb
+  - recOvqPKUtyy9ISA1
+  - recb2M22zaD3tL6Qc
+  gpt-4.1-vs-glm-4.6:
+  - recVEXvhYxAhELVqB
+  gpt-5-vs-glm-4.6:
+  - recVEXvhYxAhELVqB
+  ling-2.6-flash-vs-deepseek-v3.2:
+  - recLrRirj7iXoB0rU
+  - recYt8xx80OTyDsL0
+  nemotron-3-ultra-550b-a55b-vs-deepseek-r1-0528:
+  - recHVUd2DkoKfedJZ
+  - recJZ3QEfRKjYw9a7
+  - recK9F5aqdaybl8bb
+  - recb2M22zaD3tL6Qc
+  nemotron-3-ultra-550b-a55b-vs-deepseek-v3.2:
+  - recHVUd2DkoKfedJZ
+  - recK9F5aqdaybl8bb
+  - recLrRirj7iXoB0rU
+  - recOvqPKUtyy9ISA1
+  - recQ8oxSY2aCwFRS8
+  - recXvQ6gWAmyakrpD
+  - recYt8xx80OTyDsL0
+  - recb2M22zaD3tL6Qc
+  nemotron-3-ultra-550b-a55b-vs-gemma4-e2b-it:
+  - recJZ3QEfRKjYw9a7
+  - recK9F5aqdaybl8bb
+  - recOvqPKUtyy9ISA1
+  nemotron-3-ultra-550b-a55b-vs-muse-glimmer-30b:
+  - recHVUd2DkoKfedJZ
+  - recJZ3QEfRKjYw9a7
+  - recOvqPKUtyy9ISA1
+  - recb2M22zaD3tL6Qc
+  o3-vs-deepseek-v3.2:
+  - recLrRirj7iXoB0rU
+  - recQ8oxSY2aCwFRS8
+  - recXvQ6gWAmyakrpD
+  - recYt8xx80OTyDsL0
+  qwen3.8-2.4t-a95b-vs-nemotron-3-ultra-550b-a55b:
+  - recHVUd2DkoKfedJZ
+  - recJZ3QEfRKjYw9a7
+  - recK9F5aqdaybl8bb
+  - recOvqPKUtyy9ISA1
+  - recb2M22zaD3tL6Qc
+  qwen3.8-2.4t-a95b-vs-qwen3.8-27b:
+  - recVvpD8miVjmmyfe
+  qwen3.8-27b-vs-glm-4.6:
+  - recVEXvhYxAhELVqB
+  - recVvpD8miVjmmyfe
+  qwen3.8-27b-vs-nemotron-3.5-lightning:
+  - recZ13cwgDQf9jRd9
+judge_model_args:
+  openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct:
+    stream: true
+max_connections: 8

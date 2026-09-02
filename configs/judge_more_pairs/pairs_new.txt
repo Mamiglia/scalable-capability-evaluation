@@ -1,0 +1,12 @@
+claude-opus-4.7-vs-gpt-5
+claude-opus-4.7-vs-glm-5.3
+gpt-4.1-vs-glm-4.6
+gpt-4.1-vs-o3
+granite-4.1-8b-vs-gemma4-e2b-it
+granite-4.1-8b-vs-deepseek-r1-0528
+ling-2.6-flash-vs-qwen3.8-27b
+ling-2.6-flash-vs-deepseek-v3.2
+mistral-medium-3-vs-qwen3.5-4b
+mistral-medium-3-vs-kimi-k2.6
+qwen3-32b-vs-nemotron-3.5-lightning
+gemma3-12b-it-vs-qwen3.5-9b

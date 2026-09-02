@@ -64,12 +64,19 @@ def design_matrix(rows, entity_index) -> sp.csr_matrix:
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", type=Path, default=Path(__file__).resolve().parent / "config.yaml")
+    ap.add_argument("--judge", default=None,
+                    help="fit on this judge's verdicts alone; writes "
+                         "elo_<judge>.csv instead of the pooled elo.csv")
     args = ap.parse_args()
     cfg = yaml.safe_load(args.config.read_text())
     out = ROOT / cfg["out_dir"]
     out.mkdir(parents=True, exist_ok=True)
 
     rows = pd.read_parquet(ROOT / cfg["rows_parquet"])
+    if args.judge:
+        rows = rows[rows["judge"] == args.judge].reset_index(drop=True)
+        if rows.empty:
+            raise SystemExit(f"no verdicts from judge {args.judge!r}")
     texts = text_table(rows)
     entity_index = {k: i for i, k in enumerate(zip(texts["text_id"], texts["item"]))}
     X = design_matrix(rows, entity_index)
@@ -80,7 +87,8 @@ def main():
 
     bt = cfg["bt"]
     total = {c: 0.0 for c in bt["c_grid"]}
-    for train, test in GroupKFold(bt["cv_folds"]).split(X, y, groups=rows["judge"]):
+    groups = rows["item"] if args.judge else rows["judge"]
+    for train, test in GroupKFold(bt["cv_folds"]).split(X, y, groups=groups):
         for c in bt["c_grid"]:
             model = LogisticRegression(C=c, fit_intercept=False,
                                        max_iter=bt["max_iter"]).fit(X[train], y[train])
@@ -107,8 +115,9 @@ def main():
           f"spearman(mean elo by author, capability logit) {rho:.3f}")
 
     texts = texts.sort_values(["item", "elo"], ascending=[True, False])
-    texts.to_csv(out / "elo.csv", index=False)
-    print(f"-> {out / 'elo.csv'}")
+    name = f"elo_{args.judge.replace('/', '-')}.csv" if args.judge else "elo.csv"
+    texts.to_csv(out / name, index=False)
+    print(f"-> {out / name}")
 
 
 if __name__ == "__main__":

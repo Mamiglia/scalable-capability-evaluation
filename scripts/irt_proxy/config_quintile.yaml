@@ -1,0 +1,39 @@
+paths:
+  epoch_responses: external_data/epoch-gpqa/responses.parquet
+  epoch_logs: external_data/epoch-gpqa
+  pilot_responses: configs/gpqa_core_rd2_260803.yaml
+  local_responses:
+    gpqa: data/gpqa/63793eb6
+    aime2025: data/aime2025/44136fa3
+    aime2026: data/aime2026/44136fa3
+  viewer_data: interactive_dashboards/transcript_viewer/data
+  output: irt_results/easy_item_prediction
+viewer_datasets:
+  gpqa-pilot-rd2: gpqa
+  data-expansion-gpqa: gpqa
+  data-expansion-aime2025: aime2025
+  data-expansion-aime2026: aime2026
+correction:
+  benchmark: gpqa
+  output: analysis/bias_correction_quintile
+  bootstrap_resamples: 5000
+  viewer_datasets:
+    gpqa-pilot-rd2: gpqa
+    data-expansion-gpqa: gpqa
+    hf-judging-2026-08-17-gpqa: gpqa
+  hf_benchmark_scores: data/hf-judging-2026-08-17/benchmark-scores/gpqa
+  style_lexicon: scripts/hibayes/style_lexicon.yaml
+  feature_ablations: {}
+  predictor_bin:
+    column: quintile
+    value: P1
+irt:
+  floors:
+    gpqa: 0.25
+    aime2025: 0.001
+    aime2026: 0.001
+  warmup: 2000
+  samples: 2000
+  seed: 0
+monte_carlo:
+  resamples: 1000

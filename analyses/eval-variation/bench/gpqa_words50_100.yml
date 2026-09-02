@@ -1,0 +1,11 @@
+# Second standardization target: deepseek's natural band (its baseline
+# p25-p75 is 49-87 words) - compression proved to be the direction models
+# actually comply with, so this aims everyone at the terse end.
+name: gpqa-words50-100
+task: analyses/eval-variation/tasks.py@gpqa_instructed
+task_args:
+  instruction: "Explain your reasoning in 50-100 words."
+  cot: true
+  epochs: 2
+  high_level_domain: null
+  subdomain: null

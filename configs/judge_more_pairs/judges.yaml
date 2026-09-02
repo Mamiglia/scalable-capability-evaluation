@@ -1,0 +1,22 @@
+# The six judges and their endpoint pins (ling-2.6-flash left OpenRouter on 2026-08-26), as in the existing LASR-G5/judging runs
+# (run_judging.py takes pins from the config; the same pins live in configs/models/*.yml).
+judges:
+  - openrouter/openai/o4-mini
+  - openrouter/deepseek/deepseek-r1-0528
+  - openrouter/deepseek/deepseek-v4-flash-0731
+  - openrouter/google/gemma-4-31b-it
+  - openrouter/openai/gpt-oss-120b
+  - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+judge_model_args:
+  openrouter/openai/o4-mini: {provider: {}}
+  openrouter/deepseek/deepseek-r1-0528: {provider: {only: [siliconflow/fp8], allow_fallbacks: false}}
+  openrouter/deepseek/deepseek-v4-flash-0731: {provider: {only: [deepinfra/fp8], allow_fallbacks: false}}
+  openrouter/google/gemma-4-31b-it: {provider: {only: [novita/bf16], allow_fallbacks: false, quantizations: [bf16]}}
+  openrouter/openai/gpt-oss-120b: {provider: {only: [deepinfra/bf16], allow_fallbacks: false, quantizations: [bf16]}}
+  openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct: {stream: true}
+judge_generate_args:
+  # Novita rejects requests without an output cap; the judge reasons before answering.
+  openrouter/google/gemma-4-31b-it: {max_tokens: 16384, extra_body: {reasoning: {enabled: true}}}
+judge_max_connections:
+  openrouter/deepseek/deepseek-r1-0528: 40
+  openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct: 8

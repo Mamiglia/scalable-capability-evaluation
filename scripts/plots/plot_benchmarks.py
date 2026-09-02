@@ -55,6 +55,7 @@ KNOWN_DATES: dict[str, str] = {
     "deepseek-r1-distill-qwen-14b": "2025-01-20",
     "deepseek-reasoner": "2025-09-01",
     "deepseek-v3": "2024-12-26",
+    "deepseek-v3.1": "2025-08-21",
     "deepseek-v4-pro": "2026-03-01",
     "deepseek-v4-flash-0731": "2026-04-24",
     # ---- Google / Gemini / Gemma ----
@@ -176,6 +177,9 @@ KNOWN_DATES: dict[str, str] = {
     "o4-mini": "2025-04-16",
     "o3": "2025-04-16",
     "gpt-5.1-2025-11-13": "2025-11-13",
+    "gpt-5.1-codex-max": "2025-11-19",
+    "gpt-5.2-codex": "2025-12-18",
+    "gpt-5.3-codex": "2026-02-05",
     "gpt-5.2-2025-12-11": "2025-12-11",
     "gpt-5.4-2026-03-05": "2026-03-05",
     "gpt-5.4-mini-2026-03-17": "2026-03-17",

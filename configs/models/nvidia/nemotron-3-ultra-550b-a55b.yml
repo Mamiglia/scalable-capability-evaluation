@@ -1,3 +1,5 @@
+# 2026-08-28: the Together endpoint is gone from OpenRouter; venice/fp8 is the only endpoint
+# at fp8 or better that is left (32768 output cap). Earlier note kept for the record:
 # deliberate: pinned to `together`, which declares no quantization. Every endpoint that
 # does declare one is lower precision (venice/fp8, deepinfra/fp4, baseten/fp4), and
 # together is the only one with room for this config's 495904 max_tokens. The BF16 in
@@ -16,5 +18,5 @@ generate_args:
 model_args:
   provider:
     only:
-    - together
+    - venice/fp8
     allow_fallbacks: false

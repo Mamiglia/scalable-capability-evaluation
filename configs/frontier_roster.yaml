@@ -1,0 +1,28 @@
+# Side analysis only: this is not the canonical answer-model set or verdict dataset.
+# Frozen from the local Epoch leaderboard snapshots on 2026-08-28 using full-benchmark
+# mean_score. Plain scaffold only; low/high/xhigh effort variants are excluded, medium is kept.
+
+gpqa:
+  2023Q4: gpt-4-1106
+  2024Q1: claude-3-opus
+  2024Q2: claude-3.5-sonnet-0620
+  2024Q3: o1-mini-medium
+  2024Q4: o1-medium
+  2025Q1: gemini-2.5-pro-exp-0325
+  2025Q2: gemini-2.5-pro
+  2025Q3: gpt-5-medium
+  2025Q4: gemini-3-pro-preview
+  2026Q1: gemini-3.1-pro
+  # MiniMax-M3 and qwen3.7-max tie at 0.909091; source-row order breaks the tie.
+  2026Q2: minimax-m3
+  2026Q3: claude-opus-5
+
+swe_bench_mini:
+  2024Q4: gpt-4o-1120
+  2025Q1: claude-3.7-sonnet
+  2025Q2: claude-opus-4
+  # Epoch run cA6Mq67yaynLhY8F5kes3c; start metadata confirms agent-type bash.
+  2025Q3: claude-opus-4.1
+  2025Q4: claude-opus-4.5
+  # The 0.787 duplicate is Claude Code; this is the 0.756 plain bash-agent run.
+  2026Q1: claude-opus-4.6

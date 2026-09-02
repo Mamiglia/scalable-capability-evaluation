@@ -1,0 +1,12 @@
+log_root: logs/more-pairs-extra/aime2025/epoch-0
+transcripts:
+  claude-opus-4.7: data/aime2025/44136fa3/claude-opus-4.7/0/2026-08-13T11-24-17-00-00_aime2025_mw2mYPC9cWtsVxDjTrgrnh.eval
+  glm-4.6: data/aime2025/44136fa3/glm-4.6/0/2026-08-13T11-25-43-00-00_aime2025_RChxQUhKQS32BKDhsEhDFd.eval
+comparisons:
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - claude-opus-4.7
+  - glm-4.6
+judge_model_args:
+  openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct:
+    stream: true
+max_connections: 8

@@ -42,6 +42,19 @@ class TestParseJudgeOutput:
             ("answer: model 2", "2"),
             ("ANSWER: $1$", "1"),
             ("ANSWER: $2$", "2"),
+            ('"ANSWER": 2', "2"),          # JSON output (ling)
+            ('"ANSWER": "2"', "2"),
+            ('{"EXPLANATION": "x", "ANSWER": "1", "CONFIDENCE": 4}', "1"),
+            ("**ANSWER**: 1", "1"),        # colon outside the bold (r1)
+            ("ANSWER : 2", "2"),
+            ("ANSWER:\n2", "2"),
+            ("ANSWER: 'Transcript 2'", "2"),
+            ("**ANSWER:** **Model 1**", "1"),
+            ("### Answer\n2", "2"),           # heading then a bare digit (r1)
+            ("### ANSWER  \n1", "1"),
+            ("**Answer**\n\n2", "2"),
+            ("Answer:\n1", "1"),
+            ("reasoning.\n\n## Answer\n1\n", "1"),
         ]
         for input_text, expected_answer in cases:
             ans, _, _ = parse_judge_output(input_text)
@@ -100,10 +113,20 @@ class TestParseJudgeOutput:
         """A digit run like 'ANSWER: 128' is not a verdict, and the last verdict wins."""
         assert parse_judge_output("Model 1 wrote ANSWER: 128.\nANSWER: 2")[0] == "2"
         assert parse_judge_output("ANSWER: 128")[0] is None
+        assert parse_judge_output('"ANSWER": 12')[0] is None
+        assert parse_judge_output("**ANSWER**: 21\nANSWER: 1")[0] == "1"
+        assert parse_judge_output("### Answer\n128")[0] is None
+        assert parse_judge_output("Model 1 wrote:\nAnswer\n128\n\n### Answer\n2")[0] == "2"
+        assert parse_judge_output("### Answer\n1\n...\nANSWER: 2")[0] == "2"
 
     def test_verdict_without_format(self):
         """A pick stated in prose without the ANSWER line is not a verdict."""
         assert parse_judge_output("Transcript 1 is verbose. Transcript 2 is stronger.")[0] is None
+        assert parse_judge_output("My answer is 2.")[0] is None
+        assert parse_judge_output("ANSWER 2")[0] is None
+        assert parse_judge_output("ANSWER: none\nCONFIDENCE: 1")[0] is None
+        assert parse_judge_output("### Answer\n1 is the more capable model")[0] is None
+        assert parse_judge_output("The answer\n2")[0] is None
 
 
 def test_pair_metrics():
@@ -122,8 +145,17 @@ def test_pair_metrics():
     assert consistent_accuracy()(scores) == pytest.approx(1 / 3)
     assert position_bias()(scores) == pytest.approx(-0.5)   # 3x "1", 1x "2" over 4 answered
     assert length_corr()(scores) == pytest.approx(0.5773502691896258)  # phi of x=[1,0,1,0], y=[1,0,1,1]
-    assert length_corr()([]) == 0.0
-    assert position_bias()([]) == 0.0
+    import math
+    assert math.isnan(length_corr()([]))       # no data != no length bias
+    assert math.isnan(position_bias()([]))
+
+    # epochs > 1: the mean reducer blanks ``answer`` unless every epoch agreed, so the
+    # metrics must read the pick rate off the value, not filter on the answer.
+    reduced = [SampleScore(sample_id="q4_1", score=Score(value=0.8, answer=None),
+                           sample_metadata={"chars_1": 10, "chars_2": 5}),
+               SampleScore(sample_id="q4_2", score=Score(value=0.2, answer=None),
+                           sample_metadata={"chars_1": 5, "chars_2": 10})]
+    assert position_bias()(reduced) == pytest.approx(-0.6)  # picks 1 in 80% of both orders
 
 
 class TestJudgeScorer:

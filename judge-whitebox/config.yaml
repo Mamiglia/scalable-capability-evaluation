@@ -1,0 +1,65 @@
+paths:
+  local_root: ../../../../judge_results/judge_ft  # main tree judge_results (worktree-relative)
+  hpc_root: /ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge/staging/judge_ft
+  pairs: "{root}/pairs.parquet"
+  adapters: "{root}/out/adapters"
+  selected_adapter: "{root}/out/adapters/final"
+  out: out
+
+models:
+  dev: Qwen3-0.6B
+  headline: Qwen3-8B
+  hf_ids:
+    Qwen3-0.6B: Qwen/Qwen3-0.6B
+    Qwen3-8B: Qwen/Qwen3-8B
+    Llama-3.2-3B-Instruct: meta-llama/Llama-3.2-3B-Instruct
+  hpc_dir: /ceph/mrsic_flogel/public/projects/MoHa_20260120_SwitchChangeDetect_spForGLM/misc/small-judge/models
+
+verdicts:
+  max_input_tokens: 28672
+  batch_size: 4
+  eval_split: eval_mm
+
+screen:
+  batch_tokens: 16384
+  store_top_k: 512
+  act_ratio_min: 2.0
+  act_eps: 1.0e-9
+  per_prompt_budget_mb: 12000
+
+ablate:
+  scale: 0.0
+  top_n: 32
+
+adapter_ablate:
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  groups: [early, mid, late]
+
+before_after:
+  min_sim: 0.5
+
+case_profile:
+  n_factors: 6
+  nmf_seed: 0
+  nmf_max_iter: 500
+  max_context_bins: 12
+
+order_polarity:
+  flip_r: 0.5
+  n_outliers: 8
+  boot_n: 1000
+  boot_seed: 0
+  min_effect: 0.2
+
+resid:
+  alphas: [0.1, 1, 10, 100]
+  cv_folds: 5
+
+transcript_geometry:
+  rsa_min_items: 5
+
+token_ablate:
+  markers:
+    connective: [since, therefore, thus, because, hence, so]
+    hedge: [maybe, perhaps, might, possibly, "i think"]
+    backtrack: [wait, actually, hmm, "no"]

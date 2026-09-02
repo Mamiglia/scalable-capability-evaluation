@@ -1,0 +1,16 @@
+log_root: logs/more-pairs-extra/gpqa/epoch-1
+transcripts:
+  claude-opus-4.7: data/gpqa/b0a0d9c9/claude-opus-4.7/1/2026-08-14T15-17-19-00-00_gpqa-diamond_cwr3AmDdDdSn4iG3wNrbxF.eval
+  glm-4.6: data/gpqa/b0a0d9c9/glm-4.6/1/2026-08-13T11-02-11-00-00_gpqa-diamond_PWamhU7iJjPE9oNSzdfyDk.eval
+comparisons:
+- - openrouter/openai/gpt-oss-120b
+  - claude-opus-4.7
+  - glm-4.6
+judge_model_args:
+  openrouter/openai/gpt-oss-120b:
+    provider:
+      only:
+      - deepinfra/bf16
+      allow_fallbacks: false
+      quantizations:
+      - bf16

@@ -19,10 +19,26 @@ PLOT_LABELS = {
     "length_difference_sd": "Length difference (1 SD)",
     "position_bias_left": "Left-position bias",
     "same_model_family": "Same model family",
+    "personal_pronouns_difference_sd": "Personal pronouns (1 SD)",
+    "hedging_difference_sd": "Hedging (1 SD)",
+    "backtracking_difference_sd": "Backtracking (1 SD)",
+    "uncertainty_difference_sd": "Uncertainty (1 SD)",
+    "confidence_difference_sd": "Confidence (1 SD)",
+    "questions_difference_sd": "Questions (1 SD)",
 }
 
 
 def _effect_table(model, predictors: Sequence[str]) -> pd.DataFrame:
+    # The posterior's predictor axis is unnamed, so every label below is assigned
+    # by position from this list. A different length already raises downstream,
+    # but a reordering would silently attach each judge's coefficients to the
+    # wrong feature, so compare against the list the model was actually built with.
+    fitted = model.model_config.extra_kwargs.get("predictors")
+    if fitted is not None and list(fitted) != list(predictors):
+        raise ValueError(
+            f"Communicator predictors {list(predictors)} do not match the fitted model's "
+            f"{list(fitted)}; every effect label would be wrong"
+        )
     posterior = model.inference_data.posterior
     judges = model.coords["judge"]
     conditions = model.coords["transcript_condition"]
@@ -34,9 +50,9 @@ def _effect_table(model, predictors: Sequence[str]) -> pd.DataFrame:
         values = [("position_bias_left", intercept_draws[:, judge_index])]
         values += [(name, draws[:, judge_index, i]) for i, name in enumerate(predictors)]
         values += [
-            (f"transcript_condition={condition} vs raw", condition_draws[:, judge_index, i])
+            (f"transcript_condition={condition} vs {conditions[0]}", condition_draws[:, judge_index, i])
             for i, condition in enumerate(conditions)
-            if condition != "raw"
+            if condition != conditions[0]
         ]
         judge_rows = np.asarray(model.features["judge_index"]) == judge_index
         for feature, samples in values:

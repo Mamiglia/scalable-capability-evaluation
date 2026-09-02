@@ -164,7 +164,8 @@ def compute_contributions(
 def _style() -> None:
     plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
                          "xtick.labelsize": 7, "ytick.labelsize": 7,
-                         "svg.fonttype": "none", "axes.linewidth": 0.7})
+                         "svg.fonttype": "none", "axes.linewidth": 0.7,
+                         "scatter.edgecolors": "none", "lines.markeredgewidth": 0})
 
 
 def _ordinary(ax) -> None:
@@ -187,23 +188,26 @@ def _scale(table: pd.DataFrame, task: str) -> pd.DataFrame:
     return output
 
 
-def plot_feature_overview(table: pd.DataFrame, output: Path, task: str) -> None:
+def plot_feature_overview(
+    table: pd.DataFrame, output: Path, task: str, *, top: int = 12, width: float = 3.5,
+) -> None:
     frame = table[(table.task == task) & (table.target_quartile == "all")]
     if "benchmark" in frame:
         frame = frame[frame.benchmark == "all"]
     frame = _scale(frame, task)
     _style()
-    fig, axes = plt.subplots(1, 2, figsize=(3.5, 2.65), layout="constrained")
+    fig, axes = plt.subplots(1, 2, figsize=(width, min(3.2, max(2.0, 0.22 * top + 0.8))),
+                             layout="constrained")
     unit = "ΔMAE (pp)" if task == "direct" else "Δ accuracy (pp)"
     for ax, contribution in zip(axes, ("singular", "unique")):
-        values = frame[frame.contribution == contribution].nlargest(12, "estimate").sort_values("estimate")
+        values = frame[frame.contribution == contribution].nlargest(top, "estimate").sort_values("estimate")
         y = np.arange(len(values))
         point = values.estimate.to_numpy(float)
         error = np.vstack([point - values.lower.to_numpy(float), values.upper.to_numpy(float) - point])
         ax.errorbar(point, y, xerr=error, fmt="o", ms=3.5, lw=1, capsize=0,
                     color=EFFECT_COLORS[contribution])
         ax.axvline(0, color="#999999", lw=0.8, ls="--")
-        ax.set_yticks(y, [textwrap.fill(v.replace("_", " "), 17) for v in values.variable], fontsize=5.5)
+        ax.set_yticks(y, [textwrap.fill(v.replace("_", " "), 17) for v in values.variable], fontsize=7)
         ax.set_xlabel(unit)
         ax.set_title(contribution.capitalize(), loc="left", color="#666666", fontsize=8, pad=2)
         _ordinary(ax)
@@ -226,7 +230,7 @@ def plot_groups(table: pd.DataFrame, output: Path, task: str) -> None:
         ax.errorbar(point, y + offset, xerr=error, fmt="o", ms=3.5, lw=1, capsize=0,
                     color=EFFECT_COLORS[contribution], label=contribution.capitalize())
     ax.axvline(0, color="#999999", lw=0.8, ls="--")
-    ax.set_yticks(y, [textwrap.fill(v.replace("-", " "), 20) for v in variables], fontsize=5.5)
+    ax.set_yticks(y, [textwrap.fill(v.replace("-", " "), 20) for v in variables], fontsize=7)
     ax.set_xlabel("ΔMAE (pp)" if task == "direct" else "Δ accuracy (pp)")
     ax.set_ylabel("Feature group")
     _ordinary(ax)
@@ -255,7 +259,7 @@ def plot_each_block(table: pd.DataFrame, output: Path, task: str) -> None:
             ax.axvline(0, color="#999999", lw=0.6, ls="--")
             ax.set_yticks(y)
             if column == 0:
-                ax.set_yticklabels([name.replace("_", " ") for name in order], fontsize=5)
+                ax.set_yticklabels([name.replace("_", " ") for name in order], fontsize=7)
             else:
                 ax.tick_params(axis="y", labelleft=False)
             ax.set_ylim(0, len(order) - 1)
@@ -375,6 +379,9 @@ def plot_benchmark_grid(
     coefficients: pd.DataFrame,
     output: Path,
     task: str,
+    *,
+    count: int = 10,
+    height: float | None = None,
 ) -> None:
     """Plot four benchmarks by singular, unique, and coefficient columns."""
     output.mkdir(parents=True, exist_ok=True)
@@ -386,8 +393,8 @@ def plot_benchmark_grid(
     labels = {"aime": "AIME", "gpqa": "GPQA", "intercode": "InterCode",
               "swe_bench_mini": "SWE"}
     _style()
-    variables = list(reversed(shared_feature_selection(frame, task, count=10)))
-    fig, axes = plt.subplots(len(benchmarks), 3, figsize=(4.0, 5.2),
+    variables = list(reversed(shared_feature_selection(frame, task, count=count)))
+    fig, axes = plt.subplots(len(benchmarks), 3, figsize=(4.0, height or 5.2),
                              layout="constrained", squeeze=False)
     column_points = [[], [], []]
     used_blocks = set()
@@ -415,16 +422,16 @@ def plot_benchmark_grid(
         tick_labels = [name.replace("_", " ") for name in variables]
         for column, ax in enumerate(axes[row_index]):
             ax.axvline(0, color="#999999", lw=0.6, ls="--")
-            ax.set_yticks(y, tick_labels if column == 0 else [], fontsize=3.8)
+            ax.set_yticks(y, tick_labels if column == 0 else [], fontsize=7)
             ax.set_ylim(0, len(variables) - 1)
             ax.tick_params(axis="y", length=0, pad=1)
-            ax.tick_params(axis="x", labelsize=5.5, length=2, width=0.6, pad=1)
+            ax.tick_params(axis="x", labelsize=7, length=2, width=0.6, pad=1)
             if row_index < len(benchmarks) - 1:
                 ax.tick_params(axis="x", labelbottom=False)
             _ordinary(ax)
         axes[row_index, 0].text(-0.03, 1.02, labels[benchmark],
                                 transform=axes[row_index, 0].transAxes,
-                                ha="right", va="bottom", fontsize=5.5, color="#666666")
+                                ha="right", va="bottom", fontsize=7, color="#666666")
 
     for column, title in enumerate(("Singular", "Unique", "Coefficient")):
         axes[0, column].set_title(title, loc="left", color="#666666", fontsize=7, pad=10)
@@ -440,7 +447,7 @@ def plot_benchmark_grid(
     handles = [Line2D([], [], marker="o", ls="none", ms=3, color=COLORS[block],
                       label=block.replace("-", " "))
                for block in COLORS if block in used_blocks]
-    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, fontsize=5.5)
+    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, fontsize=7)
     _save(fig, output, "feature-summary-by-benchmark")
 
 
@@ -466,6 +473,10 @@ def plot_cross_benchmark_profiles(
     *,
     task: str,
     contribution: str,
+    diamond_height: float | None = None,
+    diamond_chunk_size: int | None = None,
+    heatmap_width: float = 2.8,
+    diamond_width: float = 3.2,
 ) -> None:
     """Plot signed heatmap and positive-effect diamond glyphs for one contribution."""
     output.mkdir(parents=True, exist_ok=True)
@@ -494,20 +505,20 @@ def plot_cross_benchmark_profiles(
         cmap = LinearSegmentedColormap.from_list("signed_effect", ["#c65f47", "#f4f1eb", "#2a78d6"])
         norm = TwoSlopeNorm(vmin=heat_lower, vcenter=0, vmax=heat_upper)
     heat_height = _cross_heatmap_height(len(variables))
-    fig, ax = plt.subplots(figsize=(2.8, heat_height), layout="constrained")
+    fig, ax = plt.subplots(figsize=(heatmap_width, heat_height), layout="constrained")
     image = ax.imshow(values.to_numpy(float), cmap=cmap, norm=norm, aspect="auto")
     significant = (lower.to_numpy(float) > 0) | (upper.to_numpy(float) < 0)
     for row in range(len(variables)):
         for column in range(len(benchmarks)):
             value = values.iat[row, column]
-            ax.text(column, row, f"{value:.2f}", ha="center", va="center", fontsize=5,
+            ax.text(column, row, f"{value:.2f}", ha="center", va="center", fontsize=7,
                     color="white" if abs(value) > 0.55 * max(abs(heat_lower), heat_upper) else "#222222")
             if significant[row, column]:
                 ax.add_patch(Rectangle((column - 0.48, row - 0.48), 0.96, 0.96,
                                        fill=False, edgecolor="#222222", lw=0.8))
     ax.set_xticks(range(len(benchmarks)), [benchmark_labels[name] for name in benchmarks],
                   rotation=90, ha="center")
-    ax.set_yticks(range(len(variables)), [name.replace("_", " ") for name in variables], fontsize=5.5)
+    ax.set_yticks(range(len(variables)), [name.replace("_", " ") for name in variables], fontsize=7)
     ax.tick_params(length=0)
     ax.spines[:].set_visible(False)
     colorbar = fig.colorbar(image, ax=ax, orientation="horizontal", pad=0.05, shrink=0.7)
@@ -521,52 +532,62 @@ def plot_cross_benchmark_profiles(
     _save(fig, output, f"{contribution}-effect-heatmap")
 
     directions = np.array([[0, 1], [1, 0], [0, -1], [-1, 0]], dtype=float)
-    rows = math.ceil(len(variables) / 2)
-    fig, axes = plt.subplots(rows, 2, figsize=(3.2, _cross_diamond_height(len(variables))),
-                             layout="constrained", squeeze=False)
-    used_blocks = []
-    for index, (ax, variable) in enumerate(zip(axes.flat, variables)):
-        block, color = blocks[variable], COLORS[blocks[variable]]
-        if block not in used_blocks:
-            used_blocks.append(block)
-        for radius, line_style in ((1.0, "-"), (0.5, ":")):
-            ax.add_patch(Polygon(directions * radius, closed=True, fill=False,
-                                 edgecolor="#c8c4bd", lw=0.6, ls=line_style))
-        for direction in directions:
-            ax.plot([0, direction[0]], [0, direction[1]], color="#d8d4ce", lw=0.5)
-        feature_values = values.loc[variable].to_numpy(float)
-        radii = np.clip(feature_values, 0, diamond_limit) / diamond_limit
-        vertices = directions * radii[:, None]
-        ax.add_patch(Polygon(vertices, closed=True, facecolor=color, edgecolor=color,
-                             alpha=0.18, lw=1))
-        feature_lower = lower.loc[variable].to_numpy(float)
-        for vertex, is_significant in zip(vertices, feature_lower > 0):
-            ax.scatter(*vertex, s=8, facecolor=color if is_significant else "white",
-                       edgecolor=color, lw=0.7, zorder=3)
-        ax.text(0, 1.34, textwrap.fill(variable.replace("_", " "), 22),
-                ha="center", va="bottom", fontsize=5.5)
-        for direction, label, alignment in zip(
-            directions, ("AIME", "GPQA", "InterCode", "SWE"),
-            (("center", "bottom"), ("left", "center"),
-             ("center", "top"), ("right", "center")),
-        ):
-            ax.text(*(direction * 1.1), label, ha=alignment[0], va=alignment[1], fontsize=4.5)
-        ax.set_xlim(-1.28, 1.28)
-        ax.set_ylim(-1.28, 1.28)
-        ax.set_aspect("equal")
-        ax.axis("off")
-    for ax in axes.flat[len(variables):]:
-        ax.remove()
-    handles = [Line2D([], [], marker="o", ls="none", ms=3, color=COLORS[block],
-                      label=block.replace("-", " ")) for block in used_blocks]
-    handles += [Line2D([], [], marker="o", ls="none", ms=3, markerfacecolor="#777777",
-                       markeredgecolor="#777777", color="#777777", label="95% CI > 0"),
-                Line2D([], [], marker="o", ls="none", ms=3, markerfacecolor="white",
-                       markeredgecolor="#777777", color="#777777", label="Uncertain"),
-                Line2D([], [], color="#c8c4bd", lw=0.8,
-                       label=f"Outer ring = {diamond_limit:g} pp")]
-    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, fontsize=5.5)
-    _save(fig, output, f"{contribution}-effect-diamonds")
+    chunks = ([variables] if diamond_chunk_size is None else
+              [variables[index:index + diamond_chunk_size]
+               for index in range(0, len(variables), diamond_chunk_size)])
+    for chunk_index, chunk in enumerate(chunks, 1):
+        rows = math.ceil(len(chunk) / 2)
+        fig, axes = plt.subplots(
+            rows, 2, figsize=(diamond_width, diamond_height or _cross_diamond_height(len(chunk))),
+            layout="constrained", squeeze=False,
+        )
+        used_blocks = []
+        for ax, variable in zip(axes.flat, chunk):
+            block, color = blocks[variable], COLORS[blocks[variable]]
+            if block not in used_blocks:
+                used_blocks.append(block)
+            for radius, line_style in ((1.0, "-"), (0.5, ":")):
+                ax.add_patch(Polygon(directions * radius, closed=True, fill=False,
+                                     edgecolor="#c8c4bd", lw=0.6, ls=line_style))
+            for direction in directions:
+                ax.plot([0, direction[0]], [0, direction[1]], color="#d8d4ce", lw=0.5)
+            feature_values = values.loc[variable].to_numpy(float)
+            radii = np.clip(feature_values, 0, diamond_limit) / diamond_limit
+            vertices = directions * radii[:, None]
+            ax.add_patch(Polygon(vertices, closed=True, facecolor=color, edgecolor=color,
+                                 alpha=0.18, lw=1))
+            feature_lower = lower.loc[variable].to_numpy(float)
+            for vertex, is_significant in zip(vertices, feature_lower > 0):
+                ax.scatter(*vertex, s=8, marker="o" if is_significant else "^",
+                           color=color, alpha=1 if is_significant else 0.42,
+                           edgecolors="none", linewidths=0, zorder=3)
+            ax.text(0, 1.34, textwrap.fill(variable.replace("_", " "), 22),
+                    ha="center", va="bottom", fontsize=7)
+            for direction, label, alignment in zip(
+                directions, ("AIME", "GPQA", "InterCode", "SWE"),
+                (("center", "bottom"), ("left", "center"),
+                 ("center", "top"), ("right", "center")),
+            ):
+                ax.text(*(direction * 1.1), label, ha=alignment[0], va=alignment[1], fontsize=7)
+            ax.set_xlim(-1.28, 1.28)
+            ax.set_ylim(-1.28, 1.28)
+            ax.set_aspect("equal")
+            ax.axis("off")
+        for ax in axes.flat[len(chunk):]:
+            ax.remove()
+        handles = [Line2D([], [], marker="o", ls="none", ms=3, color=COLORS[block],
+                          markeredgewidth=0, label=block.replace("-", " "))
+                   for block in used_blocks]
+        handles += [Line2D([], [], marker="o", ls="none", ms=3, color="#777777",
+                           markeredgewidth=0, label="95% CI > 0"),
+                    Line2D([], [], marker="^", ls="none", ms=3, color="#777777",
+                           alpha=0.42, markeredgewidth=0, label="Uncertain"),
+                    Line2D([], [], color="#c8c4bd", lw=0.8,
+                           label=f"Outer ring = {diamond_limit:g} pp")]
+        fig.legend(handles=handles, loc="outside lower center", ncol=3,
+                   frameon=False, fontsize=7)
+        suffix = "" if len(chunks) == 1 else f"-{chunk_index}"
+        _save(fig, output, f"{contribution}-effect-diamonds{suffix}")
 
 
 def plot_coefficient_heatmap(
@@ -575,6 +596,7 @@ def plot_coefficient_heatmap(
     output: Path,
     *,
     task: str,
+    width: float = 2.8,
 ) -> None:
     """Plot effective benchmark-specific feature weights and their fold range."""
     output.mkdir(parents=True, exist_ok=True)
@@ -597,20 +619,20 @@ def plot_coefficient_heatmap(
 
     _style()
     height = _cross_heatmap_height(len(variables))
-    fig, ax = plt.subplots(figsize=(2.8, height), layout="constrained")
+    fig, ax = plt.subplots(figsize=(width, height), layout="constrained")
     image = ax.imshow(values.to_numpy(float), cmap=cmap, norm=norm, aspect="auto")
     stable = (lower.to_numpy(float) > 0) | (upper.to_numpy(float) < 0)
     for row in range(len(variables)):
         for column in range(len(benchmark_order)):
             value = values.iat[row, column]
-            ax.text(column, row, f"{value:.2f}", ha="center", va="center", fontsize=5,
+            ax.text(column, row, f"{value:.2f}", ha="center", va="center", fontsize=7,
                     color="white" if abs(value) > 0.55 * limit else "#222222")
             if stable[row, column]:
                 ax.add_patch(Rectangle((column - 0.48, row - 0.48), 0.96, 0.96,
                                        fill=False, edgecolor="#222222", lw=0.8))
     ax.set_xticks(range(len(benchmark_order)), [benchmark_labels[name] for name in benchmark_order],
                   rotation=90, ha="center")
-    ax.set_yticks(range(len(variables)), [name.replace("_", " ") for name in variables], fontsize=5.5)
+    ax.set_yticks(range(len(variables)), [name.replace("_", " ") for name in variables], fontsize=7)
     ax.tick_params(length=0)
     ax.spines[:].set_visible(False)
     colorbar = fig.colorbar(image, ax=ax, orientation="horizontal", pad=0.05, shrink=0.7)

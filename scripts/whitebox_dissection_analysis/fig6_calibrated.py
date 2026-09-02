@@ -12,7 +12,7 @@ import pandas as pd
 
 sys.path.insert(0, "/Users/moriohamada/PycharmProjects/ai_safety/small-judge/judge-whitebox")
 
-S = pathlib.Path("/private/tmp/claude-501/-Users-moriohamada-PycharmProjects-ai-safety-small-judge/8727e515-2405-4685-a43d-ead3d07c1e1c/scratchpad")
+S = pathlib.Path("/Users/moriohamada/PycharmProjects/ai_safety/small-judge/tmp/whitebox")
 OUT = pathlib.Path("/Users/moriohamada/PycharmProjects/ai_safety/small-judge/judge_results/whitebox_dissection/figures/llama3.2-3B")
 plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
                      "xtick.labelsize": 7, "ytick.labelsize": 7,
@@ -109,5 +109,5 @@ axh.tick_params(left=False)
 share2 = float((verdicts < 0).mean())
 print("share of verdicts favouring transcript 2: %.3f" % share2)
 fig.tight_layout()
-fig.savefig(OUT / "fig6_cumulative.png", dpi=300, bbox_inches="tight")
+fig.savefig(OUT / "fig6_cumulative.png", dpi=300, bbox_inches="tight"); fig.savefig(OUT / "fig6_cumulative.svg", bbox_inches="tight")
 print("saved")

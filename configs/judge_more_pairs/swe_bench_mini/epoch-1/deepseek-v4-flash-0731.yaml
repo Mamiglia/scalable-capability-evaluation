@@ -1,0 +1,46 @@
+log_root: logs/more-pairs/swe_bench_mini/epoch-1
+transcripts:
+  claude-opus-4.7: data/swe_bench_mini/477dc96c/claude-opus-4.7/1/2026-08-20T21-06-13-00-00_swe-bench-verified-mini_PFnXHJDdqQntyfzprdfwJ9.eval
+  deepseek-v3.2: data/swe_bench_mini/477dc96c/deepseek-v3.2/1/2026-08-20T23-13-17-00-00_swe-bench-verified-mini_ZSx5vfgiHXvgCeXane37pB.eval
+  glm-4.6: data/swe_bench_mini/477dc96c/glm-4.6/1/2026-08-21T17-43-06-00-00_swe-bench-verified-mini_ZFX3BUFPKFJCcvcSbsLm6x.eval
+  glm-5.3: data/swe_bench_mini/477dc96c/glm-5.3/1/2026-08-21T19-38-01-00-00_swe-bench-verified-mini_KwWHA2vC7EFJYcBAXiQ9F7.eval
+  gpt-4.1: data/swe_bench_mini/477dc96c/gpt-4.1/1/2026-08-21T12-24-56-00-00_swe-bench-verified-mini_PogmWuntwUz26DyPEw2Z2F.eval
+  gpt-5: data/swe_bench_mini/477dc96c/gpt-5/1/2026-08-21T12-36-32-00-00_swe-bench-verified-mini_Z7Cjrn6bQvzTmNmtWxjVAp.eval
+  kimi-k2.6: data/swe_bench_mini/477dc96c/kimi-k2.6/1/2026-08-21T04-44-49-00-00_swe-bench-verified-mini_hg4S7Z8JJh6EEN7dpyLhke.eval
+  ling-2.6-flash: data/swe_bench_mini/477dc96c/ling-2.6-flash/1/2026-08-21T02-36-16-00-00_swe-bench-verified-mini_kzeRj9igieJEajo79L2rLJ.eval
+  mistral-medium-3: data/swe_bench_mini/477dc96c/mistral-medium-3/1/2026-08-21T03-11-09-00-00_swe-bench-verified-mini_G7dnhkm8kCm8yCqzBT6stn.eval
+  nemotron-3.5-lightning: data/swe_bench_mini/477dc96c/nvidia-nemotron-3.5-lightning-30b-a3b-bf16/1/2026-08-21T07-02-08-00-00_swe-bench-verified-mini_XeqEJZeW3s9YTk3JSZJmRR.eval
+  o3: data/swe_bench_mini/477dc96c/o3/1/2026-08-21T13-00-07-00-00_swe-bench-verified-mini_j6RwaaWa37tj3qm7JXwGMW.eval
+  qwen3-32b: data/swe_bench_mini/477dc96c/qwen3-32b/1/2026-08-22T23-44-23-00-00_swe-bench-verified-mini_8oPS8YzsgmfXsYfdxA5fV2.eval
+  qwen3.8-27b: data/swe_bench_mini/477dc96c/qwen3.8-27b/1/2026-08-21T16-22-55-00-00_swe-bench-verified-mini_CpPCfYBpommiGFhHUQtFAj.eval
+comparisons:
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - claude-opus-4.7
+  - glm-5.3
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - claude-opus-4.7
+  - gpt-5
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-4.1
+  - glm-4.6
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-4.1
+  - o3
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - ling-2.6-flash
+  - deepseek-v3.2
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - ling-2.6-flash
+  - qwen3.8-27b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - mistral-medium-3
+  - kimi-k2.6
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3-32b
+  - nemotron-3.5-lightning
+judge_model_args:
+  openrouter/deepseek/deepseek-v4-flash-0731:
+    provider:
+      only:
+      - deepinfra/fp8
+      allow_fallbacks: false

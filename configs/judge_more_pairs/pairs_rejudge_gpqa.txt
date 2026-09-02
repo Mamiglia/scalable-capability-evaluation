@@ -1,0 +1,9 @@
+gemini-3.5-flash-vs-nemotron-3.5-lightning
+glm-5.3-vs-muse-glimmer-30b
+nemotron-3-ultra-550b-a55b-vs-muse-glimmer-30b
+nemotron-3.5-lightning-vs-gemma4-e2b-it
+nemotron-3.5-lightning-vs-qwen3.5-4b
+nemotron-3.5-lightning-vs-deepseek-r1-0528
+qwen3.8-2.4t-a95b-vs-muse-glimmer-30b
+qwen3.8-27b-vs-nemotron-3.5-lightning
+qwen3-32b-vs-nemotron-3.5-lightning

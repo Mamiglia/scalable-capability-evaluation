@@ -1,0 +1,44 @@
+# Big-gap probe on AIME-style items: same members and judges as the gpqa probe,
+# transcripts from Epoch's OTIS Mock AIME runs (45 items; scores are per-epoch,
+# first correct epoch is used). Both-correct pools are small: qwen3.6-plus/llama 8,
+# gpt-5.5/claude-3-5 14, gemini-3.5/llama 8, gpt-5.5/llama 8, gpt-5.5/gemma-2 3.
+# NOTE: OTIS Mock AIME is Epoch's mock-exam bench, not the aime2025/aime2026 item sets.
+log_root: logs/data-expansion-biggap/otis-aime
+
+transcripts:
+  gpt-5.5-low: external_data/epoch-otis-aime/gpt-5.5_low.eval             # ~159 (low effort weaker, gap approximate)
+  gemini-3.5-flash: external_data/epoch-otis-aime/gemini-3.5-flash_high.eval  # 154.6
+  qwen3.6-plus: external_data/epoch-otis-aime/qwen3.6-plus.eval           # 149.0
+  claude-3-5-sonnet-0620: external_data/epoch-otis-aime/claude-3-5-sonnet-20240620.eval  # 130.0
+  llama-3.1-70b: external_data/epoch-otis-aime/Llama-3.1-70B-Instruct.eval    # 125.2
+  gemma-2-27b: external_data/epoch-otis-aime/gemma-2-27b-it.eval          # 122.1
+
+comparisons:
+  # gap ~23.8
+  - [openrouter/qwen/qwen3-8b, qwen3.6-plus, llama-3.1-70b]
+  - [openrouter/qwen/qwen3-32b, qwen3.6-plus, llama-3.1-70b]
+  - [openrouter/inclusionai/ling-2.6-flash, qwen3.6-plus, llama-3.1-70b]
+  # gap ~29.2
+  - [openrouter/qwen/qwen3-8b, gpt-5.5-low, claude-3-5-sonnet-0620]
+  - [openrouter/qwen/qwen3-32b, gpt-5.5-low, claude-3-5-sonnet-0620]
+  - [openrouter/inclusionai/ling-2.6-flash, gpt-5.5-low, claude-3-5-sonnet-0620]
+  # gap ~29.4
+  - [openrouter/qwen/qwen3-8b, gemini-3.5-flash, llama-3.1-70b]
+  - [openrouter/qwen/qwen3-32b, gemini-3.5-flash, llama-3.1-70b]
+  - [openrouter/inclusionai/ling-2.6-flash, gemini-3.5-flash, llama-3.1-70b]
+  # gap ~34.0
+  - [openrouter/qwen/qwen3-8b, gpt-5.5-low, llama-3.1-70b]
+  - [openrouter/qwen/qwen3-32b, gpt-5.5-low, llama-3.1-70b]
+  - [openrouter/inclusionai/ling-2.6-flash, gpt-5.5-low, llama-3.1-70b]
+  # gap ~37.1
+  - [openrouter/qwen/qwen3-8b, gpt-5.5-low, gemma-2-27b]
+  - [openrouter/qwen/qwen3-32b, gpt-5.5-low, gemma-2-27b]
+  - [openrouter/inclusionai/ling-2.6-flash, gpt-5.5-low, gemma-2-27b]
+
+judge_model_args:
+  openrouter/qwen/qwen3-8b:
+    provider: {only: [alibaba/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/qwen/qwen3-32b:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/inclusionai/ling-2.6-flash:
+    provider: {only: [novita], allow_fallbacks: false, require_parameters: true, data_collection: deny}

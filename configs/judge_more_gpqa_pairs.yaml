@@ -1,0 +1,140 @@
+# Add enough ordinary GPQA comparisons that every default/medium evaluated
+# model has been compared with at least four other models. Each pair was chosen
+# near its members' observed GPQA accuracy when possible, to avoid obvious
+# matchups that add little information to Elo.
+log_root: logs/data-expansion-more-pairs/gpqa
+phase1_items: 20
+include_reasoning: false
+max_tokens: 512
+max_connections: 12
+attempt_timeout: 180
+timeout: 600
+max_retries: 2
+
+# Inspect enforces this limit for each verdict. The largest configured phase
+# has 332 calls, so the $0.67 reserve keeps even its full worst-case cost below
+# the overall $20 limit when the remaining judges resume in one process.
+cost_limit_per_sample: 0.002
+total_cost_limit: 20.0
+stop_with_budget_remaining: 0.67
+
+# Each parallel process writes under its judge's own directory and cannot spend
+# another judge's allocation. The hard limits sum to the overall $20 cap,
+# including the GPT-OSS spend collected before that below-chance judge was
+# retired. Per-sample limits bound every batch before it starts.
+judge_budgets:
+  openrouter/inclusionai/ling-2.6-flash: {total_cost_limit: 0.35, cost_limit_per_sample: 0.001}
+  openrouter/deepseek/deepseek-v4-flash: {total_cost_limit: 2.18, cost_limit_per_sample: 0.005}
+  openrouter/openai/gpt-oss-20b: {total_cost_limit: 1.10, cost_limit_per_sample: 0.002}
+  openrouter/qwen/qwen3-32b: {total_cost_limit: 0.05, cost_limit_per_sample: 0.003}
+  # These per-sample ceilings remain more than twice the largest observed call
+  # for each endpoint, while avoiding a needlessly pessimistic batch estimate.
+  openrouter/google/gemini-3.1-flash-lite: {total_cost_limit: 3.12, cost_limit_per_sample: 0.003}
+  openrouter/google/gemma-4-26b-a4b-it: {total_cost_limit: 6.50, cost_limit_per_sample: 0.002}
+  openrouter/qwen/qwen3-vl-30b-a3b-instruct: {total_cost_limit: 6.70, cost_limit_per_sample: 0.003}
+
+model_costs:
+  openrouter/inclusionai/ling-2.6-flash: {input: 0.01, output: 0.03, input_cache_write: 0.01, input_cache_read: 0.01}
+  openrouter/deepseek/deepseek-v4-flash: {input: 0.09, output: 0.18, input_cache_write: 0.09, input_cache_read: 0.018}
+  openrouter/openai/gpt-oss-20b: {input: 0.03, output: 0.14, input_cache_write: 0.03, input_cache_read: 0.03}
+  openrouter/qwen/qwen3-32b: {input: 0.14, output: 0.57, input_cache_write: 0.14, input_cache_read: 0.14}
+  openrouter/google/gemini-3.1-flash-lite: {input: 0.25, output: 1.50, input_cache_write: 0.25, input_cache_read: 0.25}
+  openrouter/google/gemma-4-26b-a4b-it: {input: 0.12, output: 0.40, input_cache_write: 0.12, input_cache_read: 0.12}
+  openrouter/qwen/qwen3-vl-30b-a3b-instruct: {input: 0.29, output: 1.00, input_cache_write: 0.29, input_cache_read: 0.29}
+
+transcripts:
+  claude-3-5-haiku: external_data/epoch-gpqa/claude-3-5-haiku-20241022.eval
+  claude-3-5-sonnet-0620: external_data/epoch-gpqa/claude-3-5-sonnet-20240620.eval
+  claude-3-7-sonnet: external_data/epoch-gpqa/claude-3-7-sonnet-20250219.eval
+  claude-3-haiku: external_data/epoch-gpqa/claude-3-haiku-20240307.eval
+  gemini-1.5-pro: external_data/epoch-gpqa/gemini-1.5-pro-002.eval
+  gemini-2.5-pro: external_data/epoch-gpqa/gemini-2.5-pro.eval
+  gemma-2-27b: external_data/epoch-gpqa/gemma-2-27b-it.eval
+  gemma-2-9b: external_data/epoch-gpqa/gemma-2-9b-it.eval
+  gemma-3-27b: external_data/epoch-gpqa/gemma-3-27b-it.eval
+  gpt-4.1-mini: external_data/epoch-gpqa/gpt-4.1-mini-2025-04-14.eval
+  gpt-4.1-nano: external_data/epoch-gpqa/gpt-4.1-nano-2025-04-14.eval
+  gpt-4o: external_data/epoch-gpqa/gpt-4o-2024-08-06.eval
+  gpt-4o-mini: external_data/epoch-gpqa/gpt-4o-mini-2024-07-18.eval
+  gpt-5-mini-medium: external_data/epoch-gpqa/gpt-5-mini-2025-08-07_medium.eval
+  llama-2-70b: external_data/epoch-gpqa/Llama-2-70b-chat-hf.eval
+  llama-3-70b: external_data/epoch-gpqa/Meta-Llama-3-70B-Instruct.eval
+  llama-3.1-70b: external_data/epoch-gpqa/Llama-3.1-70B-Instruct.eval
+  llama-3.1-8b: external_data/epoch-gpqa/Llama-3.1-8B-Instruct.eval
+  llama-3.3-70b: external_data/epoch-gpqa/Llama-3.3-70B-Instruct.eval
+  mistral-7b-v0.3: external_data/epoch-gpqa/Mistral-7B-Instruct-v0.3.eval
+  mixtral-8x7b: external_data/epoch-gpqa/Mixtral-8x7B-Instruct-v0.1.eval
+  o3-mini-medium: external_data/epoch-gpqa/o3-mini-2025-01-31_medium.eval
+  phi-3-medium: external_data/epoch-gpqa/Phi-3-medium-128k-instruct.eval
+  qwen-2.5-72b-instruct: external_data/epoch-gpqa/qwen2.5-72b-instruct.eval
+  qwen2.5-32b: external_data/epoch-gpqa/qwen2.5-32b-instruct.eval
+  qwen3.5-122b-a10b: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_jidBSJQmFg5gQTECKtuEpp.eval
+  qwen3.6-plus: external_data/epoch-gpqa/qwen3.6-plus.eval
+
+judges:
+  - openrouter/inclusionai/ling-2.6-flash
+  - openrouter/deepseek/deepseek-v4-flash
+  # Finish the nearly complete Qwen coverage before spending the remainder on
+  # Gemini. Completed phases are skipped automatically.
+  - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - openrouter/google/gemini-3.1-flash-lite
+  - openrouter/google/gemma-4-26b-a4b-it
+
+pairs:
+  - [gpt-5-mini-medium, o3-mini-medium]
+  - [claude-3-haiku, gemma-2-27b]
+  - [gemini-2.5-pro, qwen3.6-plus]
+  - [gemma-2-27b, gpt-4o-mini]
+  - [llama-3.3-70b, qwen2.5-32b]
+  - [gpt-4o, qwen-2.5-72b-instruct]
+  - [gemma-2-9b, phi-3-medium]
+  - [mixtral-8x7b, phi-3-medium]
+  - [llama-3.1-8b, mistral-7b-v0.3]
+  - [claude-3-5-haiku, llama-3-70b]
+  - [llama-2-70b, llama-3.1-8b]
+  - [gemma-3-27b, gpt-4.1-nano]
+  - [claude-3-7-sonnet, gpt-4.1-mini]
+  - [claude-3-5-sonnet-0620, gemini-1.5-pro]
+  - [claude-3-7-sonnet, gpt-5-mini-medium]
+  - [claude-3-5-haiku, gemma-2-27b]
+  - [gemini-2.5-pro, o3-mini-medium]
+  - [llama-3.1-70b, qwen2.5-32b]
+  - [gpt-4.1-nano, qwen-2.5-72b-instruct]
+  - [gemma-2-9b, mixtral-8x7b]
+  - [llama-2-70b, mistral-7b-v0.3]
+  - [gemma-3-27b, llama-3.3-70b]
+  - [gpt-4o-mini, llama-3-70b]
+  - [gpt-4.1-nano, gpt-4o]
+  - [claude-3-haiku, gpt-4o-mini]
+  - [claude-3-5-sonnet-0620, gpt-4o]
+  - [gpt-4.1-mini, gpt-5-mini-medium]
+  - [gemma-2-27b, llama-3-70b]
+  - [gemini-1.5-pro, gemini-2.5-pro]
+  - [gemma-3-27b, qwen2.5-32b]
+  - [llama-3.3-70b, qwen-2.5-72b-instruct]
+  - [llama-2-70b, phi-3-medium]
+  - [llama-3.1-8b, mixtral-8x7b]
+  - [claude-3-haiku, gemma-2-9b]
+  - [claude-3-5-sonnet-0620, llama-3.1-70b]
+  - [mistral-7b-v0.3, qwen3.5-122b-a10b]
+  # Replacements for discarded Flash/preview links. Together these give every
+  # standard candidate at least four distinct opponents.
+  - [claude-3-5-haiku, llama-3.1-70b]
+  - [gemini-1.5-pro, gpt-4.1-mini]
+  - [claude-3-7-sonnet, o3-mini-medium]
+  - [gpt-5-mini-medium, qwen3.6-plus]
+  - [gemini-2.5-pro, qwen3.5-122b-a10b]
+
+judge_model_args:
+  openrouter/inclusionai/ling-2.6-flash:
+    provider: {only: [novita], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/deepseek/deepseek-v4-flash:
+    # DeepSeek is a judge only. It never appears in `pairs`, so it cannot become
+    # an evaluated result point. No reasoning override means the default setting.
+    provider: {only: [deepinfra/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/google/gemini-3.1-flash-lite:
+    provider: {only: [google-ai-studio], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/google/gemma-4-26b-a4b-it:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}
+  openrouter/qwen/qwen3-vl-30b-a3b-instruct:
+    provider: {only: [siliconflow/fp8], allow_fallbacks: false, require_parameters: true, data_collection: deny}

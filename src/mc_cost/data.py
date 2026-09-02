@@ -1,0 +1,370 @@
+"""Prepare fitted-IRT judgment features and empirical token rows."""
+
+from __future__ import annotations
+
+import json
+from collections import Counter, defaultdict
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from inspect_ai.log import list_eval_logs, read_eval_log
+
+from judge.util import extract_transcript
+from mc_cost.catalogue import catalogue_aliases, normalized_name
+
+
+RELEASE_EPOCH = pd.Timestamp("2020-01-01")
+
+JUDGMENT_COLUMNS = [
+    "chosen_left", "judge", "item", "left_model", "right_model",
+    "theta_gap", "oversight", "release_gap_days", "relative_release_days",
+    "difficulty", "theta_gap_x_oversight", "theta_gap_x_difficulty",
+    "length_difference", "same_family_x_theta_gap", "self_comparison",
+    "reasoning_difference", "left_chars", "right_chars",
+]
+
+CONTINUOUS_JUDGMENT_COLUMNS = [
+    "theta_gap", "oversight", "release_gap_days", "relative_release_days",
+    "difficulty", "theta_gap_x_oversight", "theta_gap_x_difficulty",
+    "length_difference", "same_family_x_theta_gap",
+]
+
+
+def normalize_family(value):
+    return value.strip() if isinstance(value, str) and value.strip() else pd.NA
+
+
+def _short_model(slug: str) -> str:
+    return slug.removeprefix("openrouter/").split("/")[-1]
+
+
+def _sample_tokens(sample) -> dict[str, int]:
+    """Match the Inspect accounting used by ``scripts/cost/eval_cost.py``."""
+    total = defaultdict(int)
+    for usage in (sample.model_usage or {}).values():
+        total["input"] += usage.input_tokens or 0
+        total["output"] += usage.output_tokens or 0
+        total["reasoning"] += getattr(usage, "reasoning_tokens", 0) or 0
+        total["total"] += usage.total_tokens or 0
+    return {key: total[key] for key in ("input", "output", "reasoning", "total")}
+
+
+def _sample_correct(sample) -> int:
+    """Match the existing Inspect scorer convention for correct answers."""
+    for score in (sample.scores or {}).values():
+        value = score.value
+        if value in ("C", 1, True) or (isinstance(value, float) and value >= 0.5):
+            return 1
+    return 0
+
+
+def _gpqa_items(items: pd.DataFrame) -> pd.DataFrame:
+    required = {"irt_model", "fit", "benchmark", "item", "difficulty"}
+    if not required <= set(items):
+        return pd.DataFrame(columns=["benchmark", "item", "difficulty"])
+    return items.loc[
+        (items["irt_model"] == "fixed_3pl")
+        & (items["fit"] == "gpqa")
+        & (items["benchmark"] == "gpqa"),
+        ["benchmark", "item", "difficulty"],
+    ].copy()
+
+
+def _release_days(values: pd.Series) -> pd.Series:
+    return (pd.to_datetime(values, errors="coerce") - RELEASE_EPOCH).dt.days
+
+
+def _catalogue_metadata(catalogue: pd.DataFrame) -> pd.DataFrame:
+    required = {"model_id", "theta", "release", "family"}
+    missing = required - set(catalogue)
+    if missing:
+        raise ValueError(f"catalogue lacks required columns: {', '.join(sorted(missing))}")
+    frame = catalogue.copy()
+    if frame["model_id"].duplicated().any():
+        raise ValueError("duplicate model_id in catalogue")
+    frame["theta"] = pd.to_numeric(frame["theta"], errors="coerce")
+    frame["release_day"] = _release_days(frame["release"])
+    frame["family"] = frame["family"].map(normalize_family)
+    return frame.set_index("model_id", drop=False)
+
+
+def _missing_judgment_metadata(frame: pd.DataFrame) -> list[str]:
+    missing = []
+    for role in ("judge", "left", "right"):
+        identity = frame[f"{role}_model"] if role != "judge" else frame["judge"]
+        for column, label in (
+            (f"{role}_theta", "theta"), (f"{role}_release_day", "release"),
+            (f"{role}_family", "family"),
+        ):
+            for value in identity[frame[column].isna()].astype(str).unique():
+                missing.append(f"{role} {value} missing {label}")
+    for value in frame.loc[frame["difficulty"].isna(), "item"].astype(str).unique():
+        missing.append(f"item {value} missing difficulty")
+    return missing
+
+
+def prepare_judgments(attempts: pd.DataFrame, catalogue: pd.DataFrame, items: pd.DataFrame) -> pd.DataFrame:
+    """Join observed attempts to fixed-3PL metadata and derive model features."""
+    frame = attempts.copy()
+    metadata = _catalogue_metadata(catalogue)
+    for role, identity_column in (("judge", "judge"), ("left", "left_model"), ("right", "right_model")):
+        joined = metadata.reindex(frame[identity_column])
+        frame[f"{role}_theta"] = joined["theta"].to_numpy()
+        frame[f"{role}_release_day"] = joined["release_day"].to_numpy()
+        frame[f"{role}_family"] = joined["family"].to_numpy()
+        if role == "judge" and "reasoning_class" in joined:
+            frame["judge_reasoning_class"] = joined["reasoning_class"].to_numpy()
+
+    difficulty = _gpqa_items(items).drop_duplicates(["benchmark", "item"])
+    frame = frame.merge(difficulty.drop(columns="benchmark"), on="item", how="left", validate="many_to_one")
+    missing = _missing_judgment_metadata(frame)
+    if missing:
+        raise ValueError("; ".join(missing))
+
+    frame["theta_gap"] = frame["left_theta"] - frame["right_theta"]
+    frame["oversight"] = (frame["left_theta"] + frame["right_theta"]) / 2 - frame["judge_theta"]
+    frame["release_gap_days"] = frame["left_release_day"] - frame["right_release_day"]
+    frame["relative_release_days"] = (
+        (frame["left_release_day"] + frame["right_release_day"]) / 2 - frame["judge_release_day"]
+    )
+    frame["theta_gap_x_oversight"] = frame["theta_gap"] * frame["oversight"]
+    frame["theta_gap_x_difficulty"] = frame["theta_gap"] * frame["difficulty"]
+    frame["same_model_family"] = (
+        frame["left_model"].ne(frame["right_model"])
+        & frame["left_family"].eq(frame["right_family"])
+    ).astype(int)
+    frame["same_family_x_theta_gap"] = frame["same_model_family"] * frame["theta_gap"]
+    return frame.reindex(columns=JUDGMENT_COLUMNS + [column for column in frame if column not in JUDGMENT_COLUMNS])
+
+
+def _candidate_item_id(sample) -> str:
+    return str(sample.id).rsplit("_", 1)[0]
+
+
+def _benchmark(task: str) -> str:
+    name = task.split("/")[-1].strip().lower().replace("-", "_").replace(" ", "_")
+    return "gpqa" if name == "gpqa_diamond" else name
+
+
+def _exclude(exclusions: Counter, *, count: int = 1, **details) -> None:
+    exclusions[json.dumps(details, sort_keys=True, separators=(",", ":"))] += count
+
+
+def _exclusion_rows(exclusions: Counter) -> list[dict]:
+    return [{**json.loads(key), "count": count} for key, count in sorted(exclusions.items())]
+
+
+def candidate_token_rows(
+    log_roots, catalogue: pd.DataFrame, items: pd.DataFrame, *, skip_incomplete: bool = False,
+    presentation_max_chars: int = 65536,
+) -> pd.DataFrame:
+    """Extract one valid candidate-generation usage row per model/item/epoch."""
+    if (
+        not isinstance(presentation_max_chars, int)
+        or isinstance(presentation_max_chars, bool)
+        or presentation_max_chars <= 0
+    ):
+        raise ValueError("presentation_max_chars must be a positive integer")
+    metadata = _catalogue_metadata(catalogue)
+    aliases = catalogue_aliases(catalogue)
+    difficulty = _gpqa_items(items).set_index(["benchmark", "item"])["difficulty"]
+    rows, seen_logs, seen_samples = [], set(), set()
+    excluded_zero_or_error = 0
+    excluded_invalid_accounting = 0
+    excluded_incomplete = 0
+    excluded_duplicates = 0
+    exclusions = Counter()
+    for root in log_roots:
+        for info in list_eval_logs(str(root)):
+            if info.name in seen_logs:
+                continue
+            seen_logs.add(info.name)
+            log = read_eval_log(info)
+            if not log.samples:
+                continue
+            benchmark = _benchmark(log.eval.task)
+            raw_model = _short_model(log.eval.model)
+            model = aliases.get(normalized_name(raw_model))
+            if model is None:
+                if skip_incomplete:
+                    excluded_incomplete += len(log.samples)
+                    _exclude(
+                        exclusions, count=len(log.samples), source="candidate",
+                        source_log=str(info.name), judge=None, model=raw_model, item=None,
+                        reason="unknown_model", missing_fields=["catalogue"],
+                    )
+                    continue
+                raise ValueError(f"model {raw_model} missing from catalogue")
+            for sample in log.samples:
+                item = _candidate_item_id(sample)
+                tokens = _sample_tokens(sample)
+                if getattr(sample, "error", None):
+                    excluded_zero_or_error += 1
+                    _exclude(
+                        exclusions, source="candidate", source_log=str(info.name), judge=None,
+                        model=model, item=item, reason="sample_error", missing_fields=[],
+                    )
+                    continue
+                if tokens["total"] == 0:
+                    excluded_zero_or_error += 1
+                    _exclude(
+                        exclusions, source="candidate", source_log=str(info.name), judge=None,
+                        model=model, item=item, reason="zero_usage", missing_fields=[],
+                    )
+                    continue
+                reasoning_tokens = tokens["reasoning"]
+                output_tokens = tokens["output"]
+                if reasoning_tokens and tokens["total"] == tokens["input"] + output_tokens + reasoning_tokens:
+                    output_tokens += reasoning_tokens
+                if reasoning_tokens > output_tokens:
+                    excluded_invalid_accounting += 1
+                    _exclude(
+                        exclusions, source="candidate", source_log=str(info.name), judge=None,
+                        model=model, item=item, reason="invalid_token_accounting",
+                        missing_fields=["output_tokens", "reasoning_tokens"],
+                    )
+                    continue
+                epoch = getattr(sample, "epoch", None)
+                key = benchmark, model, item, epoch
+                if key in seen_samples:
+                    excluded_duplicates += 1
+                    _exclude(
+                        exclusions, source="candidate", source_log=str(info.name), judge=None,
+                        model=model, item=item, reason="duplicate_sample", missing_fields=[],
+                    )
+                    continue
+                seen_samples.add(key)
+                model_data = metadata.loc[model] if model in metadata.index else None
+                item_difficulty = difficulty.get((benchmark, item), np.nan)
+                missing = []
+                if model_data is None or pd.isna(model_data["theta"]):
+                    missing.append("theta")
+                if model_data is None or pd.isna(model_data["release_day"]):
+                    missing.append("release")
+                if pd.isna(item_difficulty):
+                    missing.append("difficulty")
+                if missing:
+                    if skip_incomplete:
+                        excluded_incomplete += 1
+                        _exclude(
+                            exclusions, source="candidate", source_log=str(info.name), judge=None,
+                            model=model, item=item, reason="missing_metadata",
+                            missing_fields=sorted(missing),
+                        )
+                        continue
+                    details = []
+                    model_fields = [field for field in missing if field != "difficulty"]
+                    if model_fields:
+                        details.append(f"model {model} missing {', '.join(model_fields)}")
+                    if "difficulty" in missing:
+                        details.append(f"item {item} missing difficulty")
+                    raise ValueError("; ".join(details))
+                final_transcript = extract_transcript(sample, include_reasoning=False)
+                full_transcript = extract_transcript(sample, include_reasoning=True)
+                rows.append({
+                    "role": "candidate", "benchmark": benchmark, "model": model, "item": item, "epoch": epoch,
+                    "response_chars": min(len(final_transcript), presentation_max_chars),
+                    "uncapped_response_chars": len(final_transcript),
+                    "full_response_chars": len(full_transcript),
+                    "generated_reasoning": int(full_transcript != final_transcript),
+                    "correct": _sample_correct(sample),
+                    "theta": model_data["theta"], "release_day": model_data["release_day"],
+                    "difficulty": item_difficulty,
+                    "visible_reasoning": 0,
+                    "reasoning_class": model_data.get("reasoning_class", pd.NA),
+                    "input_tokens": tokens["input"], "output_tokens": output_tokens,
+                    "reasoning_tokens": reasoning_tokens, "ordinary_output_tokens": output_tokens - reasoning_tokens,
+                    "total_tokens": tokens["total"],
+                })
+    result = pd.DataFrame(rows)
+    result.attrs["accounting"] = {
+        "zero_usage_or_error": excluded_zero_or_error,
+        "invalid_token_accounting": excluded_invalid_accounting,
+        "missing_catalogue_metadata": excluded_incomplete,
+        "duplicate_samples": excluded_duplicates,
+    }
+    result.attrs["exclusions"] = _exclusion_rows(exclusions)
+    return result
+
+
+def judge_token_rows(judgments: pd.DataFrame) -> pd.DataFrame:
+    """Convert observed judge attempts into token-model rows."""
+    frame = judgments.copy()
+    input_tokens = pd.to_numeric(frame["judge_input_tokens"], errors="coerce").fillna(0)
+    output = pd.to_numeric(frame["judge_output_tokens"], errors="coerce").fillna(0)
+    reasoning = pd.to_numeric(frame["judge_reasoning_tokens"], errors="coerce").fillna(0)
+    total = pd.to_numeric(frame["judge_total_tokens"], errors="coerce").fillna(0)
+    separate = reasoning.gt(0) & total.eq(input_tokens + output + reasoning)
+    output = output + reasoning.where(separate, 0)
+    invalid = reasoning.gt(output)
+    exclusions = Counter()
+    for index in frame.index[invalid]:
+        _exclude(
+            exclusions, source="judge_token",
+            source_log=str(frame.at[index, "log_file"]) if "log_file" in frame else "",
+            judge=str(frame.at[index, "judge"]), model=str(frame.at[index, "judge"]),
+            item=str(frame.at[index, "item"]), reason="invalid_token_accounting",
+            missing_fields=["output_tokens", "reasoning_tokens"],
+        )
+    frame, input_tokens, output, reasoning, total = (
+        value.loc[~invalid] for value in (frame, input_tokens, output, reasoning, total)
+    )
+    columns = {
+        "role": "judge", "model": frame["judge"], "judge": frame["judge"], "item": frame["item"],
+        "chosen_left": frame["chosen_left"], "transcript_chars": frame["left_chars"] + frame["right_chars"],
+        "input_tokens": input_tokens, "output_tokens": output,
+        "reasoning_tokens": reasoning, "ordinary_output_tokens": (output - reasoning).clip(lower=0),
+        "total_tokens": total,
+    }
+    if "difficulty" in frame:
+        columns["difficulty"] = frame["difficulty"]
+    if "judge_reasoning_class" in frame:
+        columns["reasoning_class"] = frame["judge_reasoning_class"]
+    result = pd.DataFrame(columns).reset_index(drop=True)
+    result.attrs["accounting"] = {"invalid_token_accounting": int(invalid.sum())}
+    result.attrs["exclusions"] = _exclusion_rows(exclusions)
+    return result
+
+
+def standardize_judgments(
+    judgments: pd.DataFrame, training_rows,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Standardize continuous predictors using the supplied training rows."""
+    frame = judgments.copy()
+    training_rows = np.asarray(training_rows, dtype=bool)
+    if training_rows.shape != (len(frame),) or not training_rows.any():
+        raise ValueError("training_rows must select at least one judgment row")
+    stats = []
+    for column in CONTINUOUS_JUDGMENT_COLUMNS:
+        values = pd.to_numeric(frame[column], errors="raise")
+        training_values = values[training_rows]
+        mean = float(training_values.mean())
+        scale = float(training_values.std(ddof=0)) or 1.0
+        frame[column] = (values - mean) / scale
+        stats.append({"feature": column, "mean": mean, "scale": scale})
+    return frame, pd.DataFrame(stats).set_index("feature")
+
+
+def write_prepared_tables(
+    output_directory: str | Path,
+    judgments: pd.DataFrame,
+    candidate_tokens: pd.DataFrame,
+    judge_tokens: pd.DataFrame,
+    training_rows,
+) -> dict[str, Path]:
+    """Write standardized training judgments, token rows, and their scales."""
+    output_directory = Path(output_directory)
+    output_directory.mkdir(parents=True, exist_ok=True)
+    standardized, scales = standardize_judgments(judgments, training_rows)
+    paths = {
+        "judgments": output_directory / "judgments.parquet",
+        "candidate_tokens": output_directory / "token_candidate.parquet",
+        "judge_tokens": output_directory / "token_judge.parquet",
+        "judgment_standardization": output_directory / "judgment_standardization.json",
+    }
+    standardized.to_parquet(paths["judgments"], index=False)
+    candidate_tokens.to_parquet(paths["candidate_tokens"], index=False)
+    judge_tokens.to_parquet(paths["judge_tokens"], index=False)
+    scales.to_json(paths["judgment_standardization"], indent=2)
+    return paths

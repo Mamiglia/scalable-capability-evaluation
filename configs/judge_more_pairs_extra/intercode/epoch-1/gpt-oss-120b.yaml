@@ -1,0 +1,16 @@
+log_root: logs/more-pairs-extra/intercode/epoch-1
+transcripts:
+  claude-opus-4.7: data/intercode/463eb861/claude-opus-4.7/1/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_ExSdhdcsJ7VS2AD4GqYhAD.eval
+  glm-4.6: data/intercode/463eb861/glm-4.6/1/2026-08-17T22-06-17-00-00_gdm-intercode-ctf_P5TpDqD7kzsdwyGu4AdjqS.eval
+comparisons:
+- - openrouter/openai/gpt-oss-120b
+  - claude-opus-4.7
+  - glm-4.6
+judge_model_args:
+  openrouter/openai/gpt-oss-120b:
+    provider:
+      only:
+      - deepinfra/bf16
+      allow_fallbacks: false
+      quantizations:
+      - bf16

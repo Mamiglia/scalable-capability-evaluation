@@ -1,0 +1,64 @@
+log_root: logs/more-pairs/aime2025/epoch-1
+transcripts:
+  claude-opus-4.7: data/aime2025/44136fa3/claude-opus-4.7/1/2026-08-17T20-33-08-00-00_aime2025_EWU2UZcyFCeaHbhLeDtQYZ.eval
+  deepseek-r1-0528: data/aime2025/44136fa3/deepseek-r1-0528/1/2026-08-11T14-31-05-00-00_aime2025_6p8ckd69ZmYPRG8NNBxCb9.eval
+  deepseek-v3.2: data/aime2025/44136fa3/deepseek-v3.2/1/2026-08-21T14-17-21-00-00_aime2025_K2ePDkAKp9YME3m2DPeGcg.eval
+  gemma3-12b-it: data/aime2025/44136fa3/gemma-3-12b-it/1/2026-08-12T14-22-22-00-00_aime2025_K884YLRX7339P2BuHYieme.eval
+  gemma4-e2b-it: data/aime2025/44136fa3/gemma-4-e2b-it/1/2026-08-12T13-32-57-00-00_aime2025_iHXfUkJPFADWQHdUFPtbMx.eval
+  glm-4.6: data/aime2025/44136fa3/glm-4.6/1/2026-08-13T11-26-27-00-00_aime2025_35oBMnu9EbDMhA3pqWa9Tr.eval
+  glm-5.3: data/aime2025/44136fa3/glm-5.3/1/2026-08-19T23-47-20-00-00_aime2025_VTNNTQ6ukS8dNRPqv6UHFZ.eval
+  gpt-4.1: data/aime2025/44136fa3/gpt-4.1/1/2026-08-17T20-33-16-00-00_aime2025_VvGbAqJhc6KnkrQv8ssDaJ.eval
+  gpt-5: data/aime2025/44136fa3/gpt-5/1/2026-08-11T14-31-17-00-00_aime2025_NvBk792jFHCHbxkTVvGySo.eval
+  granite-4.1-8b: data/aime2025/44136fa3/granite-4.1-8b/1/2026-08-12T14-22-25-00-00_aime2025_nvEmRWCHfUBemNx3XfV4hj.eval
+  kimi-k2.6: data/aime2025/44136fa3/kimi-k2.6/1/2026-08-13T11-45-44-00-00_aime2025_AJ2WdEcBQ8HmNwCJTS2mG3.eval
+  ling-2.6-flash: data/aime2025/44136fa3/ling-2.6-flash/1/2026-08-12T14-22-23-00-00_aime2025_byJYP2kYB2os6YM4zu2ti6.eval
+  mistral-medium-3: data/aime2025/44136fa3/mistral-medium-3/1/2026-08-11T14-31-13-00-00_aime2025_U7j2ZMREgxeYb3dRZ438ca.eval
+  nemotron-3.5-lightning: data/aime2025/44136fa3/nvidia-nemotron-3.5-lightning-30b-a3b-bf16/1/2026-08-21T15-12-32-00-00_aime2025_b6QFpo79mZnfXAhUtnuzuN.eval
+  o3: data/aime2025/44136fa3/o3/1/2026-08-11T14-31-05-00-00_aime2025_kR2GXRRTdg6dqxGREbQypy.eval
+  qwen3-32b: data/aime2025/44136fa3/qwen3-32b/1/2026-08-13T11-49-07-00-00_aime2025_CBDHWwimeqhhcg2SEUFzut.eval
+  qwen3.5-4b: data/aime2025/44136fa3/qwen3.5-4b/1/2026-08-17T21-49-40-00-00_aime2025_MG9668GL7bgmJwHZkrPz7K.eval
+  qwen3.5-9b: data/aime2025/44136fa3/qwen3.5-9b/1/2026-08-12T14-22-23-00-00_aime2025_BNtyiutgnNNfmiaDjWqjzZ.eval
+  qwen3.8-27b: data/aime2025/44136fa3/qwen3.8-27b/1/2026-08-19T23-45-44-00-00_aime2025_RLR8doFw7j5544tnUy88E6.eval
+comparisons:
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - claude-opus-4.7
+  - glm-5.3
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - claude-opus-4.7
+  - gpt-5
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemma3-12b-it
+  - qwen3.5-9b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-4.1
+  - glm-4.6
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - gpt-4.1
+  - o3
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - granite-4.1-8b
+  - deepseek-r1-0528
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - granite-4.1-8b
+  - gemma4-e2b-it
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - ling-2.6-flash
+  - deepseek-v3.2
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - ling-2.6-flash
+  - qwen3.8-27b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - mistral-medium-3
+  - kimi-k2.6
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - mistral-medium-3
+  - qwen3.5-4b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3-32b
+  - nemotron-3.5-lightning
+judge_model_args:
+  openrouter/deepseek/deepseek-v4-flash-0731:
+    provider:
+      only:
+      - deepinfra/fp8
+      allow_fallbacks: false

@@ -1,0 +1,77 @@
+log_root: logs/more-pairs-topup/aime2024/epoch-0
+transcripts:
+  deepseek-r1-0528: data/aime2024/44136fa3/deepseek-r1-0528/0/2026-08-28T08-54-27+00-00_aime2024_cN9sU8ARsa4huKB7jongEs.eval
+  deepseek-v3.2: data/aime2024/44136fa3/deepseek-v3.2/0/2026-08-28T01-23-12+00-00_aime2024_XS6HtHnfKof28MuWsah76A.eval
+  gemma4-e2b-it: data/aime2024/44136fa3/gemma-4-e2b-it/0/2026-08-28T08-54-32+00-00_aime2024_8mR7bXiWBQhYuKdUX5CyXN.eval
+  glm-5.2: data/aime2024/44136fa3/glm-5.2/0/2026-08-28T01-49-46+00-00_aime2024_4G2VAPqgHc2mnWUWkwAmJx.eval
+  glm-5.3: data/aime2024/44136fa3/glm-5.3/0/2026-08-28T08-54-37+00-00_aime2024_DviBLCjkUFShBR6VhPZZ3n.eval
+  ling-2.6-flash: data/aime2024/44136fa3/ling-2.6-flash/0/2026-08-28T01-23-36+00-00_aime2024_XhdnJK5CG9dX54aWGfJzLw.eval
+  muse-glimmer-30b: data/aime2024/44136fa3/muse-glimmer-30b/0/2026-08-28T01-23-41+00-00_aime2024_nSa8SSVDz9UoNZzhonx3ay.eval
+  nemotron-3-ultra-550b-a55b: data/aime2024/44136fa3/nvidia-nemotron-3-ultra-550b-a55b-bf16/0/2026-08-28T08-54-49+00-00_aime2024_LniCH8Uai88FkyDeNRhfRP.eval
+  qwen3.5-4b: data/aime2024/44136fa3/qwen3.5-4b/0/2026-08-28T01-23-47+00-00_aime2024_K3Yw9FY9t9xtvvrAnv76TH.eval
+  qwen3.5-9b: data/aime2024/44136fa3/qwen3.5-9b/0/2026-08-28T08-55-01+00-00_aime2024_YZQZDNENP6gqTBQDJE2EFH.eval
+  qwen3.8-2.4t-a95b: data/aime2024/44136fa3/qwen3.8-2.4t-a95b/0/2026-08-28T08-55-06+00-00_aime2024_B4Tc2j4hq2t2HeU94k4TBV.eval
+  qwen3.8-27b: data/aime2024/44136fa3/qwen3.8-27b/0/2026-08-28T08-55-09+00-00_aime2024_8fQ5HtNuPuzQP2g6Kvcgq2.eval
+comparisons:
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - glm-5.2
+  - qwen3.8-27b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - glm-5.3
+  - nemotron-3-ultra-550b-a55b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - nemotron-3-ultra-550b-a55b
+  - deepseek-r1-0528
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - nemotron-3-ultra-550b-a55b
+  - deepseek-v3.2
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - nemotron-3-ultra-550b-a55b
+  - gemma4-e2b-it
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - nemotron-3-ultra-550b-a55b
+  - muse-glimmer-30b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3.5-4b
+  - qwen3.5-9b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3.5-9b
+  - deepseek-r1-0528
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3.5-9b
+  - ling-2.6-flash
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3.8-2.4t-a95b
+  - nemotron-3-ultra-550b-a55b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3.8-2.4t-a95b
+  - qwen3.8-27b
+only_items:
+  glm-5.2-vs-qwen3.8-27b:
+  - 2024-I-12
+  glm-5.3-vs-nemotron-3-ultra-550b-a55b:
+  - 2024-I-7
+  nemotron-3-ultra-550b-a55b-vs-deepseek-r1-0528:
+  - 2024-I-7
+  nemotron-3-ultra-550b-a55b-vs-deepseek-v3.2:
+  - 2024-I-7
+  nemotron-3-ultra-550b-a55b-vs-gemma4-e2b-it:
+  - 2024-I-7
+  nemotron-3-ultra-550b-a55b-vs-muse-glimmer-30b:
+  - 2024-I-7
+  qwen3.5-4b-vs-qwen3.5-9b:
+  - 2024-I-11
+  qwen3.5-9b-vs-deepseek-r1-0528:
+  - 2024-I-11
+  qwen3.5-9b-vs-ling-2.6-flash:
+  - 2024-I-11
+  qwen3.8-2.4t-a95b-vs-nemotron-3-ultra-550b-a55b:
+  - 2024-I-7
+  qwen3.8-2.4t-a95b-vs-qwen3.8-27b:
+  - 2024-I-12
+judge_model_args:
+  openrouter/deepseek/deepseek-v4-flash-0731:
+    provider:
+      only:
+      - deepinfra/fp8
+      allow_fallbacks: false

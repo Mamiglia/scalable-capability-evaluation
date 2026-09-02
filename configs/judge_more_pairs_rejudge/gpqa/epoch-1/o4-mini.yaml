@@ -1,0 +1,44 @@
+log_root: logs/more-pairs-rejudge/gpqa/epoch-1
+transcripts:
+  deepseek-r1-0528: data-rescored/data/gpqa/b0a0d9c9/deepseek-r1-0528/1/LiRiryJsGb3h5UuxX8bmJv.eval
+  gemini-3.5-flash: data-rescored/data/gpqa/b0a0d9c9/gemini-3.5-flash/1/2026-08-11T14-30-55-00-00_gpqa-diamond_Nro9B5tDUvKdJ4hetZWxba.eval
+  gemma4-e2b-it: data-rescored/data/gpqa/b0a0d9c9/gemma-4-e2b-it/1/2026-08-15T09-43-21-00-00_gpqa-diamond_K2VNfTodHxknCDrkfd8pwU.eval
+  glm-5.3: data-rescored/data/gpqa/b0a0d9c9/glm-5.3/1/2026-08-19T22-44-47-00-00_gpqa-diamond_nUJ3AQKLogJgEemMX4PqxP.eval
+  muse-glimmer-30b: data-rescored/data/gpqa/b0a0d9c9/muse-glimmer-30b/1/2026-08-19T22-25-57-00-00_gpqa-diamond_JKWsvbW6WsR4M3ByWDWZhA.eval
+  nemotron-3-ultra-550b-a55b: data-rescored/data/gpqa/b0a0d9c9/nvidia-nemotron-3-ultra-550b-a55b-bf16/1/2026-08-21T09-52-19-00-00_gpqa-diamond_Bfh3bfJNGjDWBbeoJy7Epp.eval
+  nemotron-3.5-lightning: data-rescored/data/gpqa/b0a0d9c9/nvidia-nemotron-3.5-lightning-30b-a3b-bf16/1/2026-08-21T09-33-11-00-00_gpqa-diamond_aB2qWJ5czwHSRPkxojaue5.eval
+  qwen3-32b: data-rescored/data/gpqa/b0a0d9c9/qwen3-32b/1/2026-08-13T11-02-11-00-00_gpqa-diamond_JUYJCgKpDryJpM77dCgmzc.eval
+  qwen3.5-4b: data-rescored/data/gpqa/b0a0d9c9/qwen3.5-4b/1/2026-08-14T09-33-54-00-00_gpqa-diamond_PvNtz4dgVi3AQtVkd5xXoG.eval
+  qwen3.8-2.4t-a95b: data-rescored/data/gpqa/b0a0d9c9/qwen3.8-2.4t-a95b/1/2026-08-19T22-31-29-00-00_gpqa-diamond_asWdSwHCivHFnv8EES2Bzo.eval
+  qwen3.8-27b: data-rescored/data/gpqa/b0a0d9c9/qwen3.8-27b/1/2026-08-19T22-41-01-00-00_gpqa-diamond_DHTBnv8xcSyLyiWpWA5XLP.eval
+comparisons:
+- - openrouter/openai/o4-mini
+  - gemini-3.5-flash
+  - nemotron-3.5-lightning
+- - openrouter/openai/o4-mini
+  - glm-5.3
+  - muse-glimmer-30b
+- - openrouter/openai/o4-mini
+  - nemotron-3-ultra-550b-a55b
+  - muse-glimmer-30b
+- - openrouter/openai/o4-mini
+  - nemotron-3.5-lightning
+  - deepseek-r1-0528
+- - openrouter/openai/o4-mini
+  - nemotron-3.5-lightning
+  - gemma4-e2b-it
+- - openrouter/openai/o4-mini
+  - nemotron-3.5-lightning
+  - qwen3.5-4b
+- - openrouter/openai/o4-mini
+  - qwen3-32b
+  - nemotron-3.5-lightning
+- - openrouter/openai/o4-mini
+  - qwen3.8-2.4t-a95b
+  - muse-glimmer-30b
+- - openrouter/openai/o4-mini
+  - qwen3.8-27b
+  - nemotron-3.5-lightning
+judge_model_args:
+  openrouter/openai/o4-mini:
+    provider: {}

@@ -5,6 +5,9 @@ from inspect_ai.model import ChatMessage
 from inspect_ai.dataset import Sample
 from inspect_ai.scorer import value_to_float
 
+# CORRECT/"C" -> 1, INCORRECT/"I" -> 0, numbers -> themselves, unparseable -> 0.
+_score_to_float = value_to_float()
+
 # Content the judge cannot read: shown as a marker so the transcript stays coherent.
 PLACEHOLDER_BLOCKS = {
     "image": "[Image]",
@@ -187,6 +190,18 @@ def extract_transcript(sample: Sample, include_reasoning: bool = True) -> str:
     return render_transcript_parts(extract_transcript_parts(sample, include_reasoning))
 
 
+def _is_correct(value: Any) -> bool:
+    """Correct if the scorer's value is 1.0 (full score)
+
+    Covers every scorer we collect: choice/match store the string "C"; SWE-bench stores a
+    float 1.0/0.0 from its in-container test run; HLE nests the label under "score" in a
+    dict alongside a confidence.
+    """
+    if isinstance(value, dict):
+        value = value.get("score", 0)
+    return _score_to_float(value) >= 1.0
+
+
 def extract_score(sample: Sample) -> bool:
     """
     Whether the sample was scored correct.
@@ -202,7 +217,15 @@ def extract_score(sample: Sample) -> bool:
         )
     if not scores:
         return False
-    value = next(iter(scores.values())).value
-    if isinstance(value, dict):
-        value = value.get("score", 0)
-    return value_to_float()(value) >= 1.0
+    return _is_correct(next(iter(scores.values())).value)
+
+
+def first_correct_by_id(log) -> dict:
+    """Group correct samples by item, with the earliest epoch first."""
+    grouped: dict = {}
+    for sample in log.samples:
+        if extract_score(sample):
+            grouped.setdefault(sample.id, []).append(sample)
+    for samples in grouped.values():
+        samples.sort(key=lambda sample: getattr(sample, "epoch", 0))
+    return grouped

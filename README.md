@@ -180,3 +180,5 @@ minor: qwen/qwen3.5-9b
 benchmark: !include ../../bench/core-bench/easy.yml
 mode: paired
 ```
+
+Data and judging corrections made in August 2026 (scoring fixes, re-runs, new pairs, judge roster) are recorded in `docs/2026-08-data-and-judging-corrections.md`.

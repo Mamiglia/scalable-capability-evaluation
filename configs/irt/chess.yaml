@@ -1,0 +1,6 @@
+# IRT — Epoch Chess Puzzles (drives fetch).
+# `models: all` pulls every model that has a downloadable log; paste a subset to trim.
+# Needs a leaderboard CSV with a populated `Logs` column and $EPOCH_WAF_TOKEN set.
+csv: external_data/epoch-chess/chess_puzzles.csv
+out_dir: external_data/epoch-chess
+models: all

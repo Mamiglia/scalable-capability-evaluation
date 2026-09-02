@@ -59,13 +59,14 @@ def judge_feature_logistic_model(
                 "judge_predictor_effects",
                 dist.Normal(0, prior_effect_scale).expand([num_judges, len(predictors)]).to_event(2),
             )
-        condition_free = numpyro.sample(
-            "judge_condition_effects_free",
-            dist.Normal(0, prior_effect_scale).expand([num_judges, num_conditions - 1]).to_event(2),
-        )
-        condition_effects = jnp.concatenate(
-            [jnp.zeros((num_judges, 1)), condition_free], axis=1
-        )
+        # A single condition has no free contrasts; sampling a zero-width site breaks arviz.
+        condition_effects = jnp.zeros((num_judges, 1))
+        if num_conditions > 1:
+            condition_free = numpyro.sample(
+                "judge_condition_effects_free",
+                dist.Normal(0, prior_effect_scale).expand([num_judges, num_conditions - 1]).to_event(2),
+            )
+            condition_effects = jnp.concatenate([condition_effects, condition_free], axis=1)
         numpyro.deterministic("judge_condition_effects", condition_effects)
 
         item_sigma = numpyro.sample("item_sigma", dist.HalfNormal(prior_item_scale))

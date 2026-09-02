@@ -1,0 +1,36 @@
+# Cross-domain judge transfer. See docs/2026-08-09-cross-domain-judge-transfer-design.md.
+# Model universe = base_groups present on ALL three domains. Both label modes on identical pairs.
+out_dir: judge_results/judge_ft/cross_domain
+
+domains:
+  gpqa:  external_data/epoch-gpqa/*.eval
+  aime:  external_data/epoch-otis-aime/*.eval
+  chess: external_data/epoch-chess/*.eval
+
+prep:
+  max_len_chars: 65536
+  min_accuracy: 0.05          # chess/AIME sit lower than GPQA; keep the range, drop only floor
+  max_accuracy: 0.98          # drop ceiling models (near-empty both-correct sets)
+  min_cap_gap_logit: 0.2      # in-domain label: min |acc-logit gap|, below = label too noisy
+  min_cap_gap_eci: 0.15       # ECI label: min |eci (z) gap|
+  min_reasoning_chars: 100    # drop answer-only transcripts (bimodal cut, clean for chess too)
+  item_holdout_frac: 0.2
+  max_train_pairs: 20000      # per cell, stratified by model pair
+  max_eval_pairs_per_split: 4000
+  max_input_tokens: 28672     # rendered prompt cap; longer pairs dropped + counted
+  tokenizer: Qwen/Qwen3-8B
+  seed: 0
+  n_holdout_models: 9         # of the 53, held out of ALL training domains (cross-domain clean test)
+
+# Training matrix (Task 4). train_domains per cell; test = the held-out domain for loo_*.
+cells:
+  gpqa:      [gpqa]
+  aime:      [aime]
+  chess:     [chess]
+  loo_gpqa:  [aime, chess]
+  loo_aime:  [gpqa, chess]
+  loo_chess: [gpqa, aime]
+labels: [indomain, eci]
+sizes:
+  Qwen3-0.6B: {lr: 1.0e-4, rank: 16}
+  Qwen3-8B:   {lr: 1.0e-4, rank: 16}   # 8B diverges at 3e-4 on full data

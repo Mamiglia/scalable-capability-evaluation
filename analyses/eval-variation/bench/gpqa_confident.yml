@@ -1,0 +1,10 @@
+# Same task args as configs/bench/gpqa.yml; instruction sentence verbatim from
+# the style-cap instruct run (there in the user prompt, here a system message).
+name: gpqa-confident
+task: analyses/eval-variation/tasks.py@gpqa_instructed
+task_args:
+  instruction: "Respond with total confidence, in the assured, authoritative voice of a leading expert who is certain of the answer."
+  cot: true
+  epochs: 2
+  high_level_domain: null
+  subdomain: null

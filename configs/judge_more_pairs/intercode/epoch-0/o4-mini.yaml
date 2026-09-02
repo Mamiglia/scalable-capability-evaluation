@@ -1,0 +1,61 @@
+log_root: logs/more-pairs/intercode/epoch-0
+transcripts:
+  claude-opus-4.7: data/intercode/463eb861/claude-opus-4.7/0/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_nbDJJofaJE8kYW6QRwFFaN.eval
+  deepseek-r1-0528: data/intercode/463eb861/deepseek-r1-0528/0/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_m7GPyExBoK9rJyyk2tr7q2.eval
+  deepseek-v3.2: data/intercode/463eb861/deepseek-v3.2/0/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_GKr47nTi7owPCegZkCWqqv.eval
+  gemma3-12b-it: data/intercode/463eb861/gemma-3-12b-it/0/2026-08-17T11-31-27-00-00_gdm-intercode-ctf_oNDPaejoHeFVS3z8UUW3Cf.eval
+  gemma4-e2b-it: data/intercode/463eb861/gemma-4-e2b-it/0/2026-08-18T13-50-29-00-00_gdm-intercode-ctf_nL2mafc3KiMAPCRV2oEvyY.eval
+  glm-4.6: data/intercode/463eb861/glm-4.6/0/2026-08-17T12-47-16-00-00_gdm-intercode-ctf_2R8FTGRzZFTfEQa93WDwDH.eval
+  glm-5.3: data/intercode/463eb861/glm-5.3/0/2026-08-20T17-31-17-00-00_gdm-intercode-ctf_aBksbndNAf5iPaPogLcGzd.eval
+  gpt-4.1: data/intercode/463eb861/gpt-4.1/0/2026-08-17T12-07-56-00-00_gdm-intercode-ctf_4F6Pqm6AQc7sEKLcR5wTt8.eval
+  gpt-5: data/intercode/463eb861/gpt-5/0/2026-08-17T13-58-51-00-00_gdm-intercode-ctf_33nC5FvubwzvM8p79g4QBb.eval
+  granite-4.1-8b: data/intercode/463eb861/granite-4.1-8b/0/2026-08-17T11-35-07-00-00_gdm-intercode-ctf_fcM3KvbrtAwu68vvG4vShM.eval
+  kimi-k2.6: data/intercode/463eb861/kimi-k2.6/0/2026-08-17T11-51-10-00-00_gdm-intercode-ctf_4Jkj2D3bZtykx7pBgv7dNH.eval
+  ling-2.6-flash: data/intercode/463eb861/ling-2.6-flash/0/2026-08-17T22-44-36-00-00_gdm-intercode-ctf_Z2ueiuWtsGgVszvp7uM3F4.eval
+  mistral-medium-3: data/intercode/463eb861/mistral-medium-3/0/2026-08-17T11-42-11-00-00_gdm-intercode-ctf_ZVXyZcyqXtFZeBQ2fVkGYh.eval
+  nemotron-3.5-lightning: data/intercode/463eb861/nvidia-nemotron-3.5-lightning-30b-a3b-bf16/0/2026-08-20T17-11-17-00-00_gdm-intercode-ctf_dabwPeP4rEc5V5dVoZuJ5S.eval
+  o3: data/intercode/463eb861/o3/0/2026-08-18T11-12-59-00-00_gdm-intercode-ctf_5GEb3etLaknSQLQ4Xe6E4W.eval
+  qwen3-32b: data/intercode/463eb861/qwen3-32b/0/2026-08-18T14-58-44-00-00_gdm-intercode-ctf_85omruWyjTicmEjV8JV5he.eval
+  qwen3.5-4b: data/intercode/463eb861/qwen3.5-4b/0/2026-08-17T18-08-18-00-00_gdm-intercode-ctf_3kCTSSKTbByszzL6j3EJkW.eval
+  qwen3.5-9b: data/intercode/463eb861/qwen3.5-9b/0/2026-08-17T12-40-22-00-00_gdm-intercode-ctf_BUiiZMwV33bYNdRweChxwW.eval
+  qwen3.8-27b: data/intercode/463eb861/qwen3.8-27b/0/2026-08-20T17-22-33-00-00_gdm-intercode-ctf_fEue2DgQRzRwwEvpBEDaYB.eval
+comparisons:
+- - openrouter/openai/o4-mini
+  - claude-opus-4.7
+  - glm-5.3
+- - openrouter/openai/o4-mini
+  - claude-opus-4.7
+  - gpt-5
+- - openrouter/openai/o4-mini
+  - gemma3-12b-it
+  - qwen3.5-9b
+- - openrouter/openai/o4-mini
+  - gpt-4.1
+  - glm-4.6
+- - openrouter/openai/o4-mini
+  - gpt-4.1
+  - o3
+- - openrouter/openai/o4-mini
+  - granite-4.1-8b
+  - deepseek-r1-0528
+- - openrouter/openai/o4-mini
+  - granite-4.1-8b
+  - gemma4-e2b-it
+- - openrouter/openai/o4-mini
+  - ling-2.6-flash
+  - deepseek-v3.2
+- - openrouter/openai/o4-mini
+  - ling-2.6-flash
+  - qwen3.8-27b
+- - openrouter/openai/o4-mini
+  - mistral-medium-3
+  - kimi-k2.6
+- - openrouter/openai/o4-mini
+  - mistral-medium-3
+  - qwen3.5-4b
+- - openrouter/openai/o4-mini
+  - qwen3-32b
+  - nemotron-3.5-lightning
+judge_model_args:
+  openrouter/openai/o4-mini:
+    provider: {}

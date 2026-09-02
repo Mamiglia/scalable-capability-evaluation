@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Judging cost calculator</title>
+  <link rel="stylesheet" href="mc_cost.css" />
+  <script src="plotly.min.js"></script>
+</head>
+<body>
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">Upload-driven planning</p>
+      <h1>Judging cost calculator</h1>
+      <p class="lede">Upload judge/model pairs to estimate candidate and judge tokens, cost,
+        mutually-correct items, and length-adjusted judging accuracy.</p>
+    </div>
+    <p id="data-status" class="data-status" role="status">Loading exported scenarios…</p>
+  </header>
+
+  <main>
+    <section class="card calculator-card" aria-labelledby="calculator-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">Calculator</p><h2 id="calculator-heading">Sample a judging design</h2></div>
+        <button id="download-calculator" type="button" class="secondary-button" disabled>Download results CSV</button>
+      </div>
+      <div class="calculator-controls">
+        <div class="field">
+          <label for="calculator-condition">Condition</label>
+          <select id="calculator-condition"><option value="oversight">Oversight</option><option value="all">All models</option></select>
+        </div>
+        <div class="field">
+          <label for="calculator-judges">Judges (J): <output id="calculator-judges-value">5</output></label>
+          <input id="calculator-judges" type="range" min="1" max="20" step="1" value="5" />
+        </div>
+        <div class="field">
+          <label for="calculator-anchors">Newer/stronger anchors (N): <output id="calculator-anchors-value">5</output></label>
+          <input id="calculator-anchors" type="range" min="1" max="20" step="1" value="5" />
+        </div>
+        <div class="field">
+          <label for="calculator-comparators">Comparators per anchor (M): <output id="calculator-comparators-value">5</output></label>
+          <input id="calculator-comparators" type="range" min="1" max="20" step="1" value="5" />
+        </div>
+        <div class="field">
+          <label for="calculator-items">Items judged per model pair: <output id="calculator-items-value">100</output></label>
+          <input id="calculator-items" type="range" min="1" max="500" step="1" value="100" />
+          <span id="calculator-items-estimate" class="caption"></span>
+        </div>
+        <div class="field">
+          <label for="calculator-correct">Mutually-correct samples (%)</label>
+          <input id="calculator-correct" type="number" min="0.1" max="100" step="0.1" value="40" />
+        </div>
+        <div class="field">
+          <label for="calculator-repeats">Repeats / epochs: <output id="calculator-repeats-value">1</output></label>
+          <input id="calculator-repeats" type="range" min="1" max="20" step="1" value="1" />
+        </div>
+        <div class="field">
+          <label for="judge-accuracy">Judge accuracy: <output id="judge-accuracy-value">60.0% Acc at 10% ΔECI</output> <span id="judge-accuracy-default"></span></label>
+          <input id="judge-accuracy" type="range" min="50" max="99.9" step="0.1" value="60" />
+        </div>
+        <div class="field">
+          <label for="comparison-upload">Optional exact CSV or JSON</label>
+          <input id="comparison-upload" type="file" accept=".csv,.json,text/csv,application/json" />
+        </div>
+      </div>
+      <p class="caption">Oversight samples N models newer and stronger than each judge, then M older comparators per anchor. All models removes those restrictions. Uploads override the sampler and require <code>judge,m1,m2,items</code>; optional:
+        <code>repeats</code>/<code>epochs</code> and per-role <code>theta</code>, <code>eci</code>, <code>reasoning_class</code>,
+        <code>release</code>, <code>price_in</code>, <code>price_out</code> overrides. Default judges are generic Monte Carlo draws from the configured 36-model pool; uploaded judge names remain exact. Prices are USD per million tokens.</p>
+      <div id="calculator-status" class="guidance neutral" role="status">Loading calculator data…</div>
+      <div class="plot-heading calculator-plot-heading">
+        <div><p class="eyebrow">Selected condition</p><h2>Relative ECI-gap curve</h2><p class="caption">Each line is one sampled judge. Its 95% band includes evaluated-model, nested-item, and repeat variance from the fitted hierarchy; the thick dashed line is the population mean set by the accuracy slider.</p></div>
+      </div>
+      <div id="gap-curves" class="plot" role="img" aria-label="Judging accuracy by capability gap and oversight condition"></div>
+      <div id="calculator-gap-summary" class="caption"></div>
+      <details id="calculator-comparison-details" class="calculator-comparison-details">
+        <summary>Show sampled comparisons</summary>
+        <div id="calculator-table-scroll" class="table-scroll calculator-table-scroll">
+          <table id="calculator-results" class="results-table">
+            <thead><tr><th>Comparison</th><th>Items × repeats</th><th>Candidate output tokens</th><th>Judge tokens</th><th>Mutually correct items</th><th>Judging accuracy</th><th>Candidate cost</th><th>Judge cost</th><th>Total cost</th><th>Source</th></tr></thead>
+            <tbody><tr><td colspan="10" class="empty-cell">Loading sampled comparisons.</td></tr></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <section id="calculator-summary" class="card" aria-labelledby="calculator-summary-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">Current forecast</p><h2 id="calculator-summary-heading">Live design totals</h2></div>
+      </div>
+      <div class="summary-grid" aria-live="polite">
+        <div class="summary-item"><span class="label">Model pairs</span><span id="calculator-pairs-summary" class="value">—</span><span class="interval">J × N × M</span></div>
+        <div class="summary-item"><span class="label">Judgment calls</span><span id="calculator-calls-summary" class="value">—</span><span class="interval">items × repeats</span></div>
+        <div class="summary-item"><span class="label">Usable judgments</span><span id="calculator-usable-summary" class="value">—</span><span class="interval">expected mutually-correct presentations</span></div>
+        <div class="summary-item"><span class="label">Total cost</span><span id="calculator-cost-summary" class="value">—</span><span id="calculator-cost-interval" class="interval"></span></div>
+        <div class="summary-item"><span class="label">Total tokens</span><span id="calculator-tokens-summary" class="value">—</span><span id="calculator-tokens-detail" class="interval"></span></div>
+      </div>
+    </section>
+
+    <section class="plots-grid" aria-label="live calculator totals">
+      <article class="card plot-card">
+        <div><p class="eyebrow">Cost</p><h2>Candidate and judge cost</h2><p class="caption">95% Monte Carlo predictive intervals across judge/model profiles and GPQA token lengths.</p></div>
+        <div id="calculator-cost-plot" class="plot" role="img" aria-label="Candidate, judge, and total cost"></div>
+      </article>
+      <article class="card plot-card">
+        <div><p class="eyebrow">Tokens</p><h2>Candidate and judge tokens</h2><p class="caption">Total input and output tokens with 95% Monte Carlo predictive intervals.</p></div>
+        <div id="calculator-token-plot" class="plot" role="img" aria-label="Candidate and judge token totals"></div>
+      </article>
+    </section>
+
+    <div id="legacy-dashboard" hidden>
+    <aside id="validation-banner" class="validation-banner" role="status"></aside>
+    <section class="card controls-card" aria-labelledby="design-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">Design</p><h2 id="design-heading">Choose an exported scenario</h2></div>
+        <div class="field compact">
+          <label for="mode">Input mode</label>
+          <select id="mode">
+            <option value="automatic">Automatic design</option>
+            <option value="manual">Manual comparisons</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="automatic-controls" class="control-grid">
+        <div class="field"><label for="judge-pool">Judge pool</label><select id="judge-pool"></select></div>
+        <div class="field"><label for="anchor-pool">Anchor (M1) pool</label><select id="anchor-pool"></select></div>
+        <div class="field"><label for="comparator-pool">Comparator (M2) pool</label><select id="comparator-pool"></select></div>
+        <div class="field"><label for="judge-count">Judges (J)</label><select id="judge-count"></select></div>
+        <div class="field"><label for="anchor-count">Anchors (M)</label><select id="anchor-count"></select></div>
+        <div class="field"><label for="comparator-count">Comparators per anchor (N)</label><select id="comparator-count"></select></div>
+        <div class="field"><label for="attempted-items">Attempted items</label><select id="attempted-items"></select></div>
+        <div class="field"><label for="presentations">Presentations per pair</label><select id="presentations"></select></div>
+        <div class="field"><label for="strength-filter">Anchor strength filter</label><select id="strength-filter"></select></div>
+        <p class="pool-note">Pools are fixed in this export. Need a custom pool? Update the catalogue or
+          dashboard configuration and rerun <code>mc-cost export-dashboard</code>.</p>
+        <div id="automatic-guidance" class="guidance" role="status" hidden></div>
+      </div>
+
+      <div id="manual-controls" hidden>
+        <div class="table-scroll">
+          <table class="editor-table">
+            <thead><tr><th>Judge</th><th>Judge class</th><th>M1</th><th>M1 class</th><th>M2</th><th>M2 class</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody id="manual-rows"></tbody>
+          </table>
+        </div>
+        <button id="add-manual-row" type="button" class="secondary-button">Add comparison</button>
+        <div id="manual-guidance" class="guidance" role="status" hidden></div>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="summary-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">Current forecast</p><h2 id="summary-heading">Design, calls, and cost</h2></div>
+        <div id="badges" class="badges" aria-label="forecast status"></div>
+      </div>
+      <div id="run-summary" class="summary-grid" aria-live="polite"></div>
+    </section>
+
+    <section class="plots-grid" aria-label="forecast charts">
+      <article class="card plot-card">
+        <div><p class="eyebrow">Accuracy</p><h2>Capability gap</h2><p class="caption">Higher-θ choice accuracy with p5–p95 bands.</p></div>
+        <div id="accuracy-plot" class="plot" role="img" aria-label="Capability gap versus choice accuracy"></div>
+      </article>
+      <article class="card plot-card">
+        <div class="plot-heading">
+          <div><p class="eyebrow">Scale</p><h2>One-axis sensitivity</h2><p class="caption">One exported axis varies; every other control stays fixed.</p></div>
+          <div class="field compact"><label for="scaling-axis">Vary</label><select id="scaling-axis"><option value="J">Judges (J)</option><option value="M">Anchors (M)</option><option value="N">Comparators (N)</option><option value="attempted_items">Attempted items</option><option value="presentations">Presentations</option></select></div>
+        </div>
+        <div id="scaling-plot" class="plot" role="img" aria-label="One-axis scaling forecast"></div>
+      </article>
+    </section>
+
+    <section class="card" aria-labelledby="tokens-heading">
+      <div class="section-heading"><div><p class="eyebrow">Usage</p><h2 id="tokens-heading">Per-model token and cost intervals</h2></div></div>
+      <div class="table-scroll">
+        <table id="token-table" class="results-table">
+          <thead><tr><th>Scenario</th><th>Model</th><th>Class</th><th>Role</th><th>Input p5 / p50 / p95</th><th>Total output p5 / p50 / p95</th><th>Ordinary output p5 / p50 / p95</th><th>Reasoning p5 / p50 / p95</th><th>Cost p5 / p50 / p95</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="manual-results" class="card" aria-labelledby="manual-results-heading" hidden>
+      <div class="section-heading"><div><p class="eyebrow">Manual rows</p><h2 id="manual-results-heading">Per-comparison forecasts</h2></div></div>
+      <div class="table-scroll">
+        <table class="results-table"><thead><tr><th>Row</th><th>Comparison</th><th>P(choose M1) p5 / p50 / p95</th><th>Higher-θ accuracy p5 / p50 / p95</th><th>Candidate calls</th><th>Judge calls</th><th>Candidate cost</th><th>Judge cost</th><th>Total cost</th><th>Status</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section id="ranking-recovery" class="card" aria-labelledby="ranking-heading">
+      <div class="section-heading"><div><p class="eyebrow">Ranking</p><h2 id="ranking-heading">Component-safe recovery</h2><p class="caption">Disconnected comparison components stay separate; partial results retain their reason.</p></div></div>
+      <div id="ranking-plot" class="plot short-plot" role="img" aria-label="Ranking recovery intervals"></div>
+      <ul id="ranking-reasons" class="reason-list"></ul>
+    </section>
+
+    <section class="card warnings-card" aria-labelledby="warnings-heading">
+      <div class="section-heading"><div><p class="eyebrow">Checks</p><h2 id="warnings-heading">Warnings and unavailable designs</h2></div></div>
+      <ul id="warning-list" class="warning-list" aria-live="polite"></ul>
+    </section>
+    </div>
+  </main>
+
+  <template id="manual-row-template">
+    <tr>
+      <td><label class="sr-only">Judge</label><select data-role="judge"></select></td>
+      <td><label class="sr-only">Judge reasoning class</label><select data-class="judge"></select></td>
+      <td><label class="sr-only">M1</label><select data-role="m1"></select></td>
+      <td><label class="sr-only">M1 reasoning class</label><select data-class="m1"></select></td>
+      <td><label class="sr-only">M2</label><select data-role="m2"></select></td>
+      <td><label class="sr-only">M2 reasoning class</label><select data-class="m2"></select></td>
+      <td><button type="button" class="remove-row" aria-label="Remove comparison">Remove</button></td>
+    </tr>
+  </template>
+  <script src="mc_cost_calculator.js"></script>
+  <script src="mc_cost.js"></script>
+</body>
+</html>

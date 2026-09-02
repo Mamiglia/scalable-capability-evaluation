@@ -1,0 +1,139 @@
+# per-model capability ground truth
+# eci: from the pairwise baseline configs
+# accuracy: mean accuracy from our own eval logs (external_data/epoch-*)
+# judge_eci from judging-variations model_pool.json: gpt-oss-120b is a real
+# Epoch ECI, the rest are its artificial-analysis-derived estimates
+# judge_accuracy: Epoch benchmark-hub runs at high effort; only gpt-oss judges have one
+# judge_model maps a judge to its name in the evaluated pool (none overlap yet)
+accuracy:
+  DeepSeek-R1: 0.6673
+  DeepSeek-R1-0528: 0.7633
+  DeepSeek-R1-Distill-Llama-70B: 0.5574
+  DeepSeek-V3: 0.5653
+  DeepSeek-V3-0324: 0.6761
+  Llama-2-70b-chat-hf: 0.2633
+  Llama-3.1-405B-Instruct: 0.5092
+  Llama-3.1-70B-Instruct: 0.4419
+  Llama-3.1-8B-Instruct: 0.2595
+  Llama-3.3-70B-Instruct: 0.4744
+  Meta-Llama-3-70B-Instruct: 0.4056
+  Meta-Llama-3-8B-Instruct: 0.2607
+  Mistral-7B-Instruct-v0.3: 0.1518
+  Mixtral-8x7B-Instruct-v0.1: 0.3059
+  Qwen3-235B-A22B-Thinking-2507: 0.8005
+  Yi-34B-Chat: 0.1474
+  claude-2.1: 0.3295
+  claude-3-5-haiku-20241022: 0.3813
+  claude-3-5-sonnet-20240620: 0.5404
+  claude-3-5-sonnet-20241022: 0.553
+  claude-3-7-sonnet-20250219: 0.6604
+  claude-3-haiku-20240307: 0.363
+  claude-3-opus-20240229: 0.4716
+  claude-3-sonnet-20240229: 0.4059
+  claude-haiku-4-5-20251001: 0.6048
+  claude-opus-4-1-20250805: 0.7323
+  claude-opus-4-20250514: 0.6919
+  claude-opus-4-5-20251101: 0.8068
+  claude-sonnet-4-20250514: 0.6667
+  claude-sonnet-4-5-20250929: 0.7374
+  deepseek-chat: 0.7121
+  deepseek-reasoner: 0.8342
+  gemini-1.0-pro-001: 0.3396
+  gemini-1.5-flash-001: 0.4037
+  gemini-1.5-flash-002: 0.4732
+  gemini-1.5-pro-001: 0.4586
+  gemini-1.5-pro-002: 0.5723
+  gemini-2.0-flash-001: 0.6414
+  gemini-2.0-flash-thinking-exp-01-21: 0.5707
+  gemini-2.0-pro-exp-02-05: 0.6566
+  glm-4.7: 0.8333
+  glm-5: 0.8782
+  glm-5.1: 0.8548
+  gpt-4.1-2025-04-14: 0.6692
+  gpt-4.1-mini-2025-04-14: 0.6585
+  gpt-4.1-nano-2025-04-14: 0.4893
+  gpt-4o-2024-05-13: 0.489
+  gpt-4o-2024-08-06: 0.4921
+  gpt-4o-2024-11-20: 0.4789
+  gpt-4o-mini-2024-07-18: 0.3772
+  kimi-k2.6: 0.9078
+  o1-preview-2024-09-12: 0.5032
+  phi-4: 0.5606
+  qwen2-72b-instruct: 0.4078
+  qwen2.5-72b-instruct: 0.4915
+  qwen3-235b-a22b: 0.7071
+  qwen3-max-2025-09-23: 0.726
+bench: gpqa
+eci:
+  DeepSeek-R1: 139.51
+  DeepSeek-R1-0528: 135.89
+  DeepSeek-R1-Distill-Llama-70B: 128.9
+  DeepSeek-V3: 132.87
+  DeepSeek-V3-0324: 132.46
+  Llama-2-70b-chat-hf: 113.13
+  Llama-3.1-405B-Instruct: 128.73
+  Llama-3.1-70B-Instruct: 125.2
+  Llama-3.1-8B-Instruct: 114.92
+  Llama-3.3-70B-Instruct: 127.2
+  Meta-Llama-3-70B-Instruct: 122.23
+  Meta-Llama-3-8B-Instruct: 115.91
+  Mistral-7B-Instruct-v0.3: 111.34
+  Mixtral-8x7B-Instruct-v0.1: 117.65
+  Qwen3-235B-A22B-Thinking-2507: 135.56
+  Yi-34B-Chat: 116.64
+  claude-2.1: 117.91
+  claude-3-5-haiku-20241022: 127.2
+  claude-3-5-sonnet-20240620: 130.0
+  claude-3-5-sonnet-20241022: 130.0
+  claude-3-7-sonnet-20250219: 141.61
+  claude-3-haiku-20240307: 117.16
+  claude-3-opus-20240229: 126.65
+  claude-3-sonnet-20240229: 119.47
+  claude-haiku-4-5-20251001: 142.8
+  claude-opus-4-1-20250805: 144.19
+  claude-opus-4-20250514: 142.85
+  claude-opus-4-5-20251101: 149.91
+  claude-sonnet-4-20250514: 142.12
+  claude-sonnet-4-5-20250929: 146.83
+  deepseek-chat: 132.87
+  deepseek-reasoner: 139.51
+  gemini-1.0-pro-001: 116.52
+  gemini-1.5-flash-001: 130.16
+  gemini-1.5-flash-002: 130.16
+  gemini-1.5-pro-001: 132.51
+  gemini-1.5-pro-002: 132.51
+  gemini-2.0-flash-001: 135.61
+  gemini-2.0-flash-thinking-exp-01-21: 136.06
+  gemini-2.0-pro-exp-02-05: 135.43
+  glm-4.7: 143.71
+  glm-5: 146.12
+  glm-5.1: 150.74
+  gpt-4.1-2025-04-14: 137.32
+  gpt-4.1-mini-2025-04-14: 135.62
+  gpt-4.1-nano-2025-04-14: 130.65
+  gpt-4o-2024-05-13: 129.06
+  gpt-4o-2024-08-06: 129.06
+  gpt-4o-2024-11-20: 129.06
+  gpt-4o-mini-2024-07-18: 126.64
+  kimi-k2.6: 151.11
+  o1-preview-2024-09-12: 135.66
+  phi-4: 130.84
+  qwen2-72b-instruct: 124.93
+  qwen2.5-72b-instruct: 128.76
+  qwen3-235b-a22b: 139.46
+  qwen3-max-2025-09-23: 143.62
+judge_accuracy:
+  gpt-oss-120b: 0.7576
+  gpt-oss-20b: 0.4596
+judge_eci:
+  gpt-oss-120b: 140.48
+  gpt-oss-20b: 132.46
+  ling-2.6-flash: 131.8
+  llama-3.2-3b: 125.0
+  qwen3-14b: 129.29
+  qwen3-14b-yarn: 129.29
+  qwen3-32b: 129.95
+  qwen3-32b-yarn: 129.95
+  qwen3-8b: 127.9
+  qwen3-8b-yarn: 127.9
+judge_model: {}

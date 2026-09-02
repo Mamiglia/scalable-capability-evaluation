@@ -1,0 +1,456 @@
+log_root: logs/eval-variation/confident
+system_prompt: 'You are an AI model that judges the responses of two other AI models to the same input prompt.
+
+  You will be given a question and the responses from two models, labeled Transcript 1 and Transcript 2, both coming to the
+  correct solution.
+
+
+  For multiple choice questions, the options were shuffled independently for each model, so an option letter in Transcript
+  1 does not refer to the same option as that letter in Transcript 2. Each transcript is preceded by the options as that model
+  saw them. Read each letter against that transcript''s own option list.
+
+
+  One of the two models is more capable than the other, and your task is to identify which is the more capable model (1 or
+  2). You MUST follow this reply format:
+
+
+  EXPLANATION: <Your explanation of which response was produced by the more capable model and why. 2-4 sentences.>
+
+  ANSWER: <1 or 2, indicating which response was produced by the more capable model.>
+
+  CONFIDENCE: <An integer between 1 and 5, how sure you are that the model you picked is the more capable one: 1 = the two
+  are indistinguishable and you are guessing, 5 = certain. Rate the choice, not the explanation.>
+
+  '
+max_word_diff: 50
+include_reasoning: false
+transcripts:
+  deepseek-v4-flash-0731: data/eval-variation/gpqa-confident/9414956a/deepseek-v4-flash-0731/0/2026-08-11T09-21-54-00-00_gpqa-instructed_KbFodbyyAuLGrWgUTG3HZ8.eval
+  gemini-3.1-flash-lite: data/eval-variation/gpqa-confident/9414956a/gemini-3.1-flash-lite-rescored/0/2026-08-11T09-21-54-00-00_gpqa-instructed_doJMtXXUcsyNeGvxnXbWZz.eval
+  glm-4.6: data/eval-variation/gpqa-confident/9414956a/glm-4.6/0/2026-08-11T09-21-54-00-00_gpqa-instructed_gjCeR7KFNqjR3NukooQjdK.eval
+  ling-2.6-flash: data/eval-variation/gpqa-confident/9414956a/ling-2.6-flash/0/2026-08-11T09-21-54-00-00_gpqa-instructed_2Yz6YBwwSohnQGvaHxQU5w.eval
+  qwen3-vl-30b-a3b-instruct: data/eval-variation/gpqa-confident/9414956a/qwen3-vl-30b-a3b-instruct/0/2026-08-11T09-21-54-00-00_gpqa-instructed_XYiQzMXj3VieTpU5iEFxH4.eval
+  qwen3-32b: data/eval-variation/gpqa-confident/9414956a/qwen3-32b/0/2026-08-11T09-21-54-00-00_gpqa-instructed_YqTJMP3UqdSXmwPR8NrRP2.eval
+  qwen3-8b: data/eval-variation/gpqa-confident/9414956a/qwen3-8b/0/2026-08-11T09-21-54-00-00_gpqa-instructed_CcadukWiBQGxkLD3dt7scU.eval
+judge_model_args:
+  openrouter/google/gemini-3.1-flash-lite:
+    provider:
+      only:
+      - google-ai-studio
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/inclusionai/ling-2.6-flash:
+    provider:
+      only:
+      - novita
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/qwen/qwen3-vl-30b-a3b-instruct:
+    provider:
+      only:
+      - siliconflow/fp8
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/deepseek/deepseek-v4-flash-0731:
+    provider:
+      only:
+      - novita/fp8
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/qwen/qwen3-32b:
+    provider:
+      only:
+      - siliconflow/fp8
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/z-ai/glm-4.6:
+    provider:
+      only:
+      - atlas-cloud/fp8
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+comparisons:
+- - openrouter/google/gemini-3.1-flash-lite
+  - deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+- - openrouter/google/gemini-3.1-flash-lite
+  - deepseek-v4-flash-0731
+  - glm-4.6
+- - openrouter/google/gemini-3.1-flash-lite
+  - deepseek-v4-flash-0731
+  - ling-2.6-flash
+- - openrouter/google/gemini-3.1-flash-lite
+  - deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/google/gemini-3.1-flash-lite
+  - deepseek-v4-flash-0731
+  - qwen3-32b
+- - openrouter/google/gemini-3.1-flash-lite
+  - deepseek-v4-flash-0731
+  - qwen3-8b
+- - openrouter/google/gemini-3.1-flash-lite
+  - gemini-3.1-flash-lite
+  - glm-4.6
+- - openrouter/google/gemini-3.1-flash-lite
+  - gemini-3.1-flash-lite
+  - ling-2.6-flash
+- - openrouter/google/gemini-3.1-flash-lite
+  - gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/google/gemini-3.1-flash-lite
+  - gemini-3.1-flash-lite
+  - qwen3-32b
+- - openrouter/google/gemini-3.1-flash-lite
+  - gemini-3.1-flash-lite
+  - qwen3-8b
+- - openrouter/google/gemini-3.1-flash-lite
+  - glm-4.6
+  - ling-2.6-flash
+- - openrouter/google/gemini-3.1-flash-lite
+  - glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/google/gemini-3.1-flash-lite
+  - glm-4.6
+  - qwen3-32b
+- - openrouter/google/gemini-3.1-flash-lite
+  - glm-4.6
+  - qwen3-8b
+- - openrouter/google/gemini-3.1-flash-lite
+  - ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/google/gemini-3.1-flash-lite
+  - ling-2.6-flash
+  - qwen3-32b
+- - openrouter/google/gemini-3.1-flash-lite
+  - ling-2.6-flash
+  - qwen3-8b
+- - openrouter/google/gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-32b
+- - openrouter/google/gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-8b
+- - openrouter/google/gemini-3.1-flash-lite
+  - qwen3-32b
+  - qwen3-8b
+- - openrouter/inclusionai/ling-2.6-flash
+  - deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+- - openrouter/inclusionai/ling-2.6-flash
+  - deepseek-v4-flash-0731
+  - glm-4.6
+- - openrouter/inclusionai/ling-2.6-flash
+  - deepseek-v4-flash-0731
+  - ling-2.6-flash
+- - openrouter/inclusionai/ling-2.6-flash
+  - deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/inclusionai/ling-2.6-flash
+  - deepseek-v4-flash-0731
+  - qwen3-32b
+- - openrouter/inclusionai/ling-2.6-flash
+  - deepseek-v4-flash-0731
+  - qwen3-8b
+- - openrouter/inclusionai/ling-2.6-flash
+  - gemini-3.1-flash-lite
+  - glm-4.6
+- - openrouter/inclusionai/ling-2.6-flash
+  - gemini-3.1-flash-lite
+  - ling-2.6-flash
+- - openrouter/inclusionai/ling-2.6-flash
+  - gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/inclusionai/ling-2.6-flash
+  - gemini-3.1-flash-lite
+  - qwen3-32b
+- - openrouter/inclusionai/ling-2.6-flash
+  - gemini-3.1-flash-lite
+  - qwen3-8b
+- - openrouter/inclusionai/ling-2.6-flash
+  - glm-4.6
+  - ling-2.6-flash
+- - openrouter/inclusionai/ling-2.6-flash
+  - glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/inclusionai/ling-2.6-flash
+  - glm-4.6
+  - qwen3-32b
+- - openrouter/inclusionai/ling-2.6-flash
+  - glm-4.6
+  - qwen3-8b
+- - openrouter/inclusionai/ling-2.6-flash
+  - ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/inclusionai/ling-2.6-flash
+  - ling-2.6-flash
+  - qwen3-32b
+- - openrouter/inclusionai/ling-2.6-flash
+  - ling-2.6-flash
+  - qwen3-8b
+- - openrouter/inclusionai/ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-32b
+- - openrouter/inclusionai/ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-8b
+- - openrouter/inclusionai/ling-2.6-flash
+  - qwen3-32b
+  - qwen3-8b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - deepseek-v4-flash-0731
+  - glm-4.6
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - deepseek-v4-flash-0731
+  - ling-2.6-flash
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - deepseek-v4-flash-0731
+  - qwen3-32b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - deepseek-v4-flash-0731
+  - qwen3-8b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - gemini-3.1-flash-lite
+  - glm-4.6
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - gemini-3.1-flash-lite
+  - ling-2.6-flash
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - gemini-3.1-flash-lite
+  - qwen3-32b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - gemini-3.1-flash-lite
+  - qwen3-8b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - glm-4.6
+  - ling-2.6-flash
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - glm-4.6
+  - qwen3-32b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - glm-4.6
+  - qwen3-8b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - ling-2.6-flash
+  - qwen3-32b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - ling-2.6-flash
+  - qwen3-8b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-32b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-8b
+- - openrouter/qwen/qwen3-vl-30b-a3b-instruct
+  - qwen3-32b
+  - qwen3-8b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - deepseek-v4-flash-0731
+  - glm-4.6
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - deepseek-v4-flash-0731
+  - ling-2.6-flash
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - deepseek-v4-flash-0731
+  - qwen3-32b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - deepseek-v4-flash-0731
+  - qwen3-8b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+  - glm-4.6
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+  - ling-2.6-flash
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+  - qwen3-32b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+  - qwen3-8b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - glm-4.6
+  - ling-2.6-flash
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - glm-4.6
+  - qwen3-32b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - glm-4.6
+  - qwen3-8b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - ling-2.6-flash
+  - qwen3-32b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - ling-2.6-flash
+  - qwen3-8b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-32b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-8b
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - qwen3-32b
+  - qwen3-8b
+- - openrouter/qwen/qwen3-32b
+  - deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+- - openrouter/qwen/qwen3-32b
+  - deepseek-v4-flash-0731
+  - glm-4.6
+- - openrouter/qwen/qwen3-32b
+  - deepseek-v4-flash-0731
+  - ling-2.6-flash
+- - openrouter/qwen/qwen3-32b
+  - deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/qwen/qwen3-32b
+  - deepseek-v4-flash-0731
+  - qwen3-32b
+- - openrouter/qwen/qwen3-32b
+  - deepseek-v4-flash-0731
+  - qwen3-8b
+- - openrouter/qwen/qwen3-32b
+  - gemini-3.1-flash-lite
+  - glm-4.6
+- - openrouter/qwen/qwen3-32b
+  - gemini-3.1-flash-lite
+  - ling-2.6-flash
+- - openrouter/qwen/qwen3-32b
+  - gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/qwen/qwen3-32b
+  - gemini-3.1-flash-lite
+  - qwen3-32b
+- - openrouter/qwen/qwen3-32b
+  - gemini-3.1-flash-lite
+  - qwen3-8b
+- - openrouter/qwen/qwen3-32b
+  - glm-4.6
+  - ling-2.6-flash
+- - openrouter/qwen/qwen3-32b
+  - glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/qwen/qwen3-32b
+  - glm-4.6
+  - qwen3-32b
+- - openrouter/qwen/qwen3-32b
+  - glm-4.6
+  - qwen3-8b
+- - openrouter/qwen/qwen3-32b
+  - ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/qwen/qwen3-32b
+  - ling-2.6-flash
+  - qwen3-32b
+- - openrouter/qwen/qwen3-32b
+  - ling-2.6-flash
+  - qwen3-8b
+- - openrouter/qwen/qwen3-32b
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-32b
+- - openrouter/qwen/qwen3-32b
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-8b
+- - openrouter/qwen/qwen3-32b
+  - qwen3-32b
+  - qwen3-8b
+- - openrouter/z-ai/glm-4.6
+  - deepseek-v4-flash-0731
+  - gemini-3.1-flash-lite
+- - openrouter/z-ai/glm-4.6
+  - deepseek-v4-flash-0731
+  - glm-4.6
+- - openrouter/z-ai/glm-4.6
+  - deepseek-v4-flash-0731
+  - ling-2.6-flash
+- - openrouter/z-ai/glm-4.6
+  - deepseek-v4-flash-0731
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/z-ai/glm-4.6
+  - deepseek-v4-flash-0731
+  - qwen3-32b
+- - openrouter/z-ai/glm-4.6
+  - deepseek-v4-flash-0731
+  - qwen3-8b
+- - openrouter/z-ai/glm-4.6
+  - gemini-3.1-flash-lite
+  - glm-4.6
+- - openrouter/z-ai/glm-4.6
+  - gemini-3.1-flash-lite
+  - ling-2.6-flash
+- - openrouter/z-ai/glm-4.6
+  - gemini-3.1-flash-lite
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/z-ai/glm-4.6
+  - gemini-3.1-flash-lite
+  - qwen3-32b
+- - openrouter/z-ai/glm-4.6
+  - gemini-3.1-flash-lite
+  - qwen3-8b
+- - openrouter/z-ai/glm-4.6
+  - glm-4.6
+  - ling-2.6-flash
+- - openrouter/z-ai/glm-4.6
+  - glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/z-ai/glm-4.6
+  - glm-4.6
+  - qwen3-32b
+- - openrouter/z-ai/glm-4.6
+  - glm-4.6
+  - qwen3-8b
+- - openrouter/z-ai/glm-4.6
+  - ling-2.6-flash
+  - qwen3-vl-30b-a3b-instruct
+- - openrouter/z-ai/glm-4.6
+  - ling-2.6-flash
+  - qwen3-32b
+- - openrouter/z-ai/glm-4.6
+  - ling-2.6-flash
+  - qwen3-8b
+- - openrouter/z-ai/glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-32b
+- - openrouter/z-ai/glm-4.6
+  - qwen3-vl-30b-a3b-instruct
+  - qwen3-8b
+- - openrouter/z-ai/glm-4.6
+  - qwen3-32b
+  - qwen3-8b

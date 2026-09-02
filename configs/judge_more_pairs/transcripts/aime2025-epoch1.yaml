@@ -1,0 +1,20 @@
+# rollout log each model was judged from in the existing LASR-G5/judging runs
+claude-opus-4.7: data/aime2025/44136fa3/claude-opus-4.7/1/2026-08-17T20-33-08-00-00_aime2025_EWU2UZcyFCeaHbhLeDtQYZ.eval
+claude-sonnet-4.5: data/aime2025/44136fa3/claude-sonnet-4.5/1/2026-08-11T14-30-59-00-00_aime2025_jzj7uAWSSZpghTQgtaj6Zs.eval
+deepseek-r1-0528: data/aime2025/44136fa3/deepseek-r1-0528/1/2026-08-11T14-31-05-00-00_aime2025_6p8ckd69ZmYPRG8NNBxCb9.eval
+deepseek-v3.2: data/aime2025/44136fa3/deepseek-v3.2/1/2026-08-11T14-31-10-00-00_aime2025_BguVzyrrxQ7fxUtsQSdcnM.eval
+gemma3-12b-it: data/aime2025/44136fa3/gemma-3-12b-it/1/2026-08-12T14-22-22-00-00_aime2025_K884YLRX7339P2BuHYieme.eval
+gemma4-e2b-it: data/aime2025/44136fa3/gemma-4-e2b-it/1/2026-08-12T13-32-57-00-00_aime2025_iHXfUkJPFADWQHdUFPtbMx.eval
+glm-4.6: data/aime2025/44136fa3/glm-4.6/1/2026-08-13T11-26-27-00-00_aime2025_35oBMnu9EbDMhA3pqWa9Tr.eval
+glm-5.2: data/aime2025/44136fa3/glm-5.2/1/2026-08-11T14-31-16-00-00_aime2025_PBY2WYuVrivp7ZhG2mCupM.eval
+gpt-4.1: data/aime2025/44136fa3/gpt-4.1/1/2026-08-13T11-30-34-00-00_aime2025_h9AbKvLFmxzCjP3cT3qjza.eval
+gpt-5: data/aime2025/44136fa3/gpt-5/1/2026-08-11T14-31-17-00-00_aime2025_NvBk792jFHCHbxkTVvGySo.eval
+granite-4.1-8b: data/aime2025/44136fa3/granite-4.1-8b/1/2026-08-12T14-22-25-00-00_aime2025_nvEmRWCHfUBemNx3XfV4hj.eval
+kimi-k2.6: data/aime2025/44136fa3/kimi-k2.6/1/2026-08-13T11-45-44-00-00_aime2025_AJ2WdEcBQ8HmNwCJTS2mG3.eval
+kimi-k3: data/aime2025/44136fa3/kimi-k3/1/2026-08-17T20-33-50-00-00_aime2025_J9Ab5W8drYTUqxsk5czK86.eval
+ling-2.6-flash: data/aime2025/44136fa3/ling-2.6-flash/1/2026-08-12T14-22-23-00-00_aime2025_byJYP2kYB2os6YM4zu2ti6.eval
+mistral-medium-3: data/aime2025/44136fa3/mistral-medium-3/1/2026-08-11T14-31-13-00-00_aime2025_U7j2ZMREgxeYb3dRZ438ca.eval
+o3: data/aime2025/44136fa3/o3/1/2026-08-11T14-31-05-00-00_aime2025_kR2GXRRTdg6dqxGREbQypy.eval
+qwen3-32b: data/aime2025/44136fa3/qwen3-32b/1/2026-08-13T11-49-07-00-00_aime2025_CBDHWwimeqhhcg2SEUFzut.eval
+qwen3.5-4b: data/aime2025/44136fa3/qwen3.5-4b/1/2026-08-13T21-29-17-00-00_aime2025_moSoKJyFzMNY8h6dJzjZyp.eval
+qwen3.5-9b: data/aime2025/44136fa3/qwen3.5-9b/1/2026-08-12T14-22-23-00-00_aime2025_BNtyiutgnNNfmiaDjWqjzZ.eval

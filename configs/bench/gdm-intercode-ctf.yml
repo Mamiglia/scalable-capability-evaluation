@@ -1,0 +1,4 @@
+name: gdm_intercode_ctf
+task: inspect_evals/gdm_intercode_ctf
+# defaults: max_messages=50, max_attempts=3, local docker sandbox (built from
+# the task's bundled compose). Offline CTF — no unrestricted-internet gate.

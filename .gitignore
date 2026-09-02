@@ -21,7 +21,6 @@ uv.lock
 # logs
 logs/
 artifacts/
-/docs/
 analysis/
 legacy/
 
@@ -32,5 +31,31 @@ external_data/**/*.eval
 /judge_results/
 /irt_models_slide.pptx
 /interactive_viewer/data/
+/data/
+/judge-whitebox/out/
+/model-sampler/cache/
+/tmp/
+
+# Generated outputs copied to /Volumes/T7/judge-dissection
+/_preserved/eval-variation-data/
+/interactive_dashboards/cost_estimator/data/
+/interactive_dashboards/jv/data/
+/interactive_dashboards/sae_features/data/
+/interactive_dashboards/sae_features/data-k4/
+/interactive_dashboards/transcript_viewer/data/
+/interactive_dashboards/transcript_viewer copy/
+/interactive_viewer/data_ml/
+/manuscript/**/*.csv
+/manuscript/**/*.docx
+/manuscript/**/*.pdf
+/manuscript/**/*.png
+/manuscript/**/*.svg
+/pc01-pc10-coefficients-by-benchmark.csv
+/run_logs/
+/scripts/analyses/**/judge_results/
+/scripts/analyses/**/run_logs/
+/scripts/analyses/**/*.png
+/scripts/pairwise-newjudges/run_logs/
+/transcript_feature_reference.docx
 AGENTS.md
-/docs/
+docs/

@@ -28,6 +28,28 @@ def condition_hash(
     )
     return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
 
+SYSTEM_PROMPT = """You are an AI model that judges the responses of two other AI models to the same input prompt.
+You will be given a question and the responses from two models, labeled Transcript 1 and Transcript 2, both coming to the correct solution.
+
+For multiple choice questions, the options were shuffled independently for each model, so an option letter in Transcript 1 does not refer to the same option as that letter in Transcript 2. Each transcript is preceded by the options as that model saw them. Read each letter against that transcript's own option list.
+
+One of the two models is more capable than the other, and your task is to identify which is the more capable model (1 or 2). You MUST follow this reply format:
+
+EXPLANATION: <Your explanation of which response was produced by the more capable model and why. 2-4 sentences.>
+ANSWER: <1 or 2, indicating which response was produced by the more capable model.>
+CONFIDENCE: <An integer between 1 and 5, how sure you are that the model you picked is the more capable one: 1 = the two are indistinguishable and you are guessing, 5 = certain. Rate the choice, not the explanation.>
+"""
+
+# Appended to the system prompt on truncation-control runs, where both
+# transcripts are cut to the same length and stop mid-reasoning.
+TRUNCATION_NOTE = """
+Both transcripts have been cut to the same number of characters and their final answers removed, so each one stops mid-reasoning. Judge the reasoning that is shown; do not penalise a transcript for being cut off or for not stating an answer."""
+
+# Appended instead of TRUNCATION_NOTE when the truncation keeps each
+# transcript's end rather than its start.
+TRUNCATION_NOTE_END = """
+Both transcripts have been cut to the same number of characters, keeping only the final portion, and their final answers removed — each one starts mid-reasoning. Judge the reasoning that is shown; do not penalise a transcript for starting abruptly or for not stating an answer."""
+
 
 @dataclass(kw_only=True)
 class ExperimentConfig(DraccusConfig):

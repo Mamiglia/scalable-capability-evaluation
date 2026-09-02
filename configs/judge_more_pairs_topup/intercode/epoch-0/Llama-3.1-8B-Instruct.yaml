@@ -1,0 +1,140 @@
+log_root: logs/more-pairs-topup/intercode/epoch-0
+transcripts:
+  claude-sonnet-4.5: data/intercode/463eb861/claude-sonnet-4.5/0/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_hTUJvQwpBCeooHo3Mqx3xU.eval
+  deepseek-v3.2: data/intercode/463eb861/deepseek-v3.2/0/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_GKr47nTi7owPCegZkCWqqv.eval
+  gemma3-12b-it: data/intercode/463eb861/gemma-3-12b-it/0/2026-08-28T01-34-21+00-00_gdm_intercode_ctf_Z4cTfmwNcHYgguCVstrP9u.eval
+  glm-4.6: data/intercode/463eb861/glm-4.6/0/2026-08-17T12-47-16-00-00_gdm-intercode-ctf_2R8FTGRzZFTfEQa93WDwDH.eval
+  nemotron-3-ultra-550b-a55b: data/intercode/463eb861/nvidia-nemotron-3-ultra-550b-a55b-bf16/0/2026-08-20T19-17-50-00-00_gdm-intercode-ctf_9rG9P3u9pLxSxy45ov73kv.eval
+  o3: data/intercode/463eb861/o3/0/2026-08-18T11-12-59-00-00_gdm-intercode-ctf_5GEb3etLaknSQLQ4Xe6E4W.eval
+  qwen3-32b: data/intercode/463eb861/qwen3-32b/0/2026-08-28T01-34-32+00-00_gdm_intercode_ctf_SsmZnAA7Qb97AQE3VEgQz5.eval
+comparisons:
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - deepseek-v3.2
+  - claude-sonnet-4.5
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - deepseek-v3.2
+  - gemma3-12b-it
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - deepseek-v3.2
+  - glm-4.6
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - deepseek-v3.2
+  - qwen3-32b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - nemotron-3-ultra-550b-a55b
+  - deepseek-v3.2
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - o3
+  - deepseek-v3.2
+only_items:
+  deepseek-v3.2-vs-claude-sonnet-4.5:
+  - '0'
+  - '10'
+  - '11'
+  - '13'
+  - '17'
+  - '18'
+  - '19'
+  - '2'
+  - '21'
+  - '22'
+  - '23'
+  - '24'
+  - '25'
+  - '26'
+  - '27'
+  - '3'
+  - '30'
+  - '31'
+  - '32'
+  - '33'
+  deepseek-v3.2-vs-gemma3-12b-it:
+  - '18'
+  deepseek-v3.2-vs-glm-4.6:
+  - '0'
+  - '10'
+  - '11'
+  - '13'
+  - '17'
+  - '18'
+  - '19'
+  - '2'
+  - '21'
+  - '22'
+  - '23'
+  - '24'
+  - '25'
+  - '26'
+  - '27'
+  - '3'
+  - '30'
+  - '31'
+  - '32'
+  - '33'
+  deepseek-v3.2-vs-qwen3-32b:
+  - '0'
+  - '10'
+  - '11'
+  - '13'
+  - '17'
+  - '18'
+  - '19'
+  - '2'
+  - '21'
+  - '22'
+  - '23'
+  - '24'
+  - '25'
+  - '26'
+  - '27'
+  - '30'
+  - '31'
+  - '32'
+  - '33'
+  - '34'
+  nemotron-3-ultra-550b-a55b-vs-deepseek-v3.2:
+  - '0'
+  - '10'
+  - '11'
+  - '13'
+  - '17'
+  - '18'
+  - '19'
+  - '2'
+  - '21'
+  - '22'
+  - '23'
+  - '24'
+  - '25'
+  - '26'
+  - '27'
+  - '3'
+  - '30'
+  - '31'
+  - '32'
+  - '33'
+  o3-vs-deepseek-v3.2:
+  - '0'
+  - '10'
+  - '11'
+  - '13'
+  - '17'
+  - '18'
+  - '19'
+  - '2'
+  - '21'
+  - '22'
+  - '23'
+  - '24'
+  - '25'
+  - '26'
+  - '27'
+  - '3'
+  - '30'
+  - '31'
+  - '32'
+  - '33'
+judge_model_args:
+  openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct:
+    stream: true
+max_connections: 8

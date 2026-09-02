@@ -10,6 +10,36 @@ transcripts:
   claude-3-5-sonnet-0620: external_data/epoch-gpqa/claude-3-5-sonnet-20240620.eval  # 130.0
   llama-3.1-70b: external_data/epoch-gpqa/Llama-3.1-70B-Instruct.eval    # 125.2
   gemma-2-27b: external_data/epoch-gpqa/gemma-2-27b-it.eval          # 122.1
+  # Complete evaluated responses that are now being linked into the full-only
+  # comparison graph by configs/judge_bridge_gpqa.yaml.
+  gpt-4.1-nano: external_data/epoch-gpqa/gpt-4.1-nano-2025-04-14.eval
+  gpt-4o: external_data/epoch-gpqa/gpt-4o-2024-08-06.eval
+  qwen-2.5-72b-instruct: external_data/epoch-gpqa/qwen2.5-72b-instruct.eval
+  llama-3.1-8b: external_data/epoch-gpqa/Llama-3.1-8B-Instruct.eval
+  mistral-7b-v0.3: external_data/epoch-gpqa/Mistral-7B-Instruct-v0.3.eval
+  gemma-2-9b: external_data/epoch-gpqa/gemma-2-9b-it.eval
+  gpt-4o-mini: external_data/epoch-gpqa/gpt-4o-mini-2024-07-18.eval
+  claude-3-haiku: external_data/epoch-gpqa/claude-3-haiku-20240307.eval
+  llama-3.3-70b: external_data/epoch-gpqa/Llama-3.3-70B-Instruct.eval
+  gpt-4.1-mini: external_data/epoch-gpqa/gpt-4.1-mini-2025-04-14.eval
+  gemini-2.0-flash: external_data/epoch-gpqa/gemini-2.0-flash-001.eval
+  claude-3-5-haiku: external_data/epoch-gpqa/claude-3-5-haiku-20241022.eval
+  gemini-1.5-pro: external_data/epoch-gpqa/gemini-1.5-pro-002.eval
+  gpt-4.5-preview: external_data/epoch-gpqa/gpt-4.5-preview-2025-02-27.eval
+  claude-3-7-sonnet: external_data/epoch-gpqa/claude-3-7-sonnet-20250219.eval
+  gemini-2.5-pro: external_data/epoch-gpqa/gemini-2.5-pro.eval
+  gpt-5-mini-medium: external_data/epoch-gpqa/gpt-5-mini-2025-08-07_medium.eval
+  gpt-5-high: external_data/epoch-gpqa/gpt-5-2025-08-07_high.eval
+  llama-2-70b: external_data/epoch-gpqa/Llama-2-70b-chat-hf.eval
+  llama-3-70b: external_data/epoch-gpqa/Meta-Llama-3-70B-Instruct.eval
+  mixtral-8x7b: external_data/epoch-gpqa/Mixtral-8x7B-Instruct-v0.1.eval
+  phi-3-medium: external_data/epoch-gpqa/Phi-3-medium-128k-instruct.eval
+  qwen2.5-32b: external_data/epoch-gpqa/qwen2.5-32b-instruct.eval
+  gemma-3-27b: external_data/epoch-gpqa/gemma-3-27b-it.eval
+  o3-mini-medium: external_data/epoch-gpqa/o3-mini-2025-01-31_medium.eval
+  gpt-5.4-mini-high: external_data/epoch-gpqa/gpt-5.4-mini-2026-03-17_high.eval
+  gemma-4-31b-it: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_Ftg8xiDvQq9dL5XLdGh3qR.eval
+  gemma-4-26b-a4b-it: data/gpqa/2026-07-31T16-08-52-00-00_gpqa-diamond_RKu47hcJZnjPNBPKSwMMsw.eval
 
 comparisons:
   # gap ~23.8

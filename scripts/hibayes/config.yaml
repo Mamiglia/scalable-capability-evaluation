@@ -13,23 +13,36 @@ data_process:
           - capability_difference_sd
           - same_model_family
           - self_comparison
+          - personal_pronouns_difference_sd
+          - hedging_difference_sd
+          - backtracking_difference_sd
+          - uncertainty_difference_sd
+          - confidence_difference_sd
+          - questions_difference_sd
         category_order:
-          transcript_condition: [raw, truncated_10, truncated_50, truncated_90]
+          transcript_condition: [a_baseline]
 
 model:
   path: scripts/hibayes/model.py
   models:
     - name: judge_feature_logistic_model
       config:
+        tag: with_style
         pool_judge_effects: true
         predictors:
           - length_difference_sd
           - capability_difference_sd
           - same_model_family
           - self_comparison
+          - personal_pronouns_difference_sd
+          - hedging_difference_sd
+          - backtracking_difference_sd
+          - uncertainty_difference_sd
+          - confidence_difference_sd
+          - questions_difference_sd
         fit:
-          samples: 1000
-          warmup: 1000
+          samples: 2500
+          warmup: 2000
           chains: 4
           seed: 0
           target_accept: 0.95
@@ -52,14 +65,17 @@ communicate:
     - judge_feature_report:
         plot_exclude:
           - self_comparison
-          - transcript_condition=truncated_10 vs raw
-          - transcript_condition=truncated_50 vs raw
-          - transcript_condition=truncated_90 vs raw
         predictors:
           - length_difference_sd
           - capability_difference_sd
           - same_model_family
           - self_comparison
+          - personal_pronouns_difference_sd
+          - hedging_difference_sd
+          - backtracking_difference_sd
+          - uncertainty_difference_sd
+          - confidence_difference_sd
+          - questions_difference_sd
     - trace_plot: {vars: [judge_intercepts, judge_predictor_effects, item_sigma], best_model: false}
 
 platform:

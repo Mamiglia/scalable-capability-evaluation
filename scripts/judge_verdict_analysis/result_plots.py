@@ -457,7 +457,7 @@ def _style() -> None:
     plt.rcParams.update({
         "font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
         "xtick.labelsize": 7, "ytick.labelsize": 7, "svg.fonttype": "none",
-        "axes.linewidth": 0.7,
+        "axes.linewidth": 0.7, "scatter.edgecolors": "none", "lines.markeredgewidth": 0,
     })
 
 
@@ -678,7 +678,7 @@ def plot_feature_scatter(
     fig, ax = plt.subplots(figsize=(3.2, 3.2), layout="constrained")
     for block, frame in features.groupby("block", sort=False):
         ax.scatter(frame.singular, frame.unique, s=15, color=_block_color(block),
-                   clip_on=False, label=str(block))
+                   edgecolors="none", linewidths=0, clip_on=False, label=str(block))
     ax.axhline(0, color="#999999", lw=0.8, ls="--")
     ax.axvline(0, color="#999999", lw=0.8, ls="--")
     ax.set_xlim(xlim)
@@ -774,7 +774,7 @@ def plot_feature_scatter(
 
 def _plot_feature_axis(
     ax, values: pd.DataFrame, effect: str, *, labels: bool = True,
-    wrap_width: int | None = 17, label_size: float = 5.5,
+    wrap_width: int | None = 17, label_size: float = 7,
 ) -> None:
     point = values[effect].to_numpy(float)
     lower, upper = values[f"{effect}_lower"].to_numpy(float), values[f"{effect}_upper"].to_numpy(float)
@@ -782,7 +782,8 @@ def _plot_feature_axis(
     color = {"singular": "#2a78d6", "unique": "#eb6834", "coefficient": "#4a3aa7"}[effect]
     ax.errorbar(point, y, xerr=np.vstack((point - lower, upper - point)),
                 fmt="none", color=color, lw=1, capsize=0)
-    ax.scatter(point, y, s=12, color=color, clip_on=False, zorder=3)
+    ax.scatter(point, y, s=12, color=color, edgecolors="none", linewidths=0,
+               clip_on=False, zorder=3)
     ax.axvline(0, color="#999999", lw=0.8, ls="--")
     if effect == "coefficient":
         limit = _symmetric_limit(values, columns=(effect,))
@@ -859,7 +860,7 @@ def plot_feature_blocks(
         for index, effect in enumerate(("singular", "unique", "coefficient")):
             _plot_feature_axis(
                 axes[index], frame, effect, labels=index == 0,
-                wrap_width=None, label_size=5,
+                wrap_width=None, label_size=7,
             )
         name = f"feature-effects-{block}"
         outputs[name] = _save(fig, output_dir, name)
@@ -895,11 +896,12 @@ def plot_group_effects(
                     xerr=np.vstack((frame[effect] - frame[f"{effect}_lower"],
                                     frame[f"{effect}_upper"] - frame[effect])),
                     fmt="none", color=color, lw=1, capsize=0)
-        ax.scatter(frame[effect], y + dodge, s=12, color=color, clip_on=False, zorder=3)
+        ax.scatter(frame[effect], y + dodge, s=12, color=color,
+                   edgecolors="none", linewidths=0, clip_on=False, zorder=3)
     ax.axvline(0, color="#999999", lw=0.8, ls="--")
     ax.set_xlim(-limit, limit)
     ax.set_xticks([-limit, 0, limit])
-    ax.set_yticks(y, labels, fontsize=5.5)
+    ax.set_yticks(y, labels, fontsize=7)
     ax.set_ylim(-0.5, len(frame) - 0.5)
     ax.set_xlabel("Δ log loss")
     _ordinary(ax)
@@ -930,6 +932,7 @@ def _selected_feature_rows(effects: pd.DataFrame, top: int) -> list[str]:
 def _plot_benchmark_grid(
     effects: pd.DataFrame, coefficients: pd.DataFrame, output_dir: str | Path,
     *, name: str, top: int = 10, variables: Sequence[str] | None = None,
+    height: float | None = None, label_size: float = 5.5,
 ) -> tuple[Path, Path]:
     """Plot four benchmarks by singular, unique, and coefficient columns."""
     _require(effects, {
@@ -947,7 +950,7 @@ def _plot_benchmark_grid(
         raise ValueError("benchmark effects contain no plottable rows")
     _style()
     fig, axes = plt.subplots(
-        len(benchmarks), 3, figsize=(4.0, 1.375 * len(benchmarks)),
+        len(benchmarks), 3, figsize=(4.0, height or 1.375 * len(benchmarks)),
         layout="constrained", squeeze=False,
     )
     column_points = [[], [], []]
@@ -998,17 +1001,17 @@ def _plot_benchmark_grid(
         tick_labels = [_feature_label(value) for value in variables]
         for column, ax in enumerate(axes[row_index]):
             ax.axvline(0, color="#999999", lw=0.6, ls="--")
-            ax.set_yticks(y, tick_labels if column == 0 else [], fontsize=3.8)
+            ax.set_yticks(y, tick_labels if column == 0 else [], fontsize=label_size)
             ax.set_ylim(0, len(variables) - 1)
             ax.tick_params(axis="y", length=0, pad=1)
-            ax.tick_params(axis="x", labelsize=5.5, length=2, width=0.6, pad=1)
+            ax.tick_params(axis="x", labelsize=label_size, length=2, width=0.6, pad=1)
             if row_index < len(benchmarks) - 1:
                 ax.tick_params(axis="x", labelbottom=False)
             _ordinary(ax)
         axes[row_index, 0].text(
             -0.03, 1.02, benchmark_labels[benchmark],
             transform=axes[row_index, 0].transAxes, ha="right", va="bottom",
-            fontsize=5.5, color="#666666",
+            fontsize=label_size, color="#666666",
         )
     for column, title in enumerate(("Singular", "Unique", "Coefficient")):
         axes[0, column].set_title(title, loc="left", color="#666666", fontsize=7, pad=10)
@@ -1028,26 +1031,27 @@ def _plot_benchmark_grid(
         Line2D([], [], marker="o", ls="none", ms=3, color=_block_color(block),
                label=str(block).replace("-", " "))
         for block in used_blocks
-    ], loc="outside lower center", ncol=3, frameon=False, fontsize=5.5)
+    ], loc="outside lower center", ncol=3, frameon=False, fontsize=label_size)
     return _save(fig, output_dir, name)
 
 
 def plot_benchmark_feature_grid(
     effects: pd.DataFrame, coefficients: pd.DataFrame, output_dir: str | Path,
-    *, top: int = 10,
+    *, top: int = 10, height: float | None = None, label_size: float = 5.5,
 ) -> tuple[Path, Path]:
     """Plot pooled-judge benchmark effects in the capability contribution grammar."""
     required = {"aime", "gpqa", "intercode", "swe_bench_mini"}
     if missing := sorted(required - set(effects.benchmark)):
         raise ValueError(f"pooled benchmark grid requires all four benchmarks; missing {missing}")
     return _plot_benchmark_grid(
-        effects, coefficients, output_dir, name="feature-effects-by-benchmark", top=top,
+        effects, coefficients, output_dir, name="feature-effects-by-benchmark",
+        top=top, height=height, label_size=label_size,
     )
 
 
 def plot_judge_benchmark_grids(
     effects: pd.DataFrame, coefficients: pd.DataFrame, output_dir: str | Path,
-    *, top: int = 10,
+    *, top: int = 10, height: float | None = None, label_size: float = 5.5,
 ) -> dict[str, tuple[Path, Path]]:
     """Plot each judge's available benchmarks with exact cell coefficients."""
     _require(effects, {"judge"}, "judge benchmark effects")
@@ -1058,7 +1062,8 @@ def plot_judge_benchmark_grids(
         name = f"feature-effects-{str(judge).replace('/', '-')}-by-benchmark"
         outputs[name] = _plot_benchmark_grid(
             frame, coefficients[coefficients.judge == judge], output_dir,
-            name=name, top=top, variables=variables,
+            name=name, top=top, variables=variables, height=height,
+            label_size=label_size,
         )
     return outputs
 
@@ -1116,7 +1121,8 @@ def plot_stability(
     height = min(3.2, max(1.6, 0.18 * len(frame) + 0.9))
     fig, axes = plt.subplots(1, 2, figsize=(3.5, height), layout="constrained", sharey=True)
     y = np.arange(len(frame))
-    axes[0].scatter(frame.selection_rate, y, s=15, color="#2a78d6", clip_on=False)
+    axes[0].scatter(frame.selection_rate, y, s=15, color="#2a78d6",
+                    edgecolors="none", linewidths=0, clip_on=False)
     axes[0].set_xlim(0, 1)
     axes[0].set_xticks([0, 0.5, 1])
     axes[0].set_xlabel("Selection rate")
@@ -1130,9 +1136,10 @@ def plot_stability(
                              fmt="none", color="#eb6834", lw=1, capsize=0, clip_on=False)
         else:
             values = fold_coefficients[fold_coefficients.feature == row.feature].effective
-            axes[1].scatter(values, np.full(len(values), row_y), s=6, facecolors="none",
-                            edgecolors="#eb6834", lw=0.6, clip_on=False)
-    axes[1].scatter(frame.coefficient_mean, y, s=15, color="#eb6834", clip_on=False, zorder=3)
+            axes[1].scatter(values, np.full(len(values), row_y), s=6, color="#eb6834",
+                            alpha=0.35, edgecolors="none", linewidths=0, clip_on=False)
+    axes[1].scatter(frame.coefficient_mean, y, s=15, color="#eb6834",
+                    edgecolors="none", linewidths=0, clip_on=False, zorder=3)
     axes[1].set_xlim(-limit, limit)
     axes[1].set_xticks([-limit, 0, limit])
     axes[1].set_xlabel("Mean coefficient")
@@ -1143,8 +1150,8 @@ def plot_stability(
                markeredgecolor="#2a78d6", label="Selected folds"),
         Line2D([], [], marker="o", color="none", markerfacecolor="#eb6834",
                markeredgecolor="#eb6834", label="Fold mean"),
-        Line2D([], [], marker="o", color="none", markerfacecolor="none",
-               markeredgecolor="#eb6834", label="Per fold (N < 3)"),
+        Line2D([], [], marker="^", color="#eb6834", lw=0, alpha=0.35,
+               markeredgewidth=0, label="Per fold (N < 3)"),
     ], loc="outside lower center", ncol=3, frameon=False)
     return _save(fig, output_dir, "coefficient-selection-stability")
 

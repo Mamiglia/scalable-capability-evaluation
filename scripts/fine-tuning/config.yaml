@@ -1,0 +1,64 @@
+# Judge fine-tuning: LoRA-SFT qwen3-32b to pick the more capable author
+# of a both-correct GPQA pair. Every script in this dir reads this.
+
+epoch_glob: external_data/epoch-gpqa/*.eval
+pilot_glob: data/gpqa/*.eval            # self-preference pairs only
+pilot_models_csv: judge_results/gpqa-pilot-rd2/models.csv
+out_dir: judge_results/judge_ft
+
+prep:
+  max_len_chars: 65536                  # per transcript, same cap as the judging runs
+  min_accuracy: 0.10                    # drop floor/ceiling models: degenerate logits,
+  max_accuracy: 0.98                    #   near-empty both-correct sets
+  min_cap_gap: 0.2                      # logit gap below this = label too noisy, pair dropped
+  min_reasoning_chars: 100              # drop answer-only transcripts: <this after the ANSWER line is stripped
+  item_holdout_frac: 0.2
+  max_train_pairs: 20000                # unique pairs, stratified by model pair
+  max_eval_pairs_per_split: 6000        # eval_mm / eval_mixed / eval_items each
+  max_self_pairs: 750                   # same-model control pairs, held-out items
+  max_input_tokens: 28672               # rendered prompt cap, longer pairs dropped + counted
+  tokenizer: Qwen/Qwen3-32B             # for the token-length filter
+  seed: 0
+  holdout_models:                       # base-name groups, cross-family, spanning capability
+    - claude-opus-4-6
+    - gpt-5.2-2025-12-11
+    - gemini-3-flash-preview
+    - DeepSeek-R1-0528
+    - qwen3-235b-a22b
+    - Llama-4-Maverick-17B-128E-Instruct-FP8
+    - mistral-large-2411
+    - claude-3-5-haiku-20241022
+
+train:
+  base_model: Qwen/Qwen3-32B
+  lr_grid: [3.0e-5, 1.0e-4, 3.0e-4]
+  lora_rank_grid: [8, 16, 64]        # low ranks kept: interpretable delta + gentler step; val picks lowest within noise
+  lora_alpha_factor: 2
+  lora_dropout: 0.0
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  epochs: 1
+  grad_accum: 8
+  abort_check_steps: 10000              # grace before plateau check; 0.6B sits at chance
+                                        # (~ln2) well past step 1000 then descends — 1000 false-aborted the spoofaug run
+  abort_window: 200                     # steps in the recent-loss mean
+  abort_loss_threshold: 0.65            # recent mean above this = still at chance (ln 2), abort
+  val_frac: 0.1                         # of train items, grouped by item, grid selection
+  grid_subsample: 6000                  # pair rows per grid cell
+  dtype: bfloat16
+  seed: 0
+
+verdicts:
+  max_model_len: 32768
+
+gpqa:
+  epochs: 4
+  temperature: 0.7                      # Qwen3 non-thinking recommendation
+  top_p: 0.8
+  max_new_tokens: 4096
+  seed: 0
+
+analysis:
+  bt_c: 1.0                             # L2 strength for the BT logistic fit
+  judge_fits_csv: judge_results/gpqa-pilot-rd2/judge_fits.csv        # preferred round
+  judge_fits_fallback_csv: judge_results/judge-pilot/judge_fits.csv  # judges only in round 1
+  ref_judges: [qwen3.5-122b-a10b, qwen3.6-35b-a3b]

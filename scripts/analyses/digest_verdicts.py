@@ -50,7 +50,7 @@ class PairItem(NamedTuple):
 
 
 def pair_items(major_path, minor_path, include_reasoning, require_both_correct,
-               truncate_frac=None):
+               truncate_frac=None, truncate_keep="first"):
     """item -> PairItem.
 
     Mirrors build_dataset's epoch selection (first eligible epoch per item;
@@ -59,7 +59,7 @@ def pair_items(major_path, minor_path, include_reasoning, require_both_correct,
     builder is caught.
     """
     key = (str(major_path), str(minor_path), include_reasoning,
-           require_both_correct, truncate_frac)
+           require_both_correct, truncate_frac, truncate_keep)
     if key in _pairs:
         return _pairs[key]
 
@@ -90,7 +90,7 @@ def pair_items(major_path, minor_path, include_reasoning, require_both_correct,
         # the same items in every truncation condition.
         rlen_major, rlen_minor = len(strip_answer(t_major)), len(strip_answer(t_minor))
         if truncate_frac is not None:
-            t_major, t_minor = truncate_pair(t_major, t_minor, truncate_frac)
+            t_major, t_minor = truncate_pair(t_major, t_minor, truncate_frac, keep=truncate_keep)
         items[str(sid)] = PairItem(a.input, t_major, t_minor, a, b, rlen_major, rlen_minor)
     _pairs[key] = items
     return items
@@ -128,9 +128,10 @@ def digest(log_root: Path, config: Path):
             n_unlisted += 1
             continue
         tf = meta.get("truncate_frac")
+        tk = meta.get("truncate_keep", "first")
         items = pair_items(meta["major_path"], meta["minor_path"],
                            meta["include_reasoning"], meta["require_both_correct"],
-                           truncate_frac=tf)
+                           truncate_frac=tf, truncate_keep=tk)
         # Phase lives in the parent dir (phase-N) or, after log normalization,
         # in a _pN filename token.
         phase = f.parent.name
@@ -170,7 +171,7 @@ def digest(log_root: Path, config: Path):
                     n_len_mismatch += 1
 
             n_correct += picked == slot
-            key = (judge, major, minor, item, slot, tf)
+            key = (judge, major, minor, item, slot, tf, tk)
             if key in rows:
                 n_replaced += 1
             rows[key] = dict(
@@ -178,7 +179,7 @@ def digest(log_root: Path, config: Path):
                 slot_of_major=slot, picked=picked, picked_major=picked_major,
                 confidence=conf, len_major=len_major, len_minor=len_minor,
                 reasoning_len_major=rlen_major, reasoning_len_minor=rlen_minor,
-                truncate_frac=tf, phase=phase, log_file=str(f),
+                truncate_frac=tf, truncate_keep=tk, phase=phase, log_file=str(f),
             )
 
         # The flattened rows must reproduce the log's own accuracy metric.

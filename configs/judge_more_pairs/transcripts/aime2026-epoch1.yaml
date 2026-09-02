@@ -1,0 +1,19 @@
+# rollout log each model was judged from in the existing LASR-G5/judging runs
+claude-opus-4.7: data/aime2026/44136fa3/claude-opus-4.7/1/2026-08-14T15-17-20-00-00_aime2026_cTLRJtpWQp5a6LtXthn8Er.eval
+claude-sonnet-4.5: data/aime2026/44136fa3/claude-sonnet-4.5/1/2026-08-11T14-31-05-00-00_aime2026_TJ2hpAYQqpqXRFmosK5ff8.eval
+deepseek-r1-0528: data/aime2026/44136fa3/deepseek-r1-0528/1/2026-08-11T14-31-07-00-00_aime2026_eHiCJdw7RjmXCcMHhXU6oD.eval
+deepseek-v3.2: data/aime2026/44136fa3/deepseek-v3.2/1/2026-08-11T14-30-59-00-00_aime2026_YNXBv4qyvHPGhVTRczCdmc.eval
+gemma3-12b-it: data/aime2026/44136fa3/gemma-3-12b-it/1/2026-08-12T14-22-24-00-00_aime2026_efyMYazU37U94PbydKaDbV.eval
+gemma4-e2b-it: data/aime2026/44136fa3/gemma-4-e2b-it/1/2026-08-15T09-43-24-00-00_aime2026_MHeEbHciNqz9JVZvvYdGAV.eval
+glm-4.6: data/aime2026/44136fa3/glm-4.6/1/2026-08-13T12-10-44-00-00_aime2026_4sF84vsDHVxydQxSbCCpAQ.eval
+glm-5.2: data/aime2026/44136fa3/glm-5.2/1/2026-08-17T20-36-32-00-00_aime2026_52ruxmAuetAXTX5B2QmjEQ.eval
+gpt-4.1: data/aime2026/44136fa3/gpt-4.1/1/2026-08-17T20-34-36-00-00_aime2026_SsFgTHcifFBzJbtLox2FMX.eval
+gpt-5: data/aime2026/44136fa3/gpt-5/1/2026-08-11T14-31-03-00-00_aime2026_SDZwRgsYxANpXP5iARriXA.eval
+kimi-k2.6: data/aime2026/44136fa3/kimi-k2.6/1/2026-08-13T12-14-05-00-00_aime2026_btRRu86AL9MaRQfF4M8dye.eval
+kimi-k3: data/aime2026/44136fa3/kimi-k3/1/2026-08-12T14-22-20-00-00_aime2026_d25tJyxRrGBFX8JatAa6ar.eval
+ling-2.6-flash: data/aime2026/44136fa3/ling-2.6-flash/1/2026-08-12T14-22-21-00-00_aime2026_LecCcn9nWt9wQzVXVgkLxT.eval
+mistral-medium-3: data/aime2026/44136fa3/mistral-medium-3/1/2026-08-11T14-31-11-00-00_aime2026_KoqnLG3vn5dwQad7YmgmJa.eval
+o3: data/aime2026/44136fa3/o3/1/2026-08-11T14-31-04-00-00_aime2026_aVsTttF9G8PPdPY8ymrL4Z.eval
+qwen3-32b: data/aime2026/44136fa3/qwen3-32b/1/2026-08-13T12-30-23-00-00_aime2026_XNvNAxUsDVw8Muv3GQzbL7.eval
+qwen3.5-4b: data/aime2026/44136fa3/qwen3.5-4b/1/2026-08-14T09-33-55-00-00_aime2026_6EEvpE8BCcK7bPBFbi7hB3.eval
+qwen3.5-9b: data/aime2026/44136fa3/qwen3.5-9b/1/2026-08-12T14-22-23-00-00_aime2026_WmowzzMqzGgidPfgtjEwhb.eval

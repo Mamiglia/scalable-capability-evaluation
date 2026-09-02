@@ -1,0 +1,37 @@
+log_root: logs/more-pairs-topup/intercode/epoch-0
+transcripts:
+  deepseek-v3.2: data/intercode/463eb861/deepseek-v3.2/0/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_GKr47nTi7owPCegZkCWqqv.eval
+  nemotron-3-ultra-550b-a55b: data/intercode/463eb861/nvidia-nemotron-3-ultra-550b-a55b-bf16/0/2026-08-20T19-17-50-00-00_gdm-intercode-ctf_9rG9P3u9pLxSxy45ov73kv.eval
+comparisons:
+- - openrouter/deepseek/deepseek-r1-0528
+  - nemotron-3-ultra-550b-a55b
+  - deepseek-v3.2
+only_items:
+  nemotron-3-ultra-550b-a55b-vs-deepseek-v3.2:
+  - '0'
+  - '10'
+  - '11'
+  - '13'
+  - '17'
+  - '18'
+  - '19'
+  - '2'
+  - '21'
+  - '22'
+  - '23'
+  - '24'
+  - '25'
+  - '26'
+  - '27'
+  - '3'
+  - '30'
+  - '31'
+  - '32'
+  - '33'
+judge_model_args:
+  openrouter/deepseek/deepseek-r1-0528:
+    provider:
+      only:
+      - siliconflow/fp8
+      allow_fallbacks: false
+max_connections: 40

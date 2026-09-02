@@ -1,6 +1,6 @@
 # Datasets offered in the interactive viewer's dataset dropdown, in menu order.
 # Newest first: the viewer opens on the first entry.
-# id     -> subdirectory under interactive_viewer/data/
+# id     -> subdirectory under interactive_dashboards/transcript_viewer/data/
 # label  -> what the dropdown shows
 # config -> transcript path -> shortname map, and the comparisons to keep
 # logs   -> judge logs (verdicts, explanations)

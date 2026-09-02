@@ -230,3 +230,51 @@ def test_judge_extra_args_parsing(monkeypatch, tmp_path):
     assert captured["model"] == "custom/jdg"
     assert captured["limit"] == 10
     assert captured["max_connections"] == 4
+
+
+def test_collect_targets_samples_in_one_valid_repeat(monkeypatch, tmp_path):
+    model_config = tmp_path / "model.yml"
+    model_config.write_text("name: custom/model\nslug: custom/model\n")
+    bench_config = tmp_path / "bench.yml"
+    bench_config.write_text("name: inspect_evals/mbpp\n")
+    target = tmp_path / "target" / "1"
+    target.mkdir(parents=True)
+    (target / "existing.eval").touch()
+
+    captured = {}
+    mock_log = MagicMock()
+    mock_log.status = "success"
+
+    def mock_eval(**kwargs):
+        captured.update(kwargs)
+        return [mock_log]
+
+    monkeypatch.setattr("collect.cli.get_eval_path", lambda **kw: target.parent)
+    monkeypatch.setattr("collect.cli.is_successful_eval", lambda path: True)
+    monkeypatch.setattr("collect.cli.inspect_eval", mock_eval)
+    eval_set = MagicMock()
+    monkeypatch.setattr("collect.cli.eval_set", eval_set)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["collect", "-b", str(bench_config), "-m", str(model_config), "-n", "2",
+         "--repeat", "1", "--sample-id", "2024-I-12,10", "--max-tokens", "32768"],
+    )
+
+    assert collect_main() == 0
+    eval_set.assert_not_called()
+    assert captured["sample_id"] == ["2024-I-12", "10"]
+    assert captured["log_dir"] == str(target)
+    assert captured["max_tokens"] == 32768
+    assert "log_dir_allow_dirty" not in captured
+    monkeypatch.setattr(
+        "sys.argv",
+        ["collect", "-b", str(bench_config), "-m", str(model_config), "-n", "2", "--repeat", "2"],
+    )
+    with pytest.raises(SystemExit):
+        collect_main()
+    monkeypatch.setattr(
+        "sys.argv",
+        ["collect", "-b", str(bench_config), "-m", str(model_config), "-n", "2", "--sample-id", "10"],
+    )
+    with pytest.raises(SystemExit):
+        collect_main()

@@ -1,0 +1,47 @@
+log_root: logs/more-pairs-topup/aime2026/epoch-0
+transcripts:
+  deepseek-r1-0528: data/aime2026/44136fa3/deepseek-r1-0528/0/2026-08-28T05-27-59+00-00_aime2026_EFdxWZ8R6Co3dyC4NytVLD.eval
+  gemma3-12b-it: data/aime2026/44136fa3/gemma-3-12b-it/0/2026-08-28T01-25-09+00-00_aime2026_oPqMvtdnTk4PNGcscBHaR4.eval
+  gemma4-e2b-it: data/aime2026/44136fa3/gemma-4-e2b-it/0/2026-08-28T01-34-06+00-00_aime2026_cBVCaWgVh7w7ihwx7Ua9Up.eval
+  gpt-4.1: data/aime2026/44136fa3/gpt-4.1/0/2026-08-28T01-49-56+00-00_aime2026_bawHSxMgWu4nCFSRhsPBZK.eval
+  granite-4.1-8b: data/aime2026/44136fa3/granite-4.1-8b/0/2026-08-28T01-25-21+00-00_aime2026_Uf22wGtPX3o2F5tBiyLDCz.eval
+  qwen3.5-4b: data/aime2026/44136fa3/qwen3.5-4b/0/2026-08-28T01-20-54+00-00_aime2026_HYAs2ihobz5Fh2SBgoiwFW.eval
+  qwen3.5-9b: data/aime2026/44136fa3/qwen3.5-9b/0/2026-08-28T09-01-31+00-00_aime2026_T8t9Ar5URwLRtgmHBTZSMu.eval
+comparisons:
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - gemma3-12b-it
+  - qwen3.5-9b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.5-4b
+  - qwen3.5-9b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.5-9b
+  - deepseek-r1-0528
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.5-9b
+  - gemma4-e2b-it
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.5-9b
+  - gpt-4.1
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.5-9b
+  - granite-4.1-8b
+only_items:
+  gemma3-12b-it-vs-qwen3.5-9b:
+  - '6'
+  qwen3.5-4b-vs-qwen3.5-9b:
+  - '17'
+  - '6'
+  qwen3.5-9b-vs-deepseek-r1-0528:
+  - '17'
+  - '6'
+  qwen3.5-9b-vs-gemma4-e2b-it:
+  - '6'
+  qwen3.5-9b-vs-gpt-4.1:
+  - '6'
+  qwen3.5-9b-vs-granite-4.1-8b:
+  - '6'
+judge_model_args:
+  openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct:
+    stream: true
+max_connections: 8

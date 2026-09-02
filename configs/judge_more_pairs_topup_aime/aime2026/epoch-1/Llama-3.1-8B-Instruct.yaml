@@ -1,0 +1,80 @@
+log_root: logs/more-pairs-topup/aime2026/epoch-1
+transcripts:
+  deepseek-r1-0528: data/aime2026/44136fa3/deepseek-r1-0528/1/2026-08-28T05-28-02+00-00_aime2026_QdyTGAUXuG6UjHBLWgGzFG.eval
+  deepseek-v3.2: data/aime2026/44136fa3/deepseek-v3.2/1/2026-08-28T01-25-05+00-00_aime2026_PcMqShFCfnN2ETdyxcgFHh.eval
+  gemma4-e2b-it: data/aime2026/44136fa3/gemma-4-e2b-it/1/2026-08-28T01-34-07+00-00_aime2026_ndrMV59XrVeACXtVdXTVoZ.eval
+  glm-5.3: data/aime2026/44136fa3/glm-5.3/1/2026-08-28T09-01-23+00-00_aime2026_YfLAgE9LCxTsrvFkRLDnBk.eval
+  ling-2.6-flash: data/aime2026/44136fa3/ling-2.6-flash/1/2026-08-28T01-25-29+00-00_aime2026_YvCjBxiZEDiYnpFqELjY3d.eval
+  muse-glimmer-30b: data/aime2026/44136fa3/muse-glimmer-30b/1/2026-08-28T01-25-35+00-00_aime2026_H6qTUEZZL2vvgpZvvqbwbY.eval
+  nemotron-3-ultra-550b-a55b: data/aime2026/44136fa3/nvidia-nemotron-3-ultra-550b-a55b-bf16/1/2026-08-28T09-01-26+00-00_aime2026_CxrpVXdoudAaHGvGwLwWtJ.eval
+  qwen3.5-4b: data/aime2026/44136fa3/qwen3.5-4b/1/2026-08-28T09-01-29+00-00_aime2026_3J6UvdASAHNG7KyUUsgo2D.eval
+  qwen3.5-9b: data/aime2026/44136fa3/qwen3.5-9b/1/2026-08-28T09-01-34+00-00_aime2026_R9kNhCzbk7dYHD5BsadVpq.eval
+  qwen3.8-2.4t-a95b: data/aime2026/44136fa3/qwen3.8-2.4t-a95b/1/2026-08-28T01-25-48+00-00_aime2026_NZK99LAzKLE8z2jgyepmT2.eval
+  qwen3.8-27b: data/aime2026/44136fa3/qwen3.8-27b/1/2026-08-28T09-01-39+00-00_aime2026_fjFdBg2gV6BQxUtUNAnqRL.eval
+comparisons:
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - glm-5.3
+  - nemotron-3-ultra-550b-a55b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - nemotron-3-ultra-550b-a55b
+  - deepseek-r1-0528
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - nemotron-3-ultra-550b-a55b
+  - deepseek-v3.2
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - nemotron-3-ultra-550b-a55b
+  - muse-glimmer-30b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.5-4b
+  - qwen3.5-9b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.5-9b
+  - deepseek-r1-0528
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.5-9b
+  - gemma4-e2b-it
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.5-9b
+  - ling-2.6-flash
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.8-2.4t-a95b
+  - nemotron-3-ultra-550b-a55b
+- - openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct
+  - qwen3.8-2.4t-a95b
+  - qwen3.8-27b
+only_items:
+  glm-5.3-vs-nemotron-3-ultra-550b-a55b:
+  - '23'
+  - '28'
+  nemotron-3-ultra-550b-a55b-vs-deepseek-r1-0528:
+  - '23'
+  - '28'
+  nemotron-3-ultra-550b-a55b-vs-deepseek-v3.2:
+  - '23'
+  - '28'
+  nemotron-3-ultra-550b-a55b-vs-muse-glimmer-30b:
+  - '23'
+  - '28'
+  qwen3.5-4b-vs-qwen3.5-9b:
+  - '14'
+  - '17'
+  - '24'
+  - '3'
+  qwen3.5-9b-vs-deepseek-r1-0528:
+  - '17'
+  - '24'
+  - '3'
+  qwen3.5-9b-vs-gemma4-e2b-it:
+  - '24'
+  - '3'
+  qwen3.5-9b-vs-ling-2.6-flash:
+  - '24'
+  qwen3.8-2.4t-a95b-vs-nemotron-3-ultra-550b-a55b:
+  - '23'
+  - '28'
+  qwen3.8-2.4t-a95b-vs-qwen3.8-27b:
+  - '15'
+judge_model_args:
+  openai-api/runpod/meta-llama/Llama-3.1-8B-Instruct:
+    stream: true
+max_connections: 8

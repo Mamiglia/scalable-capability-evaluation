@@ -49,6 +49,20 @@ def two_pl(model_idx, item_idx, n_models, n_items, y=None):
     numpyro.sample("y", dist.Bernoulli(logits=logit), obs=y)
 
 
+def fixed_three_pl(
+    model_idx, item_idx, n_models, n_items, lower_asymptote, y=None,
+):
+    """3PL with a supplied format floor; only difficulty/discrimination vary."""
+    theta = numpyro.sample("theta", dist.Normal(0, 1).expand([n_models]))
+    b = numpyro.sample("b", dist.Normal(0, 1).expand([n_items]))
+    a = numpyro.sample("a", dist.LogNormal(0.0, 0.5).expand([n_items]))
+    logistic = jax.nn.sigmoid(a[item_idx] * (theta[model_idx] - b[item_idx]))
+    floor = lower_asymptote[item_idx]
+    numpyro.sample(
+        "y", dist.Bernoulli(probs=floor + (1 - floor) * logistic), obs=y,
+    )
+
+
 def mirt(model_idx, item_idx, n_models, n_items, dim=2, y=None):
     """
     MIRT: ability is a vector of dim skills, each item loads on them.
@@ -65,11 +79,22 @@ def mirt(model_idx, item_idx, n_models, n_items, dim=2, y=None):
     logit = (a[item_idx] * theta[model_idx]).sum(-1) - d[item_idx]
     numpyro.sample("y", dist.Bernoulli(logits=logit), obs=y)
 
-MODELS = {"1pl": one_pl, "2pl": two_pl, "mirt": mirt}
+MODELS = {
+    "1pl": one_pl,
+    "2pl": two_pl,
+    "fixed_3pl": fixed_three_pl,
+    "mirt": mirt,
+}
 
-def fit(data: IRTData, model="1pl", warmup=1000, samples=1000, seed=0, **kwargs):
+def fit(
+    data: IRTData, model="1pl", warmup=1000, samples=1000, seed=0,
+    chains=1, collect_diagnostics=False, **kwargs,
+):
     """Run NUTS (No U-Turn Sampler), return posterior samples."""
-    mcmc = MCMC(NUTS(MODELS[model]), num_warmup=warmup, num_samples=samples, progress_bar=False)
+    mcmc = MCMC(
+        NUTS(MODELS[model]), num_warmup=warmup, num_samples=samples,
+        num_chains=chains, chain_method="parallel", progress_bar=False,
+    )
     mcmc.run(
         jax.random.PRNGKey(seed),
         model_idx=data.model_idx,
@@ -79,7 +104,18 @@ def fit(data: IRTData, model="1pl", warmup=1000, samples=1000, seed=0, **kwargs)
         y=data.y,
         **kwargs,
     )
-    return mcmc.get_samples()
+    result = dict(mcmc.get_samples())
+    if collect_diagnostics:
+        chain_samples = mcmc.get_samples(group_by_chain=True)
+        result.update({
+            "divergences": int(np.asarray(
+                mcmc.get_extra_fields(group_by_chain=True)["diverging"]
+            ).sum()),
+            "diagnostics": numpyro.diagnostics.summary(
+                chain_samples, group_by_chain=True,
+            ),
+        })
+    return result
 
 def summary(labels, samples) -> pd.DataFrame:
     """Per-label mean and 90% interval from posterior samples."""
@@ -90,19 +126,25 @@ def summary(labels, samples) -> pd.DataFrame:
     )
 
 
-def predict(model, post, model_idx, item_idx):
+def predict(model, post, model_idx, item_idx, lower_asymptote=None):
     """Posterior-mean P(correct) for the given (model, item) cells."""
     theta = np.asarray(post["theta"])
     if model == "mirt":
         a, d = np.asarray(post["a"]), np.asarray(post["d"])
         logit = (a[:, item_idx, :] * theta[:, model_idx, :]).sum(-1) - d[:, item_idx]
-    elif model == "2pl":
+    elif model in {"2pl", "fixed_3pl"}:
         a, b = np.asarray(post["a"]), np.asarray(post["b"])
         logit = a[:, item_idx] * (theta[:, model_idx] - b[:, item_idx])
     else:
         b = np.asarray(post["b"])
         logit = theta[:, model_idx] - b[:, item_idx]
-    return (1.0 / (1.0 + np.exp(-logit))).mean(0)
+    probability = 1.0 / (1.0 + np.exp(-logit))
+    if model == "fixed_3pl":
+        if lower_asymptote is None:
+            raise ValueError("fixed_3pl prediction needs lower_asymptote")
+        floor = np.asarray(lower_asymptote)[item_idx]
+        probability = floor + (1 - floor) * probability
+    return probability.mean(0)
 
 
 def save_results(responses, models=("1pl", "2pl", "mirt"), out_dir="irt_results",

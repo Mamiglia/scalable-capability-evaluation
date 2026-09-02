@@ -13,7 +13,7 @@ sys.path.insert(0, "/Users/moriohamada/PycharmProjects/ai_safety/small-judge/jud
 import mask_regression as mr
 import mask_summary
 
-S = pathlib.Path("/private/tmp/claude-501/-Users-moriohamada-PycharmProjects-ai-safety-small-judge/8727e515-2405-4685-a43d-ead3d07c1e1c/scratchpad")
+S = pathlib.Path("/Users/moriohamada/PycharmProjects/ai_safety/small-judge/tmp/whitebox")
 OUT = pathlib.Path("/Users/moriohamada/PycharmProjects/ai_safety/small-judge/judge_results/whitebox_dissection/figures/llama3.2-3B")
 
 plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
@@ -42,7 +42,7 @@ axes[1].axvline(pair_sum.mean(), color="k", lw=1)
 axes[1].set_xlabel("same pair, both orders summed\n(0 = no slot preference)")
 axes[1].set_ylabel("pairs")
 fig.tight_layout()
-fig.savefig(OUT / "fig1_verdict_bias.png", dpi=300)
+fig.savefig(OUT / "fig1_verdict_bias.png", dpi=300); fig.savefig(OUT / "fig1_verdict_bias.svg")
 plt.close(fig)
 
 # ------------------------------------------------- 2. per-token effect hists
@@ -53,17 +53,16 @@ fig, axes = plt.subplots(2, 1, figsize=(3.4, 2.8), sharex=True)
 for ax, grp, name, color in ((axes[0], "transcript_1", "transcript 1 sentences", BLUE),
                              (axes[1], "transcript_2", "transcript 2 sentences", ORANGE)):
     vals = slots.loc[slots.group == grp, "towards_own"]
-    lim = vals.quantile([0.005, 0.995])
-    ax.hist(vals.clip(*lim), bins=60, color=color, alpha=0.85)
+    ax.hist(vals.clip(-2.5, 2.5), bins=100, color=color, alpha=0.85)
+    ax.set_yscale("log")
     ax.axvline(0, color="0.5", lw=0.8, ls="--")
     ax.axvline(vals.mean(), color="k", lw=1)
     ax.set_ylabel(name.split()[0] + " " + name.split()[1] + "\nsentences", fontsize=7)
     print(name, "mean per-token pull towards own slot: %.4f, share>0 %.3f"
           % (vals.mean(), (vals > 0).mean()))
-axes[1].set_xlabel("per-token pull towards its own transcript\n(log-odds; > 0 = self-advocacy)")
-axes[0].set_xlim(-0.4, 0.4)
+axes[1].set_xlabel("per-token pull towards its own transcript\n(log-odds; log count scale; tails clipped at ±2.5)")
 fig.tight_layout()
-fig.savefig(OUT / "fig2_token_effects.png", dpi=300)
+fig.savefig(OUT / "fig2_token_effects.png", dpi=300); fig.savefig(OUT / "fig2_token_effects.svg")
 plt.close(fig)
 
 # ---------------------------------------------------------- 3. length bias
@@ -106,7 +105,7 @@ axes[1].axvline(0, color="0.5", lw=0.8, ls="--")
 axes[1].set_xlabel("length advantage of transcript 1\nover transcript 2 (tokens)")
 axes[1].set_ylabel("net pull towards\ntranscript 1 (log-odds)")
 fig.tight_layout()
-fig.savefig(OUT / "fig3_length_bias.png", dpi=300)
+fig.savefig(OUT / "fig3_length_bias.png", dpi=300); fig.savefig(OUT / "fig3_length_bias.svg")
 plt.close(fig)
 
 # ------------------------------------------------------- 4. whole-span deletion
@@ -129,11 +128,13 @@ ax.axvline(0, color="0.5", lw=0.8, ls="--")
 ax.set_yticks(y, [n for _, n in SPANS])
 ax.set_xlabel("how the verdict shifts (log-odds)\n(+ = towards transcript 1)")
 fig.tight_layout()
-fig.savefig(OUT / "fig4_whole_span_deletion.png", dpi=300)
+fig.savefig(OUT / "fig4_whole_span_deletion.png", dpi=300); fig.savefig(OUT / "fig4_whole_span_deletion.svg")
 plt.close(fig)
 
 # --------------------------------------------------------- 5. validation
-masks = mr.read_mask_parts(S / "maskcamp_llama")
+# valid1106 only: the sentence fits being validated used the 512-draw campaign,
+# and maskcamp_llama now also holds the 3584-draw extension plus pooled hardlinks
+masks = mr.read_mask_parts(S / "maskcamp_llama" / "valid1106")
 rng = np.random.default_rng(3)
 sample_keys = list(masks.groupby(["pair_uid", "order"]).groups)
 pick = [sample_keys[i] for i in rng.choice(len(sample_keys), 150, replace=False)]
@@ -163,7 +164,7 @@ ax.set_ylabel("measured verdict shift")
 r = np.corrcoef(pred, obs)[0, 1]
 print("validation scatter r = %.3f over %d held-out draws" % (r, len(pred)))
 fig.tight_layout()
-fig.savefig(OUT / "fig5_validation.png", dpi=300)
+fig.savefig(OUT / "fig5_validation.png", dpi=300); fig.savefig(OUT / "fig5_validation.svg")
 plt.close(fig)
 
 # ------------------------------------------------- 6. cumulative curve, remade
@@ -208,7 +209,7 @@ ax.set_xlim(0, 1)
 ax.set_ylim(-lim, lim)
 ax.legend(frameon=False, loc="lower center", bbox_to_anchor=(0.5, 1.06), ncol=1)
 fig.tight_layout()
-fig.savefig(OUT / "fig6_cumulative.png", dpi=300)
+fig.savefig(OUT / "fig6_cumulative.png", dpi=300); fig.savefig(OUT / "fig6_cumulative.svg")
 plt.close(fig)
 
 print("written:", sorted(p.name for p in OUT.glob("fig*.png")))

@@ -1,0 +1,27 @@
+# rollout log each model was judged from in the existing LASR-G5/judging runs
+claude-opus-4.7: data/intercode/463eb861/claude-opus-4.7/1/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_ExSdhdcsJ7VS2AD4GqYhAD.eval
+claude-sonnet-4.5: data/intercode/463eb861/claude-sonnet-4.5/1/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_7mC4Vx7uPZjZSmQrNpoc4Q.eval
+deepseek-r1-0528: data/intercode/463eb861/deepseek-r1-0528/1/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_nf2jfrXQQisGDhAvxfSfjP.eval
+deepseek-v3.2: data/intercode/463eb861/deepseek-v3.2/1/2026-08-17T11-18-39-00-00_gdm-intercode-ctf_heQkB2Qa6hMHbMATTUJzm7.eval
+gemini-3.5-flash: data/intercode/463eb861/gemini-3.5-flash/1/2026-08-20T17-31-03-00-00_gdm-intercode-ctf_jJ8azk3ezP8Djs5ZiUhoW8.eval
+gemma3-12b-it: data/intercode/463eb861/gemma-3-12b-it/1/2026-08-17T11-32-22-00-00_gdm-intercode-ctf_aBBihab5ezYNNGp8dyDPon.eval
+gemma4-e2b-it: data/intercode/463eb861/gemma-4-e2b-it/1/2026-08-18T13-50-32-00-00_gdm-intercode-ctf_bhke7mDSHi62qQ5tPfh8hW.eval
+glm-4.6: data/intercode/463eb861/glm-4.6/1/2026-08-17T22-06-17-00-00_gdm-intercode-ctf_P5TpDqD7kzsdwyGu4AdjqS.eval
+glm-5.2: data/intercode/463eb861/glm-5.2/1/2026-08-17T13-02-16-00-00_gdm-intercode-ctf_TKWYoNkRH8wjnteGhwbuAH.eval
+glm-5.3: data/intercode/463eb861/glm-5.3/1/2026-08-20T18-55-19-00-00_gdm-intercode-ctf_HWTjWdK2oiU5L9Zj2Koeta.eval
+gpt-4.1: data/intercode/463eb861/gpt-4.1/1/2026-08-17T12-19-25-00-00_gdm-intercode-ctf_aWfLZpbEFoXWMpQbpGrB4c.eval
+gpt-5: data/intercode/463eb861/gpt-5/1/2026-08-17T13-58-51-00-00_gdm-intercode-ctf_GJXSE8wR5du4sDEhVxk6Zs.eval
+granite-4.1-8b: data/intercode/463eb861/granite-4.1-8b/1/2026-08-17T11-37-35-00-00_gdm-intercode-ctf_FwzM7DsavWc8gqg3rPsSFi.eval
+kimi-k2.6: data/intercode/463eb861/kimi-k2.6/1/2026-08-17T11-55-55-00-00_gdm-intercode-ctf_USSbwpuvR59dKSEhSmcfLs.eval
+kimi-k3: data/intercode/463eb861/kimi-k3/1/2026-08-17T11-59-42-00-00_gdm-intercode-ctf_WbbfRHLpvvuqdtsVbDRLM3.eval
+ling-2.6-flash: data/intercode/463eb861/ling-2.6-flash/1/2026-08-17T11-40-30-00-00_gdm-intercode-ctf_LPynZvoJktsnsJrpxsVE98.eval
+mistral-medium-3: data/intercode/463eb861/mistral-medium-3/1/2026-08-17T23-03-11-00-00_gdm-intercode-ctf_Fc5j8bVoikoxKg4U7WUkzt.eval
+muse-glimmer-30b: data/intercode/463eb861/muse-glimmer-30b/1/2026-08-20T18-54-44-00-00_gdm-intercode-ctf_jfRs3wpF6bqHaVjXxhk8ur.eval
+nemotron-3-ultra-550b-a55b: data/intercode/463eb861/nvidia-nemotron-3-ultra-550b-a55b-bf16/1/2026-08-20T19-13-33-00-00_gdm-intercode-ctf_hefBxZAhGTmmxSbF7gp6NY.eval
+nemotron-3.5-lightning: data/intercode/463eb861/nvidia-nemotron-3.5-lightning-30b-a3b-bf16/1/2026-08-20T17-02-55-00-00_gdm-intercode-ctf_Q6Unu5nZaiZjCitTmxbvGR.eval
+o3: data/intercode/463eb861/o3/1/2026-08-18T11-12-59-00-00_gdm-intercode-ctf_Z4ZEywYRuGkSTYsYdye6XB.eval
+qwen3-32b: data/intercode/463eb861/qwen3-32b/1/2026-08-18T14-58-42-00-00_gdm-intercode-ctf_XvqPad65Je244FQyygCDNy.eval
+qwen3.5-4b: data/intercode/463eb861/qwen3.5-4b/1/2026-08-17T18-08-16-00-00_gdm-intercode-ctf_WGq6aALrLCfMohDWmV4mnv.eval
+qwen3.5-9b: data/intercode/463eb861/qwen3.5-9b/1/2026-08-17T12-45-51-00-00_gdm-intercode-ctf_G3v44rzKJopw2QUCZs4CnZ.eval
+qwen3.8-2.4t-a95b: data/intercode/463eb861/qwen3.8-2.4t-a95b/1/2026-08-20T16-11-49-00-00_gdm-intercode-ctf_dPvh8kfHkyHXnqnM4Wi36n.eval
+qwen3.8-27b: data/intercode/463eb861/qwen3.8-27b/1/2026-08-20T17-28-46-00-00_gdm-intercode-ctf_LWXDmFmqH6zfpq3afxv3Pn.eval

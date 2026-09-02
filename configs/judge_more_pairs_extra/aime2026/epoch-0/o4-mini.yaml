@@ -1,0 +1,11 @@
+log_root: logs/more-pairs-extra/aime2026/epoch-0
+transcripts:
+  claude-opus-4.7: data/aime2026/44136fa3/claude-opus-4.7/0/2026-08-14T15-17-20-00-00_aime2026_Jrb4XxgkjGEVwUMomhZEj3.eval
+  glm-4.6: data/aime2026/44136fa3/glm-4.6/0/2026-08-13T12-10-33-00-00_aime2026_8co6sVP86bRVUo8YPp69VY.eval
+comparisons:
+- - openrouter/openai/o4-mini
+  - claude-opus-4.7
+  - glm-4.6
+judge_model_args:
+  openrouter/openai/o4-mini:
+    provider: {}

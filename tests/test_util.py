@@ -16,8 +16,8 @@ from inspect_ai.tool import ToolCall, ToolCallError
 from inspect_ai.scorer import Score
 
 from util import (extract_score, extract_transcript, extract_transcript_parts,
-                  format_content, format_message, render_transcript_parts, strip_think,
-                  transcript_content_hash)
+                  first_correct_by_id, format_content, format_message,
+                  render_transcript_parts, strip_think, transcript_content_hash)
 
 
 class TestFormatMessage:
@@ -214,6 +214,70 @@ class TestExtractScore:
         assert extract_score(SimpleNamespace(scores={"scorer": Score(value=1)})) is True
         assert extract_score(SimpleNamespace(scores={"scorer": Score(value={"score": 1})})) is True
         assert extract_score(SimpleNamespace(scores={"scorer": Score(value=0)})) is False
+
+
+class TestFirstCorrectById:
+    """Epoch selection must match build_dataset: earliest CORRECT epoch first."""
+
+    @staticmethod
+    def _log(*samples):
+        return SimpleNamespace(samples=list(samples))
+
+    @staticmethod
+    def _sample(item, epoch, correct, text):
+        return SimpleNamespace(id=item, epoch=epoch,
+                               scores={"scorer": Score(value="C" if correct else "I")},
+                               messages=[ChatMessageAssistant(content=text)])
+
+    def test_earliest_correct_epoch_wins_over_later_epochs(self):
+        """Later epochs must not overwrite the first correct one (the original bug)."""
+        log = self._log(
+            self._sample("q1", 1, True, "first correct"),
+            self._sample("q1", 2, True, "second correct"),
+            self._sample("q1", 3, True, "last epoch"),
+        )
+        groups = first_correct_by_id(log)
+        assert extract_transcript(groups["q1"][0]).endswith("first correct")
+        # a drift back to last-epoch selection would put "last epoch" here
+        assert extract_transcript(groups["q1"][1]).endswith("second correct")
+
+    def test_incorrect_epochs_are_skipped(self):
+        """The first correct epoch is neither the first nor the last epoch here."""
+        log = self._log(
+            self._sample("q1", 1, False, "wrong early"),
+            self._sample("q1", 2, True, "right"),
+            self._sample("q1", 3, False, "wrong late"),
+        )
+        groups = first_correct_by_id(log)
+        assert len(groups["q1"]) == 1
+        assert extract_transcript(groups["q1"][0]).endswith("right")
+
+    def test_out_of_order_samples_are_sorted_by_epoch(self):
+        """Log order must not decide the winner; epoch does."""
+        log = self._log(
+            self._sample("q1", 1, True, "epoch one"),
+            self._sample("q1", 3, True, "epoch three"),
+            self._sample("q1", 2, True, "epoch two"),
+        )
+        assert extract_transcript(first_correct_by_id(log)["q1"][0]).endswith("epoch one")
+
+    def test_item_with_no_correct_epoch_is_absent(self):
+        log = self._log(self._sample("q1", 1, False, "wrong"))
+        assert "q1" not in first_correct_by_id(log)
+
+    def test_extract_score_swe_bench_float(self):
+        """SWE-bench's test-run scorer stores a float 1.0/0.0, not 'C'/'I'."""
+        assert extract_score(SimpleNamespace(scores={"s": Score(value=1.0)})) is True
+        assert extract_score(SimpleNamespace(scores={"s": Score(value=0.0)})) is False
+
+    def test_extract_score_hle_dict(self):
+        """HLE nests the label under 'score' alongside a confidence."""
+        assert extract_score(SimpleNamespace(scores={"s": Score(value={"score": "C", "confidence": 80})})) is True
+        assert extract_score(SimpleNamespace(scores={"s": Score(value={"score": "I", "confidence": 80})})) is False
+
+    def test_extract_score_no_scores(self):
+        """A sample with no scores is not correct."""
+        assert extract_score(SimpleNamespace(scores={})) is False
 
 
 class TestStripThink:

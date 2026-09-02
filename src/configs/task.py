@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from inspect_ai import Epochs
+from inspect_ai.solver import SolverSpec
 
 from configs.base import DraccusConfig
 
@@ -16,11 +17,15 @@ class TaskConfig(DraccusConfig):
 
     task: str = ''
     task_args: Dict[str, Any] = field(default_factory=dict)
+    # Override the task's built-in solver, as an inspect spec: a registered name or a
+    # ``file.py@name`` path (resolved from the repo root). Empty = use the task default.
+    solver: str = ''
     # No generate cache by default: repeats reuse the same prompts, so a cache turns the
     # second repeat into a replay of the first (seen on aime/mbpp; gpqa escaped only because
     # its options are reshuffled per run).
     cache: Any = None
-    limit: Optional[int] = None
+    # Plain type with a None default: Optional[int] breaks Draccus on Python 3.14.
+    limit: int = None
     epochs: int = 1
     epochs_reducer: Any = None
 
@@ -37,6 +42,8 @@ class TaskConfig(DraccusConfig):
             kwargs["cache"] = self.cache
         if self.limit:
             kwargs["limit"] = self.limit
+        if self.solver:
+            kwargs["solver"] = SolverSpec(solver=self.solver)
         kwargs["epochs"] = (
             Epochs(self.epochs, self.epochs_reducer)
             if self.epochs_reducer is not None

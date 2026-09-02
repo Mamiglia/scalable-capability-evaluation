@@ -17,6 +17,7 @@ dependencies = [
     "numpyro>=0.15",
     "openai>=3.1.0",   # inspect-ai's OpenRouter provider requires it
     "pandas>=3.0.5",
+    "peft>=0.20.0",              # analysis only (LoRA fine-tuning)
     "pyarrow>=25.0.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
@@ -33,6 +34,8 @@ dependencies = [
 collect = "collect.cli:main"
 judge = "judge.cli:main"
 irt = "irt.cli:main"
+mc-cost = "mc_cost.cli:main"
+rank = "ranking.cli:main"
 
 [build-system]
 requires = ["setuptools>=77"]

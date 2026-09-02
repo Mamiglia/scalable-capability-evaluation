@@ -1,0 +1,134 @@
+log_root: logs/judge-interp-steered
+phase1_items: 40
+transcripts:
+  random_a_p0: data/steered_answers/random_a_p0/2026-08-06T14-49-46-00-00_gpqa-diamond-steered_AxNEqE68RuGCEvjo9W5fmQ.eval
+  random_a_p0.4: data/steered_answers/random_a_p0.4/2026-08-06T14-49-48-00-00_gpqa-diamond-steered_LKn3DrgYovcK57RQHvo8sT.eval
+  random_a_p0.5: data/steered_answers/random_a_p0.5/2026-08-06T14-49-48-00-00_gpqa-diamond-steered_5Z8CeHFqWcYLw3qQGrZ9wZ.eval
+  unsteered: data/steered_answers/unsteered/2026-08-06T14-49-49-00-00_gpqa-diamond-steered_Fo3whnehWtWUSvCQK973MW.eval
+  v_pref_judge_m0.2: data/steered_answers/v_pref_judge_m0.2/2026-08-06T14-49-49-00-00_gpqa-diamond-steered_DEmTkrd2hL7pFkyeVVexPo.eval
+  v_pref_judge_m0.25: data/steered_answers/v_pref_judge_m0.25/2026-08-06T14-49-50-00-00_gpqa-diamond-steered_RxdJvCrp3JXHpbHeaPPhqp.eval
+  v_pref_judge_m0.4: data/steered_answers/v_pref_judge_m0.4/2026-08-06T14-49-50-00-00_gpqa-diamond-steered_CgLFpPmsQtrHzyRPG3rfcs.eval
+  v_pref_judge_m0.5: data/steered_answers/v_pref_judge_m0.5/2026-08-06T14-49-51-00-00_gpqa-diamond-steered_o8ADj4BKVLG2Vq7x8ED757.eval
+  v_pref_judge_p0.2: data/steered_answers/v_pref_judge_p0.2/2026-08-06T14-49-52-00-00_gpqa-diamond-steered_PkhnW3RgTmu48WRXmK8oQL.eval
+  v_pref_judge_p0.25: data/steered_answers/v_pref_judge_p0.25/2026-08-06T14-49-52-00-00_gpqa-diamond-steered_MEhQUVopPAfrKSMEtCiUwL.eval
+  v_pref_judge_p0.4: data/steered_answers/v_pref_judge_p0.4/2026-08-06T14-49-53-00-00_gpqa-diamond-steered_SmqqLgK5gD7KnTPftcqUkF.eval
+  v_pref_judge_p0.5: data/steered_answers/v_pref_judge_p0.5/2026-08-06T14-49-54-00-00_gpqa-diamond-steered_MpkqzKKvsFmzv4PbfvxExf.eval
+judge_model_args:
+  openrouter/qwen/qwen3-32b:
+    provider:
+      only:
+      - siliconflow/fp8
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/google/gemma-4-31b-it:
+    provider:
+      only:
+      - siliconflow/fp8
+      allow_fallbacks: false
+      require_parameters: true
+      data_collection: deny
+  openrouter/openai/gpt-4o-2024-08-06:
+    provider:
+      data_collection: deny
+      require_parameters: true
+comparisons:
+- - qwen3-32b
+  - random_a_p0
+  - unsteered
+- - gemma-4-31b-it
+  - random_a_p0
+  - unsteered
+- - gpt-4o-2024-08-06
+  - random_a_p0
+  - unsteered
+- - qwen3-32b
+  - random_a_p0.4
+  - unsteered
+- - gemma-4-31b-it
+  - random_a_p0.4
+  - unsteered
+- - gpt-4o-2024-08-06
+  - random_a_p0.4
+  - unsteered
+- - qwen3-32b
+  - random_a_p0.5
+  - unsteered
+- - gemma-4-31b-it
+  - random_a_p0.5
+  - unsteered
+- - gpt-4o-2024-08-06
+  - random_a_p0.5
+  - unsteered
+- - qwen3-32b
+  - v_pref_judge_m0.2
+  - unsteered
+- - gemma-4-31b-it
+  - v_pref_judge_m0.2
+  - unsteered
+- - gpt-4o-2024-08-06
+  - v_pref_judge_m0.2
+  - unsteered
+- - qwen3-32b
+  - v_pref_judge_m0.25
+  - unsteered
+- - gemma-4-31b-it
+  - v_pref_judge_m0.25
+  - unsteered
+- - gpt-4o-2024-08-06
+  - v_pref_judge_m0.25
+  - unsteered
+- - qwen3-32b
+  - v_pref_judge_m0.4
+  - unsteered
+- - gemma-4-31b-it
+  - v_pref_judge_m0.4
+  - unsteered
+- - gpt-4o-2024-08-06
+  - v_pref_judge_m0.4
+  - unsteered
+- - qwen3-32b
+  - v_pref_judge_m0.5
+  - unsteered
+- - gemma-4-31b-it
+  - v_pref_judge_m0.5
+  - unsteered
+- - gpt-4o-2024-08-06
+  - v_pref_judge_m0.5
+  - unsteered
+- - qwen3-32b
+  - v_pref_judge_p0.2
+  - unsteered
+- - gemma-4-31b-it
+  - v_pref_judge_p0.2
+  - unsteered
+- - gpt-4o-2024-08-06
+  - v_pref_judge_p0.2
+  - unsteered
+- - qwen3-32b
+  - v_pref_judge_p0.25
+  - unsteered
+- - gemma-4-31b-it
+  - v_pref_judge_p0.25
+  - unsteered
+- - gpt-4o-2024-08-06
+  - v_pref_judge_p0.25
+  - unsteered
+- - qwen3-32b
+  - v_pref_judge_p0.4
+  - unsteered
+- - gemma-4-31b-it
+  - v_pref_judge_p0.4
+  - unsteered
+- - gpt-4o-2024-08-06
+  - v_pref_judge_p0.4
+  - unsteered
+- - qwen3-32b
+  - v_pref_judge_p0.5
+  - unsteered
+- - gemma-4-31b-it
+  - v_pref_judge_p0.5
+  - unsteered
+- - gpt-4o-2024-08-06
+  - v_pref_judge_p0.5
+  - unsteered

@@ -1,0 +1,27 @@
+paths:
+  epoch_responses: /Users/moriohamada/PycharmProjects/ai_safety/small-judge/external_data/epoch-gpqa/responses.parquet
+  epoch_logs: /Users/moriohamada/PycharmProjects/ai_safety/small-judge/external_data/epoch-gpqa
+  pilot_responses: /Users/moriohamada/PycharmProjects/ai_safety/small-judge/configs/gpqa_core_rd2_260803.yaml
+  local_responses:
+    gpqa: /Users/moriohamada/PycharmProjects/ai_safety/small-judge/data/gpqa/63793eb6
+  viewer_data: /Users/moriohamada/PycharmProjects/ai_safety/small-judge/interactive_dashboards/transcript_viewer/data
+  output: /private/tmp/small-judge-bias-correction/irt_results/easy_item_prediction
+viewer_datasets:
+  gpqa-pilot-rd2: gpqa
+  data-expansion-gpqa: gpqa
+correction:
+  benchmark: gpqa
+  output: /private/tmp/small-judge-bias-correction/analysis/bias_correction_glm_ind
+  bootstrap_resamples: 5000
+  viewer_datasets:
+    gpqa-pilot-rd2: gpqa
+    data-expansion-gpqa: gpqa
+    hf-judging-2026-08-17-gpqa: gpqa
+  hf_benchmark_scores: /Users/moriohamada/PycharmProjects/ai_safety/small-judge/data/hf-judging-2026-08-17/benchmark-scores/gpqa
+  style_lexicon: /private/tmp/small-judge-bias-correction/scripts/hibayes/style_lexicon.yaml
+irt:
+  floors:
+    gpqa: 0.25
+  warmup: 2000
+  samples: 2000
+  seed: 0

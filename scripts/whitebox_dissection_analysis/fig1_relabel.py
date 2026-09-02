@@ -11,7 +11,7 @@ import pandas as pd
 sys.path.insert(0, "/Users/moriohamada/PycharmProjects/ai_safety/small-judge/judge-whitebox")
 import mask_summary
 
-S = pathlib.Path("/private/tmp/claude-501/-Users-moriohamada-PycharmProjects-ai-safety-small-judge/8727e515-2405-4685-a43d-ead3d07c1e1c/scratchpad")
+S = pathlib.Path("/Users/moriohamada/PycharmProjects/ai_safety/small-judge/tmp/whitebox")
 OUT = pathlib.Path("/Users/moriohamada/PycharmProjects/ai_safety/small-judge/judge_results/whitebox_dissection/figures/llama3.2-3B")
 plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7,
                      "xtick.labelsize": 7, "ytick.labelsize": 7,
@@ -59,5 +59,5 @@ axes[1].axvline(0, color="0.5", lw=0.8, ls="--")
 axes[1].set_xlabel("Δ transcript length, 1 − 2 (tokens)")
 axes[1].set_ylabel("net pull towards\ntranscript 1 (log-odds)")
 fig.tight_layout()
-fig.savefig(OUT / "fig1_length_bias.png", dpi=300)
+fig.savefig(OUT / "fig1_length_bias.png", dpi=300); fig.savefig(OUT / "fig1_length_bias.svg")
 print("saved")

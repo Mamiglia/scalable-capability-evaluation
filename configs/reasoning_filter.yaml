@@ -1,0 +1,18 @@
+# Which answer transcripts an analysis may use. A judge handed an answer with no
+# working has nothing to assess, so such a transcript carries no signal about the
+# model that wrote it.
+
+# Characters left after the ANSWER line for a transcript to count as reasoning.
+# Roughly 15-20 words, the floor the fine-tuning configs use.
+min_reasoning_chars: 100
+
+# none            keep everything
+# per_transcript  drop individual transcripts below the floor
+# per_model       drop an answer model whose median transcript is below it
+mode: per_model
+
+# Reasoning-effort variants of a model are collected as separate answer models;
+# only their default-effort sibling belongs in the pool. Matched as a name
+# suffix after a - or _, so a model merely containing the word is left alone.
+exclude_effort_variants: true
+effort_suffixes: [low, high]

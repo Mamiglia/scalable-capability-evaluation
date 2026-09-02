@@ -1,0 +1,14 @@
+log_root: logs/more-pairs-extra/swe_bench_mini/epoch-1
+transcripts:
+  claude-opus-4.7: data/swe_bench_mini/477dc96c/claude-opus-4.7/1/2026-08-20T21-06-13-00-00_swe-bench-verified-mini_PFnXHJDdqQntyfzprdfwJ9.eval
+  glm-4.6: data/swe_bench_mini/477dc96c/glm-4.6/1/2026-08-21T17-43-06-00-00_swe-bench-verified-mini_ZFX3BUFPKFJCcvcSbsLm6x.eval
+comparisons:
+- - openrouter/deepseek/deepseek-v4-flash-0731
+  - claude-opus-4.7
+  - glm-4.6
+judge_model_args:
+  openrouter/deepseek/deepseek-v4-flash-0731:
+    provider:
+      only:
+      - deepinfra/fp8
+      allow_fallbacks: false

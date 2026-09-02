@@ -112,7 +112,10 @@ def inventory_and_verdicts(roots: dict[str, Path]) -> tuple[pd.DataFrame, pd.Dat
     inventory = []
     rows = []
     for condition, root in roots.items():
+        others = [r for r in roots.values() if r != root and r.is_relative_to(root)]
         for index, path in enumerate(sorted(root.rglob("*.eval")), 1):
+            if any(path.is_relative_to(other) for other in others):
+                continue  # belongs to a nested root (e.g. logs/aime/reason under logs/aime)
             try:
                 data = header(path)
                 status = data.get("status", "unknown")
@@ -247,7 +250,7 @@ def add_reference_scores(verdicts: pd.DataFrame, aa_path: Path) -> pd.DataFrame:
 
 
 def deduplicate(verdicts: pd.DataFrame) -> tuple[pd.DataFrame, str]:
-    key = ["condition", "judge", "pair", "source_repeat", "item", "order"]
+    key = ["condition", "benchmark", "judge", "pair", "source_repeat", "item", "order"]
     duplicate = verdicts[verdicts.duplicated(key, keep=False)]
     conflicts = duplicate.groupby(key, dropna=False).chosen_model.nunique(dropna=False)
     conflicting_keys = set(conflicts[conflicts > 1].index)
@@ -269,7 +272,7 @@ def validate(verdicts: pd.DataFrame, inventory: pd.DataFrame, aa_path: Path) -> 
     messages.append(f"cells missing a second repeat: {(repeats < 2).sum():,}/{len(repeats):,}")
     off = verdicts[verdicts.condition == "reasoning_off"]
     on = verdicts[verdicts.condition == "reasoning_on"]
-    match = ["judge", "pair", "source_repeat", "item", "order"]
+    match = ["judge", "benchmark", "pair", "source_repeat", "item", "order"]
     messages.append(f"matched reasoning rows: {len(off.merge(on, on=match)):,}")
     aa = pd.read_csv(aa_path)
     candidates = set(verdicts.major) | set(verdicts.minor)
@@ -717,7 +720,7 @@ def summary_rows(verdicts: pd.DataFrame, matched: pd.DataFrame, variation: pd.Da
     return pd.DataFrame(rows)
 
 
-def write_readme(out: Path, messages: list[str], summary: pd.DataFrame, inventory: pd.DataFrame,
+def write_readme(out: Path, roots: dict[str, Path], messages: list[str], summary: pd.DataFrame, inventory: pd.DataFrame,
                  matched: pd.DataFrame) -> None:
     quality = summary[summary.section == "judge_quality"]
     best = quality.loc[quality.groupby("benchmark").value.idxmax()]
@@ -725,9 +728,9 @@ def write_readme(out: Path, messages: list[str], summary: pd.DataFrame, inventor
         f"- {row.benchmark}: highest pair-balanced judge accuracy was {short(row.judge)} at {row.value:.1%}."
         for row in best.itertuples()
     )
-    text = f"""# Pilot judge results
+    text = f"""# Judge results
 
-Generated from item-level Inspect judgments in `logs/pilot/` and `logs/pilot_reasoning/`.
+Generated from item-level Inspect judgments in `{roots["reasoning_off"]}/` (reasoning off) and `{roots["reasoning_on"]}/` (reasoning on).
 
 ## Coverage and validation
 
@@ -797,9 +800,8 @@ def main() -> int:
             raise FileNotFoundError(path)
     args.out.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed)
-    verdicts, inventory = inventory_and_verdicts(
-        {"reasoning_off": args.pilot_root, "reasoning_on": args.reasoning_root}
-    )
+    roots = {"reasoning_off": args.pilot_root, "reasoning_on": args.reasoning_root}
+    verdicts, inventory = inventory_and_verdicts(roots)
     verdicts, duplicate_message = deduplicate(verdicts)
     verdicts = add_reference_scores(verdicts, args.aa_scores)
     messages = validate(verdicts, inventory, args.aa_scores)
@@ -817,7 +819,7 @@ def main() -> int:
     btl.to_csv(args.out / "btl_scores.csv", index=False)
     stability.to_csv(args.out / "subset_stability.csv", index=False)
     plot_all(verdicts, matched, variation, btl, stability, args.out, rng)
-    write_readme(args.out, messages, summary, inventory, matched)
+    write_readme(args.out, roots, messages, summary, inventory, matched)
     print(f"wrote analysis to {args.out}")
     return 0
 

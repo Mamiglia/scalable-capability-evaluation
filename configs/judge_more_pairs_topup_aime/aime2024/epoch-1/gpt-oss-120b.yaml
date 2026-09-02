@@ -1,0 +1,83 @@
+log_root: logs/more-pairs-topup/aime2024/epoch-1
+transcripts:
+  deepseek-r1-0528: data/aime2024/44136fa3/deepseek-r1-0528/1/2026-08-28T08-54-30+00-00_aime2024_THBni56MHoDCCTruVZp9ZW.eval
+  deepseek-v3.2: data/aime2024/44136fa3/deepseek-v3.2/1/2026-08-28T01-23-13+00-00_aime2024_VAKdksyG7duZ4zUFvWjqhg.eval
+  gemini-3.5-flash: data/aime2024/44136fa3/gemini-3.5-flash/1/2026-08-28T01-23-17+00-00_aime2024_bPKW6AkiDrJ8re2cGCNNCR.eval
+  glm-5.3: data/aime2024/44136fa3/glm-5.3/1/2026-08-28T08-54-39+00-00_aime2024_cwpDZdADCicZwoqRwyRaWV.eval
+  gpt-4.1: data/aime2024/44136fa3/gpt-4.1/1/2026-08-28T01-23-28+00-00_aime2024_ZAJQApHyKaxKUUFgbikZhm.eval
+  kimi-k2.6: data/aime2024/44136fa3/kimi-k2.6/1/2026-08-28T08-54-42+00-00_aime2024_KnhhDAW48mSzQGuNTqSpM4.eval
+  kimi-k3: data/aime2024/44136fa3/kimi-k3/1/2026-08-28T08-54-46+00-00_aime2024_XvS5qJbVMDvY59srPz2yDc.eval
+  ling-2.6-flash: data/aime2024/44136fa3/ling-2.6-flash/1/2026-08-28T01-23-37+00-00_aime2024_VyssnrFH9HPSjJPogchxDj.eval
+  muse-glimmer-30b: data/aime2024/44136fa3/muse-glimmer-30b/1/2026-08-28T01-23-42+00-00_aime2024_b93w4xEhe3NDUH2NZs5ALd.eval
+  nemotron-3-ultra-550b-a55b: data/aime2024/44136fa3/nvidia-nemotron-3-ultra-550b-a55b-bf16/1/2026-08-28T08-54-51+00-00_aime2024_3jcg3Ew9KqUKXuT5vmEMhr.eval
+  qwen3.5-4b: data/aime2024/44136fa3/qwen3.5-4b/1/2026-08-28T01-23-49+00-00_aime2024_Jb7i5g7MSybpwXbUgXwR4q.eval
+  qwen3.5-9b: data/aime2024/44136fa3/qwen3.5-9b/1/2026-08-28T08-55-04+00-00_aime2024_2uSQRXv8Za7H7vukEaNszV.eval
+  qwen3.8-2.4t-a95b: data/aime2024/44136fa3/qwen3.8-2.4t-a95b/1/2026-08-28T05-27-12+00-00_aime2024_3rrbEvrrGkE7ScND5WYbrV.eval
+comparisons:
+- - openrouter/openai/gpt-oss-120b
+  - gemini-3.5-flash
+  - kimi-k2.6
+- - openrouter/openai/gpt-oss-120b
+  - glm-5.3
+  - nemotron-3-ultra-550b-a55b
+- - openrouter/openai/gpt-oss-120b
+  - kimi-k2.6
+  - kimi-k3
+- - openrouter/openai/gpt-oss-120b
+  - nemotron-3-ultra-550b-a55b
+  - deepseek-r1-0528
+- - openrouter/openai/gpt-oss-120b
+  - nemotron-3-ultra-550b-a55b
+  - deepseek-v3.2
+- - openrouter/openai/gpt-oss-120b
+  - nemotron-3-ultra-550b-a55b
+  - muse-glimmer-30b
+- - openrouter/openai/gpt-oss-120b
+  - qwen3.5-4b
+  - qwen3.5-9b
+- - openrouter/openai/gpt-oss-120b
+  - qwen3.5-9b
+  - deepseek-r1-0528
+- - openrouter/openai/gpt-oss-120b
+  - qwen3.5-9b
+  - gpt-4.1
+- - openrouter/openai/gpt-oss-120b
+  - qwen3.5-9b
+  - ling-2.6-flash
+- - openrouter/openai/gpt-oss-120b
+  - qwen3.8-2.4t-a95b
+  - nemotron-3-ultra-550b-a55b
+only_items:
+  gemini-3.5-flash-vs-kimi-k2.6:
+  - 2024-I-12
+  glm-5.3-vs-nemotron-3-ultra-550b-a55b:
+  - 2024-I-10
+  kimi-k2.6-vs-kimi-k3:
+  - 2024-I-12
+  nemotron-3-ultra-550b-a55b-vs-deepseek-r1-0528:
+  - 2024-I-10
+  nemotron-3-ultra-550b-a55b-vs-deepseek-v3.2:
+  - 2024-I-10
+  nemotron-3-ultra-550b-a55b-vs-muse-glimmer-30b:
+  - 2024-I-10
+  qwen3.5-4b-vs-qwen3.5-9b:
+  - 2024-I-8
+  - 2024-II-12
+  qwen3.5-9b-vs-deepseek-r1-0528:
+  - 2024-I-8
+  - 2024-II-12
+  qwen3.5-9b-vs-gpt-4.1:
+  - 2024-II-12
+  qwen3.5-9b-vs-ling-2.6-flash:
+  - 2024-I-8
+  - 2024-II-12
+  qwen3.8-2.4t-a95b-vs-nemotron-3-ultra-550b-a55b:
+  - 2024-I-10
+judge_model_args:
+  openrouter/openai/gpt-oss-120b:
+    provider:
+      only:
+      - deepinfra/bf16
+      allow_fallbacks: false
+      quantizations:
+      - bf16
