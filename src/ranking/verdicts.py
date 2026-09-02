@@ -16,7 +16,10 @@ def from_logs(log_dir: str | Path) -> pd.DataFrame:
         major, minor = md.get("major") or md["name_major"], md.get("minor") or md["name_minor"]
         bench = md.get("bench") or md["benchmark_name"]
         for s in read_eval_log_sample_summaries(str(path)):
-            answer = next(iter((s.scores or {}).values())).answer
+            # A sample the run tolerated an error on (fail_on_error) never reached the
+            # scorer, so it carries no verdict.
+            score = next(iter((s.scores or {}).values()), None)
+            answer = score.answer if score else None
             if answer not in ("1", "2"):
                 continue
             item, target = str(s.id).rsplit("_", 1)

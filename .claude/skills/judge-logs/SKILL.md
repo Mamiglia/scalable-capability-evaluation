@@ -1,0 +1,53 @@
+---
+name: judge-logs
+description: Handling the logs/ repo of judge runs - layout, where a judging campaign's verdicts land, resuming, moving stale/invalid verdicts, and committing/pushing to the LASR-G5/judging HF repo. Use whenever the user works with logs/, judge eval-sets, verdict logs, or rankings - launching or resuming a judging run, finding which dir a run wrote to, cleaning up after data/ transcripts changed, or syncing logs/.
+---
+
+# Handling logs/ (judge runs)
+
+**Read `logs/CONTRACT.md` first** — it is the binding rulebook (layout, fixed areas,
+quarantine, sync). This skill is the operational companion. `logs/` holds *derived* data:
+every verdict is recomputable from `data/` + `configs/experiments/` (judge at temperature 0,
+generate cache on), which is why the repo is gitignored in the parent and pinned nowhere.
+
+## Where things are
+
+- Current runs: `logs/rank/<domain>/<judge shortname>/<condition hash>/`, one `.eval` per
+  `<bench, pair>` (pair in the task name). `ranking.csv` / `scores.csv` / `ranking.json`
+  sit beside the logs.
+- To find a run's dir, don't guess the hash — `condition_hash` (`src/configs/experiment.py`)
+  covers system_prompt, include_reasoning, truncate_frac, max_length, require_both_correct,
+  include_reverse; or just `ls -t logs/rank/<domain>/<judge>/`.
+- `pilot*/`, `aime/`, `apex/` are frozen pre-08-26 experiments; `smoke/` is scratch;
+  `legacy/` = superseded, `invalid/` = must-not-use (see its README).
+
+## Running / resuming
+
+```bash
+uv run judge --cfg configs/experiments/<domain>.yml [--limit 2]   # writes the layout itself
+uv run rank logs/rank/<domain>/<judge>/<hash> --domain configs/domain/<domain>.yml
+```
+
+Re-running the same `judge` command resumes the same `eval_set` dir; adding models adds
+pairs to it. Never hand-create condition-hash dirs, never mix conditions in one dir.
+Re-judging an unchanged pair is free (generate cache).
+
+## When data/ changes under the verdicts
+
+Canonicalization, rescoring, or normalization in `data/` makes verdicts on the old
+transcripts **stale**: move them to `logs/legacy/<mirrored path>` (never delete), re-judge,
+and say so in the commit message. Unusable verdicts (serving defects) go to `logs/invalid/`
+*plus a line in `invalid/README.md` explaining why*.
+
+## Syncing
+
+`logs/` is its own git repo → `https://huggingface.co/datasets/LASR-G5/judging`, git-LFS on
+`*.eval`. Git is the only transport (no `hf upload`). No parent pin exists, so an unpushed
+commit lives only on this machine: commit + push after every judging campaign and every
+legacy/invalid move. Commit messages name the campaign or the move and its reason.
+
+## Hygiene
+
+- Junk to flag: nested `inspect_evals/...` dirs (wrong `--log_dir`), stray test dirs.
+- Findings cite the experiment config + condition, never a log path.
+- Before bulk-reading logs use the `reading-logs` skill; never unzip a `.eval`.
