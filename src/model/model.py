@@ -10,13 +10,7 @@ from typing import Any
 
 from configs import ModelConfig
 from configs.logs import logger
-from model import runpod
-from model.session import RunpodSession
-
-
-# Excluded from the session key: they do not change the container, so runs that differ
-# only in these can still share a pod.
-NON_CONTAINER_KEYS = {"use", "model_args", "keep_alive"}
+from model.session import RunpodSession, get_session
 
 
 class Model:
@@ -31,37 +25,24 @@ class Model:
         self.config = config
         self.use_runpod = use_runpod
         self._base_url: str | None = None
-        self._runpod_config: dict[str, Any] | None = None
         self._session: RunpodSession | None = None
         self._previous_sigterm: Any = None
 
     def _enabled(self) -> bool:
         """Whether this model is served from a Runpod pod."""
-        config = self.config.runpod
-        if not config:
-            if self.use_runpod:
-                raise ValueError(
-                    f"model '{self.config.name}' needs a runpod mapping with --runpod"
-                )
-            return False
-        if not isinstance(config, dict):
-            raise ValueError(f"model '{self.config.name}': runpod must be a mapping")
-        use = config.get("use", False)
-        if not isinstance(use, bool):
-            raise ValueError(f"model '{self.config.name}': runpod.use must be a Boolean")
-        return self.use_runpod or use
+        if self.use_runpod:
+            self.config.runpod.require_pod_fields()
+            return True
+        return self.config.runpod.use
 
     def __enter__(self) -> Model:
         if not self._enabled():
             return self
 
-        self._runpod_config = runpod.validate(self.config.runpod)
-        container = {
-            key: value
-            for key, value in self._runpod_config.items()
-            if key not in NON_CONTAINER_KEYS
-        }
-        self._session = RunpodSession(json.dumps(container, sort_keys=True, default=str), self._runpod_config)
+        runpod = self.config.runpod
+        runpod.require_pod_fields()
+        key = json.dumps(runpod.container_key(), sort_keys=True, default=str)
+        self._session = get_session(key, runpod)
 
         # A SIGTERM (e.g. from the parent runner) must unwind the context so the pod is
         # released rather than left running.
@@ -97,8 +78,9 @@ class Model:
 
     def eval_kwargs(self) -> dict[str, Any]:
         """Return the model arguments expected by ``inspect_ai.eval_set``."""
-        if self._runpod_config:
-            slug = f"openai-api/runpod/{self._runpod_config['model']}"
+        if self._session:
+            runpod = self.config.runpod
+            slug = f"openai-api/runpod/{runpod.model}"
             # OpenRouter provider pins mean nothing to a vLLM pod; pod args come from
             # runpod.model_args instead.
             if self.config.model_args:
@@ -108,7 +90,7 @@ class Model:
                     self.config.name,
                     sorted(self.config.model_args),
                 )
-            model_args = {"api_key": "inspectai", "stream": True} | self._runpod_config["model_args"]
+            model_args = {"api_key": "inspectai", "stream": True} | runpod.model_args
             generate_args = {"max_retries": 2} | (self.config.generate_args or {})
         else:
             slug = self.config.slug

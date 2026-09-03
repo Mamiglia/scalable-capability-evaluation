@@ -1,26 +1,23 @@
 """Cross-process registry of shared Runpod pods.
 
 Several `collect`/`judge` processes may want the same pod, so the pod is registered in a
-small JSON file under /tmp, guarded by a file lock, and reference-counted: whoever drops
-the last reference terminates it.
+small JSON file under /tmp, guarded by a file lock, together with the pids using it:
+whoever drops the last live pid terminates it. Pids rather than a counter, so a process
+that dies without releasing (SIGKILL, OOM) cannot pin the pod forever.
 
 The file is the only record of a running pod, so a read/write failure is raised rather
-than swallowed — losing it silently orphans a pod that then bills until
-``terminate_after`` expires.
+than swallowed — losing it silently orphans a pod that bills until terminated by hand.
 """
 
 from __future__ import annotations
 
 import fcntl
 import json
-import logging
 import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
-
-LOGGER = logging.getLogger(__name__)
 
 STATE_FILE = Path("/tmp/small_judge_runpod_sessions.json")
 LOCK_FILE = Path("/tmp/small_judge_runpod_sessions.lock")
@@ -61,18 +58,34 @@ def _write_state(state: dict[str, Any]) -> None:
     os.replace(tmp_file, STATE_FILE)
 
 
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _live_pids(entry: dict[str, Any]) -> list[int]:
+    """Prune dead users in place and return the survivors."""
+    entry["pids"] = [pid for pid in entry.get("pids", []) if _alive(pid)]
+    return entry["pids"]
+
+
 def claim_or_join(state: dict[str, Any], key: str, ready_timeout: float) -> tuple[dict | None, bool]:
     """Decide what this process should do about the pod for ``key``.
 
     Returns ``(entry, is_creating)``:
-    - ``(entry, False)`` — a pod is registered and this process now holds a reference to it
+    - ``(entry, False)`` — a pod is registered and this process is now one of its users
       (the caller must still health-check it and call ``drop`` if it is dead).
     - ``(None, True)`` — another live process is creating it; wait for it.
     - ``(None, False)`` — nothing there, so this process has claimed creation.
     """
     entry = state.get(key)
     if entry and entry.get("status") == "ready":
-        entry["ref_count"] = entry.get("ref_count", 0) + 1
+        pids = _live_pids(entry)
+        if os.getpid() not in pids:
+            pids.append(os.getpid())
         return entry, False
 
     if entry and entry.get("status") == "creating" and _creator_alive(entry, ready_timeout):
@@ -85,11 +98,8 @@ def claim_or_join(state: dict[str, Any], key: str, ready_timeout: float) -> tupl
 def _creator_alive(entry: dict[str, Any], ready_timeout: float) -> bool:
     """Whether the process that claimed creation is still around and still in time."""
     pid = entry.get("pid")
-    if pid:
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            return False
+    if pid and not _alive(pid):
+        return False
     return time.time() - entry.get("created_at", 0) < ready_timeout + 60
 
 
@@ -101,27 +111,27 @@ def register(key: str, pod_id: str, base_url: str, gpu: str) -> None:
             "pod_id": pod_id,
             "base_url": base_url,
             "gpu": gpu,
-            "ref_count": 1,
+            "pids": [os.getpid()],
         }
 
 
 def drop(key: str) -> int:
-    """Release one reference to ``key``'s pod and return the remaining count."""
+    """Stop using ``key``'s pod and return how many live processes still do."""
     with locked_state() as state:
         entry = state.get(key)
         if not entry:
             return 0
-        entry["ref_count"] = max(0, entry.get("ref_count", 1) - 1)
-        return entry["ref_count"]
+        entry["pids"] = [pid for pid in _live_pids(entry) if pid != os.getpid()]
+        return len(entry["pids"])
 
 
 def unregister(key: str, only_if_unused: bool = False) -> bool:
-    """Forget ``key``'s pod. With ``only_if_unused``, keep it if someone took a reference."""
+    """Forget ``key``'s pod. With ``only_if_unused``, keep it if a live process uses it."""
     with locked_state() as state:
         entry = state.get(key)
         if entry is None:
             return False
-        if only_if_unused and entry.get("ref_count", 0) > 0:
+        if only_if_unused and _live_pids(entry):
             return False
         del state[key]
         return True

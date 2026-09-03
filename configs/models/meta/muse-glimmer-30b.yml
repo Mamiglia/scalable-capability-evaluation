@@ -1,4 +1,5 @@
-# Quantization: Unquantized BF16 (Parasail) - DeepInfra also serves bf16 but caps output at 16k.
+# Quantization: Unquantized BF16. Parasail dropped this slug (2026-09-03, 404 provider drift);
+# repinned to DeepInfra/bf16 (same precision, no confound) which caps output at 16384.
 name: meta-models/Muse-Glimmer-30B
 slug: openrouter/meta/muse-glimmer-30b
 release_date: '2026-08-10'
@@ -6,9 +7,9 @@ generate_args:
   extra_body:
     reasoning:
       enabled: true
-  max_tokens: 65536  # capped so input + output fits Parasail's 131072 context (was 114688, 400'd on long CTF transcripts)
+  max_tokens: 16384  # DeepInfra's max output cap (was 65536 on Parasail's 131072 context, now gone)
 model_args:
   provider:
     only:
-    - parasail/bf16
+    - deepinfra/bf16
     allow_fallbacks: false

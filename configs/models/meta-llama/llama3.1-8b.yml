@@ -6,5 +6,10 @@ runpod:
   model: meta-llama/Llama-3.1-8B-Instruct
   name: small-judge-llama31-8b
   cloud_type: SECURE
-  gpu_id: NVIDIA A40
+  gpu_id: NVIDIA RTX A5000   # 24GB, $0.27/h: 16GB of weights
   ready_timeout: 900
+  vllm_args:
+    # 128k native; KV is 128KB/token so a 24GB card holds ~2 sequences at 32k. Prompts
+    # top out at ~12k (HLE) and this model's answers are short.
+    - --max-model-len
+    - "32768"

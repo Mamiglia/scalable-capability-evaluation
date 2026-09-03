@@ -8,7 +8,7 @@ runpod:
   model: huggyllama/llama-7b
   name: small-judge-llama-7b
   cloud_type: SECURE
-  gpu_id: NVIDIA A40
+  gpu_id: NVIDIA RTX A4500   # 20GB, $0.25/h: 13.5GB of weights, 2048 context
   container_disk_in_gb: 40
   ready_timeout: 900
   image: vllm/vllm-openai:v0.18.0

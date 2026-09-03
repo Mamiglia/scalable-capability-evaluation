@@ -6,11 +6,13 @@ runpod:
   model: microsoft/Phi-3-medium-128k-instruct
   name: small-judge-phi3-medium-14b
   cloud_type: SECURE
-  gpu_id: NVIDIA A100 80GB PCIe
+  gpu_id: NVIDIA A40   # 48GB, $0.44/h: 28GB of weights
   ready_timeout: 900
   container_disk_in_gb: 80
   image: vllm/vllm-openai:v0.18.0
   vllm_args:
     - --trust-remote-code
+    # 128k native, but KV is 200KB/token: one 131k sequence needs 26GB and does not fit next
+    # to the weights on 48GB. 32k covers every prompt we run (HLE max ~12k) with room for ~3 sequences.
     - --max-model-len
-    - '131072'
+    - '32768'

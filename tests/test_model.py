@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +10,7 @@ import pytest
 from configs import ModelConfig
 from model import Model
 from model import runpod
+from configs.model import RunpodConfig
 
 
 def test_plain_model_arguments():
@@ -38,7 +40,7 @@ def test_runpod_model_lifecycle(monkeypatch):
     monkeypatch.setattr(
         runpod,
         "wait",
-        lambda pod_id, port, timeout: events.append("wait")
+        lambda pod_id, port, timeout, stall_timeout=0: events.append("wait")
         or "https://pod1-8000.proxy.runpod.net/v1",
     )
     monkeypatch.setattr(runpod, "terminate", lambda pod_id: events.append("terminate"))
@@ -103,7 +105,7 @@ def test_threads_share_one_runpod(monkeypatch):
     monkeypatch.setattr(
         runpod, "create", lambda cfg: created.append(cfg) or ("shared-pod", "gpu")
     )
-    monkeypatch.setattr(runpod, "wait", lambda pod_id, port, timeout: "shared-url")
+    monkeypatch.setattr(runpod, "wait", lambda pod_id, port, timeout, stall_timeout=0: "shared-url")
     monkeypatch.setattr(runpod, "terminate", terminated.append)
 
     def evaluate(_index):
@@ -144,12 +146,8 @@ def test_runpod_command(monkeypatch):
         lambda command: captured.append(command)
         or MagicMock(stdout=json.dumps({"id": "pod1"})),
     )
-    config = runpod.validate(
-        {
-            "model": "org/model",
-            "gpu_id": "NVIDIA A40",
-            "vllm_args": ["--max-model-len", 8192],
-        }
+    config = RunpodConfig(
+        model="org/model", gpu_id="NVIDIA A40", vllm_args=["--max-model-len", 8192]
     )
 
     assert runpod.create(config) == ("pod1", "NVIDIA A40")
@@ -172,7 +170,7 @@ def _worker_eval(config_dict):
 
 def test_cross_process_runpod_sharing(monkeypatch):
     monkeypatch.setattr(runpod, "create", lambda cfg: ("shared-mp-pod", "gpu"))
-    monkeypatch.setattr(runpod, "wait", lambda pod_id, port, timeout: "http://shared-mp-url/v1")
+    monkeypatch.setattr(runpod, "wait", lambda pod_id, port, timeout, stall_timeout=0: "http://shared-mp-url/v1")
     monkeypatch.setattr(runpod, "is_healthy", lambda base_url: True)
     monkeypatch.setattr(runpod, "terminate", lambda pod_id: None)
 
@@ -180,7 +178,6 @@ def test_cross_process_runpod_sharing(monkeypatch):
         "use": True,
         "model": "org/mp-model",
         "gpu_id": "NVIDIA A40",
-        "keep_alive": 0,
     }
 
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -188,44 +185,6 @@ def test_cross_process_runpod_sharing(monkeypatch):
 
     assert results == ["http://shared-mp-url/v1", "http://shared-mp-url/v1"]
 
-
-def test_keep_alive_timer(monkeypatch):
-    config = ModelConfig(
-        name="org/timer-model",
-        runpod={
-            "use": True,
-            "model": "org/timer-model",
-            "gpu_id": "NVIDIA A40",
-            "keep_alive": 0.2,
-        },
-    )
-    terminated = []
-    monkeypatch.setattr(runpod, "create", lambda cfg: ("timer-pod", "gpu"))
-    monkeypatch.setattr(runpod, "wait", lambda pod_id, port, timeout: "http://timer-url/v1")
-    monkeypatch.setattr(runpod, "is_healthy", lambda base_url: True)
-    monkeypatch.setattr(runpod, "terminate", terminated.append)
-
-    with Model(config) as model:
-        assert model.eval_kwargs()["model_base_url"] == "http://timer-url/v1"
-
-    assert terminated == []
-
-    import time
-    time.sleep(0.35)
-
-    assert terminated == ["timer-pod"]
-
-
-
-def test_validate_rejects_bad_terminate_after():
-    with pytest.raises(ValueError, match="terminate_after"):
-        runpod.validate({"model": "org/model", "gpu_id": "NVIDIA A40", "terminate_after": "soon"})
-
-
-def test_validate_keeps_explicit_keep_alive():
-    config = runpod.validate({"model": "m", "gpu_id": "g", "keep_alive": 30})
-    assert config["keep_alive"] == 30.0
-    assert runpod.validate({"model": "m", "gpu_id": "g"})["keep_alive"] == 0.0
 
 
 def test_gpu_fallback_is_logged_loudly(monkeypatch, caplog):
@@ -239,9 +198,7 @@ def test_gpu_fallback_is_logged_loudly(monkeypatch, caplog):
         return "pod1"
 
     monkeypatch.setattr(runpod, "_create_pod_once", fake_create)
-    config = runpod.validate(
-        {"model": "org/model", "gpu_id": "NVIDIA A40", "fallback_gpus": ["NVIDIA L40S"]}
-    )
+    config = RunpodConfig(model="org/model", gpu_id="NVIDIA A40", fallback_gpus=["NVIDIA L40S"])
 
     with caplog.at_level("WARNING"):
         assert runpod.create(config) == ("pod1", "NVIDIA L40S")
@@ -256,7 +213,7 @@ def test_gpu_fallback_can_be_disabled(monkeypatch):
         "_create_pod_once",
         lambda config, gpu_id: (_ for _ in ()).throw(RuntimeError("failed to create pod")),
     )
-    config = runpod.validate({"model": "m", "gpu_id": "NVIDIA A40", "fallback_gpus": []})
+    config = RunpodConfig(model="m", gpu_id="NVIDIA A40", fallback_gpus=[])
 
     with pytest.raises(RuntimeError, match="No capacity"):
         runpod.create(config)
@@ -270,8 +227,53 @@ def test_unexpected_create_error_is_not_retried(monkeypatch):
         raise RuntimeError("runpodctl is not installed")
 
     monkeypatch.setattr(runpod, "_create_pod_once", fake_create)
-    config = runpod.validate({"model": "m", "gpu_id": "NVIDIA A40"})
+    config = RunpodConfig(model="m", gpu_id="NVIDIA A40")
 
     with pytest.raises(RuntimeError, match="not installed"):
         runpod.create(config)
     assert calls == ["NVIDIA A40"]
+
+
+def test_stalled_pod_is_replaced_once(monkeypatch):
+    """A pod whose log went silent is a bad host: terminate it and create one more."""
+    from model.session import RunpodSession
+
+    events = []
+    monkeypatch.setattr(runpod, "create", lambda cfg: events.append("create") or (f"pod{len(events)}", "gpu"))
+    monkeypatch.setattr(runpod, "terminate", lambda pod_id: events.append(("terminate", pod_id)))
+    waits = iter([runpod.Stalled("silent"), "http://good/v1"])
+
+    def fake_wait(pod_id, port, timeout, stall_timeout=0):
+        result = next(waits)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(runpod, "wait", fake_wait)
+    session = RunpodSession("stall-key", RunpodConfig(model="m", gpu_id="g"))
+    assert session.acquire() == "http://good/v1"
+    assert events == ["create", ("terminate", "pod1"), "create"]
+
+
+def test_wait_raises_stalled_on_silent_log(monkeypatch):
+    import time as _time
+
+    monkeypatch.setattr(runpod, "direct_url", lambda pod_id, port: None)
+    monkeypatch.setattr(runpod, "is_healthy", lambda url, timeout=3: False)
+    monkeypatch.setattr(runpod, "last_log_time", lambda pod_id: _time.time() - 1000)
+    clock = [0.0]
+    monkeypatch.setattr(runpod.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runpod.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + 61))
+
+    with pytest.raises(runpod.Stalled, match="no container log output"):
+        runpod.wait("pod1", 8000, timeout=3600, stall_timeout=900)
+
+
+def test_last_log_time_parses_runpod_lines(monkeypatch):
+    lines = "\n".join([
+        '{"source":"container","line":"Loading model from scratch...","ts":"2026-09-03T15:05:33.810646874Z"}',
+        '{"source":"container","line":"[shm_broadcast.py:801] No available shared memory broadcast block","ts":"2026-09-03T16:00:00.000000000Z"}',
+        "not json",
+    ])
+    monkeypatch.setattr(runpod, "_run", lambda cmd: MagicMock(stdout=lines))
+    assert runpod.last_log_time("pod1") == 1788447933.810646

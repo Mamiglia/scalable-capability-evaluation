@@ -13,9 +13,9 @@ PARALLEL_JOBS="${MAX_CONCURRENCY:-5}"
 run_model() {
   local model="$1"
   local benchmarks=(configs/bench/{gpqa,aime24,aime25,aime26,mbpp}.yml)
-  for benchmark in "${benchmarks[@]}"; do
-    DOCKER_HOST=unix:///var/run/docker.sock uv run collect -b "$benchmark" -m "$model" -n 2 --log-dir data || true
-  done
+  # One invocation for all benches: its parallel jobs share a single pod through the session
+  # registry, instead of paying the pod start (image pull, weight download) once per bench.
+  DOCKER_HOST=unix:///var/run/docker.sock uv run collect -b "${benchmarks[@]}" -m "$model" -n 2 --log-dir data || true
 }
 
 export -f run_model

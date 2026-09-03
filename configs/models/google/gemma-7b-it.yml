@@ -6,7 +6,7 @@ runpod:
   model: google/gemma-7b-it
   name: small-judge-gemma-7b-it
   cloud_type: SECURE
-  gpu_id: NVIDIA A40
+  gpu_id: NVIDIA RTX A5000   # 24GB, $0.27/h: 17GB of weights, 8192 context
   ready_timeout: 900
   image: vllm/vllm-openai:v0.18.0
   model_args:

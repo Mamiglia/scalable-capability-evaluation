@@ -13,7 +13,9 @@ runpod:
   model: Qwen/Qwen3-14B
   name: small-judge-qwen3-14b
   cloud_type: SECURE
-  gpu_id: NVIDIA A100 80GB PCIe
+  # 30GB of weights; KV is 160KB/token so ~13GB of cache holds 2 full 40k sequences.
+  # Concurrency-bound, not memory-bound: an A100 ($1.39/h) triples cache but not price/token.
+  gpu_id: NVIDIA A40   # 48GB, $0.44/h
   gpu_count: 1
   container_disk_in_gb: 40
   ready_timeout: 900

@@ -1,0 +1,25 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
+name: meta-llama/Llama-2-70b-chat-hf
+release_date: "2023-07-18"
+runpod:
+  use: true
+  model: meta-llama/Llama-2-70b-chat-hf   # gated: HF_TOKEN must have accepted the license
+  name: small-judge-llama-2-70b-chat
+  cloud_type: SECURE
+  # 138GB of bf16 weights: 4×A40 (192GB, $1.76/h) leaves ~35GB of KV; 2×80GB cards would
+  # leave ~6GB and choke on concurrency.
+  gpu_id: NVIDIA A40
+  gpu_count: 4
+  # Runpod's multi-GPU PCIe hosts (A40, L40S) ship with GPU peer-to-peer broken: NCCL init or
+  # the first all-reduce hangs with every GPU at 100%. Seen 2026-09-03 on 2×A40 and 4×A40/L40S.
+  env: {NCCL_P2P_DISABLE: "1"}
+  container_disk_in_gb: 160
+  ready_timeout: 5400   # 138GB download plus TP init
+  vllm_args:
+    - --tensor-parallel-size
+    - "4"
+    # vLLM's custom all-reduce talks over CUDA IPC and ignores NCCL_P2P_DISABLE; on hosts with
+    # broken P2P it hangs right after graph capture. NCCL handles the all-reduce instead.
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "4096"   # native context; no max_tokens so vLLM uses whatever the prompt leaves

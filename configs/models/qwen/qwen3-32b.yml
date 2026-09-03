@@ -21,22 +21,27 @@ runpod:
   model: Qwen/Qwen3-32B
   name: small-judge-qwen3-32b
   cloud_type: SECURE
-  gpu_id: NVIDIA A100 80GB PCIe
-  # 66GB of bf16 weights leaves ~10GB of KV on a single 80GB card — one sequence at
-  # 40960, i.e. no concurrency. Two cards give ~94GB of KV, roughly 8 full-length slots.
+  # 66GB of bf16 weights: no single ≤48GB card fits, and one 80GB card leaves ~10GB of KV
+  # (one 40k sequence, no concurrency). 2×A40 = 96GB at $0.88/h, ~20GB of KV (~3 full-length
+  # slots). A40 bandwidth is ~1/3 of an A100, so decode is ~3× slower per token at ~1/3 the
+  # price: same cost per token, 3× the wall clock (HLE full pass ~36h). Pin
+  # "NVIDIA A100 80GB PCIe" for speed.
+  gpu_id: NVIDIA A40
   gpu_count: 2
+  # Runpod's multi-GPU PCIe hosts (A40, L40S) ship with GPU peer-to-peer broken: NCCL init or
+  # the first all-reduce hangs with every GPU at 100%. Seen 2026-09-03 on 2×A40 and 4×A40/L40S.
+  env: {NCCL_P2P_DISABLE: "1"}
   container_disk_in_gb: 80
   ready_timeout: 5400   # 66GB of weights plus TP init; 1800 killed pods that were still loading
-  # HLE is 2158 samples; the GPQA rate (198 in 68 min) puts a full pass at ~12h, right on
-  # the 12h default. The pod self-terminating mid-run reads as APIConnectionError and
-  # burns the eval-set retries restarting the whole task.
-  terminate_after: 30h
   model_args: {}
   vllm_args:
     - --dtype
     - bfloat16
     - --tensor-parallel-size
     - "2"
+    # vLLM's custom all-reduce talks over CUDA IPC and ignores NCCL_P2P_DISABLE; on hosts with
+    # broken P2P it hangs right after graph capture. NCCL handles the all-reduce instead.
+    - --disable-custom-all-reduce
     # Stock Qwen3-32B stops at 40960. We used to stretch it to 131072 with YaRN, but that
     # left KV cache for only ~2-3 full-length sequences on 2xA100, so requests queued
     # token-less until the read timeout killed them. Native context, truncate the rest.

@@ -3,13 +3,14 @@ slug: vllm/Qwen/Qwen3.5-4B
 release_date: "2026-02-27"
 generate_args:
   max_tokens: 65536   # pod context is 262144
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: true   # Qwen3.5 default, made explicit
 runpod:
   use: true
   model: Qwen/Qwen3.5-4B
   name: small-judge-qwen35-4b
   cloud_type: SECURE
-  gpu_id: NVIDIA A100 80GB PCIe
-  ready_timeout: 900
-  terminate_after: 24h   # HLE is 2158 samples; the 12h default cuts the pod mid-run
+  gpu_id: NVIDIA RTX A4500   # 20GB, $0.25/h: 8GB of bf16 weights, hybrid attention keeps KV tiny
   model_args: {}
   vllm_args: [--reasoning-parser, qwen3, --enable-auto-tool-choice, --tool-call-parser, hermes]

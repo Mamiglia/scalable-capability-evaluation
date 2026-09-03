@@ -37,7 +37,6 @@ runpod:
   container_disk_in_gb: 40
   port: 8000
   ready_timeout: 1800
-  terminate_after: 4h
   create_args: []
   vllm_args:
   - --reasoning-parser
