@@ -44,6 +44,7 @@ def test_runpod_model_lifecycle(monkeypatch):
         or "https://pod1-8000.proxy.runpod.net/v1",
     )
     monkeypatch.setattr(runpod, "terminate", lambda pod_id: events.append("terminate"))
+    monkeypatch.setattr(runpod, "placement", lambda pod_id: {"machine": "m1", "datacenter": "EU-RO-1"})
 
     with pytest.raises(RuntimeError, match="eval failed"):
         with Model(config) as model:
@@ -52,7 +53,8 @@ def test_runpod_model_lifecycle(monkeypatch):
                 "model_args": {"api_key": "inspectai", "stream": True},
                 "model_base_url": "https://pod1-8000.proxy.runpod.net/v1",
                 "max_retries": 2,
-                "metadata": {"runpod_gpu": "gpu", "runpod_pod_id": "pod1"},
+                "metadata": {"runpod_gpu": "gpu", "runpod_pod_id": "pod1",
+                             "runpod_machine": "m1", "runpod_datacenter": "EU-RO-1"},
             }
             raise RuntimeError("eval failed")
 
@@ -250,9 +252,10 @@ def test_stalled_pod_is_replaced_once(monkeypatch):
         return result
 
     monkeypatch.setattr(runpod, "wait", fake_wait)
+    monkeypatch.setattr(runpod, "diagnostics", lambda pod_id: events.append(("diagnostics", pod_id)) or "")
     session = RunpodSession("stall-key", RunpodConfig(model="m", gpu_id="g"))
     assert session.acquire() == "http://good/v1"
-    assert events == ["create", ("terminate", "pod1"), "create"]
+    assert events == ["create", ("diagnostics", "pod1"), ("terminate", "pod1"), "create"]
 
 
 def test_wait_raises_stalled_on_silent_log(monkeypatch):

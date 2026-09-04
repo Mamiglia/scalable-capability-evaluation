@@ -33,7 +33,7 @@ class RunpodConfig:
     model: str = ""  # HF repo vLLM loads
     gpu_id: str = ""  # Runpod GPU display name, e.g. "NVIDIA A40"
     name: str = ""  # pod name shown in the Runpod console
-    image: str = "vllm/vllm-openai:latest"
+    image: str = "vllm/vllm-openai:v0.28.0"  # pinned: `latest` changes under a running study
     cloud_type: str = "COMMUNITY"
     gpu_count: int = 1
     container_disk_in_gb: int = 40

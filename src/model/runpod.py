@@ -166,6 +166,49 @@ def last_log_time(pod_id: str) -> float | None:
     return newest
 
 
+def _graphql(query: str) -> dict | None:
+    api_key = os.environ.get("RUNPOD_API_KEY")
+    if not api_key:
+        return None
+    request = urllib.request.Request(
+        f"https://api.runpod.io/graphql?api_key={api_key}",
+        data=json.dumps({"query": query}).encode(),
+        # Cloudflare in front of the API returns 403 to urllib's default User-Agent.
+        headers={"content-type": "application/json", "User-Agent": "small-judge/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.load(response).get("data")
+    except Exception:
+        return None
+
+
+def placement(pod_id: str) -> dict[str, str | None]:
+    """Which machine and data center Runpod put the pod on; failures cluster by these."""
+    data = _graphql(
+        f'{{ pod(input:{{podId:"{pod_id}"}}) {{ machineId machine {{ dataCenterId }} }} }}'
+    )
+    pod = (data or {}).get("pod") or {}
+    return {
+        "machine": pod.get("machineId"),
+        "datacenter": (pod.get("machine") or {}).get("dataCenterId"),
+    }
+
+
+def diagnostics(pod_id: str, log_lines: int = 40) -> str:
+    """What a stalled pod looked like, for the job log: placement, runtime stats, log tail."""
+    data = _graphql(
+        f'{{ pod(input:{{podId:"{pod_id}"}}) {{ machineId machine {{ dataCenterId gpuDisplayName }} '
+        f"runtime {{ uptimeInSeconds container {{ cpuPercent memoryPercent }} "
+        f"gpus {{ gpuUtilPercent memoryUtilPercent }} }} }} }}"
+    )
+    try:
+        tail = _run(["runpodctl", "pod", "logs", pod_id]).stdout.splitlines()[-log_lines:]
+    except RuntimeError as exc:
+        tail = [str(exc)]
+    return f"pod {pod_id}: {json.dumps((data or {}).get('pod'))}\n" + "\n".join(tail)
+
+
 def wait(pod_id: str, port: int, timeout: float, stall_timeout: float = 0) -> str:
     """Block until the pod serves an OpenAI API, and return the URL that reached it.
 

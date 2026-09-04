@@ -17,3 +17,11 @@ def clear_transcript_cache():
     dataset._STREAMED.clear()
     dataset._RANDOM.clear()
     dataset.read_header.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def no_runpod_api(monkeypatch):
+    """Placement lookups hit Runpod's API; tests never should."""
+    from model import runpod
+
+    monkeypatch.setattr(runpod, "placement", lambda pod_id: {"machine": None, "datacenter": None})

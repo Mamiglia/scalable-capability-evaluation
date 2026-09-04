@@ -40,6 +40,7 @@ class RunpodSession:
         self.pod_id: str | None = None
         self.base_url: str | None = None
         self.gpu: str | None = None
+        self.placement: dict = {}
 
     def acquire(self) -> str:
         """Return the base URL of a ready pod, starting or joining one as needed."""
@@ -93,6 +94,7 @@ class RunpodSession:
                 if runpod.is_healthy(entry["base_url"], timeout=15):
                     self.pod_id = entry["pod_id"]
                     self.gpu = entry.get("gpu")
+                    self.placement = entry.get("placement") or {}
                     return entry["base_url"]
                 if sessions.drop(self.key) == 0 and sessions.unregister(self.key, only_if_unused=True):
                     logger.warning("Registered Runpod %s is unhealthy, replacing it", entry["pod_id"])
@@ -136,9 +138,11 @@ class RunpodSession:
                     )
                     break
                 except runpod.Stalled as exc:
+                    # Keep the evidence: the pod is about to be destroyed.
+                    logger.warning("%s\n%s", exc, runpod.diagnostics(pod_id))
                     if attempt == 2:
                         raise
-                    logger.warning("%s; terminating it and trying another host", exc)
+                    logger.warning("Terminating stalled Runpod %s and creating another", pod_id)
                     self._terminate(pod_id)
                     pod_id = None
         except BaseException:
@@ -147,8 +151,10 @@ class RunpodSession:
                 self._terminate(pod_id)
             raise
 
-        sessions.register(self.key, pod_id, base_url, gpu)
-        self.pod_id, self.gpu = pod_id, gpu
+        placement = runpod.placement(pod_id)
+        logger.info("Runpod %s placed on machine %s in %s", pod_id, placement["machine"], placement["datacenter"])
+        sessions.register(self.key, pod_id, base_url, gpu, placement)
+        self.pod_id, self.gpu, self.placement = pod_id, gpu, placement
         return base_url
 
     @staticmethod
