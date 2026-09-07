@@ -1,0 +1,12 @@
+# Quantization: Unquantized BF16 (DeepInfra)
+# pin: sole endpoint; 16384 is its declared ceiling.
+name: google/gemma-3-4b-it
+slug: openrouter/google/gemma-3-4b-it
+release_date: '2025-03-13'
+model_args:
+  provider:
+    only:
+    - deepinfra/bf16
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 16384

@@ -90,7 +90,11 @@ class Model:
                     self.config.name,
                     sorted(self.config.model_args),
                 )
-            model_args = {"api_key": "inspectai", "stream": True} | runpod.model_args
+            # stream=False: vLLM's streamed chunks break under a reasoning or tool-call parser
+            # (JSONDecodeError / "generator didn't stop"). Streaming used to keep the Runpod HTTP
+            # proxy from cutting long responses at ~100s, but pods are reached over a direct TCP
+            # mapping now, which has no such limit.
+            model_args = {"api_key": "inspectai", "stream": False} | runpod.model_args
             generate_args = {"max_retries": 2} | (self.config.generate_args or {})
         else:
             slug = self.config.slug

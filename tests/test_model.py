@@ -50,7 +50,7 @@ def test_runpod_model_lifecycle(monkeypatch):
         with Model(config) as model:
             assert model.eval_kwargs() == {
                 "model": "openai-api/runpod/org/model",
-                "model_args": {"api_key": "inspectai", "stream": True},
+                "model_args": {"api_key": "inspectai", "stream": False},
                 "model_base_url": "https://pod1-8000.proxy.runpod.net/v1",
                 "max_retries": 2,
                 "metadata": {"runpod_gpu": "gpu", "runpod_pod_id": "pod1",
