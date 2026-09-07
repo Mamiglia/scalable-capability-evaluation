@@ -125,7 +125,8 @@ def direct_url(pod_id: str, port: int) -> str | None:
         return None
     request = urllib.request.Request(
         f"https://rest.runpod.io/v1/pods/{pod_id}",
-        headers={"Authorization": f"Bearer {api_key}"},
+        # Cloudflare in front of the API returns 403 to urllib's default User-Agent.
+        headers={"Authorization": f"Bearer {api_key}", "User-Agent": "small-judge/1.0"},
     )
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
