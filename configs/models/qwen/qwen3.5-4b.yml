@@ -12,5 +12,8 @@ runpod:
   name: small-judge-qwen35-4b
   cloud_type: SECURE
   gpu_id: NVIDIA RTX A4500   # 20GB, $0.25/h: 8GB of bf16 weights, hybrid attention keeps KV tiny
-  model_args: {}
+  # stream:false — streamed responses hit JSONDecodeError/"generator didn't stop" on vLLM 0.28
+  # + qwen3 reasoning parser (2026-09-04 cybench); gemma4-e2b needs the same.
+  model_args: {stream: false}
+  ready_timeout: 2700   # A40-fallback pod stalled past the 1800 default on first retry (2026-09-05)
   vllm_args: [--reasoning-parser, qwen3, --enable-auto-tool-choice, --tool-call-parser, hermes]
