@@ -2,6 +2,14 @@
 # Qwen 1 (Nov 2023), not the Qwen1.5/2 72B. Not on OpenRouter (checked 2026-09-08).
 name: Qwen/Qwen-72B-Chat
 release_date: "2023-11-30"
+generate_args:
+  # vLLM defaults to 512 output tokens when the request sends none: 29/198 GPQA samples were
+  # cut off mid-reasoning before writing "ANSWER:". Capped so prompt+output fits the 8192
+  # native context: longest GPQA prompt measured at 2822 tokens (2822+5120=7942).
+  max_tokens: 5120
+  # v0.23 does not register Qwen-1's ChatML turn token as a stop token, so it decodes literally
+  # and the model rambles into a second turn.
+  stop_seqs: ["<|im_end|>"]
 runpod:
   use: true
   model: Qwen/Qwen-72B-Chat
