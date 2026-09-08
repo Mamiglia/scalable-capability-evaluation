@@ -1,0 +1,12 @@
+# AI2 Reasoning Challenge, challenge split (allenai/ai2_arc, revision pinned upstream).
+# 1172 test items, 4-way MCQ, single `choice` scorer.
+# Local task: upstream's arc_challenge has no cot option, and a bare "ANSWER: X"
+# transcript gives the judge nothing to compare.
+name: arc_challenge
+task: src/collect/arc.py@arc_challenge_cot
+task_args:
+  cot: true
+  # fixed random draw of 200 of the 1172 test items, identical across models;
+  # grade-level balance checked by scripts/check_arc_subset.py (chi2 p=0.70).
+  subset: 200
+  seed: 0
