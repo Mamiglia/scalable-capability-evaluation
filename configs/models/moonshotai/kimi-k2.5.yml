@@ -1,0 +1,16 @@
+# Quantization: undeclared (Novita). No endpoint declares bf16 or fp8 for k2.5; the two
+# that declare anything (siliconflow, atlas-cloud) are int4, so an undeclared endpoint at
+# the full 235929 cap is the best available. Report k2.5 numbers as precision-unverified.
+name: moonshotai/Kimi-K2.5
+slug: openrouter/moonshotai/kimi-k2.5
+release_date: '2026-01-27'
+model_args:
+  provider:
+    only:
+    - novita
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 235929
+  extra_body:
+    reasoning:
+      enabled: true

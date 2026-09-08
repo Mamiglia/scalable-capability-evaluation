@@ -1,0 +1,19 @@
+# Quantization: FP8 (Novita); the alibaba endpoint declares no quantization.
+# deliberate: alibaba caps at 117964 vs 32768 here but declares no precision. A dedicated
+# thinking model can run long, yet 32768 covers its traces on these benches, so the
+# declared-fp8 endpoint wins; revisit if traces start truncating.
+name: Qwen/Qwen3-235B-A22B-Thinking-2507
+slug: openrouter/qwen/qwen3-235b-a22b-thinking-2507
+release_date: '2025-07-25'
+model_args:
+  provider:
+    only:
+    - novita/fp8
+    allow_fallbacks: false
+    quantizations:
+    - fp8
+generate_args:
+  max_tokens: 32768
+  extra_body:
+    reasoning:
+      enabled: true

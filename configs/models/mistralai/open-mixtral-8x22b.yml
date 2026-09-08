@@ -1,0 +1,11 @@
+# Quantization: undeclared (Mistral first-party).
+name: mistralai/open-mixtral-8x22b
+slug: openrouter/mistralai/mixtral-8x22b-instruct
+release_date: '2024-04-17'
+model_args:
+  provider:
+    only:
+    - mistral
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 52428

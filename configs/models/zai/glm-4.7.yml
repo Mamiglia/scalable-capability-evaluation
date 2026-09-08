@@ -1,0 +1,14 @@
+# Quantization: FP8 (AtlasCloud) — the highest-precision endpoint with the longest cap;
+# z-ai's own endpoint serves this one at fp4.
+name: zai-org/GLM-4.7
+slug: openrouter/z-ai/glm-4.7
+release_date: '2025-12-22'
+model_args:
+  provider:
+    only:
+    - atlas-cloud/fp8
+    allow_fallbacks: false
+    quantizations:
+    - fp8
+generate_args:
+  max_tokens: 182476

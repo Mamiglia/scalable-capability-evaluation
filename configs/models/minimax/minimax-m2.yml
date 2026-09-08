@@ -1,0 +1,17 @@
+# Quantization: FP8 (MiniMax first-party). google-vertex caps higher (176947) but declares
+# no precision; a declared fp8 endpoint at 131072 is the better trade here.
+name: MiniMaxAI/MiniMax-M2
+slug: openrouter/minimax/minimax-m2
+release_date: '2025-10-27'
+model_args:
+  provider:
+    only:
+    - minimax/fp8
+    allow_fallbacks: false
+    quantizations:
+    - fp8
+generate_args:
+  max_tokens: 131072
+  extra_body:
+    reasoning:
+      enabled: true

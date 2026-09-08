@@ -1,0 +1,12 @@
+# Quantization: undeclared (Mistral first-party).
+# Replaces mistral-large-2411, which OpenRouter no longer lists.
+name: mistralai/mistral-large-2407
+slug: openrouter/mistralai/mistral-large-2407
+release_date: '2024-07-24'
+model_args:
+  provider:
+    only:
+    - mistral
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 104857

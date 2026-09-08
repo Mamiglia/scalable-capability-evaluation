@@ -1,0 +1,13 @@
+# pin: sole endpoint (cloudflare), which declares no quantization — so precision is
+# unverified. Kept because it is the weakest instruct model on OpenRouter and the only
+# way to get a low anchor on saturated MCQ benches without a Runpod pod.
+name: meta-llama/Llama-3.2-1B-Instruct
+slug: openrouter/meta-llama/llama-3.2-1b-instruct
+release_date: '2024-09-25'
+model_args:
+  provider:
+    only:
+    - cloudflare
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 54000

@@ -1,0 +1,15 @@
+# Quantization: Unquantized BF16 (Novita).
+# deliberate: parasail/fp8 caps at 117964 vs novita/bf16's 16384. Rule 2 only outranks
+# rule 3 for a cap you would hit; gemma-3 has no reasoning trace, so bf16 wins.
+name: google/gemma-3-27b-it
+slug: openrouter/google/gemma-3-27b-it
+release_date: '2025-03-12'
+model_args:
+  provider:
+    only:
+    - novita/bf16
+    allow_fallbacks: false
+    quantizations:
+    - bf16
+generate_args:
+  max_tokens: 16384

@@ -1,0 +1,12 @@
+# Quantization: undeclared (OpenAI first-party; moot for a hosted API).
+# OpenRouter's `openai/gpt-4-turbo` is the 2024-04-09 snapshot.
+name: openai/gpt-4-turbo-2024-04-09
+slug: openrouter/openai/gpt-4-turbo
+release_date: '2024-04-09'
+model_args:
+  provider:
+    only:
+    - openai
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 4096

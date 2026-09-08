@@ -1,0 +1,13 @@
+# Quantization: FP8 (Novita) — sole endpoint on OpenRouter.
+name: deepseek-ai/DeepSeek-R1
+slug: openrouter/deepseek/deepseek-r1
+release_date: '2025-01-20'
+model_args:
+  provider:
+    only:
+    - novita/fp8
+    allow_fallbacks: false
+    quantizations:
+    - fp8
+generate_args:
+  max_tokens: 16000

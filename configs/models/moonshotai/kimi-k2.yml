@@ -9,3 +9,8 @@ model_args:
     allow_fallbacks: false
     quantizations:
     - fp8
+generate_args:
+  # Novita declares 100352 to OpenRouter but rejects anything above 98304 (400, seen
+  # 2026-09-08); inspect sends the declared value when max_tokens is unset, so every
+  # request failed. Same defect as kimi-k2-thinking.
+  max_tokens: 98304

@@ -1,0 +1,13 @@
+# Quantization: Unquantized FP16 (io.net); the fp8 alternatives carry a near-identical cap.
+name: mistralai/open-mistral-nemo-2407
+slug: openrouter/mistralai/mistral-nemo
+release_date: '2024-07-18'
+model_args:
+  provider:
+    only:
+    - io-net/fp16
+    allow_fallbacks: false
+    quantizations:
+    - fp16
+generate_args:
+  max_tokens: 102400

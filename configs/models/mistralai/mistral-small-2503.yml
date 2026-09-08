@@ -1,0 +1,26 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
+# OpenRouter has one endpoint for this slug, cloudflare, and it truncates ~45% of
+# responses mid-sentence (stop_reason "unknown", text cut before the ANSWER line) with
+# max_tokens 102400 sent -- the provider caps below what it declares. Self-hosted instead.
+name: mistralai/mistral-small-2503
+release_date: "2025-03-17"
+runpod:
+  use: true
+  model: mistralai/Mistral-Small-3.1-24B-Instruct-2503
+  name: small-judge-mistral-small-2503
+  cloud_type: SECURE
+  # 48GB of bf16 weights: 2×A40 (96GB) leaves ~40GB of KV.
+  gpu_id: NVIDIA A40
+  gpu_count: 2
+  env: {NCCL_P2P_DISABLE: "1"}
+  # The repo ships the weights twice (model-* and consolidated-*, 48GB each). Both get
+  # downloaded: vLLM resolves this as PixtralForConditionalGeneration and takes its dtype
+  # and loader from the consolidated files, so excluding them crashes load_weights.
+  container_disk_in_gb: 160
+  ready_timeout: 3600
+  vllm_args:
+    - --tensor-parallel-size
+    - "2"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "32768"

@@ -1,0 +1,29 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
+# Qwen 1 (Nov 2023), not the Qwen1.5/2 72B. Not on OpenRouter (checked 2026-09-08).
+name: Qwen/Qwen-72B-Chat
+release_date: "2023-11-30"
+runpod:
+  use: true
+  model: Qwen/Qwen-72B-Chat
+  name: small-judge-qwen-72b-chat
+  cloud_type: SECURE
+  # vLLM dropped QWenLMHeadModel (Qwen 1) after v0.23.0: the pinned v0.28.0 image exits at
+  # engine config with "not supported anymore". v0.23.0 is the last release that loads it.
+  image: vllm/vllm-openai:v0.23.0
+  # 145GB of bf16 weights. 4×A40 (192GB) OOMs on engine init: at the default 0.9
+  # utilization only ~172GB is usable and vLLM 0.23 profiles the KV cache after the
+  # weights land. 8×A40 (384GB) is the working fit.
+  gpu_id: NVIDIA A40
+  gpu_count: 8
+  # hf_transfer: a cold 140GB pull ran past the old 5400s ceiling on deepseek-67b.
+  env: {NCCL_P2P_DISABLE: "1", HF_HUB_ENABLE_HF_TRANSFER: "1"}
+  container_disk_in_gb: 200
+  ready_timeout: 10800
+  vllm_args:
+    - --tensor-parallel-size
+    - "8"
+    - --disable-custom-all-reduce
+    # QWenLMHeadModel ships custom modelling code in the repo.
+    - --trust-remote-code
+    - --max-model-len
+    - "8192"   # native context; 32k needs the NTK config the repo disables by default

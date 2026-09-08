@@ -1,0 +1,13 @@
+# Quantization: FP8 (GMICloud) — same endpoint family as glm-5.2.
+name: zai-org/GLM-5.1
+slug: openrouter/z-ai/glm-5.1
+release_date: '2026-04-07'
+model_args:
+  provider:
+    only:
+    - gmicloud/fp8
+    allow_fallbacks: false
+    quantizations:
+    - fp8
+generate_args:
+  max_tokens: 131072

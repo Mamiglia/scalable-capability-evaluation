@@ -1,0 +1,21 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
+# Not on OpenRouter (checked 2026-09-08), so self-hosted.
+name: NousResearch/Nous-Hermes-2-Yi-34B
+release_date: "2023-12-26"
+runpod:
+  use: true
+  model: NousResearch/Nous-Hermes-2-Yi-34B
+  name: small-judge-nous-hermes-2-yi-34b
+  cloud_type: SECURE
+  # 69GB of bf16 weights: 2×A40 (96GB) leaves ~17GB of KV at a 4k context.
+  gpu_id: NVIDIA A40
+  gpu_count: 2
+  env: {NCCL_P2P_DISABLE: "1"}
+  container_disk_in_gb: 100
+  ready_timeout: 3600
+  vllm_args:
+    - --tensor-parallel-size
+    - "2"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "4096"   # native context

@@ -9,3 +9,7 @@ model_args:
     allow_fallbacks: false
     quantizations:
     - bf16
+generate_args:
+  # Novita lowered its cap to 98304 (it 400s above that, seen 2026-09-08); inspect
+  # otherwise sends OpenRouter's declared 100352 and every request fails.
+  max_tokens: 98304

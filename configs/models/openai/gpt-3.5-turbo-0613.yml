@@ -1,0 +1,11 @@
+# Quantization: undeclared (Azure-served; the only live endpoint for this snapshot).
+name: openai/gpt-3.5-turbo-0613
+slug: openrouter/openai/gpt-3.5-turbo-0613
+release_date: '2023-06-13'
+model_args:
+  provider:
+    only:
+    - azure
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 3685   # 4095 context total

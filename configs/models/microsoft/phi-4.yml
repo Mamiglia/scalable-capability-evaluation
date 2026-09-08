@@ -1,0 +1,14 @@
+# Quantization: Unquantized BF16 (DeepInfra)
+# Sole endpoint; 16k context total, so the cap is context-bound rather than a choice.
+name: microsoft/phi-4
+slug: openrouter/microsoft/phi-4
+release_date: '2024-12-12'
+model_args:
+  provider:
+    only:
+    - deepinfra/bf16
+    allow_fallbacks: false
+    quantizations:
+    - bf16
+generate_args:
+  max_tokens: 14745

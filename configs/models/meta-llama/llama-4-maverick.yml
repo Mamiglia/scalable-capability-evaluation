@@ -1,0 +1,15 @@
+# Quantization: FP8 (Parasail). The model ships as FP8 weights, so this is native precision.
+# deliberate: digitalocean caps at 115200 vs 32768 here, but declares no quantization.
+# A declared-native-FP8 endpoint beats an unknown one; 32768 is not a cap this model hits.
+name: meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
+slug: openrouter/meta-llama/llama-4-maverick
+release_date: '2025-04-05'
+model_args:
+  provider:
+    only:
+    - parasail/fp8
+    allow_fallbacks: false
+    quantizations:
+    - fp8
+generate_args:
+  max_tokens: 32768

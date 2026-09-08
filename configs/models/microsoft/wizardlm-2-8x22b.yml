@@ -1,0 +1,14 @@
+# Quantization: Unquantized BF16 (Novita)
+# Sole endpoint on OpenRouter; 8000 is its declared cap.
+name: microsoft/WizardLM-2-8x22B
+slug: openrouter/microsoft/wizardlm-2-8x22b
+release_date: '2024-04-15'
+model_args:
+  provider:
+    only:
+    - novita/bf16
+    allow_fallbacks: false
+    quantizations:
+    - bf16
+generate_args:
+  max_tokens: 8000

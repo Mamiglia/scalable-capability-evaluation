@@ -1,0 +1,11 @@
+# Quantization: undeclared (OpenAI first-party; moot for a hosted API).
+name: openai/gpt-4o-2024-05-13
+slug: openrouter/openai/gpt-4o-2024-05-13
+release_date: '2024-05-13'
+model_args:
+  provider:
+    only:
+    - openai
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 4096

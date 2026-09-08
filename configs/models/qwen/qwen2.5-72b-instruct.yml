@@ -1,0 +1,15 @@
+# Quantization: FP8 (DeepInfra)
+# novita/bf16 is the only bf16 endpoint and it 400s ("does not support endpoint:
+# completions", seen 2026-09-08); deepinfra/fp8 also carries the longer cap (rule 2).
+name: Qwen/Qwen2.5-72B-Instruct
+slug: openrouter/qwen/qwen-2.5-72b-instruct
+release_date: '2024-09-19'
+model_args:
+  provider:
+    only:
+    - deepinfra/fp8
+    allow_fallbacks: false
+    quantizations:
+    - fp8
+generate_args:
+  max_tokens: 16384

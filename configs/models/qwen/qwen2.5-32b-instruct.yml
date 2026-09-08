@@ -1,0 +1,21 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
+# Not on OpenRouter (checked 2026-09-08), so self-hosted.
+name: Qwen/Qwen2.5-32B-Instruct
+release_date: "2024-09-19"
+runpod:
+  use: true
+  model: Qwen/Qwen2.5-32B-Instruct
+  name: small-judge-qwen2.5-32b
+  cloud_type: SECURE
+  # 66GB of bf16 weights: 2×A40 (96GB) leaves ~20GB of KV.
+  gpu_id: NVIDIA A40
+  gpu_count: 2
+  env: {NCCL_P2P_DISABLE: "1"}
+  container_disk_in_gb: 100
+  ready_timeout: 3600
+  vllm_args:
+    - --tensor-parallel-size
+    - "2"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "32768"   # native context

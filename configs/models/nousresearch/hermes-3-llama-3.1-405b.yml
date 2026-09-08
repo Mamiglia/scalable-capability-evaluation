@@ -1,0 +1,13 @@
+# Quantization: FP8 (DeepInfra) — the only live endpoint.
+name: NousResearch/Hermes-3-Llama-3.1-405B
+slug: openrouter/nousresearch/hermes-3-llama-3.1-405b
+release_date: '2024-08-16'
+model_args:
+  provider:
+    only:
+    - deepinfra/fp8
+    allow_fallbacks: false
+    quantizations:
+    - fp8
+generate_args:
+  max_tokens: 16384

@@ -1,0 +1,13 @@
+# Quantization: Unquantized BF16 (Novita).
+name: meta-llama/Llama-4-Scout-17B-16E-Instruct
+slug: openrouter/meta-llama/llama-4-scout
+release_date: '2025-04-05'
+model_args:
+  provider:
+    only:
+    - novita/bf16
+    allow_fallbacks: false
+    quantizations:
+    - bf16
+generate_args:
+  max_tokens: 117964

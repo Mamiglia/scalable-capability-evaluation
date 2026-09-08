@@ -1,0 +1,22 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
+# Not on OpenRouter (checked 2026-09-08), so self-hosted.
+name: Qwen/Qwen2-72B-Instruct
+release_date: "2024-06-07"
+runpod:
+  use: true
+  model: Qwen/Qwen2-72B-Instruct
+  name: small-judge-qwen2-72b
+  cloud_type: SECURE
+  # 145GB of bf16 weights: 4×A40 (192GB) leaves ~40GB of KV.
+  gpu_id: NVIDIA A40
+  gpu_count: 4
+  # hf_transfer: a cold 140GB pull ran past the old 5400s ceiling on deepseek-67b.
+  env: {NCCL_P2P_DISABLE: "1", HF_HUB_ENABLE_HF_TRANSFER: "1"}
+  container_disk_in_gb: 180
+  ready_timeout: 10800
+  vllm_args:
+    - --tensor-parallel-size
+    - "4"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "32768"   # native context

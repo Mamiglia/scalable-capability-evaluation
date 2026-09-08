@@ -1,0 +1,15 @@
+# Quantization: undeclared (Alibaba) — sole endpoint on OpenRouter.
+# Hybrid thinking model: reasoning is off unless asked for.
+name: Qwen/Qwen3-235B-A22B
+slug: openrouter/qwen/qwen3-235b-a22b
+release_date: '2025-04-28'
+model_args:
+  provider:
+    only:
+    - alibaba
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 8192
+  extra_body:
+    reasoning:
+      enabled: true

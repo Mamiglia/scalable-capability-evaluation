@@ -1,0 +1,12 @@
+# Quantization: undeclared (OpenAI first-party; moot for a hosted API).
+# OpenRouter's `openai/gpt-4` is the 0613 snapshot.
+name: openai/gpt-4-0613
+slug: openrouter/openai/gpt-4
+release_date: '2023-06-13'
+model_args:
+  provider:
+    only:
+    - openai
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 4096

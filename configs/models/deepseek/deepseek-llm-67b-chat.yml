@@ -1,0 +1,24 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
+# Not on OpenRouter (checked 2026-09-08), so self-hosted.
+name: deepseek-ai/deepseek-llm-67b-chat
+release_date: "2023-11-29"
+runpod:
+  use: true
+  model: deepseek-ai/deepseek-llm-67b-chat
+  name: small-judge-deepseek-67b-chat
+  cloud_type: SECURE
+  # 134GB of bf16 weights: 4×A40 (192GB) leaves ~50GB of KV.
+  gpu_id: NVIDIA A40
+  gpu_count: 4
+  # Runpod's multi-GPU PCIe hosts (A40, L40S) ship with GPU peer-to-peer broken: NCCL init or
+  # the first all-reduce hangs with every GPU at 100%.
+  # hf_transfer: a cold 140GB pull ran past the old 5400s ceiling on deepseek-67b.
+  env: {NCCL_P2P_DISABLE: "1", HF_HUB_ENABLE_HF_TRANSFER: "1"}
+  container_disk_in_gb: 160
+  ready_timeout: 10800
+  vllm_args:
+    - --tensor-parallel-size
+    - "4"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "4096"   # native context

@@ -12,7 +12,9 @@ generate_args:
   extra_body:
     reasoning:
       enabled: true
-  max_tokens: 495904
+  # 182520 is baseten/fp4's declared cap. It was left at together's 495904 after the
+  # 2026-08-31 repin, which 400s every request (seen 2026-09-08).
+  max_tokens: 182520
 model_args:
   provider:
     only:

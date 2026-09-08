@@ -1,0 +1,24 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
+# OpenRouter has exactly one endpoint for this model, nextbit/int4, capped at 2048 output.
+# 4-bit weights are the wrong precision for a capability estimate, so it is self-hosted.
+name: google/gemma-2-27b-it
+release_date: "2024-06-27"
+runpod:
+  use: true
+  model: google/gemma-2-27b-it   # gated: HF_TOKEN must have accepted the Gemma license
+  name: small-judge-gemma-2-27b
+  cloud_type: SECURE
+  # 54GB of bf16 weights: 2×A40 (96GB) leaves ~30GB of KV.
+  gpu_id: NVIDIA A40
+  gpu_count: 2
+  # A40/L40S PCIe hosts ship with GPU peer-to-peer broken; vLLM only auto-disables its
+  # custom all-reduce above 2 PCIe GPUs, so a 2-GPU pod needs the flag explicitly.
+  env: {NCCL_P2P_DISABLE: "1"}
+  container_disk_in_gb: 80
+  ready_timeout: 3600
+  vllm_args:
+    - --tensor-parallel-size
+    - "2"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "8192"   # native context

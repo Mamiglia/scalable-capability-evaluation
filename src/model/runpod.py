@@ -237,7 +237,9 @@ def wait(pod_id: str, port: int, timeout: float, stall_timeout: float = 0) -> st
                     f"(bad host: stalled download or hung NCCL)"
                 )
         time.sleep(min(5, max(0, deadline - time.monotonic())))
-    raise TimeoutError(f"Runpod {pod_id} was not ready within {timeout:g}s")
+    raise TimeoutError(
+        f"Runpod {pod_id} was not ready within {timeout:g}s\n{diagnostics(pod_id)}"
+    )
 
 
 def terminate(pod_id: str) -> None:
