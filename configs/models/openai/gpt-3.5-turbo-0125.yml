@@ -1,0 +1,18 @@
+# gpt-3.5-turbo-0125 (2024-01-25), the last GPT-3.5 snapshot OpenAI still serves. The dated
+# slug `openai/gpt-3.5-turbo-0125` has no endpoints on OpenRouter; the bare `openai/gpt-3.5-turbo`
+# alias resolves to 0125 on the OpenAI provider (probed 2026-09-08: no system_fingerprint, no
+# knowledge of 2023 events, cutoff answer consistent with GPT-3.5).
+# Do NOT use `openai/gpt-3.5-turbo-0613`: its only endpoint (Azure) serves a 2024-cutoff GPT-4-class
+# model (fp_51ebab882d, GPQA .66, self-identifies as gpt-4-turbo). Those runs are in data/legacy.
+# Provider pinned to openai: the Azure endpoints of legacy OpenAI slugs return fingerprints and
+# cutoffs that do not match the snapshot name.
+name: openai/gpt-3.5-turbo-0125
+slug: openrouter/openai/gpt-3.5-turbo
+release_date: '2024-01-25'
+model_args:
+  provider:
+    only:
+    - openai
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 4096   # 0125: 16k context, 4096 max output
