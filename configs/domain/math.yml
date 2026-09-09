@@ -1,11 +1,17 @@
-# MATH: AIME 24/25/26 + APEX + APEX shortlist + HLE-Verified gold, Math category.
+# MATH: MMLU-Pro [math] (easy tier) + AIME 24/25/26 + APEX + APEX shortlist + HLE-Verified gold, Math category.
 name: math
 benches:
+  - bench: configs/bench/mmlu_pro_math.yml
   - bench: configs/bench/aime24.yml
   - bench: configs/bench/aime25.yml
   - bench: configs/bench/aime26.yml
   - bench: configs/bench/apex.yml
   - bench: configs/bench/apex_shortlist.yml
   - bench: configs/bench/hle.yml
+    hle_gold: true
+    metadata: {category: [Math]}
+  # same items, same ids as the entry above (gold-only hash) - pools as one bench;
+  # models collected from 2026-09 on live here, earlier ones under hle.yml's hash.
+  - bench: configs/bench/hle_gold.yml
     hle_gold: true
     metadata: {category: [Math]}
