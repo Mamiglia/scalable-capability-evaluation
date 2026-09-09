@@ -1,0 +1,15 @@
+# Quantization: Unquantized BF16 (Parasail). Two endpoints on this slug; parasail/bf16
+# wins on both rules that matter — 32768 output vs deepinfra/fp8's 16384, and declared
+# bf16 vs fp8. Unlike 2503 this slug has a working hosted endpoint, so no Runpod pod.
+name: mistralai/mistral-small-3.2-24b-instruct
+slug: openrouter/mistralai/mistral-small-3.2-24b-instruct
+release_date: '2025-06-20'
+model_args:
+  provider:
+    only:
+    - parasail/bf16
+    allow_fallbacks: false
+    quantizations:
+    - bf16
+generate_args:
+  max_tokens: 32768

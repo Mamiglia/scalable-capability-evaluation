@@ -1,0 +1,19 @@
+# Quantization: Unquantized BF16 (Novita). The MiniMax first-party endpoint declares no
+# precision and does not support `tools`, so novita/bf16 wins on both rules here.
+# Replaces llama-4-scout in the agentic roster: Llama 4 emits pythonic tool calls
+# (`[bash("...")]`) that no endpoint on that slug both accepts and parses.
+name: MiniMaxAI/MiniMax-M1
+slug: openrouter/minimax/minimax-m1
+release_date: '2025-06-16'
+model_args:
+  provider:
+    only:
+    - novita/bf16
+    allow_fallbacks: false
+    quantizations:
+    - bf16
+generate_args:
+  max_tokens: 40000
+  extra_body:
+    reasoning:
+      enabled: true
