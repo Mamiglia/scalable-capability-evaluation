@@ -1,15 +1,43 @@
-# Quantization: Unquantized BF16 (Parasail). Two endpoints on this slug; parasail/bf16
-# wins on both rules that matter — 32768 output vs deepinfra/fp8's 16384, and declared
-# bf16 vs fp8. Unlike 2503 this slug has a working hosted endpoint, so no Runpod pod.
+# Quantization: Unquantized BF16 (vLLM / Runpod).
+# Self-hosted rather than via OpenRouter: parasail/bf16 is bf16 with a 32768 cap but serves no
+# `tools`, and deepinfra/fp8 is the only tool-capable endpoint on the slug — fp8 at 16384, and
+# it rate-limits hard (a 2-repeat gpqa run drove retry backoff to 1800s). This model is in the
+# roster for the agentic benches, so it needs tool calling at full precision and without a
+# provider quota; the same reasoning that put mistral-small-2503 on a pod.
 name: mistralai/mistral-small-3.2-24b-instruct
-slug: openrouter/mistralai/mistral-small-3.2-24b-instruct
 release_date: '2025-06-20'
-model_args:
-  provider:
-    only:
-    - parasail/bf16
-    allow_fallbacks: false
-    quantizations:
-    - bf16
-generate_args:
-  max_tokens: 32768
+runpod:
+  use: true
+  model: mistralai/Mistral-Small-3.2-24B-Instruct-2506
+  name: small-judge-mistral-small-3.2
+  cloud_type: SECURE
+  # 48GB of bf16 weights: 2×A40 (96GB) leaves ~40GB of KV.
+  gpu_id: NVIDIA A40
+  gpu_count: 2
+  env: {NCCL_P2P_DISABLE: "1"}
+  # As with 2503, the repo ships the weights twice (consolidated.safetensors plus
+  # model-*-of-00010, 48GB each) and both get downloaded.
+  container_disk_in_gb: 160
+  ready_timeout: 3600
+  vllm_args:
+    - --tensor-parallel-size
+    - "2"
+    - --disable-custom-all-reduce
+    # Matches 2503: 32768 overflows 200-message agent loops on terminal_bench. KV is
+    # ~160 KB/token, so ~4-5 sequences fit the ~48GB left after weights -> agentic benches
+    # want --max-sandboxes 4.
+    - --max-model-len
+    - "65536"
+    # vLLM does not parse Mistral's [TOOL_CALLS] into tool_calls without these.
+    - --enable-auto-tool-choice
+    - --tool-call-parser
+    - mistral
+    # mistral_common for encode AND decode. With the HF tokenizer, stray [TOOL_CALLS] markers
+    # in content survive into the next request and mistral's validator 400s the whole
+    # conversation ("Only one BOT token should have been outputted").
+    - --tokenizer-mode
+    - mistral
+    - --config-format
+    - mistral
+    - --load-format
+    - mistral
