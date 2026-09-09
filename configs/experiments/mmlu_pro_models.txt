@@ -1,0 +1,38 @@
+# MMLU-Pro [math] cohort for the easy math tier, by release half.
+# Reported MMLU-Pro overall scores (leaderboard, not this run) are in the comments.
+# 2023
+configs/models/mistralai/mixtral-8x7b-instruct-v0.1.yml   # 0.306
+configs/models/meta-llama/llama-2-70b-chat-hf.yml         # 0.263
+configs/models/meta-llama/llama2-13b.yml                  # 0.240 (Llama-2-13b-chat-hf)
+configs/models/mosaicml/mpt-30b.yml                       # 0.222
+configs/models/qwen/qwen-72b-chat.yml                     # to collect
+configs/models/nousresearch/nous-hermes-2-yi-34b.yml      # to collect
+configs/models/openai/gpt-4-0613.yml                      # 0.307
+configs/models/openai/gpt-3.5-turbo-0125.yml              # to collect
+# 2024-I
+configs/models/microsoft/wizardlm-2-8x22b.yml             # 0.434
+configs/models/qwen/qwen2-72b-instruct.yml                # 0.408
+configs/models/meta-llama/llama-3-70b-instruct.yml        # 0.406
+configs/models/google/gemma-2-27b-it.yml                  # 0.365
+configs/models/mistralai/open-mixtral-8x22b.yml           # 0.341
+configs/models/microsoft/phi3-medium-128k-instruct.yml    # 0.276
+configs/models/openai/gpt-4o-2024-05-13.yml               # 0.489
+configs/models/openai/gpt-4-turbo-2024-04-09.yml          # 0.466
+# 2024-II
+configs/models/microsoft/phi-4.yml                        # 0.561
+configs/models/qwen/qwen2.5-72b-instruct.yml              # 0.491
+configs/models/mistralai/mistral-large-2407.yml           # 0.490
+configs/models/meta-llama/llama-3.3-70b-instruct.yml      # 0.474
+configs/models/qwen/qwen2.5-32b-instruct.yml              # 0.461
+configs/models/nousresearch/hermes-3-llama-3.1-405b.yml   # to collect
+configs/models/mistralai/open-mistral-nemo-2407.yml       # 0.299
+configs/models/meta-llama/llama3.1-8b.yml                 # 0.259
+# 2025-I
+configs/models/deepseek/deepseek-r1-0528.yml              # 0.769
+configs/models/qwen/qwen3-235b-a22b.yml                   # 0.707
+configs/models/deepseek/deepseek-v3-0324.yml              # 0.676
+configs/models/meta-llama/llama-4-maverick.yml            # 0.670
+configs/models/qwen/qwen3-32b.yml                         # 0.631
+configs/models/minimax/minimax-m1.yml                     # to collect (replaces llama-4-scout)
+configs/models/mistralai/mistral-small-3.2-24b.yml        # to collect (replaces mistral-small-2503)
+configs/models/google/gemma-3-27b-it.yml                  # 0.439

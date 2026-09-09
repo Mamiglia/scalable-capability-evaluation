@@ -1,0 +1,6 @@
+name: mmlu_pro_math
+task: src/collect/mmlu_pro.py@mmlu_pro_subset
+task_args:
+  subjects: [math]
+  n: 150
+  seed: 42

@@ -1,0 +1,21 @@
+# HLE, HLE-Verified *gold* subset only (575 text-only items of the 668 audited).
+#
+# Same pinned cais/hle revision, same prompts, same single grader as hle.yml -- only the
+# dataset filter differs, so sample ids (create_stable_id over the record id) are identical
+# and rows from both hashes pool as one bench. Kept `name: hle` for exactly that reason.
+#
+# Use this for models collected from 2026-09 on: the gold subset is what every IRT/difficulty
+# analysis keeps anyway (domain configs filter with `hle_gold: true`), so paying for the other
+# 1583 items buys nothing. Models already run on the full set (data/hle/f0ab1992/) are reused
+# as-is -- do not re-collect them here, that would double their rows in the pooled table.
+name: hle
+task: inspect_evals/hle
+task_args:
+  include_multi_modal: false
+  only_hle_verified_gold: true
+  rolling: false
+  judge_prompt: original
+  max_grader_attempts: 3
+  graders: grader
+  category: null
+  subject: null
