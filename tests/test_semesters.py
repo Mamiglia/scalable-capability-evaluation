@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from capability import protocol, semesters
+from capability import evaluate, semesters, task
 from capability.semesters import load_semesters, local_fit, score, split_items
 
 
@@ -55,10 +55,10 @@ def test_evaluate_on_frozen_tables(tmp_path, monkeypatch):
     models.to_csv(d / "models.csv", index=False)
     _items().assign(s2_set=["easy"] * 4 + ["hard"] * 4, s2_train=[True] * 4 + [False] * 4).to_csv(d / "items.csv", index=False)
     domain = type("D", (), {"name": "toy", "source": ""})()
-    ts = list(protocol.tasks(domain))
+    ts = list(task.tasks(domain))
     assert [t.target for t in ts] == list("efgh") and ts[0].references == list("abcd") and len(ts[0].items) == 4
     truth = models.set_index("model").s2_theta
-    table = protocol.evaluate(domain, lambda t: 2 * truth[t.target] + 1, "toy")
+    table = evaluate.evaluate(domain, lambda t: 2 * truth[t.target] + 1, "toy")
     assert table.semester.tolist() == ["s2", "all"] and table.r.gt(0.99).all() and table.affine_mse.lt(1e-9).all()
     assert (d / "eval_toy.csv").exists()
     with pytest.raises(FileExistsError):

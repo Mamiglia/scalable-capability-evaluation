@@ -38,7 +38,7 @@ irt = "irt.cli:main"
 rank = "ranking.cli:main"
 domain = "domain.cli:main"
 reference = "capability.semesters:main"
-evaluate = "capability.protocol:main"
+evaluate = "capability.evaluate:main"
 
 # litellm (via inspect-harbor) caps openai<3; inspect-ai's OpenRouter provider needs >=3.1.
 # We never call litellm, so ignore its cap.
