@@ -2,7 +2,8 @@
 
 A judge run is a `uv run judge` log dir (logs/rank/<domain>/<judge>/<condition hash>/): the judge
 compared two correct transcripts of the same item and picked the more capable model
-(ranking.verdicts.from_logs). Only verdicts among the task's models on its train items count.
+(ranking.verdicts.from_logs). One protocol pools the runs of one judge (one dir per semester);
+only verdicts among the task's models on its train items count.
 """
 
 from pathlib import Path
@@ -17,15 +18,15 @@ from ranking.verdicts import from_logs
 
 
 class PairwiseJudge(Protocol):
-    def __init__(self, log_dir: str | Path, name: str = ""):
-        self.log_dir = Path(log_dir)
-        self.name = name or f"judge_{self.log_dir.parent.name}"
+    def __init__(self, log_dirs: list[str | Path], name: str = ""):
+        self.log_dirs = [Path(d) for d in log_dirs]
+        self.name = name or f"judge_{self.log_dirs[0].parent.name}"
         self._verdicts: pd.DataFrame | None = None
 
     @property
     def verdicts(self) -> pd.DataFrame:
         if self._verdicts is None:
-            self._verdicts = from_logs(self.log_dir)
+            self._verdicts = pd.concat([from_logs(d) for d in self.log_dirs], ignore_index=True)
         return self._verdicts
 
     def __call__(self, task: Task) -> float:

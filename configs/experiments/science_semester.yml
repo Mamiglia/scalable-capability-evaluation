@@ -1,0 +1,9 @@
+# SCIENCE semester task: every pair of the task's 8 references + 8 targets (120 pairs), judged on
+# its train items (data/meta/science/items.csv <sem>_train), both orders. Ground truth = theta*.
+#   uv run judge --cfg configs/experiments/science_semester.yml --semester 2026-I [--limit 2]
+# Then: uv run evaluate configs/domain/science.yml --judge logs/rank/science/<judge>/<hash> ...
+name: science_semester
+domain: configs/domain/science.yml
+judge: configs/models/google/gemma4-31b.yml
+semester: 2026-I
+include_reasoning: false

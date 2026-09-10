@@ -44,8 +44,27 @@ def test_explicit_pairs_replace_the_combinations():
 
 
 def test_items_are_the_quartile_per_bench():
-    assert experiment().items(1) == {"b1": {"1"}}
-    assert experiment().items(4) == {"b1": {"4"}}
+    assert experiment().items() == {"b1": {"1"}}
+    assert experiment(q_src=4).items() == {"b1": {"4"}}
+
+
+def test_semester_task_picks_models_items_and_truth(tmp_path, monkeypatch):
+    from capability import semesters
+
+    monkeypatch.setattr(semesters, "META", tmp_path)
+    (tmp_path / "dom").mkdir()
+    pd.DataFrame({"model": list("abcd"), "s_role": ["reference", "reference", "target", ""], "s_theta": [0.0, 1.0, 2.0, 3.0]}
+                 ).to_csv(tmp_path / "dom" / "models.csv", index=False)
+    pd.DataFrame({"bench": "b1", "item": ["1", "2", "3"], "s_train": [True, False, True]}).to_csv(tmp_path / "dom" / "items.csv", index=False)
+    d = domain(ITEMS, RESPONSES)
+    d.model_configs = lambda: MODELS + [ModelConfig(name="d", slug="d")]
+    exp = ExperimentConfig(name="exp", domain=d, judge=ModelConfig(name="j", slug="j"), semester="s")
+    assert [m.name for m in exp.models] == ["a", "b", "c"] and len(exp.pairs) == 3
+    assert exp.items() == {"b1": {"1", "3"}}
+    assert [(M.name, m.name) for M, m in exp.ordered_pairs()] == [("b", "a"), ("c", "a"), ("c", "b")]
+    assert exp.condition_hash != experiment().condition_hash  # the semester is part of the condition
+    with pytest.raises(ValueError, match="neither pairs nor models"):
+        ExperimentConfig(name="exp", domain=d, judge=ModelConfig(name="j", slug="j"), semester="s", models=MODELS)
 
 
 def test_model_without_responses_raises():

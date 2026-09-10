@@ -84,7 +84,8 @@ def test_build_tasks_one_per_bench_and_pair(mock_build_dataset, mock_read_log, m
     exp.domain.load_responses.return_value = pd.DataFrame(  # B never solved item 2; item 3 is Q1 but A failed it
         [("a", "1", True), ("a", "2", True), ("a", "3", False), ("b", "1", True), ("b", "2", False), ("b", "3", True)],
         columns=["model", "item", "correct"]).assign(bench="gpqa", repeat=0)
-    exp.accuracy.return_value = pd.Series({"a": 0.9, "b": 0.4})
+    exp.truth.return_value = pd.Series({"a": 0.9, "b": 0.4})
+    exp.semester = ""
     exp.ordered_pairs.return_value = [(a, b)]
 
     tasks = build_tasks(exp)

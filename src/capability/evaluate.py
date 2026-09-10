@@ -2,7 +2,8 @@
 
     uv run evaluate configs/domain/science.yml [--protocol chars ridge ...] [--judge logs/rank/science/<judge>/<hash> ...]
 
---judge adds a PairwiseJudge protocol per judge-run dir (named judge_<judge>); --protocol defaults to every protocol.
+--judge adds one PairwiseJudge protocol per judge (dirs grouped by their <judge> directory, so one
+judge's semester runs pool into one protocol), named judge_<judge>; --protocol defaults to every protocol.
 
 Per semester and pooled over all semesters ("all"; valid because every local fit shares the
 global item scale): Pearson r, MSE, affine-fit MSE. theta-hat per target -> data/meta/<domain>/eval_<name>.csv.
@@ -39,8 +40,10 @@ def main() -> int:
     parser.add_argument("--judge", nargs="+", default=[], type=Path, help="judge-run log dirs -> pairwise-judge protocols")
     a = parser.parse_args()
     domain = DomainConfig.from_cli(a.domain)
-    protocols = {**PROTOCOLS, **{p.name: p for p in map(PairwiseJudge, a.judge)}}
-    names = a.protocol + [p.name for p in map(PairwiseJudge, a.judge)] or list(protocols)
+    by_judge = {d.parent.name: [x for x in a.judge if x.parent.name == d.parent.name] for d in a.judge}
+    judges = [PairwiseJudge(dirs) for dirs in by_judge.values()]
+    protocols = {**PROTOCOLS, **{p.name: p for p in judges}}
+    names = a.protocol + [p.name for p in judges] or list(protocols)
     table = pd.concat([evaluate(domain, protocols[n], n).assign(protocol=n) for n in names])
     print(table.pivot(index="semester", columns="protocol", values=["n", "r", "affine_mse"]).round(2).to_string())
     return 0

@@ -73,7 +73,7 @@ def test_pairwise_judge_protocol():
     # c beats b beats a on both items and orders; t beats everyone: ability(t) > ability(c) -> theta-hat > 2
     rows = [dict(bench="b", judge="j", item=i, model_left=w, model_right=l, pick_left=1.0)
             for i in ("0", "1") for w, l in [("t", "a"), ("t", "b"), ("t", "c"), ("c", "b"), ("c", "a"), ("b", "a")]]
-    p = PairwiseJudge("unused", name="j")
+    p = PairwiseJudge(["unused"], name="j")
     p._verdicts = pd.DataFrame(rows)
     assert p(t) > 2
     assert np.isnan(p(task.Task("s", ["a", "b", "c"], t.theta_ref, "u", items, pd.DataFrame())))  # target never judged

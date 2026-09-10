@@ -1,6 +1,7 @@
 """Judge pipeline: build the domain (if needed) -> judge every pair on q_src -> rank and score.
 
-    uv run judge --cfg configs/experiments/domain/science_q1.yml [--q_src 2 --limit 2 --max-connections 16]
+    uv run judge --cfg configs/experiments/science.yml [--q_src 2 --limit 2 --max-connections 16]
+    uv run judge --cfg configs/experiments/science_semester.yml --semester 2026-I   # a frozen semester task
 
 Any ExperimentConfig field is a CLI override; unknown flags go to ``eval_set``. Several --cfg
 run in parallel processes, one eval_set per log dir. Each log dir ends up with one .eval per
@@ -21,6 +22,8 @@ from configs.logs import log_to, logger
 from domain.cli import build as build_domain
 from judge.task import build_tasks
 from model import Model
+from capability.evaluate import evaluate
+from protocols.judge import PairwiseJudge
 from ranking.cli import rank_logs
 
 EXPERIMENT_FIELDS = {f.name for f in fields(ExperimentConfig)}
@@ -66,7 +69,7 @@ def run_tasks(tasks: list[Task], judge: ModelConfig, log_dir: Path, display: str
 def run_experiments(experiments: list[ExperimentConfig], display: str | None = None) -> int:
     """All experiments of one log dir as tasks of one eval_set, then rank that dir."""
     exp = experiments[0]
-    if not exp.domain.items_path.exists():
+    if not exp.semester and not exp.domain.items_path.exists():
         build_domain(exp.domain)
     tasks = [task for exp in experiments for task in build_tasks(exp)]
     kwargs = exp.eval_kwargs() | {"temperature": exp.temperature}
@@ -75,7 +78,10 @@ def run_experiments(experiments: list[ExperimentConfig], display: str | None = N
         kwargs["cache"] = CachePolicy(expiry=None)  # repeated pairs must never re-bill
     if not run_tasks(tasks, exp.judge, exp.log_dir, display, **kwargs):
         return 1
-    rank_logs(exp.log_dir, exp.domain)
+    if exp.semester:
+        print(evaluate(exp.domain, PairwiseJudge([exp.log_dir]), f"judge_{exp.judge.shortname.lower()}").round(3).to_string(index=False))
+    else:
+        rank_logs(exp.log_dir, exp.domain)
     return 0
 
 
