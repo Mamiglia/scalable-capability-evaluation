@@ -31,11 +31,11 @@ def test_split_repeat0_rule_and_fixed_train():
 
 def test_local_fit_orders_models_and_rejects_unseen():
     resp, items = _resp(), _items()
-    split = split_items(resp, items, top=["x", "y"], train=0)
-    local = local_fit(resp, items, split, ["x", "y", "z"], warmup=100, samples=100).set_index("model")
+    hard = items[split_items(resp, items, top=["x", "y"], train=0).set == "hard"]
+    local = local_fit(resp, hard, ["x", "y", "z"], warmup=100, samples=100)
     assert local.theta["x"] > local.theta["y"] and local.theta["x"] > local.theta["z"]
     with pytest.raises(ValueError, match="no HARD responses"):
-        local_fit(resp, items, split, ["x", "w"], warmup=10, samples=10)
+        local_fit(resp, hard, ["x", "w"], warmup=10, samples=10)
 
 
 def test_score_and_roster():
@@ -51,12 +51,13 @@ def test_evaluate_on_frozen_tables(tmp_path, monkeypatch):
     d = tmp_path / "toy"
     d.mkdir()
     models = pd.DataFrame({"model": list("abcdefgh"), "semester": ["s1"] * 4 + ["s2"] * 4, "global_theta": np.arange(8.0),
-                           "path_b": "", "s2_role": ["reference"] * 4 + ["target"] * 4, "s2_theta": np.arange(8.0)})
+                           "path_b": np.nan, "s2_role": ["reference"] * 4 + ["target"] * 4, "s2_theta": np.arange(8.0)})
     models.to_csv(d / "models.csv", index=False)
     _items().assign(s2_set=["easy"] * 4 + ["hard"] * 4, s2_train=[True] * 4 + [False] * 4).to_csv(d / "items.csv", index=False)
     domain = type("D", (), {"name": "toy", "source": ""})()
     ts = list(task.tasks(domain))
     assert [t.target for t in ts] == list("efgh") and ts[0].references == list("abcd") and len(ts[0].items) == 4
+    assert ts[0].transcripts("a") == {}  # never run on bench b
     truth = models.set_index("model").s2_theta
     table = evaluate.evaluate(domain, lambda t: 2 * truth[t.target] + 1, "toy")
     assert table.semester.tolist() == ["s2", "all"] and table.r.gt(0.99).all() and table.affine_mse.lt(1e-9).all()

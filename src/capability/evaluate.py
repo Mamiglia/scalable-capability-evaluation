@@ -18,7 +18,7 @@ from protocols import PROTOCOLS, Protocol
 
 
 def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "") -> pd.DataFrame:
-    models = semesters.load(domain)[0].set_index("model")
+    models = semesters.load(domain)[0]
     rows = [dict(semester=t.semester, model=t.target, theta_hat=float(protocol(t)),
                  theta=models.loc[t.target, f"{t.semester}_theta"]) for t in tasks(domain)]
     pred = pd.DataFrame(rows)
