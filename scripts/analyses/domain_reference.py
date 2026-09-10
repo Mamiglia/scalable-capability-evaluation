@@ -54,14 +54,14 @@ def main(domain: str):
     fig.savefig(out / "reference_theta.svg", bbox_inches="tight")
 
     # Fig 2: theta* by era (points + era mean), 2PL item a vs b by bench, quartile mix per bench.
-    fig, axes = plt.subplots(1, 3, figsize=(4.4, 1.6))
+    fig, axes = plt.subplots(1, 3, figsize=(4.4, 1.9))
     ax = axes[0]
     eras = [e for e in ROSTER if any(m in models.index for m, _ in ROSTER[e])]
     for i, e in enumerate(eras):
         v = t.theta[[m for m, _ in ROSTER[e] if m in t.index]]
         ax.plot(np.full(len(v), i) + np.linspace(-.18, .18, len(v)), v, "o", ms=2.5, color=ERA_COLOR[e], mec="none", alpha=.8)
         ax.plot([i - .3, i + .3], [v.mean()] * 2, lw=1, color=ERA_COLOR[e])
-    ax.set_xticks(range(len(eras))); ax.set_xticklabels(eras, rotation=90); ax.set_ylabel(r"$\theta^*$")
+    ax.set_xticks(range(len(eras))); ax.set_xticklabels(eras); ax.tick_params(axis="x", rotation=90); ax.set_ylabel(r"$\theta^*$")
     ax.set_ylim(lo, hi); ax.set_yticks(np.arange(lo, hi + 1, 2)); offset(ax)
     ax = axes[1]
     for b in benches:
@@ -77,11 +77,11 @@ def main(domain: str):
     for q, c in zip([1, 2, 3, 4], shades):
         ax.bar(range(len(benches)), frac[q], bottom=bottom, color=c, width=.8, label=f"Q{q}")
         bottom += frac[q].values
-    ax.set_xticks(range(len(benches))); ax.set_xticklabels(benches, rotation=90)
+    ax.set_xticks(range(len(benches))); ax.set_xticklabels(benches); ax.tick_params(axis="x", rotation=90)
     ax.set_ylim(0, 1); ax.set_yticks([0, .5, 1]); ax.set_ylabel("Share of items"); offset(ax)
     h1, l1 = axes[1].get_legend_handles_labels(); h2, l2 = axes[2].get_legend_handles_labels()
-    fig.legend(h1 + h2, l1 + l2, loc="lower center", ncol=6, frameon=False, bbox_to_anchor=(.5, -.42))
-    fig.tight_layout()
+    fig.legend(h1 + h2, l1 + l2, loc="lower center", ncol=6, frameon=False, bbox_to_anchor=(.5, -.02))
+    fig.tight_layout(rect=(0, .12, 1, 1))
     fig.savefig(out / "reference_items.png", dpi=300, bbox_inches="tight")
     fig.savefig(out / "reference_items.svg", bbox_inches="tight")
 
