@@ -120,6 +120,14 @@ class ExperimentConfig(DraccusConfig):
             table = table[table.quartile == self.q_src]
         return {bench: set(group.item) for bench, group in table.groupby("bench")}
 
+    def responses(self) -> pd.DataFrame:
+        """bench, model, item, repeat, correct: the frozen fit input in semester mode, else the domain's table."""
+        if self.semester:
+            from capability.semesters import frozen_dir
+
+            return pd.read_csv(frozen_dir(self.domain) / "responses.csv", dtype={"item": str})
+        return self.domain.load_responses()
+
     def truth(self) -> pd.Series:
         """Ground truth by model: the semester's theta*, else mean correctness on the q_dst items."""
         if self.semester:

@@ -96,15 +96,21 @@ def build_tasks(experiment: ExperimentConfig) -> list[Task]:
     acc = exp.truth()
     # Which items each log got right is already in the domain's response table; asking the
     # logs again would mean streaming every one of them (minutes each for HLE).
-    correct = exp.domain.load_responses().query("correct")
+    correct = exp.responses().query("correct")
     tasks = []
+    # Bench entries sharing a task name (hle.yml / hle_gold.yml: same items under two hashes) pool
+    # their logs: a model's log is wherever it was collected.
+    entries: dict[str, list] = {}
     for bench in exp.domain.benches:
-        task_cfg = exp.domain.task(bench)
-        if task_cfg.name not in items:
-            logger.warning("%s: no items to judge on %s", exp.name, task_cfg.name)
+        entries.setdefault(exp.domain.task(bench).name, []).append(bench)
+    for name, benches in entries.items():
+        bench, task_cfg = benches[0], exp.domain.task(benches[0])
+        if name not in items:
+            logger.warning("%s: no items to judge on %s", exp.name, name)
             continue
-        logs = {m.shortname.lower(): successful_evals(task_cfg, m) for m in exp.models}
-        solved = correct[correct.bench == task_cfg.name].groupby(["model", "repeat"]).item.agg(set)
+        logs = {m.shortname.lower(): next((l for b in benches if (l := successful_evals(exp.domain.task(b), m))), [])
+                for m in exp.models}
+        solved = correct[correct.bench == name].groupby(["model", "repeat"]).item.agg(set)
         for major, minor in exp.ordered_pairs():
             names = major.shortname.lower(), minor.shortname.lower()
             if not all(logs[n] for n in names):
