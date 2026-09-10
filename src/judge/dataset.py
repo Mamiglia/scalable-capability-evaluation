@@ -61,6 +61,7 @@ class Transcript:
     text: str
     options: tuple[str, ...] = ()
     epoch: int = 0
+    tokens: int = 0  # output tokens billed for the sample (reasoning included)
 
 
 def question_text(sample_input: Any) -> str:
@@ -125,6 +126,7 @@ def _group(samples, require_correct: bool, include_reasoning: bool) -> dict[str,
             text=extract_transcript(sample, include_reasoning=include_reasoning),
             options=tuple(getattr(sample, "choices", None) or ()),
             epoch=getattr(sample, "epoch", 0) or 0,
+            tokens=sum(u.output_tokens or 0 for u in (getattr(sample, "model_usage", None) or {}).values()),
         )
         by_id.setdefault(record.id, []).append(record)
     for group in by_id.values():

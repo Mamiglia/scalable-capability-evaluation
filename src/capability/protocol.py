@@ -10,6 +10,7 @@ shares the global item scale).
 """
 
 import argparse
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator
@@ -72,26 +73,59 @@ def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "") -> pd.Dat
                          for sem, g in groups])
 
 
-def chars(task: Task) -> float:
-    """Trivial protocol: mean length of a model's correct train transcripts, affine-mapped on the references."""
-    def mean_chars(model):
-        lens = [len(t[0].text) for t in task.transcripts(model).values()]
-        return float(np.mean(lens)) if lens else np.nan
-    x = pd.Series({m: mean_chars(m) for m in task.references}).dropna()
-    beta, alpha = np.polyfit(x, task.theta_ref.loc[x.index], 1)
-    return alpha + beta * mean_chars(task.target)
+THOUGHT = re.compile(r"<THOUGHT_START>.*?<THOUGHT_END>", re.S)
+FEATURES = {
+    "chars": lambda t: len(t.text),
+    "answer_chars": lambda t: len(THOUGHT.sub("", t.text)),
+    "reasoning_chars": lambda t: len(t.text) - len(THOUGHT.sub("", t.text)),
+    "tokens": lambda t: t.tokens,
+}
 
 
-PROTOCOLS: dict[str, Protocol] = {"chars": chars}
+def features(task: Task, model: str) -> pd.Series:
+    """Mean log1p of each transcript feature over the model's correct train transcripts."""
+    rows = [{k: f(t[0]) for k, f in FEATURES.items()} for t in task.transcripts(model).values()]
+    return np.log1p(pd.DataFrame(rows, columns=list(FEATURES))).mean()
+
+
+def _table(task: Task) -> tuple[pd.DataFrame, pd.Series]:
+    x = pd.DataFrame({m: features(task, m) for m in task.references + [task.target]}).T
+    return x, task.theta_ref
+
+
+def regression(feature: str) -> Protocol:
+    """Least squares of the references' theta* on one log feature, applied to the target."""
+    def run(task: Task) -> float:
+        x, y = _table(task)
+        xr, yr = x.loc[task.references, feature], y.loc[task.references]
+        if xr.std() == 0:  # e.g. no reference reasons: the feature says nothing about theta
+            return float(yr.mean())
+        beta, alpha = np.polyfit(xr, yr, 1)
+        return alpha + beta * x.loc[task.target, feature]
+    return run
+
+
+def ridge(task: Task, lam: float = 1.0) -> float:
+    """Ridge over every standardised log feature (8 references, so shrinkage is not optional)."""
+    x, y = _table(task)
+    ref = x.loc[task.references]
+    z = (x - ref.mean()) / ref.std().replace(0, 1)
+    zr = z.loc[task.references].to_numpy()
+    w = np.linalg.solve(zr.T @ zr + lam * np.eye(zr.shape[1]), zr.T @ (y.loc[task.references] - y.loc[task.references].mean()))
+    return float(y.loc[task.references].mean() + z.loc[task.target].to_numpy() @ w)
+
+
+PROTOCOLS: dict[str, Protocol] = {**{f: regression(f) for f in FEATURES}, "ridge": ridge}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("domain", type=Path)
-    parser.add_argument("--protocol", default="chars", choices=sorted(PROTOCOLS))
+    parser.add_argument("--protocol", nargs="+", default=list(PROTOCOLS), choices=list(PROTOCOLS))
     a = parser.parse_args()
-    table = evaluate(DomainConfig.from_cli(a.domain), PROTOCOLS[a.protocol], a.protocol)
-    print(table.round(3).to_string(index=False))
+    domain = DomainConfig.from_cli(a.domain)
+    table = pd.concat([evaluate(domain, PROTOCOLS[n], n).assign(protocol=n) for n in a.protocol])
+    print(table.pivot(index="semester", columns="protocol", values=["r", "affine_mse"]).round(2).to_string())
     return 0
 
 
