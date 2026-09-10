@@ -10,7 +10,8 @@ Per domain, all benches pooled, written once to data/meta/<domain>/ and committe
 2. SEMESTERS (configs/semesters.yml; 2023 is one) — each task from 2024-I on has 8 *reference*
    models (the previous semester) and 8 *target* models (this semester) a protocol must forecast.
 3. EASY / HARD — EASY = items the TOP_K best reference models (by global theta) solve on repeat
-   0; HARD = the rest (an item a top model has no repeat-0 response on is hard). The train set is
+   0; HARD = the rest; an item some top model has no repeat-0 response on (a bench that
+   generation was never run on) is out of the task (set = ""). The train set is
    the EASY items, optionally a fixed random subset stratified by global-b quartile (--train N per
    quartile, 0 = all) — item-level, so identical for every model. Protocols only see correct
    transcripts of the train items. -> items.csv <sem>_set, <sem>_train
@@ -70,15 +71,15 @@ def global_fit(resp: pd.DataFrame, warmup=1000, samples=1000, seed=0) -> tuple[p
 
 
 def split_items(resp: pd.DataFrame, items: pd.DataFrame, top: list[str], train: int = 25, seed: int = 0) -> pd.DataFrame:
-    """items[bench, item] + `set` (easy/hard) + `train`. EASY = every model in `top` correct on repeat 0."""
+    """items[bench, item] + `set` (easy / hard / "" = out of the task) + `train`. EASY = every model in `top` correct on repeat 0."""
     r0 = resp[(resp.repeat == 0) & resp.model.isin(top)]
     solved = r0.groupby(["bench", "item"]).agg(n=("model", "nunique"), ok=("correct", "min"))
-    easy = solved[(solved.n == len(top)) & solved.ok.astype(bool)].index
+    seen = solved[solved.n == len(top)]
+    status = pd.Series(np.where(seen.ok.astype(bool), "easy", "hard"), index=seen.index)
     out = items[["bench", "item", "b"]].copy()
-    out["set"] = np.where(pd.MultiIndex.from_frame(out[["bench", "item"]]).isin(easy), "easy", "hard")
-    unseen = int((solved.n < len(top)).sum()) + int(len(out) - len(solved))
-    if unseen:
-        print(f"  {unseen} items lack a repeat-0 response from a top model -> hard")
+    out["set"] = pd.MultiIndex.from_frame(out[["bench", "item"]]).map(status).fillna("")
+    if (n_out := int((out.set == "").sum())):
+        print(f"  {n_out} items without a repeat-0 response from every top model -> out of the task")
     out["train"] = out.set == "easy"
     if train:
         e = out[out.train]
@@ -171,7 +172,8 @@ def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, for
         for c in local.columns:
             models[f"{sem}_{c}"] = models.model.map(local[c])
         prov[sem] = {"top": top, "missing": missing, "easy": int((split.set == "easy").sum()),
-                     "hard": int((split.set == "hard").sum()), "train": int(split.train.sum())}
+                     "hard": int((split.set == "hard").sum()), "out": int((split.set == "").sum()),
+                     "train": int(split.train.sum())}
         print(f"{sem}: top {top}, {prov[sem]['easy']} easy / {prov[sem]['hard']} hard, {prov[sem]['train']} train\n"
               + local.assign(role=role.set_axis(models.model).loc[local.index]).round(2).to_string())
     out.mkdir(parents=True, exist_ok=True)

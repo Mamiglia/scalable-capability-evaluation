@@ -25,8 +25,8 @@ def test_split_repeat0_rule_and_fixed_train():
     assert split.train.sum() == 3 and split[split.train].set.eq("easy").all()  # 3 easy items, 4 quartiles -> min(1, n)
     assert split.train.equals(split_items(_resp(), _items(), top=["x", "y"], train=1).train)  # seeded: fixed subset
     assert split_items(_resp(), _items(), top=["x", "y"], train=0).train.sum() == 3
-    # an item a top model never answered on repeat 0 is hard
-    assert split_items(_resp()[lambda d: ~((d.model == "x") & (d.item == "2"))], _items(), ["x", "y"], 0).set[2] == "hard"
+    # an item a top model never answered on repeat 0 is out of the task (neither easy nor hard)
+    assert split_items(_resp()[lambda d: ~((d.model == "x") & (d.item == "2"))], _items(), ["x", "y"], 0).set[2] == ""
 
 
 def test_local_fit_orders_models_and_rejects_unseen():
