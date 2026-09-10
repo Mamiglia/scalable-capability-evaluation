@@ -41,20 +41,37 @@ def one_pl(model_idx, item_idx, n_models, n_items, y=None, guess=None):
         numpyro.sample("y", dist.Bernoulli(probs=c + (1 - c) * jax.nn.sigmoid(logit)), obs=y)
 
 
-def two_pl(model_idx, item_idx, n_models, n_items, y=None):
+def two_pl(model_idx, item_idx, n_models, n_items, y=None, guess=None):
     """
     2PL: adds a discrimination per item on top of 1PL.
 
     P(correct) = sigmoid(a[item] * (theta[model] - b[item]))
+    or, with a known guessing floor c per item, c + (1 - c) * that.
 
     a: item discrimination (how sharply the item separates by ability).
-    theta, b and the arguments are as in one_pl.
+    theta, b, guess and the arguments are as in one_pl.
     """
     theta = numpyro.sample("theta", dist.Normal(0, 1).expand([n_models]))
     b = numpyro.sample("b", dist.Normal(0, 1).expand([n_items]))
     a = numpyro.sample("a", dist.LogNormal(0.0, 0.5).expand([n_items]))
     logit = a[item_idx] * (theta[model_idx] - b[item_idx])
-    numpyro.sample("y", dist.Bernoulli(logits=logit), obs=y)
+    if guess is None:
+        numpyro.sample("y", dist.Bernoulli(logits=logit), obs=y)
+    else:
+        c = guess[item_idx]
+        numpyro.sample("y", dist.Bernoulli(probs=c + (1 - c) * jax.nn.sigmoid(logit)), obs=y)
+
+
+def fixed_2pl(model_idx, item_idx, n_models, n_items, y=None, a=None, b=None, guess=None):
+    """
+    2PL with every item parameter (a, b, guess: arrays of n_items) fixed; only theta is fitted.
+
+    Puts new models on the scale of an earlier fit (the global fit's items).
+    """
+    theta = numpyro.sample("theta", dist.Normal(0, 1).expand([n_models]))
+    logit = a[item_idx] * (theta[model_idx] - b[item_idx])
+    c = guess[item_idx]
+    numpyro.sample("y", dist.Bernoulli(probs=c + (1 - c) * jax.nn.sigmoid(logit)), obs=y)
 
 
 def mirt(model_idx, item_idx, n_models, n_items, dim=2, y=None):
@@ -73,7 +90,7 @@ def mirt(model_idx, item_idx, n_models, n_items, dim=2, y=None):
     logit = (a[item_idx] * theta[model_idx]).sum(-1) - d[item_idx]
     numpyro.sample("y", dist.Bernoulli(logits=logit), obs=y)
 
-MODELS = {"1pl": one_pl, "2pl": two_pl, "mirt": mirt}
+MODELS = {"1pl": one_pl, "2pl": two_pl, "fixed_2pl": fixed_2pl, "mirt": mirt}
 
 def fit(data: IRTData, model="1pl", warmup=1000, samples=1000, seed=0, **kwargs):
     """Run NUTS (No U-Turn Sampler), return posterior samples."""

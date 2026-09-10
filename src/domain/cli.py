@@ -33,6 +33,15 @@ def guess_rate(sample) -> float:
     return 1.0 / n if n >= 2 else 0.0
 
 
+def eval_logs(domain: DomainConfig) -> pd.DataFrame:
+    """Every successful log of the domain: bench, model, repeat, path (one row per log)."""
+    models = domain.model_configs()
+    rows = [dict(bench=task.name, model=model.shortname.lower(), repeat=int(log.parent.name), path=log)
+            for task in map(domain.task, domain.benches) for model in models
+            for log in sorted(get_eval_path(task, model).rglob("*.eval")) if is_successful_eval(log)]
+    return pd.DataFrame(rows, columns=["bench", "model", "repeat", "path"])
+
+
 def responses(domain: DomainConfig) -> pd.DataFrame:
     """One row per (bench, model, item, repeat) from every successful log, after the domain's filters."""
     rows = []
