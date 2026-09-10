@@ -1,16 +1,25 @@
-# Quantization: FP8 (SiliconFlow).
+# Quantization: FP8 (Chutes), 262144 ctx / 65536 output.
+# Repin 2026-09-09 (was siliconflow/fp8, 235929 output). On this model's long generations
+# (10-20 min) OpenRouter's upstream connection drops on siliconflow, deepinfra and chutes alike:
+# non-streamed the partial comes back as HTTP 200 with `finish_reason: error` and no answer
+# text (13-73% of the 09-08 AIME/APEX samples), streamed it is an abort exception inspect does
+# not retry. The 2026-09-10 aime/apex logs were collected through a temporary retry wrapper
+# (`eval.model` reads `openrouter-strict/...` in those logs), deleted afterwards on request;
+# a new run of this model will hit the drops again and needs the same treatment.
+# deliberate: 65536 output cap - the only endpoints with more room were deepinfra (429
+# engine_overloaded) and siliconflow (drops); apex_2025 is 25-42% capped, shortlist 15-21%.
 name: Qwen/Qwen3.6-27B
 slug: openrouter/qwen/qwen3.6-27b
 release_date: '2026-03-10'
 model_args:
   provider:
     only:
-    - siliconflow/fp8
+    - chutes/fp8
     allow_fallbacks: false
     quantizations:
     - fp8
 generate_args:
-  max_tokens: 235929
+  max_tokens: 65536
   extra_body:
     reasoning:
       enabled: true

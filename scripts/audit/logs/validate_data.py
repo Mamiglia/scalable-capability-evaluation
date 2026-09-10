@@ -71,7 +71,8 @@ def complete_log(repeat_dir: Path, delete: bool = False) -> tuple[Path | None, b
                 path.unlink()
             continue
         imported, done, total = info["imported"], info["done"], info["total"]
-        if done < total - 1 and not imported:  # one failed sample is tolerated; imports are as they come
+        # up to max(1, 2%) failed samples are tolerated (CONTRACT rule 1); imports are as they come
+        if done < total - max(1, total // 50) and not imported:
             problems.append(f"{path}: only {done}/{total} samples")
             if delete:
                 path.unlink()

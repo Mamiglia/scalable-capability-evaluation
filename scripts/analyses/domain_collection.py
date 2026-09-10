@@ -61,6 +61,7 @@ def main(domain: str):
     anchor, against, panels = DOMAINS[domain]
     resp = responses(DomainConfig.from_cli(f"configs/domain/{domain}.yml"))
     label = {b: label for label, bs in panels for b in bs}
+    resp["raw_bench"] = resp.bench
     resp["bench"] = resp.bench.map(label)
     resp = resp.dropna(subset=["bench"])
     anchor, against = label[anchor], label[against]
@@ -76,8 +77,8 @@ def main(domain: str):
     table.to_csv(out / "accuracy.csv", float_format="%.3f")
     print(table.round(3).to_string())
 
-    # Fig 1: per-bench accuracy per model, one row per model, repeats as small points.
-    order = roster.model.tolist()[::-1]
+    # Fig 1: per-bench accuracy per model, rows sorted by the anchor bench (best on top), repeats as small points.
+    order = table[anchor].sort_values().index.tolist()
     fig, axes = plt.subplots(1, len(panels), figsize=(1.1 * len(panels) + 1.1, 5.6), sharey=True)
     for ax, (bench, _) in zip(axes, panels):
         sub = per_rep[per_rep.bench == bench]
@@ -119,6 +120,31 @@ def main(domain: str):
     fig.savefig(out / "bench_agreement.png", dpi=300, bbox_inches="tight")
     fig.savefig(out / "bench_agreement.svg", bbox_inches="tight")
     print("\nPearson r:", {f"{x}~{y}": round(table[[x, y]].dropna().corr().iloc[0, 1], 3) for x, y, *_ in pairs})
+
+    # Fig 3: every bench unpooled, models x benches heatmap of mean accuracy (repeats averaged).
+    raw = resp.groupby(["raw_bench", "model", "repeat"]).correct.mean().groupby(["raw_bench", "model"]).mean()
+    grid = raw.unstack("raw_bench").reindex(roster.model)
+    grid = grid[[b for _, bs in panels for b in bs if b in grid.columns]]
+    grid.to_csv(out / "accuracy_per_bench.csv", float_format="%.3f")
+    fig, ax = plt.subplots(figsize=(0.32 * grid.shape[1] + 1.9, 0.115 * grid.shape[0] + 0.5))
+    im = ax.imshow(grid.values, cmap="Blues", vmin=0, vmax=1, aspect="auto")
+    for i in range(grid.shape[0]):
+        for j in range(grid.shape[1]):
+            v = grid.values[i, j]
+            if not np.isnan(v):
+                ax.text(j, i, f"{v:.2f}".lstrip("0") or "0", ha="center", va="center", fontsize=5,
+                        color="white" if v > .6 else "black")
+    ax.set_xticks(range(grid.shape[1])); ax.set_xticklabels(grid.columns, rotation=90)
+    ax.set_yticks(range(grid.shape[0])); ax.set_yticklabels(grid.index)
+    for lab, m in zip(ax.get_yticklabels(), grid.index):
+        lab.set_color(ERA_COLOR[roster.set_index("model").era[m]])
+    ax.tick_params(length=0)
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    cb = fig.colorbar(im, ax=ax, fraction=.03, pad=.02, ticks=[0, .5, 1]); cb.set_label("Accuracy"); cb.outline.set_visible(False)
+    fig.tight_layout()
+    fig.savefig(out / "accuracy_heatmap.png", dpi=300, bbox_inches="tight")
+    fig.savefig(out / "accuracy_heatmap.svg", bbox_inches="tight")
 
 
 if __name__ == "__main__":
