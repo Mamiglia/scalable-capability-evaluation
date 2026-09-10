@@ -95,8 +95,11 @@ def local_fit(resp: pd.DataFrame, hard: pd.DataFrame, models: list[str], warmup=
 
 
 def score(pred: pd.Series, truth: pd.Series) -> dict:
-    """theta-hat vs theta* on the models both index: Pearson r, MSE, affine-fit MSE."""
+    """theta-hat vs theta* on the models both index (NaN forecasts dropped): Pearson r, MSE, affine-fit MSE."""
     p, t = pred.align(truth, join="inner")
+    p, t = p[p.notna()], t[p.notna()]
+    if len(p) < 3:
+        return {"n": len(p), "r": np.nan, "mse": np.nan, "affine_mse": np.nan}
     beta, alpha = np.polyfit(p, t, 1)
     return {"n": len(p), "r": float(np.corrcoef(p, t)[0, 1]), "mse": float(((p - t) ** 2).mean()),
             "affine_mse": float(((alpha + beta * p - t) ** 2).mean())}

@@ -1,6 +1,8 @@
 """Score protocols against the frozen theta* of a domain's semester tasks.
 
-    uv run evaluate configs/domain/science.yml [--protocol chars ridge ...]   (default: every protocol)
+    uv run evaluate configs/domain/science.yml [--protocol chars ridge ...] [--judge logs/rank/science/<judge>/<hash> ...]
+
+--judge adds a PairwiseJudge protocol per judge-run dir (named judge_<judge>); --protocol defaults to every protocol.
 
 Per semester and pooled over all semesters ("all"; valid because every local fit shares the
 global item scale): Pearson r, MSE, affine-fit MSE. theta-hat per target -> data/meta/<domain>/eval_<name>.csv.
@@ -15,6 +17,7 @@ from capability import semesters
 from capability.task import tasks
 from configs.domain import DomainConfig
 from protocols import PROTOCOLS, Protocol
+from protocols.judge import PairwiseJudge
 
 
 def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "") -> pd.DataFrame:
@@ -32,11 +35,14 @@ def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "") -> pd.Dat
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("domain", type=Path)
-    parser.add_argument("--protocol", nargs="+", default=list(PROTOCOLS), choices=list(PROTOCOLS))
+    parser.add_argument("--protocol", nargs="+", default=[], choices=list(PROTOCOLS))
+    parser.add_argument("--judge", nargs="+", default=[], type=Path, help="judge-run log dirs -> pairwise-judge protocols")
     a = parser.parse_args()
     domain = DomainConfig.from_cli(a.domain)
-    table = pd.concat([evaluate(domain, PROTOCOLS[n], n).assign(protocol=n) for n in a.protocol])
-    print(table.pivot(index="semester", columns="protocol", values=["r", "affine_mse"]).round(2).to_string())
+    protocols = {**PROTOCOLS, **{p.name: p for p in map(PairwiseJudge, a.judge)}}
+    names = a.protocol + [p.name for p in map(PairwiseJudge, a.judge)] or list(protocols)
+    table = pd.concat([evaluate(domain, protocols[n], n).assign(protocol=n) for n in names])
+    print(table.pivot(index="semester", columns="protocol", values=["n", "r", "affine_mse"]).round(2).to_string())
     return 0
 
 

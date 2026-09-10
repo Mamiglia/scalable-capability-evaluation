@@ -64,3 +64,17 @@ def test_evaluate_on_frozen_tables(tmp_path, monkeypatch):
     assert (d / "eval_toy.csv").exists()
     with pytest.raises(FileExistsError):
         semesters.build(domain)
+
+
+def test_pairwise_judge_protocol():
+    from protocols.judge import PairwiseJudge
+    items = pd.DataFrame({"bench": "b", "item": ["0", "1"], "guess": 0.0, "a": 1.0, "b": 0.0})
+    t = task.Task("s", ["a", "b", "c"], pd.Series({"a": 0.0, "b": 1.0, "c": 2.0}), "t", items, pd.DataFrame())
+    # c beats b beats a on both items and orders; t beats everyone: ability(t) > ability(c) -> theta-hat > 2
+    rows = [dict(bench="b", judge="j", item=i, model_left=w, model_right=l, pick_left=1.0)
+            for i in ("0", "1") for w, l in [("t", "a"), ("t", "b"), ("t", "c"), ("c", "b"), ("c", "a"), ("b", "a")]]
+    p = PairwiseJudge("unused", name="j")
+    p._verdicts = pd.DataFrame(rows)
+    assert p(t) > 2
+    assert np.isnan(p(task.Task("s", ["a", "b", "c"], t.theta_ref, "u", items, pd.DataFrame())))  # target never judged
+    assert np.isnan(semesters.score(pd.Series({"a": np.nan, "b": 1.0}), pd.Series({"a": 0.0, "b": 1.0}))["r"])
