@@ -1,24 +1,29 @@
-# Quantization: unquantized bf16 on Venice (256k context, 8k output cap; verdicts incl.
-# reasoning run ~1-4k tokens). No max_tokens: Venice's default is its cap.
-# Not Novita (also bf16): it rejects requests as "input is longer than the model's
-# context length" depending on max_tokens rather than the prompt (probed 2026-08-27:
-# 65536 fails past ~7k input tokens, 32768 past ~18k, 16384 past ~116k) and is ~1.5x
-# slower per verdict. CoreWeave dropped its bf16 endpoint on long prompts; Together,
-# SiliconFlow, Parasail are fp8; Crusoe/Phala undeclared; Cerebras fp16 returns no reasoning.
+# Quantization: FP8 (Parasail), 262144 ctx / 235929 output.
+# Repin 2026-09-09 (was venice/bf16): as an HLE-gold *subject* this model hit venice's
+# 8192 output cap on 54% of samples (acc 0.193), far past the contract's 20% bar. No bf16
+# endpoint has headroom - novita/bf16 declares 131072 but is status -2 and rejects requests
+# as "input is longer than the model's context length" depending on max_tokens rather than
+# the prompt (probed 2026-08-27); coreweave dropped its bf16 endpoint on long prompts.
+# Crusoe/Phala/Together/SambaNova declare no precision; DeepInfra and Friendli cap at 8192-16384;
+# Cerebras fp16 returns no reasoning. So parasail/fp8 is the only healthy endpoint that is
+# both declared and long enough - a bf16 -> fp8 drop, taken because truncation biases
+# deliberate: capability is biased far more by truncation than by the quantization drop.
+# Judge note: this model is also the study's judge. Verdicts collected before this date were
+# served at venice/bf16; judge runs from here on are fp8. Verdicts run ~1-4k tokens either way.
 
-# This model gets used exclusively as a judge. which is why 4K reasoning tokens is reasonable
 name: google/gemma-4-31b-it
 slug: openrouter/google/gemma-4-31b-it
 release_date: '2026-03-31'
 generate_args:
+  max_tokens: 235929
   extra_body:
     reasoning:
       enabled: true
 model_args:
   provider:
     only:
-    - venice/bf16
+    - parasail/fp8
     allow_fallbacks: false
     require_parameters: true
     quantizations:
-    - bf16
+    - fp8

@@ -1,19 +1,20 @@
-# Quantization: FP8 (Novita); the alibaba endpoint declares no quantization.
-# deliberate: alibaba caps at 117964 vs 32768 here but declares no precision. A dedicated
-# thinking model can run long, yet 32768 covers its traces on these benches, so the
-# declared-fp8 endpoint wins; revisit if traces start truncating.
+# Quantization: undeclared (Alibaba); novita is the only endpoint that declares one (fp8).
+# Repin 2026-09-09, the revisit the old note called for: on HLE gold 70% of samples hit
+# novita/fp8's 32768 cap mid-reasoning (acc 0.111, below the non-thinking 235b's 0.237),
+# so rule 2 now beats rule 3. alibaba is the only endpoint with room (117964).
+# The novita/fp8 HLE run is archived in data/legacy/; gpqa/aime logs predate this repin
+# and were served at fp8 with short answers (no truncation) - cross-bench precision note.
+# deliberate: alibaba declares no quantization; every declared endpoint truncates this model.
 name: Qwen/Qwen3-235B-A22B-Thinking-2507
 slug: openrouter/qwen/qwen3-235b-a22b-thinking-2507
 release_date: '2025-07-25'
 model_args:
   provider:
     only:
-    - novita/fp8
+    - alibaba
     allow_fallbacks: false
-    quantizations:
-    - fp8
 generate_args:
-  max_tokens: 32768
+  max_tokens: 117964
   extra_body:
     reasoning:
       enabled: true

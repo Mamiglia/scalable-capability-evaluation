@@ -1,19 +1,35 @@
-# Quantization: FP8 (Parasail).
-# Was gmicloud/fp8, which returned OpenAIResponseError server_error on every request
-# (2026-09-08) until inspect backed off to 30-minute retries and collected nothing.
-# parasail/fp8 is the same precision at the same 235929 cap.
+# Quantization: FP8 (DeepInfra, GMICloud or Parasail — all declared fp8).
+# deliberate: three providers, not one. gmicloud/fp8 was the original pin; it returned
+# OpenAIResponseError server_error on every request (2026-09-08) so we moved to
+# parasail/fp8, which by that evening was returning 429 on even a single request and
+# wedged both the swe_bench_mini and hle_gold sweeps (inspect backing off 1,537 s).
+# 2026-09-08 evening, re-probed during the math sweep: parasail/fp8 429s on 3/3 probes,
+# gmicloud/fp8 answers small probes but OpenRouter lists it status=-2 (deranked) and it
+# server_errors under real load — 3 of 4 math jobs sat at retry 10-14 with 1,800 s backoffs.
+# deepinfra/fp8 added as a third: healthy on 4/4 probes, same declared fp8 precision.
+# allow_fallbacks MUST be true: with it false OpenRouter will not move past the first
+# provider in `only` even when that one 429s (probed 2026-09-08 — false: 429, true: GMICloud).
+# `only` still confines routing to these three endpoints, all fp8, so the quantization
+# confound is unchanged.
+#
+# max_tokens 81920 = deepinfra/fp8's cap, the smallest of the three, applied uniformly so the
+# effective ceiling does not depend on which endpoint served. Measured on the 1,616 samples of
+# this model already collected: median 6,453 output tokens, p90 33,105, p99 63,366, and only
+# 2 samples (0.12%) above 81,920. Earlier logs were collected at the 235,929 cap.
 name: Qwen/Qwen3.5-397B-A17B
 slug: openrouter/qwen/qwen3.5-397b-a17b
 release_date: '2026-01-15'
 model_args:
   provider:
     only:
+    - deepinfra/fp8
+    - gmicloud/fp8
     - parasail/fp8
-    allow_fallbacks: false
+    allow_fallbacks: true
     quantizations:
     - fp8
 generate_args:
-  max_tokens: 235929
+  max_tokens: 81920
   extra_body:
     reasoning:
       enabled: true

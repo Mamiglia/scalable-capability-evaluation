@@ -1,13 +1,17 @@
-# Quantization: Unquantized BF16 (Novita).
+# Quantization: unknown (Google Vertex does not declare one).
+# 2026-09-08 repin, novita/bf16 -> google-vertex/us-east5: agentic benches need tool calling and
+# both other endpoints refuse it (Novita 400 "model features function calling not support",
+# DeepInfra/fp8 does not list `tools`). Google is the only tool-capable endpoint on the slug, so
+# this trades a declared bf16 pin for an undeclared quantization and a 8192 output cap
+# (was 117964) — a cross-bench confound, same class as the qwen3.8-27b and nemotron-3-ultra repins.
+# `quantizations:` is deliberately absent: it would filter this endpoint out ("unknown").
 name: meta-llama/Llama-4-Scout-17B-16E-Instruct
 slug: openrouter/meta-llama/llama-4-scout
 release_date: '2025-04-05'
 model_args:
   provider:
     only:
-    - novita/bf16
+    - google-vertex/us-east5
     allow_fallbacks: false
-    quantizations:
-    - bf16
 generate_args:
-  max_tokens: 117964
+  max_tokens: 8192
