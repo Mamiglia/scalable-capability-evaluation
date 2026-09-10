@@ -221,6 +221,7 @@ def wait(pod_id: str, port: int, timeout: float, stall_timeout: float = 0) -> st
     started = time.time()
     deadline = time.monotonic() + timeout
     next_stall_check = time.monotonic() + 60
+    last_seen = started  # newest log line seen so far; a failed/empty log fetch must not reset it
     while time.monotonic() < deadline:
         direct = direct_url(pod_id, port)
         if direct and is_healthy(direct):
@@ -230,7 +231,8 @@ def wait(pod_id: str, port: int, timeout: float, stall_timeout: float = 0) -> st
             return proxy_url
         if stall_timeout and time.monotonic() >= next_stall_check:
             next_stall_check = time.monotonic() + 60
-            idle = time.time() - (last_log_time(pod_id) or started)
+            last_seen = max(last_seen, last_log_time(pod_id) or 0)
+            idle = time.time() - last_seen
             if idle > stall_timeout:
                 raise Stalled(
                     f"Runpod {pod_id}: no container log output for {idle:.0f}s and not ready "
