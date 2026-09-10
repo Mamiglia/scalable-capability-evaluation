@@ -22,5 +22,24 @@ runpod:
     - --tensor-parallel-size
     - "2"
     - --disable-custom-all-reduce
+    # 2026-09-08: 32768 errored 8/61 terminal_bench samples with "maximum context length"
+    # (200-message agent loops outgrow it). 64k costs concurrency: KV is ~160 KB/token here,
+    # so ~4-5 sequences fit the ~48 GB left after weights -> run agentic benches with
+    # --max-sandboxes 4.
     - --max-model-len
-    - "32768"
+    - "65536"
+    # 2026-09-08: agentic benches (terminal_bench) need tool calling. vLLM does not parse
+    # Mistral's [TOOL_CALLS] into tool_calls without these; single-turn benches are unaffected
+    # (no tools in the request -> no parser invoked, generation identical).
+    - --enable-auto-tool-choice
+    - --tool-call-parser
+    - mistral
+    # mistral_common for encode AND decode. With the HF tokenizer the model's stray [TOOL_CALLS]
+    # markers in content survive into the next request and mistral's validator 400s the whole
+    # conversation ("Only one BOT token should have been outputted") - 7/61 samples died that way.
+    - --tokenizer-mode
+    - mistral
+    - --config-format
+    - mistral
+    - --load-format
+    - mistral

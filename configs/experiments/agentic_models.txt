@@ -1,0 +1,32 @@
+# Agentic cohort (tool-calling models) for the coding/cyber domains, by release half.
+# gemma-3-27b-it is deliberately absent: no native tool calling (no tool tokens, no FC
+# training) -- prompt-templated pseudo-tools only, so an agentic score is not comparable.
+# 2026-09-08 swaps: mistral-small-2503 -> mistral-small-3.2-24b (3.1's vLLM tool path 400s on stray
+# [TOOL_CALLS] markers), llama-4-scout -> minimax-m1 (Llama 4's pythonic tool calls are parsed by
+# no endpoint on the slug). Both replacements are API-served, so no Runpod skip applies.
+# 2025-I
+configs/models/deepseek/deepseek-r1-0528.yml
+configs/models/qwen/qwen3-235b-a22b.yml
+configs/models/deepseek/deepseek-v3-0324.yml
+configs/models/meta-llama/llama-4-maverick.yml
+configs/models/qwen/qwen3-32b.yml
+configs/models/minimax/minimax-m1.yml
+configs/models/mistralai/mistral-small-3.2-24b.yml
+# 2025-II
+configs/models/moonshotai/kimi-k2-thinking.yml
+configs/models/zai/glm-4.5.yml
+configs/models/zai/glm-4.7.yml
+configs/models/deepseek/deepseek-v3.2.yml
+configs/models/qwen/qwen3-235b-a22b-thinking-2507.yml
+configs/models/minimax/minimax-m2.yml
+configs/models/openai/gpt-oss-120b.yml
+configs/models/openai/gpt-oss-20b.yml
+# 2026-I
+configs/models/zai/glm-5.1.yml
+configs/models/moonshotai/kimi-k2.6.yml
+configs/models/zai/glm-5.2.yml
+configs/models/moonshotai/kimi-k2.5.yml
+configs/models/google/gemma4-31b.yml
+configs/models/qwen/qwen3.5-397b-a17b.yml
+configs/models/qwen/qwen3.6-27b.yml
+configs/models/nvidia/nemotron-3-ultra-550b-a55b.yml
