@@ -7,8 +7,11 @@ from typing import List
 import draccus
 import pandas as pd
 
-from irt.fitting import save_results
-from irt.validation import compare
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling modules of this analysis
+from fitting import save_results  # noqa: E402
+from validation import compare  # noqa: E402
 
 
 @dataclass

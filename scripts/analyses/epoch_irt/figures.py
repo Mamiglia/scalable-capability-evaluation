@@ -5,8 +5,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from irt.data import pick_epoch
-from irt.plots import (COLOR, LABEL, cat_scatter, cat_scatter_joint, curve_plot, density_plot,
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling modules of this analysis
+from data import pick_epoch  # noqa: E402
+from plots import (  # noqa: E402COLOR, LABEL, cat_scatter, cat_scatter_joint, curve_plot, density_plot,
                        heatmap, joint_pair, scatter, scree_plot, strip, sweep_gap_plot, wright_map)
 
 # categorical palette (dataviz default, light surface); "Other" stays muted grey

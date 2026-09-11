@@ -13,8 +13,14 @@ model capability; IRT over model_base = value of item difficulty.
 import numpy as np
 import pandas as pd
 
-from irt.data import IRTData, encode, pick_epoch
-from irt.fitting import fit, predict
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling modules of this analysis
+from data import pick_epoch  # noqa: E402
+from fitting import mirt, predict  # noqa: E402
+from irt.data import IRTData, encode  # noqa: E402
+from irt.fitting import fit  # noqa: E402
 
 
 def logloss(y, p, eps=1e-6):
@@ -71,7 +77,7 @@ def heldout(responses, model="1pl", k=10, seed=0, warmup=500, samples=500, **kwa
             data.model_idx[train], data.item_idx[train], data.y[train],
             data.models, data.items,
         )
-        post = fit(train_data, model=model, warmup=warmup, samples=samples, **kwargs)
+        post = fit(train_data, model=mirt if model == "mirt" else model, warmup=warmup, samples=samples, **kwargs)
         p = predict(model, post, data.model_idx[test], data.item_idx[test])
         item_p = pass_rate(data.item_idx[train], data.y[train], len(data.items))[data.item_idx[test]]
         model_p = pass_rate(data.model_idx[train], data.y[train], len(data.models))[data.model_idx[test]]
