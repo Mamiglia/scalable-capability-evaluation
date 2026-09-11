@@ -30,12 +30,16 @@ def test_judge_bt_places_targets_among_pinned_references(tmp_path, monkeypatch):
     t = toy_task()
     p = toy_judge(tmp_path)
     # c beats b beats a on both items and orders; t beats everyone; u was never judged.
-    rows = [dict(bench="b", judge="j", item=i, model_left=w, model_right=l, pick_left=1.0, semester="s")
+    rows = [dict(bench="b", judge="j", item=i, model_left=w, model_right=l, pick_left=1.0, semester="s", imported=False)
             for i in ("0", "1") for w, l in [("t", "a"), ("t", "b"), ("t", "c"), ("c", "b"), ("c", "a"), ("b", "a")]]
+    # an imported verdict that disagrees on a judged (item, pair, order) loses to the run's own; one on a new item counts
+    rows += [dict(rows[0], pick_left=0.0, imported=True), dict(rows[0], item="9", pick_left=0.0, imported=True)]
     monkeypatch.setattr(JudgeBT, "judge", lambda self, train, test: "run-dir")
     monkeypatch.setattr(judge_module, "from_logs", lambda log_dir: pd.DataFrame(rows))
     theta_hat = p(t)
     assert p.name == "judge_j" and theta_hat["t"] > 2 and np.isnan(theta_hat["u"])
+    kept = p.verdicts(t.train, t.test)
+    assert len(kept) == len(rows) - 1 and kept[kept.item == "0"].pick_left.eq(1.0).all()
     # verdicts among targets only leave the scale unpinned
     monkeypatch.setattr(judge_module, "from_logs", lambda log_dir: pd.DataFrame(columns=judge_module.VERDICT_COLUMNS))
     assert p(t).isna().all()

@@ -73,7 +73,7 @@ def test_drop_ties_removes_only_disagreeing_groups():
 def test_verdicts_from_logs(monkeypatch, tmp_path):
     (tmp_path / "x.eval").touch()
     header = SimpleNamespace(status="success", eval=SimpleNamespace(
-        model="judge", metadata={"bench": "gpqa", "major": "big", "minor": "small", "semester": "s"}))
+        model="judge", task="gpqa/big|small", metadata={"bench": "gpqa", "major": "big", "minor": "small", "semester": "s"}))
     summaries = [
         SimpleNamespace(id="q1_1", scores={"s": SimpleNamespace(answer="1")}),  # big shown left, picked
         SimpleNamespace(id="q1_2", scores={"s": SimpleNamespace(answer="1")}),  # small shown left, picked
@@ -83,6 +83,6 @@ def test_verdicts_from_logs(monkeypatch, tmp_path):
     monkeypatch.setattr(judge_module, "read_eval_log_sample_summaries", lambda *a, **k: summaries)
     table = judge_module.from_logs(tmp_path)
     assert table.to_dict("records") == [
-        dict(bench="gpqa", judge="judge", item="q1", model_left="big", model_right="small", pick_left=1.0, semester="s"),
-        dict(bench="gpqa", judge="judge", item="q1", model_left="small", model_right="big", pick_left=1.0, semester="s"),
+        dict(bench="gpqa", judge="judge", item="q1", model_left="big", model_right="small", pick_left=1.0, semester="s", imported=False),
+        dict(bench="gpqa", judge="judge", item="q1", model_left="small", model_right="big", pick_left=1.0, semester="s", imported=False),
     ]

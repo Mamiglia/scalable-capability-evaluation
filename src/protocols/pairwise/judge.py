@@ -9,6 +9,10 @@ and a dir with every task finished is only read.
 
 Targets are compared with the references only, never with each other: the references are pinned
 at theta* in the Bradley-Terry fit, so those are the comparisons that place a target.
+
+Logs imported from older campaigns (scripts/judge/import_judge_logs.py) sit in the same dir with
+an "(imported)" task-name suffix: they never count as the finished task, and where they overlap
+the run's own verdicts on an (item, pair, shown order) the run's verdict wins.
 """
 
 from pathlib import Path
@@ -27,7 +31,8 @@ from judge.task import judge_task
 from protocols.pairwise.protocol import PairwiseBT
 from reference.tables import DATA
 
-VERDICT_COLUMNS = ["bench", "judge", "item", "model_left", "model_right", "pick_left", "semester"]
+VERDICT_COLUMNS = ["bench", "judge", "item", "model_left", "model_right", "pick_left", "semester", "imported"]
+IMPORTED = " (imported)"  # task-name suffix of a log imported from an older campaign
 
 
 def from_logs(log_dir: str | Path) -> pd.DataFrame:
@@ -49,8 +54,9 @@ def from_logs(log_dir: str | Path) -> pd.DataFrame:
                 continue
             item, target = str(s.id).rsplit("_", 1)
             left, right = (major, minor) if target == "1" else (minor, major)
-            rows.append(dict(bench=bench, judge=log.eval.model, item=item, model_left=left,
-                             model_right=right, pick_left=float(answer == "1"), semester=md.get("semester") or ""))
+            rows.append(dict(bench=bench, judge=log.eval.model, item=item, model_left=left, model_right=right,
+                             pick_left=float(answer == "1"), semester=md.get("semester") or "",
+                             imported=log.eval.task.endswith(IMPORTED)))
     return pd.DataFrame(rows, columns=VERDICT_COLUMNS)
 
 
@@ -95,11 +101,14 @@ class JudgeBT(PairwiseBT):
         """The run dir for this task, judging whatever is not finished in it yet."""
         log_dir = self.log_dir(test.semester)
         tasks = self.tasks(train, test)
-        done = {read_header(p).eval.task for p in log_dir.glob("*.eval") if is_successful_eval(p)}
+        done = {read_header(p).eval.task for p in log_dir.glob("*.eval") if is_successful_eval(p)}  # imported names differ
         if any(task.name not in done for task in tasks):
             if not run_tasks(tasks, self.config, log_dir):
                 raise RuntimeError(f"judge run failed in {log_dir}")
         return log_dir
 
     def verdicts(self, train: Cohort, test: Cohort) -> pd.DataFrame:
-        return from_logs(self.judge(train, test))
+        verdicts = from_logs(self.judge(train, test))
+        # the run's own verdict wins over an imported one on the same (item, pair, shown order)
+        verdicts = verdicts.sort_values("imported", kind="stable")
+        return verdicts.drop_duplicates(["bench", "item", "model_left", "model_right"], keep="first")
