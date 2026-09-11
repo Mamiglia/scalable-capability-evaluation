@@ -66,8 +66,8 @@ DOMAIN_COLOR = {"Physics": "#2a78d6", "Chemistry": "#eb6834", "Biology": "#1baf7
 def item_figure(root: Path, dif: pd.DataFrame, data: Path):
     """Item difficulty b vs empirical item %-correct, coloured by subject domain."""
     resp = pick_epoch(pd.read_parquet(data / "responses.parquet"))
-    rate = resp.groupby(["benchmark", "item"])["correct"].mean().rename("passrate").reset_index()
-    d = dif.merge(rate, on=["benchmark", "item"])
+    rate = resp.groupby(["bench", "item"])["correct"].mean().rename("passrate").reset_index()
+    d = dif.merge(rate, on=["bench", "item"])
     note = None
     out = str(root / "figures" / "b_vs_passrate")
     dom_path = data / "item_domains.csv"

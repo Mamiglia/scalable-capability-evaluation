@@ -135,7 +135,7 @@ def save_results(responses, models=("1pl", "2pl", "mirt"), out_dir="irt_results"
     """Fit each model type; write one capabilities table and one difficulties table."""
     data = encode(pick_epoch(responses))
     caps = pd.DataFrame({"model": data.models})
-    diffs = pd.DataFrame(data.items, columns=["benchmark", "item"])
+    diffs = pd.DataFrame(data.items, columns=["bench", "item"])
     for m in models:
         post = fit(data, model=m, warmup=warmup, samples=samples)
         theta = np.asarray(post["theta"])

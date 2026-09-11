@@ -42,29 +42,29 @@ TOP_K = 3
 
 
 def load_semesters(path: Path = SEMESTERS) -> dict[str, list[str]]:
+    """Load the semester models from configs/semesters.yml: {semester: [model, ...]}."""
     return {str(k): list(v) for k, v in yaml.safe_load(path.read_text()).items()}
 
 
-def _encode(resp: pd.DataFrame):
-    return encode(resp.rename(columns={"bench": "benchmark"}))
-
-
-def global_fit(resp: pd.DataFrame, warmup=1000, samples=1000, seed=0) -> tuple[pd.DataFrame, pd.DataFrame]:
+def global_fit(transcripts: pd.DataFrame, warmup=1000, samples=1000, seed=0) -> tuple[pd.DataFrame, pd.DataFrame]:
     """2PL + guessing over every response -> (models[global_theta, _sd] by model, items[bench, item, guess, a, b, ..])."""
-    data = _encode(resp)
-    guess = resp.groupby(["bench", "item"]).guess.max()  # the floor is an item property; some imported logs lack `choices`
+    data = encode(transcripts)
+    guess = transcripts.groupby(["bench", "item"]).guess.max()  # the floor is an item property; some imported logs lack `choices`
     guess = np.array([guess[i] for i in data.items])
     post = fit(data, model="2pl", warmup=warmup, samples=samples, seed=seed, guess=guess)
     theta, a, b = (np.asarray(post[k]) for k in ("theta", "a", "b"))
-    models = pd.DataFrame({"global_theta": theta.mean(0), "global_theta_sd": theta.std(0)}, index=pd.Index(data.models, name="model"))
+    models = pd.DataFrame(
+        {"global_theta": theta.mean(0), "global_theta_sd": theta.std(0)}, 
+        index=pd.Index(data.models, name="model")
+    )
     items = pd.DataFrame(data.items, columns=["bench", "item"]).assign(
         guess=guess, a=a.mean(0), a_sd=a.std(0), b=b.mean(0), b_sd=b.std(0))
     return models, items
 
 
-def split_items(resp: pd.DataFrame, items: pd.DataFrame, top: list[str], train: int = 25, seed: int = 0) -> pd.DataFrame:
+def split_items(transcripts: pd.DataFrame, items: pd.DataFrame, top: list[str], train: int = 25, seed: int = 0) -> pd.DataFrame:
     """`set` (easy / hard / "" = out of the task) and `train` per item. EASY = every model in `top` correct on repeat 0."""
-    r0 = resp[(resp.repeat == 0) & resp.model.isin(top)]
+    r0 = transcripts[(transcripts.repeat == 0) & transcripts.model.isin(top)]
     seen = r0.groupby(["bench", "item"]).agg(n=("model", "nunique"), ok=("correct", "min"))
     seen = seen[seen.n == len(top)]
     status = pd.Series(np.where(seen.ok, "easy", "hard"), index=seen.index)
@@ -81,12 +81,12 @@ def split_items(resp: pd.DataFrame, items: pd.DataFrame, top: list[str], train: 
     return out
 
 
-def local_fit(resp: pd.DataFrame, hard: pd.DataFrame, models: list[str], warmup=1000, samples=1000, seed=0) -> pd.DataFrame:
+def local_fit(transcripts: pd.DataFrame, hard: pd.DataFrame, models: list[str], warmup=1000, samples=1000, seed=0) -> pd.DataFrame:
     """theta of `models` on the `hard` items (bench, item, a, b, guess fixed to the global fit) -> [theta, theta_sd] by model."""
-    r = resp[resp.model.isin(models)].merge(hard[["bench", "item"]])
+    r = transcripts[transcripts.model.isin(models)].merge(hard[["bench", "item"]])
     if missing := set(models) - set(r.model):
         raise ValueError(f"no HARD responses for {sorted(missing)}: theta would be the prior")
-    data = _encode(r)
+    data = encode(r)
     par = hard.set_index(["bench", "item"]).loc[data.items]
     post = fit(data, model="fixed_2pl", warmup=warmup, samples=samples, seed=seed,
                a=par.a.to_numpy(), b=par.b.to_numpy(), guess=par.guess.to_numpy())
@@ -130,12 +130,12 @@ def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, for
     out = frozen_dir(domain)
     if (out / "models.csv").exists() and not force:
         raise FileExistsError(f"{out} is frozen; refit deliberately with --force and commit the result")
-    resp = responses(domain)
+    transcripts = responses(domain)
     semesters = load_semesters()
-    models, items = global_fit(resp, warmup, samples, seed)
+    models, items = global_fit(transcripts, warmup, samples, seed)
     models.insert(0, "semester", models.index.map({m: s for s, ms in semesters.items() for m in ms}))
     models = models.join(log_paths(eval_logs(domain)))
-    present = set(resp.model)
+    present = set(transcripts.model)
     tops = {}
     for prev, sem in zip(semesters, list(semesters)[1:]):
         ref = [m for m in semesters[prev] if m in present]
@@ -145,8 +145,8 @@ def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, for
         if len(ref) < 2 or len(tgt) < 2:
             raise ValueError(f"{sem}: {len(ref)} references / {len(tgt)} targets on {domain.name}")
         tops[sem] = top = models.global_theta.loc[ref].nlargest(TOP_K).index.tolist()
-        split = split_items(resp, items, top, train, seed)
-        local = local_fit(resp, items[split.set == "hard"], ref + tgt, warmup, samples, seed)
+        split = split_items(transcripts, items, top, train, seed)
+        local = local_fit(transcripts, items[split.set == "hard"], ref + tgt, warmup, samples, seed)
         items[f"{sem}_set"], items[f"{sem}_train"] = split.set, split.train
         models[f"{sem}_role"] = pd.Series({**dict.fromkeys(ref, "reference"), **dict.fromkeys(tgt, "target")})
         models = models.join(local.add_prefix(f"{sem}_"))
@@ -155,7 +155,7 @@ def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, for
     out.mkdir(parents=True, exist_ok=True)
     models.to_csv(out / "models.csv", float_format="%.4f")
     items.to_csv(out / "items.csv", index=False, float_format="%.4f")
-    resp[["bench", "item", "model", "repeat", "correct"]].sort_values(["bench", "item", "model", "repeat"]).to_csv(
+    transcripts[["bench", "item", "model", "repeat", "correct"]].sort_values(["bench", "item", "model", "repeat"]).to_csv(
         out / "responses.csv", index=False)
     (out / "fit.yml").write_text(yaml.safe_dump(dict(
         domain=domain.name, date=datetime.date.today().isoformat(), warmup=warmup, samples=samples, seed=seed,

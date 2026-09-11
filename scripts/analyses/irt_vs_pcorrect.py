@@ -72,7 +72,7 @@ def read_pool(pool: str) -> pd.DataFrame:
     benches, hle_filter = POOLS[pool]
     models = PILOT if "hle" in benches else None
     df = pd.concat([read_bench(y, hle_filter, models) for y in benches], ignore_index=True)
-    full = df.groupby("model").benchmark.nunique() == len(benches)  # same items for every model
+    full = df.groupby("model").bench.nunique() == len(benches)  # same items for every model
     return df[df.model.isin(full[full].index)]
 
 
@@ -85,7 +85,7 @@ def read_bench(yml: str, hle_filter, models) -> pd.DataFrame:
             if is_successful_eval(f):
                 for s in read_eval_log_sample_summaries(str(f)):
                     md = s.metadata or {}
-                    rows.append(dict(benchmark=task.name, model=mdir.name, item=str(s.id), correct=extract_score(s),
+                    rows.append(dict(bench=task.name, model=mdir.name, item=str(s.id), correct=extract_score(s),
                                      uid=md.get("uid"), category=md.get("category")))
     df = pd.DataFrame(rows)
     if yml == "hle":
@@ -99,15 +99,15 @@ def read_bench(yml: str, hle_filter, models) -> pd.DataFrame:
 def analyse(pool: str, warmup: int, samples: int, replot: bool):
     items_csv, models_csv = OUT / f"{pool}_items.csv", OUT / f"{pool}_models.csv"
     df = read_pool(pool)
-    M = df.groupby(["benchmark", "item", "model"]).correct.mean().unstack("model")  # item x model
+    M = df.groupby(["bench", "item", "model"]).correct.mean().unstack("model")  # item x model
     if replot and items_csv.exists():
-        items = pd.read_csv(items_csv, dtype={"item": str}).set_index(["benchmark", "item"])
+        items = pd.read_csv(items_csv, dtype={"item": str}).set_index(["bench", "item"])
         models = pd.read_csv(models_csv).set_index("model")
     else:
         data = encode(df)
         post = fit(data, model="2pl", warmup=warmup, samples=samples)
-        items = pd.DataFrame(data.items, columns=["benchmark", "item"]).assign(
-            b=np.asarray(post["b"]).mean(0), a=np.asarray(post["a"]).mean(0)).set_index(["benchmark", "item"])
+        items = pd.DataFrame(data.items, columns=["bench", "item"]).assign(
+            b=np.asarray(post["b"]).mean(0), a=np.asarray(post["a"]).mean(0)).set_index(["bench", "item"])
         models = pd.DataFrame({"theta": np.asarray(post["theta"]).mean(0)}, index=pd.Index(data.models, name="model"))
     items["P"] = M.mean(axis=1)
     models["acc"] = M.mean(axis=0)

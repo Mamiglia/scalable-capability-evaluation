@@ -49,7 +49,7 @@ def _logit(p, eps=1e-6):
 def cell_rate(responses):
     """Empirical %-correct per (model, benchmark, item) over all non-blank epochs."""
     valid = responses[responses["answer"].fillna("").astype(str).str.strip() != ""]
-    return valid.groupby(["model", "benchmark", "item"])["correct"].mean().to_dict()
+    return valid.groupby(["model", "bench", "item"])["correct"].mean().to_dict()
 
 
 def heldout(responses, model="1pl", k=10, seed=0, warmup=500, samples=500, **kwargs):

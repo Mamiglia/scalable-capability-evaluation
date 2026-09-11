@@ -36,7 +36,7 @@ def read_log(path: Path) -> Iterator[dict]:
         if score is None:
             continue
         yield {
-            "benchmark": benchmark,
+            "bench": benchmark,
             "model": model,
             "item": question_number(sample),
             "question": " ".join(str(sample.input).split())[:SNIPPET_CHARS],
@@ -55,7 +55,7 @@ def build_responses(logs_dir: Path) -> pd.DataFrame:
 
 def items(responses: pd.DataFrame) -> pd.DataFrame:
     """One row per question: benchmark, item, question snippet"""
-    return responses[["benchmark", "item", "question"]].drop_duplicates(["benchmark", "item"])
+    return responses[["bench", "item", "question"]].drop_duplicates(["bench", "item"])
 
 
 def for_items(responses: pd.DataFrame, item_ids, epoch=None) -> pd.DataFrame:
@@ -93,7 +93,7 @@ def verify_alignment(responses: pd.DataFrame) -> dict:
     sets = list(items_by_model)
     union = set().union(*sets) if sets else set()
     shared = set.intersection(*sets) if sets else set()
-    questions_per_item = responses.groupby(["benchmark", "item"])["question"].nunique()
+    questions_per_item = responses.groupby(["bench", "item"])["question"].nunique()
     return {
         "n_models": responses["model"].nunique(),
         "n_items_shared": len(shared),
@@ -113,7 +113,7 @@ class IRTData(NamedTuple):
 
 def encode(responses: pd.DataFrame) -> IRTData:
     """Response table to integer-indexed arrays for the fit."""
-    pairs = list(zip(responses["benchmark"], responses["item"]))
+    pairs = list(zip(responses["bench"], responses["item"]))
     models = sorted(responses["model"].unique())
     item_ids = sorted(set(pairs))
     m_index = {m: i for i, m in enumerate(models)}

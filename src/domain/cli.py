@@ -68,7 +68,7 @@ def responses(domain: DomainConfig) -> pd.DataFrame:
 
 def difficulties(resp: pd.DataFrame, warmup: int = 1000, samples: int = 1000) -> pd.DataFrame:
     """1PL-with-guessing fit over the pooled responses; quartile 1 = easiest quarter of items by b."""
-    data = encode(resp.rename(columns={"bench": "benchmark"}))
+    data = encode(resp)
     guess = resp.groupby(["bench", "item"]).guess.max()  # some imported logs carry no `choices`; the floor is an item property
     guess = np.array([guess[item] for item in data.items])
     post = fit(data, model="1pl", warmup=warmup, samples=samples, guess=guess)
