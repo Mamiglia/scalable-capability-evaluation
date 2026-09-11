@@ -1,0 +1,25 @@
+# Quantization: Unquantized BF16 (vLLM / Runpod)
+# Not on OpenRouter (checked 2026-09-11), so self-hosted. Qwen2ForCausalLM architecture, so the
+# pinned vLLM image loads it without trust-remote-code (unlike Qwen-1). GPQA repeats are the
+# imported Epoch AI logs (sagemaker); only ARC is collected here.
+name: Qwen/Qwen1.5-72B-Chat
+release_date: "2024-02-05"
+generate_args:
+  max_tokens: 8192
+runpod:
+  use: true
+  model: Qwen/Qwen1.5-72B-Chat
+  name: small-judge-qwen1.5-72b-chat
+  cloud_type: SECURE
+  # 145GB of bf16 weights: 4×A40 (192GB) leaves ~40GB of KV (same as qwen2-72b-instruct).
+  gpu_id: NVIDIA A40
+  gpu_count: 4
+  env: {NCCL_P2P_DISABLE: "1", HF_HUB_ENABLE_HF_TRANSFER: "1"}
+  container_disk_in_gb: 180
+  ready_timeout: 10800
+  vllm_args:
+    - --tensor-parallel-size
+    - "4"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "10240"   # 4xA40: 72B bf16 leaves ~7GB KV; vLLM estimated max 11136 at 32k it crash-looped

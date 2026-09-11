@@ -1,0 +1,7 @@
+# One LLM judge and its condition (configs.judge.JudgeConfig). Used as a protocol:
+#   uv run evaluate configs/domain/science.yml --judge configs/judges/gemma4-31b.yml [--semester 2026-I]
+# The protocol judges every (target, reference) pair of each semester task on the train items
+# (both shown orders), if the run under judge/<domain>/<semester>/<judge>/<hash>/ is missing.
+name: gemma4-31b
+judge: configs/models/google/gemma4-31b.yml
+include_reasoning: false

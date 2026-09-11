@@ -1,4 +1,8 @@
-# Quantization: Unquantized BF16 (DeepInfra)
+# Quantization: bf16 (DeepInfra) for the 2026-08/09 gpqa/aime/apex/hle logs. 2026-09-10: deepinfra/bf16
+# went `engine_overloaded` (429, retry 11 at 25 min backoff, 3/150 mmlu_pro_math samples in 60 min)
+# and it is the only bf16 endpoint on the slug (the rest are fp4/fp8), so mmlu_pro_math was collected
+# self-hosted on a pod instead: native mxfp4 weights served by vLLM, same model dir (the
+# mistral-small-3.2 precedent). Set `runpod.use: false` to go back to the hosted pin.
 name: openai/gpt-oss-20b
 slug: openrouter/openai/gpt-oss-20b
 release_date: '2025-08-05'
@@ -9,3 +13,33 @@ model_args:
     allow_fallbacks: false
     quantizations:
     - bf16
+generate_args:
+  timeout: 7200
+  extra_body:
+    reasoning:
+      enabled: true
+
+runpod:
+  use: true
+  model: openai/gpt-oss-20b
+  name: small-judge-gpt-oss-20b
+  cloud_type: SECURE
+  # ~13GB of mxfp4 weights; Hopper has the native mxfp4 MoE kernels, Ampere falls back to
+  # slower triton ones. One H100 leaves ~60GB of KV for the 131k context.
+  gpu_id: NVIDIA H100 80GB HBM3
+  gpu_count: 1
+  container_disk_in_gb: 60
+  ready_timeout: 2400
+  model_args: {}
+  vllm_args:
+    - --reasoning-parser
+    - openai_gptoss
+    - --max-model-len
+    - "131072"
+    # 2026-09-11: agentic benches need tool calling. Without these vLLM never turns the
+    # model's output into structured tool_calls, so the react loop re-prompts until the
+    # message cap: a swe_bench_mini run showed 0 `tool` events, msgs=100 and ~100k tokens
+    # on every sample, all scoring 0. Single-turn benches (mmlu_pro_math) are unaffected.
+    - --enable-auto-tool-choice
+    - --tool-call-parser
+    - openai

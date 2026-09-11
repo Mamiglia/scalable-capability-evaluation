@@ -10,18 +10,18 @@
   - gpt-4-0613
   - gpt-3.5-turbo-0125
 2024-I:
-  - wizardlm-2-8x22b
+  - wizardlm-2-8x22b-hf
   - qwen2-72b-instruct
   - meta-llama-3-70b-instruct
   - gemma-2-27b-it
-  - open-mixtral-8x22b
+  - qwen1.5-72b-chat
   - phi-3-medium-128k-instruct
   - gpt-4o-2024-05-13
   - gpt-4-turbo-2024-04-09
 2024-II:
   - phi-4
   - qwen2.5-72b-instruct
-  - mistral-large-2407
+  - deepseek-v3
   - llama-3.3-70b-instruct
   - qwen2.5-32b-instruct
   - hermes-3-llama-3.1-405b
@@ -31,7 +31,7 @@
   - deepseek-r1-0528
   - qwen3-235b-a22b
   - deepseek-v3-0324
-  - llama-4-maverick-17b-128e-instruct-fp8
+  - qwen3-30b-a3b
   - qwen3-32b
   - minimax-m1
   - mistral-small-3.2-24b-instruct

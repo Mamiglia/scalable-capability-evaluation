@@ -1,0 +1,37 @@
+# Quantization: unquantized bf16 (vLLM / Runpod), weights straight from Hugging Face
+# (alpindale/WizardLM-2-8x22B mirror; Microsoft pulled the original repo). The hosted alias in
+# `wizardlm-2-8x22b.yml` (novita/bf16) scores .63/.57 on AIME 2024 and .67/.61 on AIME 2026
+# (released after the model), which an April-2024 WizardLM-2 cannot do, and capped 37-43% of
+# math samples at 8000. Same pattern and fix as `mixtral-8x22b-instruct-v0.1.yml`: separate
+# model dir (`wizardlm-2-8x22b-hf`), never merged with the hosted or the imported Epoch logs.
+name: alpindale/WizardLM-2-8x22B-hf
+slug: vllm/alpindale/WizardLM-2-8x22B
+release_date: "2024-04-15"
+generate_args:
+  max_tokens: 12000
+  timeout: 7200
+
+runpod:
+  use: true
+  model: alpindale/WizardLM-2-8x22B
+  name: small-judge-wizardlm-2-8x22b
+  cloud_type: SECURE
+  # MixtralForCausalLM, 281GB of bf16 weights, TP=4. On 4x80GB (2026-09-11, 4xH100 SXM) vLLM's
+  # engine core died at init and the pod crash-looped: 70GB of weights per card leaves ~2GB
+  # under the 0.9 memory budget, nothing for KV cache. Needs >=94GB per card: 4xH200 (141GB,
+  # $14.4/h) first, then the 94-96GB cards.
+  gpu_id: NVIDIA H200
+  gpu_count: 4
+  fallback_gpus: ["NVIDIA H200 NVL", "NVIDIA H100 NVL", "NVIDIA RTX PRO 6000 Blackwell Server Edition"]
+  env: {NCCL_P2P_DISABLE: "1", HF_HUB_ENABLE_HF_TRANSFER: "1"}
+  container_disk_in_gb: 400
+  ready_timeout: 7200
+  model_args: {}
+  vllm_args:
+    - --dtype
+    - bfloat16
+    - --tensor-parallel-size
+    - "4"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "16384"

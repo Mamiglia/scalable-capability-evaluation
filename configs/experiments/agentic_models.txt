@@ -10,6 +10,7 @@ configs/models/qwen/qwen3-235b-a22b.yml
 configs/models/deepseek/deepseek-v3-0324.yml
 configs/models/meta-llama/llama-4-maverick.yml
 configs/models/qwen/qwen3-32b.yml
+configs/models/qwen/qwen3-30b-a3b.yml
 configs/models/minimax/minimax-m1.yml
 configs/models/mistralai/mistral-small-3.2-24b.yml
 # 2025-II

@@ -1,0 +1,15 @@
+# Quantization: FP4 (DeepInfra) — the original DeepSeek-V3 (Dec 2024). The other live endpoint
+# (StreamLake) declares no quantization. GPQA repeats are the imported Epoch AI logs (Together);
+# only ARC is collected here.
+name: deepseek-ai/DeepSeek-V3
+slug: openrouter/deepseek/deepseek-chat
+release_date: '2024-12-26'
+model_args:
+  provider:
+    only:
+    - deepinfra/fp4
+    allow_fallbacks: false
+    quantizations:
+    - fp4
+generate_args:
+  max_tokens: 16384

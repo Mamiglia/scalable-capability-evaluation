@@ -1,0 +1,33 @@
+# Quantization: unquantized bf16 (vLLM / Runpod), weights straight from Hugging Face.
+# Provenance check for `open-mixtral-8x22b.yml` (2026-09-10): the Mistral endpoint behind that
+# alias scores .40/.43 on AIME 2024 and .43/.37 on AIME 2026 (released after the model), which
+# an April-2024 Mixtral cannot do. This config runs the actual released weights; separate model
+# dir (`mixtral-8x22b-instruct-v0.1`), never merged with the hosted one.
+name: mistralai/Mixtral-8x22B-Instruct-v0.1
+slug: vllm/mistralai/Mixtral-8x22B-Instruct-v0.1
+release_date: "2024-04-17"
+generate_args:
+  max_tokens: 12000
+  timeout: 7200
+
+runpod:
+  use: true
+  model: mistralai/Mixtral-8x22B-Instruct-v0.1
+  name: small-judge-mixtral-8x22b
+  cloud_type: SECURE
+  # 281GB of bf16 weights: 4x80GB (320GB), TP=4. 80GB cards only.
+  gpu_id: NVIDIA H100 80GB HBM3
+  gpu_count: 4
+  fallback_gpus: ["NVIDIA A100-SXM4-80GB", "NVIDIA A100 80GB PCIe", "NVIDIA H100 PCIe", "NVIDIA H100 NVL"]
+  env: {NCCL_P2P_DISABLE: "1", HF_HUB_ENABLE_HF_TRANSFER: "1"}
+  container_disk_in_gb: 400
+  ready_timeout: 7200
+  model_args: {}
+  vllm_args:
+    - --dtype
+    - bfloat16
+    - --tensor-parallel-size
+    - "4"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "16384"
