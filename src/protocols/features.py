@@ -11,6 +11,7 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.base import RegressorMixin as SKlearnRegressor
 
 from capability.task import Cohort
 from protocols import Protocol
@@ -22,7 +23,7 @@ THOUGHT = re.compile(r"<THOUGHT_START>.*?<THOUGHT_END>", re.S)
 def answer_text(transcript) -> str:
     return THOUGHT.sub("", transcript.text)
 
-
+# TODO: These features are meant to be improved!
 FEATURES = {
     "chars": lambda t: len(t.text),
     "answer_chars": lambda t: len(answer_text(t)),
@@ -44,14 +45,18 @@ def feature_table(cohort: Cohort) -> pd.DataFrame:
 class TabularRegression(Protocol):
     """A sklearn estimator of theta* on some feature columns, fit on the references."""
 
-    def __init__(self, name: str, features: list[str], estimator):
+    def __init__(self, name: str, features: list[str], estimator : SKlearnRegressor):
         self.name, self.features, self.estimator = name, features, estimator
+        
+    def get_features(self, cohort: Cohort) -> pd.DataFrame:
+        return feature_table(cohort)[self.features]
 
     def fit(self, train: Cohort) -> None:
-        self.estimator.fit(feature_table(train)[self.features], train.theta)
+        x = self.get_features(train)
+        self.estimator.fit(x, train.theta)
 
     def predict(self, test: Cohort) -> pd.Series:
-        x = feature_table(test)[self.features]
+        x = self.get_features(test)
         return pd.Series(self.estimator.predict(x), index=x.index)
 
 
