@@ -1,0 +1,105 @@
+"""JudgeBT: an LLM judge's verdicts on every (target, reference) pair of the task, judged on demand.
+
+The run is one inspect eval_set per <domain, semester, judge, condition>, stored under
+<config.log_dir>/<domain>/<semester>/<judge>/<condition hash>/: one .eval per <bench, reference,
+target>, on the train items both models got right on repeat 0, in both shown orders. A sample
+is `<item>_<shown position of the reference>`; the scorer's answer "1"/"2" says which shown
+transcript the judge picked. Tasks already finished in the dir are not re-run (eval_set resumes),
+and a dir with every task finished is only read.
+
+Targets are compared with the references only, never with each other: the references are pinned
+at theta* in the Bradley-Terry fit, so those are the comparisons that place a target.
+"""
+
+from pathlib import Path
+
+import pandas as pd
+from inspect_ai import Task
+from inspect_ai.log import read_eval_log, read_eval_log_sample_summaries
+
+from capability.task import Cohort
+from configs.domain import DomainConfig
+from configs.judge import JudgeConfig
+from configs.paths import is_successful_eval
+from evals.transcripts import read_header
+from judge.run import run_tasks
+from judge.task import judge_task
+from protocols.pairwise.protocol import PairwiseBT
+from reference.tables import DATA
+
+VERDICT_COLUMNS = ["bench", "judge", "item", "model_left", "model_right", "pick_left", "semester"]
+
+
+def from_logs(log_dir: str | Path) -> pd.DataFrame:
+    """Verdict table of one run dir: bench, judge, item, model_left, model_right, pick_left, semester."""
+    rows = []
+    for path in sorted(Path(log_dir).glob("*.eval")):
+        log = read_eval_log(str(path), header_only=True)
+        if log.status != "success":
+            continue
+        md = log.eval.metadata or {}
+        major, minor = md.get("major") or md["name_major"], md.get("minor") or md["name_minor"]
+        bench = md.get("bench") or md["benchmark_name"]
+        for s in read_eval_log_sample_summaries(str(path)):
+            # A sample the run tolerated an error on (fail_on_error) never reached the
+            # scorer, so it carries no verdict.
+            score = next(iter((s.scores or {}).values()), None)
+            answer = score.answer if score else None
+            if answer not in ("1", "2"):
+                continue
+            item, target = str(s.id).rsplit("_", 1)
+            left, right = (major, minor) if target == "1" else (minor, major)
+            rows.append(dict(bench=bench, judge=log.eval.model, item=item, model_left=left,
+                             model_right=right, pick_left=float(answer == "1"), semester=md.get("semester") or ""))
+    return pd.DataFrame(rows, columns=VERDICT_COLUMNS)
+
+
+class JudgeBT(PairwiseBT):
+    def __init__(self, config: JudgeConfig, domain: DomainConfig):
+        self.config, self.domain = config, domain
+        self.name = f"judge_{config.judge.shortname.lower()}"
+
+    def log_dir(self, semester: str) -> Path:
+        return self.config.log_dir / self.domain.name / semester / self.config.judge.shortname.lower() / self.config.condition_hash
+
+    def tasks(self, train: Cohort, test: Cohort) -> list[Task]:
+        """One judging task per <bench, reference, target>, on the train items both got right."""
+        tasks = []
+        # Bench entries sharing a task name (hle.yml / hle_gold.yml: same items under two hashes)
+        # are one bench: the frozen path_<bench> already points at whichever hash has the log.
+        benches = {self.domain.task(bench).name: bench for bench in self.domain.benches}
+        for name, bench in benches.items():
+            for target in test.models.index:
+                for reference in train.models.index:
+                    items = {item for b, item in train.transcripts[reference] if b == name}
+                    items &= {item for b, item in test.transcripts[target] if b == name}
+                    if not items:
+                        continue
+                    task = judge_task(
+                        DATA / train.models.loc[reference, f"path_{name}"], DATA / test.models.loc[target, f"path_{name}"],
+                        system_prompt=bench.system_prompt or self.config.system_prompt,
+                        max_length=self.config.max_length,
+                        include_reverse=self.config.include_reverse,
+                        include_reasoning=self.config.include_reasoning,
+                        task_name=f"{name}/{reference}|{target}",
+                        items=items,
+                        # Data-dir model names, so from_logs reads logs alone.
+                        metadata={"domain": self.domain.name, "bench": name, "major": reference, "minor": target,
+                                  "semester": test.semester},
+                    )
+                    if task is not None:
+                        tasks.append(task)
+        return tasks
+
+    def judge(self, train: Cohort, test: Cohort) -> Path:
+        """The run dir for this task, judging whatever is not finished in it yet."""
+        log_dir = self.log_dir(test.semester)
+        tasks = self.tasks(train, test)
+        done = {read_header(p).eval.task for p in log_dir.glob("*.eval") if is_successful_eval(p)}
+        if any(task.name not in done for task in tasks):
+            if not run_tasks(tasks, self.config, log_dir):
+                raise RuntimeError(f"judge run failed in {log_dir}")
+        return log_dir
+
+    def verdicts(self, train: Cohort, test: Cohort) -> pd.DataFrame:
+        return from_logs(self.judge(train, test))

@@ -1,75 +1,84 @@
 """Score protocols against the frozen theta* of a domain's semester tasks.
 
-    uv run evaluate configs/domain/science.yml [--protocol chars ridge ...] [--judge logs/rank/science/<judge>/<hash> ...]
+    uv run evaluate configs/domain/science.yml [--protocol chars ridge judge_gpt-5.2 ...] [--semester 2026-I ...]
 
---protocol names entries of protocols.PROTOCOLS (default: all of them). --judge adds one
-PairwiseJudge protocol per judge: the dirs are grouped by their <judge> directory, so one judge's
-semester runs pool into one protocol named judge_<judge>.
+--protocol names entries of protocols.PROTOCOLS plus one judge_<judge> JudgeBT per directory
+under logs/rank/<domain>/ (default: all of them). --semester restricts the tasks.
 
 Scores are per semester and pooled over all semesters ("all"; valid because every local fit
-shares the global item scale): Pearson r, MSE, affine-fit MSE. The per-target forecasts go to
+shares the global item scale): MSE in theta units. The per-target forecasts go to
 data/meta/<domain>/eval_<name>.csv (gitignored).
 """
 
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-from capability import semesters
-from capability.task import tasks
+from capability.task import Task
 from configs.domain import DomainConfig
+from configs.judge import JudgeConfig
 from protocols import PROTOCOLS, Protocol
-from protocols.judge import PairwiseJudge
+from protocols.pairwise import JudgeBT
+from reference import tables
 
 
-def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "") -> pd.DataFrame:
+def score(pred: pd.Series, truth: pd.Series) -> dict:
+    """MSE of theta-hat against theta* over the models both series index; NaN forecasts are dropped.
+
+    Every protocol forecasts on the theta scale (the references' theta* anchor it), so the raw
+    squared error is the metric: no shift/scale-free variant.
+    """
+    pred, truth = pred.align(truth, join="inner")
+    known = pred.notna()
+    pred, truth = pred[known], truth[known]
+    if len(pred) == 0:
+        return {"n": 0, "mse": np.nan}
+    return {"n": len(pred), "mse": float(((pred - truth) ** 2).mean())}
+
+
+def semester_names(domain: DomainConfig) -> list[str]:
+    columns = tables.load(domain)[0].columns
+    return [c.removesuffix("_role") for c in columns if c.endswith("_role")]
+
+
+def forecast(task: Task, protocol: Protocol) -> pd.DataFrame:
+    """One row per target: semester, model, theta_hat, theta."""
+    theta_hat = protocol(task).reindex(task.truth.index)
+    return pd.DataFrame({"semester": task.semester, "model": task.truth.index,
+                         "theta_hat": theta_hat.to_numpy(float), "theta": task.truth.to_numpy()})
+
+
+def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "", semester_list: list[str] | None = None) -> pd.DataFrame:
     """Run the protocol on every semester task; one score row per semester plus "all"."""
-    frozen_models = semesters.load(domain)[0]
-    forecasts = []
-    for task in tasks(domain):
-        theta_hat = protocol(task)
-        for target in task.targets:
-            forecasts.append({
-                "semester": task.semester,
-                "model": target,
-                "theta_hat": float(theta_hat[target]),
-                "theta": frozen_models.loc[target, f"{task.semester}_theta"],
-            })
-    forecasts = pd.DataFrame(forecasts)
+    tasks = [Task.from_semester(s, domain) for s in semester_list or semester_names(domain)]
+    forecasts = pd.concat([forecast(task, protocol) for task in tasks], ignore_index=True)
     if name:
-        forecasts.to_csv(semesters.frozen_dir(domain) / f"eval_{name}.csv", index=False, float_format="%.4f")
+        forecasts.to_csv(tables.frozen_dir(domain) / f"eval_{name}.csv", index=False, float_format="%.4f")
 
     scores = []
     groups = list(forecasts.groupby("semester", sort=False)) + [("all", forecasts)]
     for semester, group in groups:
         group = group.set_index("model")
-        scores.append({"semester": semester, **semesters.score(group.theta_hat, group.theta)})
+        scores.append({"semester": semester, **score(group.theta_hat, group.theta)})
     return pd.DataFrame(scores)
-
-
-def judge_protocols(log_dirs: list[Path]) -> list[PairwiseJudge]:
-    """One PairwiseJudge per judge: log dirs are logs/rank/<domain>/<judge>/<hash>, grouped by <judge>."""
-    dirs_by_judge: dict[str, list[Path]] = {}
-    for log_dir in log_dirs:
-        dirs_by_judge.setdefault(log_dir.parent.name, []).append(log_dir)
-    return [PairwiseJudge(dirs) for dirs in dirs_by_judge.values()]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("domain", type=Path)
-    parser.add_argument("--protocol", nargs="+", default=[], choices=list(PROTOCOLS))
-    parser.add_argument("--judge", nargs="+", default=[], type=Path, help="judge-run log dirs -> pairwise-judge protocols")
+    parser.add_argument("--protocol", nargs="+", default=[], choices=list(PROTOCOLS), help="default: all")
+    parser.add_argument("--judge", nargs="+", default=[], type=Path, help="JudgeConfig yml(s) -> judge_<name> protocols")
+    parser.add_argument("--semester", nargs="+", default=None, help="default: every semester task")
     args = parser.parse_args()
     domain = DomainConfig.from_cli(args.domain)
 
-    judges = judge_protocols(args.judge)
-    protocols = {**PROTOCOLS, **{judge.name: judge for judge in judges}}
-    selected = args.protocol + [judge.name for judge in judges] or list(protocols)
+    judges = [JudgeBT(JudgeConfig.from_cli(path), domain) for path in args.judge]
+    protocols = [PROTOCOLS[name] for name in args.protocol or PROTOCOLS] + judges
 
-    tables = [evaluate(domain, protocols[name], name).assign(protocol=name) for name in selected]
-    table = pd.concat(tables).pivot(index="semester", columns="protocol", values=["n", "r", "affine_mse"])
+    scores = [evaluate(domain, protocol, protocol.name, args.semester).assign(protocol=protocol.name) for protocol in protocols]
+    table = pd.concat(scores).pivot(index="semester", columns="protocol", values=["n", "mse"])
     print(table.round(2).to_string())
     return 0
 

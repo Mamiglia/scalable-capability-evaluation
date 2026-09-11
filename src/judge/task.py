@@ -1,16 +1,16 @@
+"""One inspect Task: a judge compares two models' correct transcripts of the same items."""
+
 from pathlib import Path
 
 from inspect_ai import Task
 from inspect_ai.solver import generate, system_message
 
-from configs.experiment import ExperimentConfig, successful_evals
 from configs.logs import logger
-from judge.dataset import MAX_LENGTH, build_dataset, read_header
+from evals.transcripts import read_header
+from judge.dataset import MAX_LENGTH, build_dataset
 from judge.scorer import judge_scorer
 
 DEFAULT_SYSTEM_PROMPT = "assets/system_prompt/default.txt"
-# Same prompt plus a note that both transcripts stop mid-reasoning on purpose.
-TRUNCATED_SYSTEM_PROMPT = "assets/system_prompt/truncated.txt"
 
 
 def judge_task(
@@ -21,8 +21,6 @@ def judge_task(
     require_both_correct: bool = True,
     include_reverse: bool = True,
     include_reasoning: bool = True,
-    truncate_frac: float | None = None,
-    experiment_name: str | None = None,
     task_name: str | None = None,
     items: set[str] | None = None,
     metadata: dict | None = None,
@@ -46,11 +44,6 @@ def judge_task(
     benchmark_name = log_major.eval.task
     name = task_name or f"{benchmark_name}={major_path.stem}|{minor_path.stem}"
 
-    if truncate_frac is not None and system_prompt == DEFAULT_SYSTEM_PROMPT:
-        # Truncated transcripts stop mid-reasoning, so the judge has to be told not to
-        # read that as a failure.
-        system_prompt = TRUNCATED_SYSTEM_PROMPT
-
     dataset = build_dataset(
         major_path=major_path,
         minor_path=minor_path,
@@ -58,7 +51,6 @@ def judge_task(
         require_both_correct=require_both_correct,
         include_reverse=include_reverse,
         include_reasoning=include_reasoning,
-        truncate_frac=truncate_frac,
         items=items,
     )
     if len(dataset) == 0:
@@ -81,71 +73,7 @@ def judge_task(
             "require_both_correct": require_both_correct,
             "include_reverse": include_reverse,
             "include_reasoning": include_reasoning,
-            "truncate_frac": truncate_frac,
             "max_length": max_length,
-            "experiment_name": experiment_name,
             **(metadata or {}),
         },
     )
-
-
-def build_tasks(experiment: ExperimentConfig) -> list[Task]:
-    """One judging task per <bench of the domain, pair of models>, on the experiment's items."""
-    exp = experiment
-    items = exp.items()
-    acc = exp.truth()
-    # Which items each log got right is already in the domain's response table; asking the
-    # logs again would mean streaming every one of them (minutes each for HLE).
-    correct = exp.responses().query("correct")
-    tasks = []
-    # Bench entries sharing a task name (hle.yml / hle_gold.yml: same items under two hashes) pool
-    # their logs: a model's log is wherever it was collected.
-    entries: dict[str, list] = {}
-    for bench in exp.domain.benches:
-        entries.setdefault(exp.domain.task(bench).name, []).append(bench)
-    for name, benches in entries.items():
-        bench, task_cfg = benches[0], exp.domain.task(benches[0])
-        if name not in items:
-            logger.warning("%s: no items to judge on %s", exp.name, name)
-            continue
-        logs = {}
-        for model in exp.models:
-            logs[model.shortname.lower()] = []
-            for entry in benches:  # the first entry that has this model's logs
-                found = successful_evals(exp.domain.task(entry), model)
-                if found:
-                    logs[model.shortname.lower()] = found
-                    break
-        solved = correct[correct.bench == name].groupby(["model", "repeat"]).item.agg(set)
-        for major, minor in exp.ordered_pairs():
-            names = major.shortname.lower(), minor.shortname.lower()
-            if not all(logs[n] for n in names):
-                logger.warning("%s: no logs on %s for %s, skipping pair", exp.name, task_cfg.name,
-                               [n for n in names if not logs[n]])
-                continue
-            # Items both models solved in the (first) repeat being judged.
-            both = items[task_cfg.name].intersection(
-                *(solved.get((n, int(logs[n][0].parent.name)), set()) for n in names))
-            if not both:
-                logger.warning("%s: %s|%s share no correct item on %s, skipping", exp.name, *names, task_cfg.name)
-                continue
-            task = judge_task(
-                logs[names[0]][0], logs[names[1]][0],
-                system_prompt=bench.system_prompt or exp.system_prompt,
-                max_length=exp.max_length,
-                include_reverse=exp.include_reverse,
-                include_reasoning=exp.include_reasoning,
-                truncate_frac=exp.truncate_frac or None,
-                experiment_name=exp.name,
-                task_name=f"{task_cfg.name}/{names[0]}|{names[1]}",
-                items=both,
-                # Data-dir model names and the ground truth, so ranking.verdicts reads logs alone.
-                metadata={"domain": exp.domain.name, "bench": task_cfg.name, "major": names[0],
-                          "minor": names[1], "semester": exp.semester, "q_src": exp.q_src, "q_dst": exp.q_dst,
-                          "acc_major": float(acc[names[0]]), "acc_minor": float(acc[names[1]])},
-            )
-            if task is not None:
-                tasks.append(task)
-    if not tasks:
-        raise ValueError(f"{exp.name}: nothing to judge")
-    return tasks

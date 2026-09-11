@@ -1,66 +1,65 @@
-"""A semester task: the reference models, whose theta* is known, and the target models to forecast.
+"""A semester task: a train cohort (the references, theta* known) and a test cohort (the targets).
 
-Built from the frozen tables (capability.semesters). A protocol gets the references with their
-theta* (the anchors), the targets without it, the train items, and the correct repeat-0
-transcripts of those items for any of the task's models. Nothing about the HARD items is exposed.
+Built from the frozen tables (reference.tables). Both cohorts sit on the same train items:
+a protocol fits on the references' theta* and forecasts the targets, and it may read the correct
+repeat-0 transcripts of either cohort on those items. The targets' theta* is kept on the task
+for the metric only. Nothing about the HARD items is exposed.
 """
 
 from dataclasses import dataclass
-from typing import Iterator
+from functools import cached_property
 
 import pandas as pd
 
-from capability import semesters
 from configs.domain import DomainConfig
-from judge.dataset import Transcript, read_transcripts
+from evals.transcripts import Transcript, read_transcripts
+from reference import tables
 
 TRAIN_COLUMNS = ["bench", "item", "guess", "a", "b"]
 
 
 @dataclass
-class Task:
-    semester: str
-    # Indexed by model: role (reference / target), theta (theta* for references, NaN for targets),
-    # and one column per bench, `path_<bench>`, with the model's repeat-0 log.
+class Cohort:
+    """Some models on the train items: their theta (NaN on the test cohort) and their transcripts."""
+
+    # Indexed by model: theta, and one column per bench, `path_<bench>`, with the repeat-0 log.
     models: pd.DataFrame
-    items: pd.DataFrame  # the train items: bench, item, guess, a, b
+    items: pd.DataFrame  # bench, item, guess, a, b
+    semester: str  # the task this cohort belongs to (a judge run is stored per semester)
 
     @property
-    def references(self) -> list[str]:
-        return self.models.index[self.models.role == "reference"].tolist()
+    def theta(self) -> pd.Series:
+        return self.models.theta
 
-    @property
-    def targets(self) -> list[str]:
-        return self.models.index[self.models.role == "target"].tolist()
-
-    @property
-    def theta_ref(self) -> pd.Series:
-        """theta* of the references, indexed by model."""
-        return self.models.theta[self.references]
-
-    def transcripts(self, model: str, include_reasoning: bool = True) -> dict[tuple[str, str], list[Transcript]]:
-        """The model's correct repeat-0 transcripts of the train items: (bench, item) -> [Transcript]."""
-        found = {}
-        for bench, item_ids in self.items.groupby("bench").item:
-            path = self.models.loc[model, f"path_{bench}"]
-            if not isinstance(path, str):  # NaN: the model was never run on this bench
-                continue
-            transcripts = read_transcripts(semesters.DATA / path, require_correct=True,
-                                           include_reasoning=include_reasoning, items=set(item_ids))
-            for item, texts in transcripts.items():
-                found[(bench, item)] = texts
+    @cached_property
+    def transcripts(self) -> dict[str, dict[tuple[str, str], Transcript]]:
+        """model -> (bench, item) -> correct repeat-0 transcript. Read from the logs once."""
+        found: dict[str, dict[tuple[str, str], Transcript]] = {}
+        for model in self.models.index:
+            found[model] = {}
+            for bench, item_ids in self.items.groupby("bench").item:
+                path = self.models.loc[model, f"path_{bench}"]
+                if not isinstance(path, str):  # NaN: the model was never run on this bench
+                    continue
+                read = read_transcripts(tables.DATA / path, require_correct=True, items=set(item_ids))
+                found[model].update({(bench, item): texts[0] for item, texts in read.items()})
         return found
 
 
-def tasks(domain: DomainConfig) -> Iterator[Task]:
-    """One Task per semester of the domain, from the frozen tables."""
-    frozen_models, frozen_items = semesters.load(domain)
-    paths = frozen_models.filter(like="path_")
-    semester_names = [column.removesuffix("_role") for column in frozen_models.columns if column.endswith("_role")]
-    for semester in semester_names:
+@dataclass
+class Task:
+    semester: str
+    train: Cohort  # references, theta = theta*
+    test: Cohort  # targets, theta = NaN
+    truth: pd.Series  # the targets' theta*, for the metric only
+
+    @classmethod
+    def from_semester(cls, semester: str, domain: DomainConfig) -> "Task":
+        frozen_models, frozen_items = tables.load(domain)
         role = frozen_models[f"{semester}_role"]
-        models = pd.DataFrame({"role": role, "theta": frozen_models[f"{semester}_theta"]}).join(paths)
-        models = models[models.role.isin(["reference", "target"])]
-        models.loc[models.role == "target", "theta"] = float("nan")  # what the protocol must forecast
+        models = pd.DataFrame({"theta": frozen_models[f"{semester}_theta"]}).join(frozen_models.filter(like="path_"))
         items = frozen_items[frozen_items[f"{semester}_train"]][TRAIN_COLUMNS].reset_index(drop=True)
-        yield Task(semester, models, items)
+        train = Cohort(models[role == "reference"], items, semester)
+        truth = models.theta[role == "target"]
+        test = Cohort(models[role == "target"].assign(theta=float("nan")), items, semester)
+        return cls(semester, train, test, truth)

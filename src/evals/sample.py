@@ -1,3 +1,5 @@
+"""One eval sample -> the transcript text a judge sees (extract_transcript) or its correctness (extract_score)."""
+
 from typing import Any
 from inspect_ai.model import ChatMessage
 from inspect_ai.dataset import Sample
