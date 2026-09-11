@@ -81,6 +81,9 @@ def roster(semesters: dict[str, list[str]], semester: str, collected: set[str]) 
     missing = sorted(set(semesters[previous] + semesters[semester]) - collected)
     if missing:
         logger.warning("%s: not collected: %s", semester, missing)
+    if not references or not targets:  # a generation this domain was never run on (coding: pre-2025)
+        logger.warning("%s: no task, roster not collected on this domain", semester)
+        return [], []
     if len(references) < 2 or len(targets) < 2:
         raise ValueError(f"{semester}: {len(references)} references / {len(targets)} targets")
     return references, targets
@@ -239,6 +242,8 @@ def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, for
     top_per_semester = {}
     for semester in list(semesters)[1:]:
         references, targets = roster(semesters, semester, set(responses.model))
+        if not references:
+            continue
         item_columns, model_columns, top = semester_task(
             semester, references, targets, responses, models, items, train, warmup, samples, seed)
         items = items.join(item_columns)
