@@ -45,7 +45,8 @@ def main(domain: str):
         ax.plot(t.theta[m], yi, "o", ms=3, color=c, mec="none")
     ax.set_yticks(y); ax.set_yticklabels(roster); ax.set_ylim(-.7, len(roster) - .3)
     lo, hi = np.floor(t.theta_lo.min()), np.ceil(t.theta_hi.max())
-    ax.set_xlim(lo, hi); ax.set_xticks(np.arange(lo, hi + 1, 2)); ax.set_xlabel(r"$\theta^*$ (95% interval)")
+    ticks = np.arange(np.ceil(lo / 2) * 2, hi + 1, 2)  # even ticks, both ends inside the limits
+    ax.set_xlim(lo, hi); ax.set_xticks(ticks); ax.set_xlabel(r"$\theta^*$ (95% interval)")
     ax.axvline(0, lw=.8, ls="--", color="grey")
     offset(ax)
     fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(.6, -.04))
@@ -62,7 +63,7 @@ def main(domain: str):
         ax.plot(np.full(len(v), i) + np.linspace(-.18, .18, len(v)), v, "o", ms=2.5, color=ERA_COLOR[e], mec="none", alpha=.8)
         ax.plot([i - .3, i + .3], [v.mean()] * 2, lw=1, color=ERA_COLOR[e])
     ax.set_xticks(range(len(eras))); ax.set_xticklabels(eras); ax.tick_params(axis="x", rotation=90); ax.set_ylabel(r"$\theta^*$")
-    ax.set_ylim(lo, hi); ax.set_yticks(np.arange(lo, hi + 1, 2)); offset(ax)
+    ax.set_ylim(lo, hi); ax.set_yticks(ticks); offset(ax)
     ax = axes[1]
     for b in benches:
         sub = ref_items[ref_items.bench == b]
@@ -96,7 +97,7 @@ def main(domain: str):
         p = sub.guess.values[:, None] + (1 - sub.guess.values[:, None]) / (1 + np.exp(-sub.a.values[:, None] * (grid[None, :] - sub.b.values[:, None])))
         ax.plot(grid, p.mean(0), lw=1, color=BENCH_COLOR[b], label=b)
     ax.plot(t.theta, np.full(len(t), -.04), "|", ms=4, color="grey")
-    ax.set_xlim(lo, hi); ax.set_xticks(np.arange(lo, hi + 1, 2)); ax.set_ylim(-.06, 1); ax.set_yticks([0, .5, 1])
+    ax.set_xlim(lo, hi); ax.set_xticks(ticks); ax.set_ylim(-.06, 1); ax.set_yticks([0, .5, 1])
     ax.set_xlabel(r"$\theta$ (ticks: roster $\theta^*$)"); ax.set_ylabel("Expected score"); offset(ax)
     fig.legend(loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(.55, -.2))
     fig.tight_layout()
