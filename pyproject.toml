@@ -33,11 +33,7 @@ dependencies = [
 
 [project.scripts]
 collect = "collect.cli:main"
-judge = "judge.cli:main"
-irt = "irt.cli:main"
-rank = "ranking.cli:main"
-domain = "domain.cli:main"
-reference = "capability.semesters:main"
+reference = "reference.freeze:main"
 evaluate = "capability.evaluate:main"
 
 # litellm (via inspect-harbor) caps openai<3; inspect-ai's OpenRouter provider needs >=3.1.
