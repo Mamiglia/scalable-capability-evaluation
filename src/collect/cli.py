@@ -6,8 +6,8 @@ from pathlib import Path
 
 from inspect_ai import eval_set
 
-from collect import agentbench_compat  # noqa: F401  (side effect: drop AgentBench cpuset pin)
-from collect import harbor_compat  # noqa: F401  (side effect: relax Harbor compose)
+from collect.tasks import agentbench_compat  # noqa: F401  (side effect: drop AgentBench cpuset pin)
+from collect.tasks import harbor_compat  # noqa: F401  (side effect: relax Harbor compose)
 from collect.runner import eval_runner
 from configs import ModelConfig, TaskConfig, flag_parse, kv_pair
 from configs.logs import log_to, logger
