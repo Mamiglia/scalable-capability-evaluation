@@ -12,11 +12,11 @@ def isolated_runpod_state(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def clear_transcript_cache():
-    from judge import dataset
+    from evals import transcripts
 
-    dataset._STREAMED.clear()
-    dataset._RANDOM.clear()
-    dataset.read_header.cache_clear()
+    transcripts._STREAMED.clear()
+    transcripts._RANDOM.clear()
+    transcripts.read_header.cache_clear()
 
 
 @pytest.fixture(autouse=True)

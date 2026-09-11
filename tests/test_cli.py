@@ -1,14 +1,14 @@
-"""Unit tests for CLI modules (collect and judge)."""
+"""Unit tests for the collect CLI."""
 
 from concurrent.futures import Future
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pandas as pd
 import pytest
 from inspect_ai import Epochs
 
 from collect.cli import main as collect_main
-from judge.cli import main as judge_main
 
 
 class SynchronousExecutor:
@@ -168,29 +168,3 @@ def test_collect_args_parsing(monkeypatch, tmp_path):
     assert captured["limit"] == 10
     assert captured["max_connections"] == 4
     assert captured["display"] == "plain"
-
-
-def test_judge_pipeline(monkeypatch, tmp_path):
-    (tmp_path / "dom.yml").write_text("name: dom\nbenches:\n  - bench: b1\n")
-    (tmp_path / "exp.yml").write_text(f"""name: test_exp
-domain: {tmp_path / "dom.yml"}
-judge: p/jdg
-models: [p/a, p/b]
-q_src: 1
-""")
-
-    captured, built, ranked = {}, [], []
-    monkeypatch.setattr("judge.cli.build_domain", lambda domain, *a: built.append(domain.name))
-    monkeypatch.setattr("judge.cli.build_tasks", lambda exp: ["dummy_task"])
-    monkeypatch.setattr("judge.cli.eval_set", lambda **kw: (captured.update(kw) or (True, [True])))
-    monkeypatch.setattr("judge.cli.rank_logs", lambda log_dir, domain: ranked.append(log_dir))
-    monkeypatch.setattr("sys.argv", ["judge", "--cfg", str(tmp_path / "exp.yml"), "--q_src", "2",
-                                     "--limit", "10", "--max-connections", "4"])
-
-    assert judge_main() == 0
-    assert built == ["dom"]  # artefacts missing -> built first
-    assert captured["tasks"] == ["dummy_task"]
-    assert captured["model"] == "openrouter/p/jdg"
-    assert captured["temperature"] == 0.0 and captured["cache"].expiry is None
-    assert captured["limit"] == 10 and captured["max_connections"] == 4
-    assert ranked == [Path(captured["log_dir"])] and "/dom/jdg/" in captured["log_dir"]

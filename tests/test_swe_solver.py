@@ -5,14 +5,14 @@ from inspect_ai._eval.loader import solver_from_spec
 
 
 def test_swe_bash_python_builds():
-    from collect.swe_solver import swe_bash_python
+    from collect.tasks.swe_solver import swe_bash_python
 
     assert swe_bash_python() is not None
 
 
 def test_module_drops_openai_incompatible_tools():
     # The scaffold exists to avoid bash_session and text_editor, whose schemas OpenAI rejects.
-    import collect.swe_solver as m
+    import collect.tasks.swe_solver as m
 
     assert not hasattr(m, "bash_session")
     assert not hasattr(m, "text_editor")

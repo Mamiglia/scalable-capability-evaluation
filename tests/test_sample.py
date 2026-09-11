@@ -15,7 +15,7 @@ from inspect_ai.model import (
 from inspect_ai.tool import ToolCall, ToolCallError
 from inspect_ai.scorer import Score
 
-from judge.util import format_message, extract_transcript, extract_score, format_content, strip_think
+from evals.sample import format_message, extract_transcript, extract_score, format_content, strip_think
 
 
 class TestFormatMessage:

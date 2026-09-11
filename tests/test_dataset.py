@@ -9,12 +9,11 @@ from inspect_ai.scorer import Score
 
 from judge.dataset import (
     USER_PROMPT,
-    Transcript,
     build_dataset,
     has_reasoning,
-    read_transcripts,
     responses_to_sample,
 )
+from evals.transcripts import Transcript, read_transcripts
 
 
 def transcript(text, id="q1", question="Question", options=(), epoch=1):
@@ -34,7 +33,7 @@ def eval_sample(sample_id, content, correct=True, question=None, choices=None, e
 
 
 def test_read_transcripts_with_items_reads_only_those_samples(monkeypatch):
-    import judge.dataset as module
+    import evals.transcripts as module
 
     read = []
     monkeypatch.setattr(module, "_read_samples",
@@ -64,7 +63,7 @@ def test_build_dataset_refuses_reasoning_on_one_side_only(monkeypatch):
 def test_question_text_takes_user_text_of_chat_inputs():
     from inspect_ai.model import ChatMessageSystem, ChatMessageUser
 
-    from judge.dataset import question_text
+    from evals.transcripts import question_text
 
     chat = [ChatMessageSystem(content="format"), ChatMessageUser(content="What is 2+2?")]
     assert question_text(chat) == "What is 2+2?"
@@ -117,15 +116,6 @@ class TestResponsesToSample:
         assert "Multiple choice options" not in res.input
         assert "---\n\nTranscript 1:" in res.input
 
-    def test_responses_to_sample_truncation(self):
-        res = responses_to_sample(
-            transcript("reasoning one goes here\nANSWER: A"),
-            transcript("short reasoning\nANSWER: B"),
-            target="1",
-            truncate_frac=0.5,
-        )
-        assert "ANSWER" not in res.input.split("Which of the two")[0]
-
     def test_responses_to_sample_id_mismatch(self):
         with pytest.raises(AssertionError, match="Sample IDs must match"):
             responses_to_sample(transcript("Ans A", id="q1"), transcript("Ans B", id="q2"))
@@ -160,7 +150,7 @@ class TestHasReasoning:
 class TestReadTranscripts:
     """read_transcripts streams a log into per-question transcripts."""
 
-    @patch("judge.dataset.read_eval_log_samples")
+    @patch("evals.transcripts.read_eval_log_samples")
     def test_filters_incorrect_and_orders_epochs(self, mock_samples):
         mock_samples.return_value = iter([
             eval_sample("q1", "second epoch", epoch=2),
@@ -173,7 +163,7 @@ class TestReadTranscripts:
         assert list(by_id) == ["q1"]
         assert [t.text for t in by_id["q1"]] == ["first epoch", "second epoch"]
 
-    @patch("judge.dataset.read_eval_log_samples")
+    @patch("evals.transcripts.read_eval_log_samples")
     def test_keeps_incorrect_when_not_required(self, mock_samples):
         mock_samples.return_value = iter([eval_sample("q1", "wrong", correct=False)])
         assert list(read_transcripts(Path("log.eval"), require_correct=False)) == ["q1"]
@@ -190,8 +180,8 @@ class TestBuildDataset:
         header_minor.eval.model = minor
         return [header_major, header_minor]
 
-    @patch("judge.dataset.read_eval_log")
-    @patch("judge.dataset.read_eval_log_samples")
+    @patch("evals.transcripts.read_eval_log")
+    @patch("evals.transcripts.read_eval_log_samples")
     def test_build_dataset_success(self, mock_samples, mock_header):
         mock_samples.side_effect = [
             iter([eval_sample("q1", "Ans 1A"), eval_sample("q2", "Ans 2A")]),
@@ -207,8 +197,8 @@ class TestBuildDataset:
         assert "gemma-2b" in dataset.name
         assert "gpqa" in dataset.name
 
-    @patch("judge.dataset.read_eval_log")
-    @patch("judge.dataset.read_eval_log_samples")
+    @patch("evals.transcripts.read_eval_log")
+    @patch("evals.transcripts.read_eval_log_samples")
     def test_build_dataset_unmatched_samples_skipped(self, mock_samples, mock_header):
         mock_samples.side_effect = [
             iter([eval_sample("q1", "A1"), eval_sample("q2", "A2")]),
@@ -219,8 +209,8 @@ class TestBuildDataset:
         dataset = build_dataset(Path("path/major.eval"), Path("path/minor.eval"))
         assert len(dataset.samples) == 2  # only q1, for target 1 and 2
 
-    @patch("judge.dataset.read_eval_log")
-    @patch("judge.dataset.read_eval_log_samples")
+    @patch("evals.transcripts.read_eval_log")
+    @patch("evals.transcripts.read_eval_log_samples")
     def test_build_dataset_filtering_incorrect_samples(self, mock_samples, mock_header):
         mock_samples.side_effect = [
             iter([
@@ -243,8 +233,8 @@ class TestBuildDataset:
         assert dataset.samples[0].id == "q1_1"
         assert dataset.samples[1].id == "q1_2"
 
-    @patch("judge.dataset.read_eval_log")
-    @patch("judge.dataset.read_eval_log_samples")
+    @patch("evals.transcripts.read_eval_log")
+    @patch("evals.transcripts.read_eval_log_samples")
     def test_build_dataset_no_reverse(self, mock_samples, mock_header):
         mock_samples.side_effect = [
             iter([eval_sample("q1", "A1")]),
@@ -257,8 +247,8 @@ class TestBuildDataset:
         )
         assert [s.target for s in dataset.samples] == ["1"]
 
-    @patch("judge.dataset.read_eval_log")
-    @patch("judge.dataset.read_eval_log_samples")
+    @patch("evals.transcripts.read_eval_log")
+    @patch("evals.transcripts.read_eval_log_samples")
     def test_self_pair_needs_two_epochs(self, mock_samples, mock_header):
         """The self-pair control reads one log once and pairs two correct epochs."""
         mock_samples.side_effect = [
