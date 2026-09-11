@@ -104,9 +104,17 @@ def _finish_bar(progress: Progress, bar_id) -> None:
     progress.update(bar_id, completed=bar.total or 1, total=bar.total or 1, visible=False)
 
 
-def _report(errors: Sequence[tuple[str, str, str]], total: int) -> None:
+def _last_line(log_file: Path) -> str:
+    """The job's last log line, without the logger prefix: what it ended on (ran, skipped, ...)."""
+    lines = [line for line in log_file.read_text().splitlines() if line.strip()]
+    return lines[-1].split(" | ")[-1] if lines else ""
+
+
+def _report(errors: Sequence[tuple[str, str, str]], done: Sequence[tuple[str, str]]) -> None:
+    for label, outcome in done:
+        print(f"  {label}: {outcome}")
     if not errors:
-        print(f"✓ All {total} subtask(s) completed successfully!")
+        print(f"✓ All {len(done)} subtask(s) completed successfully!")
         return
     print("\n" + "=" * 60)
     print(" ❌ SUBTASK FAILURES DETECTED:")
@@ -155,6 +163,7 @@ def eval_runner(jobs: Sequence[Job], max_workers: int = MAX_WORKERS) -> int:
                     _finish_bar(progress, bars[futures[future]])
             _drain(queue, progress, bars)
 
+        done: list[tuple[str, str]] = []
         for future, label in futures.items():
             exc = future.exception()
             if exc is not None:
@@ -163,6 +172,8 @@ def eval_runner(jobs: Sequence[Job], max_workers: int = MAX_WORKERS) -> int:
                 continue
             if future.result() != 0:
                 errors.append((label, "Subtask evaluation failed", log_files[label].read_text()))
+            else:
+                done.append((label, _last_line(log_files[label])))
 
-    _report(errors, len(jobs))
+    _report(errors, done)
     return 1 if errors else 0

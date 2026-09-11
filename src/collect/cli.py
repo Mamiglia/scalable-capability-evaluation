@@ -43,7 +43,7 @@ def _run_eval_worker(
     logger.info("Running repeat %d/%d for benchmark '%s' and model '%s'",
                 repeat + 1, repeats, bench.name, model_config.slug)
     if any(is_successful_eval(path) for path in target_dir.glob("*.eval")):
-        logger.info("Skipping completed repeat %d: %s", repeat + 1, target_dir)
+        logger.info("Skipping completed repeat %d: %s", repeat, target_dir)
         return 0
 
     # The hash dir is opaque; leave the args it was computed from next to it, so old data
