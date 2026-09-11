@@ -1,4 +1,8 @@
-"""Transcript-statistics baselines: theta-hat from the length of a model's correct train transcripts."""
+"""Transcript-statistics baselines: theta-hat from how much a model writes on the train items.
+
+Each protocol summarises a model by one number per feature — the mean log length of its correct
+train transcripts — fits the references' theta* on that summary, and applies the fit to the target.
+"""
 
 import re
 
@@ -8,43 +12,60 @@ import pandas as pd
 from capability.task import Task
 from protocols import Protocol
 
+# extract_transcript wraps a model's reasoning in these markers (when include_reasoning is on).
 THOUGHT = re.compile(r"<THOUGHT_START>.*?<THOUGHT_END>", re.S)
+
+
+def answer_text(transcript) -> str:
+    return THOUGHT.sub("", transcript.text)
+
+
 FEATURES = {
     "chars": lambda t: len(t.text),
-    "answer_chars": lambda t: len(THOUGHT.sub("", t.text)),
-    "reasoning_chars": lambda t: len(t.text) - len(THOUGHT.sub("", t.text)),
-    "tokens": lambda t: t.tokens,
+    "answer_chars": lambda t: len(answer_text(t)),
+    "reasoning_chars": lambda t: len(t.text) - len(answer_text(t)),
+    "tokens": lambda t: t.tokens,  # billed output tokens, reasoning included
 }
 
 
-def features(task: Task, model: str) -> pd.Series:
-    """Mean log1p of each transcript feature over the model's correct train transcripts."""
-    rows = [{k: f(t[0]) for k, f in FEATURES.items()} for t in task.transcripts(model).values()]
-    return np.log1p(pd.DataFrame(rows, columns=list(FEATURES))).mean()
+def model_features(task: Task, model: str) -> pd.Series:
+    """One value per feature: mean of log1p(feature) over the model's correct train transcripts."""
+    rows = []
+    for transcripts in task.transcripts(model).values():
+        first = transcripts[0]  # repeat 0
+        rows.append({name: feature(first) for name, feature in FEATURES.items()})
+    table = pd.DataFrame(rows, columns=list(FEATURES))
+    return np.log1p(table).mean()
 
 
-def table(task: Task) -> pd.DataFrame:
-    """Feature row per reference and the target."""
-    return pd.DataFrame({m: features(task, m) for m in task.references + [task.target]}).T
+def feature_table(task: Task) -> pd.DataFrame:
+    """Rows = the references and the target, columns = FEATURES."""
+    models = task.references + [task.target]
+    return pd.DataFrame({model: model_features(task, model) for model in models}).T
 
 
 class FeatureRegression(Protocol):
-    """Least squares of the references' theta* on one log feature, applied to the target."""
+    """Least squares of the references' theta* on one feature, applied to the target."""
 
     def __init__(self, feature: str):
-        self.name = self.feature = feature
+        self.feature = feature
+        self.name = feature
 
     def __call__(self, task: Task) -> float:
-        x = table(task)[self.feature]
-        xr, yr = x.loc[task.references], task.theta_ref
-        if xr.std() == 0:  # e.g. no reference reasons: the feature says nothing about theta
-            return float(yr.mean())
-        beta, alpha = np.polyfit(xr, yr, 1)
-        return alpha + beta * x.loc[task.target]
+        x = feature_table(task)[self.feature]
+        x_ref = x.loc[task.references]
+        if x_ref.std() == 0:
+            # e.g. reasoning_chars when no reference reasons: the feature says nothing about theta.
+            return float(task.theta_ref.mean())
+        slope, intercept = np.polyfit(x_ref, task.theta_ref, 1)
+        return intercept + slope * x.loc[task.target]
 
 
 class Ridge(Protocol):
-    """Ridge over every standardised log feature (8 references, so shrinkage is not optional)."""
+    """Ridge regression on every feature, standardised on the references.
+
+    Eight references against four collinear features: without shrinkage the fit is arbitrary.
+    """
 
     name = "ridge"
 
@@ -52,9 +73,10 @@ class Ridge(Protocol):
         self.lam = lam
 
     def __call__(self, task: Task) -> float:
-        x, y = table(task), task.theta_ref
-        ref = x.loc[task.references]
-        z = (x - ref.mean()) / ref.std().replace(0, 1)
-        zr = z.loc[task.references].to_numpy()
-        w = np.linalg.solve(zr.T @ zr + self.lam * np.eye(zr.shape[1]), zr.T @ (y - y.mean()))
-        return float(y.mean() + z.loc[task.target].to_numpy() @ w)
+        x = feature_table(task)
+        x_ref = x.loc[task.references]
+        z = (x - x_ref.mean()) / x_ref.std().replace(0, 1)  # a constant feature becomes all zeros
+        z_ref = z.loc[task.references].to_numpy()
+        y_ref = task.theta_ref - task.theta_ref.mean()
+        weights = np.linalg.solve(z_ref.T @ z_ref + self.lam * np.eye(z_ref.shape[1]), z_ref.T @ y_ref)
+        return float(task.theta_ref.mean() + z.loc[task.target].to_numpy() @ weights)

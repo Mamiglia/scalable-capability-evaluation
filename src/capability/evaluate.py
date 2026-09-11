@@ -2,11 +2,13 @@
 
     uv run evaluate configs/domain/science.yml [--protocol chars ridge ...] [--judge logs/rank/science/<judge>/<hash> ...]
 
---judge adds one PairwiseJudge protocol per judge (dirs grouped by their <judge> directory, so one
-judge's semester runs pool into one protocol), named judge_<judge>; --protocol defaults to every protocol.
+--protocol names entries of protocols.PROTOCOLS (default: all of them). --judge adds one
+PairwiseJudge protocol per judge: the dirs are grouped by their <judge> directory, so one judge's
+semester runs pool into one protocol named judge_<judge>.
 
-Per semester and pooled over all semesters ("all"; valid because every local fit shares the
-global item scale): Pearson r, MSE, affine-fit MSE. theta-hat per target -> data/meta/<domain>/eval_<name>.csv.
+Scores are per semester and pooled over all semesters ("all"; valid because every local fit
+shares the global item scale): Pearson r, MSE, affine-fit MSE. The per-target forecasts go to
+data/meta/<domain>/eval_<name>.csv (gitignored).
 """
 
 import argparse
@@ -22,15 +24,34 @@ from protocols.judge import PairwiseJudge
 
 
 def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "") -> pd.DataFrame:
+    """Run the protocol on every task; one score row per semester plus "all"."""
     models = semesters.load(domain)[0]
-    rows = [dict(semester=t.semester, model=t.target, theta_hat=float(protocol(t)),
-                 theta=models.loc[t.target, f"{t.semester}_theta"]) for t in tasks(domain)]
-    pred = pd.DataFrame(rows)
+    forecasts = []
+    for task in tasks(domain):
+        forecasts.append({
+            "semester": task.semester,
+            "model": task.target,
+            "theta_hat": float(protocol(task)),
+            "theta": models.loc[task.target, f"{task.semester}_theta"],
+        })
+    forecasts = pd.DataFrame(forecasts)
     if name:
-        pred.to_csv(semesters.frozen_dir(domain) / f"eval_{name}.csv", index=False, float_format="%.4f")
-    groups = [(sem, g) for sem, g in pred.groupby("semester", sort=False)] + [("all", pred)]
-    return pd.DataFrame([{"semester": sem, **semesters.score(g.set_index("model").theta_hat, g.set_index("model").theta)}
-                         for sem, g in groups])
+        forecasts.to_csv(semesters.frozen_dir(domain) / f"eval_{name}.csv", index=False, float_format="%.4f")
+
+    scores = []
+    groups = list(forecasts.groupby("semester", sort=False)) + [("all", forecasts)]
+    for semester, group in groups:
+        group = group.set_index("model")
+        scores.append({"semester": semester, **semesters.score(group.theta_hat, group.theta)})
+    return pd.DataFrame(scores)
+
+
+def judge_protocols(log_dirs: list[Path]) -> list[PairwiseJudge]:
+    """One PairwiseJudge per judge: log dirs are logs/rank/<domain>/<judge>/<hash>, grouped by <judge>."""
+    dirs_by_judge: dict[str, list[Path]] = {}
+    for log_dir in log_dirs:
+        dirs_by_judge.setdefault(log_dir.parent.name, []).append(log_dir)
+    return [PairwiseJudge(dirs) for dirs in dirs_by_judge.values()]
 
 
 def main() -> int:
@@ -38,14 +59,16 @@ def main() -> int:
     parser.add_argument("domain", type=Path)
     parser.add_argument("--protocol", nargs="+", default=[], choices=list(PROTOCOLS))
     parser.add_argument("--judge", nargs="+", default=[], type=Path, help="judge-run log dirs -> pairwise-judge protocols")
-    a = parser.parse_args()
-    domain = DomainConfig.from_cli(a.domain)
-    by_judge = {d.parent.name: [x for x in a.judge if x.parent.name == d.parent.name] for d in a.judge}
-    judges = [PairwiseJudge(dirs) for dirs in by_judge.values()]
-    protocols = {**PROTOCOLS, **{p.name: p for p in judges}}
-    names = a.protocol + [p.name for p in judges] or list(protocols)
-    table = pd.concat([evaluate(domain, protocols[n], n).assign(protocol=n) for n in names])
-    print(table.pivot(index="semester", columns="protocol", values=["n", "r", "affine_mse"]).round(2).to_string())
+    args = parser.parse_args()
+    domain = DomainConfig.from_cli(args.domain)
+
+    judges = judge_protocols(args.judge)
+    protocols = {**PROTOCOLS, **{judge.name: judge for judge in judges}}
+    selected = args.protocol + [judge.name for judge in judges] or list(protocols)
+
+    tables = [evaluate(domain, protocols[name], name).assign(protocol=name) for name in selected]
+    table = pd.concat(tables).pivot(index="semester", columns="protocol", values=["n", "r", "affine_mse"])
+    print(table.round(2).to_string())
     return 0
 
 

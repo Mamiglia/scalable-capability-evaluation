@@ -20,6 +20,12 @@ Per domain, all benches pooled, written once to data/meta/<domain>/ and committe
    for every semester. theta* is the target of every protocol. -> models.csv <sem>_role, <sem>_theta
 5. responses.csv is the exact fit input; fit.yml the settings. score() compares a protocol's
    theta-hat with theta*: Pearson r, MSE, affine-fit MSE (MSE after the best shift+scale).
+
+Tables used throughout:
+    responses: one row per (bench, model, item, repeat) with `correct` (bool) and `guess`
+               (the item's guessing floor). No text — transcripts are read from the logs later.
+    items:     one row per (bench, item) with the global item parameters.
+    models:    one row per model, indexed by model name.
 """
 
 import argparse
@@ -31,14 +37,15 @@ import pandas as pd
 import yaml
 
 from configs.domain import DomainConfig
-from domain.cli import eval_logs, responses
+from domain.cli import eval_logs
+from domain.cli import responses as read_responses
 from irt.data import encode
 from irt.fitting import fit
 
 SEMESTERS = Path("configs/semesters.yml")
 DATA = Path("data")
 META = DATA / "meta"
-TOP_K = 3
+TOP_K = 3  # reference models that define the EASY set
 
 
 def load_semesters(path: Path = SEMESTERS) -> dict[str, list[str]]:
@@ -46,63 +53,119 @@ def load_semesters(path: Path = SEMESTERS) -> dict[str, list[str]]:
     return {str(k): list(v) for k, v in yaml.safe_load(path.read_text()).items()}
 
 
-def global_fit(transcripts: pd.DataFrame, warmup=1000, samples=1000, seed=0) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """2PL + guessing over every response -> (models[global_theta, _sd] by model, items[bench, item, guess, a, b, ..])."""
-    data = encode(transcripts)
-    guess = transcripts.groupby(["bench", "item"]).guess.max()  # the floor is an item property; some imported logs lack `choices`
-    guess = np.array([guess[i] for i in data.items])
-    post = fit(data, model="2pl", warmup=warmup, samples=samples, seed=seed, guess=guess)
-    theta, a, b = (np.asarray(post[k]) for k in ("theta", "a", "b"))
-    models = pd.DataFrame(
-        {"global_theta": theta.mean(0), "global_theta_sd": theta.std(0)}, 
-        index=pd.Index(data.models, name="model")
-    )
-    items = pd.DataFrame(data.items, columns=["bench", "item"]).assign(
-        guess=guess, a=a.mean(0), a_sd=a.std(0), b=b.mean(0), b_sd=b.std(0))
+def posterior_summary(draws, name: str) -> pd.DataFrame:
+    """Mean and sd of posterior draws (samples x n) as columns `name`, `name_sd`."""
+    draws = np.asarray(draws)
+    return pd.DataFrame({name: draws.mean(0), f"{name}_sd": draws.std(0)})
+
+
+def global_fit(responses: pd.DataFrame, warmup=1000, samples=1000, seed=0) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fit the 2PL with guessing floor on every response: all models, all items, all repeats.
+
+    Returns
+        models: indexed by model — global_theta, global_theta_sd
+        items:  bench, item, guess, a, a_sd, b, b_sd
+    """
+    data = encode(responses)
+
+    # The guessing floor is a property of the item (1/n_choices on multiple choice, else 0).
+    # A few imported logs lack the `choices` field, so take the max over the item's responses.
+    guess_per_item = responses.groupby(["bench", "item"]).guess.max()
+    guess = np.array([guess_per_item[item] for item in data.items])
+
+    posterior = fit(data, model="2pl", warmup=warmup, samples=samples, seed=seed, guess=guess)
+
+    models = posterior_summary(posterior["theta"], "global_theta")
+    models.index = pd.Index(data.models, name="model")
+
+    items = pd.DataFrame(data.items, columns=["bench", "item"])
+    items["guess"] = guess
+    items[["a", "a_sd"]] = posterior_summary(posterior["a"], "a")
+    items[["b", "b_sd"]] = posterior_summary(posterior["b"], "b")
     return models, items
 
 
-def split_items(transcripts: pd.DataFrame, items: pd.DataFrame, top: list[str], train: int = 25, seed: int = 0) -> pd.DataFrame:
-    """`set` (easy / hard / "" = out of the task) and `train` per item. EASY = every model in `top` correct on repeat 0."""
-    r0 = transcripts[(transcripts.repeat == 0) & transcripts.model.isin(top)]
-    seen = r0.groupby(["bench", "item"]).agg(n=("model", "nunique"), ok=("correct", "min"))
-    seen = seen[seen.n == len(top)]
-    status = pd.Series(np.where(seen.ok, "easy", "hard"), index=seen.index)
-    out = pd.DataFrame({"set": pd.MultiIndex.from_frame(items[["bench", "item"]]).map(status).fillna("")}, index=items.index)
-    if (n_out := int((out.set == "").sum())):
-        print(f"  {n_out} items without a repeat-0 response from every top model -> out of the task")
-    out["train"] = out.set == "easy"
+def split_items(responses: pd.DataFrame, items: pd.DataFrame, top: list[str], train: int = 25,
+                seed: int = 0) -> pd.DataFrame:
+    """Assign every item to the EASY set, the HARD set, or neither, for one semester task.
+
+    EASY: every model in `top` (the best references) answered it correctly on repeat 0.
+    HARD: every model in `top` answered it on repeat 0 and at least one got it wrong.
+    "":   some model in `top` has no repeat-0 answer (its generation never ran that bench),
+          so the item is out of this task.
+
+    The train set is the EASY items, or a fixed random subset of them: `train` items from each
+    quartile of global difficulty b within EASY (0 = keep all). It is drawn once per task, so
+    every model is judged on the same items.
+
+    Returns one row per item, aligned with `items`: set (easy / hard / ""), train (bool).
+    """
+    top_repeat0 = responses[(responses.repeat == 0) & responses.model.isin(top)]
+    per_item = top_repeat0.groupby(["bench", "item"]).agg(
+        n_answered=("model", "nunique"), all_correct=("correct", "min"))
+    answered_by_all = per_item[per_item.n_answered == len(top)]
+    status = pd.Series(np.where(answered_by_all.all_correct, "easy", "hard"), index=answered_by_all.index)
+
+    item_keys = pd.MultiIndex.from_frame(items[["bench", "item"]])
+    split = pd.DataFrame({"set": item_keys.map(status).fillna("")}, index=items.index)
+    n_out = int((split.set == "").sum())
+    if n_out:
+        print(f"  {n_out} items lack a repeat-0 answer from a top model -> out of the task")
+
+    split["train"] = split.set == "easy"
     if train:
-        easy = items[out.train]
+        easy = items[split.train]
         quartile = pd.qcut(easy.b.rank(method="first"), 4, labels=False)
-        keep = easy.groupby(quartile, group_keys=False).apply(
-            lambda g: g.sample(min(train, len(g)), random_state=seed), include_groups=False)
-        out["train"] = out.index.isin(keep.index)
-    return out
+        sample = lambda group: group.sample(min(train, len(group)), random_state=seed)
+        kept = easy.groupby(quartile, group_keys=False).apply(sample, include_groups=False)
+        split["train"] = split.index.isin(kept.index)
+    return split
 
 
-def local_fit(transcripts: pd.DataFrame, hard: pd.DataFrame, models: list[str], warmup=1000, samples=1000, seed=0) -> pd.DataFrame:
-    """theta of `models` on the `hard` items (bench, item, a, b, guess fixed to the global fit) -> [theta, theta_sd] by model."""
-    r = transcripts[transcripts.model.isin(models)].merge(hard[["bench", "item"]])
-    if missing := set(models) - set(r.model):
-        raise ValueError(f"no HARD responses for {sorted(missing)}: theta would be the prior")
-    data = encode(r)
-    par = hard.set_index(["bench", "item"]).loc[data.items]
-    post = fit(data, model="fixed_2pl", warmup=warmup, samples=samples, seed=seed,
-               a=par.a.to_numpy(), b=par.b.to_numpy(), guess=par.guess.to_numpy())
-    theta = np.asarray(post["theta"])
-    return pd.DataFrame({"theta": theta.mean(0), "theta_sd": theta.std(0)}, index=pd.Index(data.models, name="model"))
+def local_fit(responses: pd.DataFrame, hard: pd.DataFrame, models: list[str], warmup=1000,
+              samples=1000, seed=0) -> pd.DataFrame:
+    """theta* of `models` on the HARD items, with a, b, guess fixed to the global fit.
+
+    `hard` is the HARD rows of the global item table (bench, item, a, b, guess). Only theta is
+    sampled, so every semester's theta* lands on the global scale.
+
+    Returns indexed by model — theta, theta_sd.
+    """
+    hard_responses = responses[responses.model.isin(models)].merge(hard[["bench", "item"]])
+    unseen = set(models) - set(hard_responses.model)
+    if unseen:
+        raise ValueError(f"no HARD responses for {sorted(unseen)}: their theta would just be the prior")
+
+    data = encode(hard_responses)
+    params = hard.set_index(["bench", "item"]).loc[data.items]  # in the encoded item order
+    posterior = fit(data, model="fixed_2pl", warmup=warmup, samples=samples, seed=seed,
+                    a=params.a.to_numpy(), b=params.b.to_numpy(), guess=params.guess.to_numpy())
+
+    theta = posterior_summary(posterior["theta"], "theta")
+    theta.index = pd.Index(data.models, name="model")
+    return theta
 
 
 def score(pred: pd.Series, truth: pd.Series) -> dict:
-    """theta-hat vs theta* on the models both index (NaN forecasts dropped): Pearson r, MSE, affine-fit MSE."""
-    p, t = pred.align(truth, join="inner")
-    p, t = p[p.notna()], t[p.notna()]
-    if len(p) < 3:
-        return {"n": len(p), "r": np.nan, "mse": np.nan, "affine_mse": np.nan}
-    beta, alpha = np.polyfit(p, t, 1)
-    return {"n": len(p), "r": float(np.corrcoef(p, t)[0, 1]), "mse": float(((p - t) ** 2).mean()),
-            "affine_mse": float(((alpha + beta * p - t) ** 2).mean())}
+    """Compare theta-hat with theta* over the models both series index; NaN forecasts are dropped.
+
+    r:          Pearson correlation — ignores shift and scale.
+    mse:        raw squared error — the forecast has to be on the theta scale.
+    affine_mse: squared error after the best linear map theta-hat -> theta* — ignores shift and
+                scale but, unlike r, still penalises noise.
+    """
+    pred, truth = pred.align(truth, join="inner")
+    known = pred.notna()
+    pred, truth = pred[known], truth[known]
+    if len(pred) < 3:
+        return {"n": len(pred), "r": np.nan, "mse": np.nan, "affine_mse": np.nan}
+    slope, intercept = np.polyfit(pred, truth, 1)
+    return {
+        "n": len(pred),
+        "r": float(np.corrcoef(pred, truth)[0, 1]),
+        "mse": float(((pred - truth) ** 2).mean()),
+        "affine_mse": float(((intercept + slope * pred - truth) ** 2).mean()),
+    }
 
 
 def frozen_dir(domain: DomainConfig) -> Path:
@@ -110,56 +173,83 @@ def frozen_dir(domain: DomainConfig) -> Path:
 
 
 def load(domain: DomainConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """The frozen (models by model, items) tables of a domain."""
-    d = frozen_dir(domain)
-    if not (d / "models.csv").exists():
-        raise FileNotFoundError(f"{d} not frozen — run `uv run reference {domain.source or domain.name}`")
-    return pd.read_csv(d / "models.csv", index_col="model"), pd.read_csv(d / "items.csv", dtype={"item": str})
+    """The frozen tables of a domain: (models indexed by model, items)."""
+    directory = frozen_dir(domain)
+    if not (directory / "models.csv").exists():
+        raise FileNotFoundError(f"{directory} not frozen — run `uv run reference {domain.source or domain.name}`")
+    models = pd.read_csv(directory / "models.csv", index_col="model")
+    items = pd.read_csv(directory / "items.csv", dtype={"item": str})
+    return models, items
 
 
 def log_paths(logs: pd.DataFrame) -> pd.DataFrame:
-    """path_<bench> per model: the repeat-0 log, relative to data/ (protocols read transcripts from it)."""
-    r0 = logs[logs.repeat == 0]
-    if (dup := r0.groupby(["bench", "model"]).size()).gt(1).any():
-        raise ValueError(f"several repeat-0 logs for {dup[dup > 1].index.tolist()}")
-    return r0.assign(path=[str(Path(p).relative_to(DATA)) for p in r0.path]).pivot(
-        index="model", columns="bench", values="path").add_prefix("path_")
+    """One column per bench, `path_<bench>`: each model's repeat-0 log, relative to data/.
+
+    Protocols read transcripts from these logs. NaN where the model was never run on the bench.
+    """
+    repeat0 = logs[logs.repeat == 0].copy()
+    duplicates = repeat0.groupby(["bench", "model"]).size()
+    duplicates = duplicates[duplicates > 1]
+    if len(duplicates):
+        raise ValueError(f"several repeat-0 logs for {duplicates.index.tolist()}")
+    repeat0["path"] = [str(Path(p).relative_to(DATA)) for p in repeat0.path]
+    return repeat0.pivot(index="model", columns="bench", values="path").add_prefix("path_")
 
 
 def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, force=False) -> None:
+    """Fit everything and write the frozen tables of a domain (steps 1-5 of the module docstring)."""
     out = frozen_dir(domain)
     if (out / "models.csv").exists() and not force:
         raise FileExistsError(f"{out} is frozen; refit deliberately with --force and commit the result")
-    transcripts = responses(domain)
+
+    responses = read_responses(domain)
     semesters = load_semesters()
-    models, items = global_fit(transcripts, warmup, samples, seed)
-    models.insert(0, "semester", models.index.map({m: s for s, ms in semesters.items() for m in ms}))
+    collected = set(responses.model)
+
+    # 1. Global fit. Every model with logs on the domain takes part, roster or not.
+    models, items = global_fit(responses, warmup, samples, seed)
+    semester_of = {model: semester for semester, roster in semesters.items() for model in roster}
+    models.insert(0, "semester", models.index.map(semester_of))
     models = models.join(log_paths(eval_logs(domain)))
-    present = set(transcripts.model)
-    tops = {}
-    for prev, sem in zip(semesters, list(semesters)[1:]):
-        ref = [m for m in semesters[prev] if m in present]
-        tgt = [m for m in semesters[sem] if m in present]
-        if missing := sorted(set(semesters[prev] + semesters[sem]) - present):
-            print(f"{sem}: not collected on {domain.name}: {missing}")
-        if len(ref) < 2 or len(tgt) < 2:
-            raise ValueError(f"{sem}: {len(ref)} references / {len(tgt)} targets on {domain.name}")
-        tops[sem] = top = models.global_theta.loc[ref].nlargest(TOP_K).index.tolist()
-        split = split_items(transcripts, items, top, train, seed)
-        local = local_fit(transcripts, items[split.set == "hard"], ref + tgt, warmup, samples, seed)
-        items[f"{sem}_set"], items[f"{sem}_train"] = split.set, split.train
-        models[f"{sem}_role"] = pd.Series({**dict.fromkeys(ref, "reference"), **dict.fromkeys(tgt, "target")})
-        models = models.join(local.add_prefix(f"{sem}_"))
-        print(f"{sem}: top {top}, {split.set.value_counts().to_dict()}, {int(split.train.sum())} train\n"
-              + local.join(models[f"{sem}_role"]).round(2).to_string())
+
+    # 2. One task per semester: references = the previous semester's roster, targets = this one's.
+    top_per_semester = {}
+    for previous, semester in zip(semesters, list(semesters)[1:]):
+        references = [m for m in semesters[previous] if m in collected]
+        targets = [m for m in semesters[semester] if m in collected]
+        missing = sorted(set(semesters[previous] + semesters[semester]) - collected)
+        if missing:
+            print(f"{semester}: not collected on {domain.name}: {missing}")
+        if len(references) < 2 or len(targets) < 2:
+            raise ValueError(f"{semester}: {len(references)} references / {len(targets)} targets on {domain.name}")
+
+        # 3. EASY / HARD split, defined by the best references.
+        top = models.global_theta.loc[references].nlargest(TOP_K).index.tolist()
+        split = split_items(responses, items, top, train, seed)
+        items[f"{semester}_set"] = split.set
+        items[f"{semester}_train"] = split.train
+
+        # 4. Local fit: theta* of references and targets on the HARD items.
+        hard_items = items[split.set == "hard"]
+        theta = local_fit(responses, hard_items, references + targets, warmup, samples, seed)
+        role = pd.concat([pd.Series("reference", index=references), pd.Series("target", index=targets)])
+        models[f"{semester}_role"] = role
+        models = models.join(theta.add_prefix(f"{semester}_"))
+
+        top_per_semester[semester] = top
+        counts = split.set.value_counts().to_dict()
+        print(f"{semester}: top {top}, {counts}, {int(split.train.sum())} train")
+        print(theta.join(role.rename("role")).round(2).to_string())
+
+    # 5. Write the frozen tables.
     out.mkdir(parents=True, exist_ok=True)
     models.to_csv(out / "models.csv", float_format="%.4f")
     items.to_csv(out / "items.csv", index=False, float_format="%.4f")
-    transcripts[["bench", "item", "model", "repeat", "correct"]].sort_values(["bench", "item", "model", "repeat"]).to_csv(
-        out / "responses.csv", index=False)
-    (out / "fit.yml").write_text(yaml.safe_dump(dict(
-        domain=domain.name, date=datetime.date.today().isoformat(), warmup=warmup, samples=samples, seed=seed,
-        train_per_quartile=train, top_k=TOP_K, top=tops), sort_keys=False))
+    fit_input = responses[["bench", "item", "model", "repeat", "correct"]]
+    fit_input.sort_values(["bench", "item", "model", "repeat"]).to_csv(out / "responses.csv", index=False)
+    settings = dict(domain=domain.name, date=datetime.date.today().isoformat(), warmup=warmup, samples=samples,
+                    seed=seed, train_per_quartile=train, top_k=TOP_K, top=top_per_semester)
+    (out / "fit.yml").write_text(yaml.safe_dump(settings, sort_keys=False))
     print(f"wrote {out}")
 
 
@@ -171,8 +261,8 @@ def main() -> int:
     parser.add_argument("--samples", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--force", action="store_true", help="overwrite the frozen tables (then commit them)")
-    a = parser.parse_args()
-    build(DomainConfig.from_cli(a.domain), a.train, a.warmup, a.samples, a.seed, a.force)
+    args = parser.parse_args()
+    build(DomainConfig.from_cli(args.domain), args.train, args.warmup, args.samples, args.seed, args.force)
     return 0
 
 

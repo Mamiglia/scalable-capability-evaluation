@@ -1,9 +1,14 @@
-"""Pairwise LLM-judge protocol: Bradley-Terry over one judge run's verdicts, anchored on the references.
+"""Pairwise LLM-judge protocol: Bradley-Terry over a judge's verdicts, anchored on the references.
 
-A judge run is a `uv run judge` log dir (logs/rank/<domain>/<judge>/<condition hash>/): the judge
-compared two correct transcripts of the same item and picked the more capable model
-(ranking.verdicts.from_logs). One protocol pools the runs of one judge (one dir per semester);
-only verdicts among the task's models on its train items count.
+A judge run (`uv run judge`, log dir logs/rank/<domain>/<judge>/<condition hash>/) asked a judge
+model to compare two correct transcripts of the same item and pick the more capable model.
+ranking.verdicts.from_logs turns such a dir into one row per verdict:
+    bench, judge, item, model_left, model_right, pick_left (1 = picked the left one)
+
+One PairwiseJudge pools the runs of one judge (typically one dir per semester). For a task it
+keeps the verdicts on the task's train items between two of the task's models, fits
+Bradley-Terry abilities (ranking.bradley_terry.rank), and maps ability to theta with a line
+fitted on the references' theta*.
 """
 
 from pathlib import Path
@@ -25,20 +30,22 @@ class PairwiseJudge(Protocol):
 
     @property
     def verdicts(self) -> pd.DataFrame:
-        if self._verdicts is None:
+        if self._verdicts is None:  # read the logs once, on first use
             self._verdicts = pd.concat([from_logs(d) for d in self.log_dirs], ignore_index=True)
         return self._verdicts
 
     def __call__(self, task: Task) -> float:
-        """BT ability of the target, affine-mapped to theta by the references' abilities vs theta*; NaN without coverage."""
-        models = {*task.references, task.target}
-        v = self.verdicts.merge(task.items[["bench", "item"]])
-        v = v[v.model_left.isin(models) & v.model_right.isin(models)]
-        if v.empty or task.target not in {*v.model_left, *v.model_right}:
+        """theta-hat of the target; NaN when the runs do not cover the task."""
+        models = set(task.references) | {task.target}
+        verdicts = self.verdicts.merge(task.items[["bench", "item"]])  # train items only
+        verdicts = verdicts[verdicts.model_left.isin(models) & verdicts.model_right.isin(models)]
+        judged = set(verdicts.model_left) | set(verdicts.model_right)
+        if task.target not in judged:
             return np.nan
-        ability = rank(v).set_index("model").ability
-        ref = ability.index.intersection(task.references)
-        if len(ref) < 2:
+
+        ability = rank(verdicts).set_index("model").ability
+        references = ability.index.intersection(task.references)
+        if len(references) < 2:  # a line needs two anchors
             return np.nan
-        beta, alpha = np.polyfit(ability[ref], task.theta_ref[ref], 1)
-        return alpha + beta * ability[task.target]
+        slope, intercept = np.polyfit(ability[references], task.theta_ref[references], 1)
+        return intercept + slope * ability[task.target]

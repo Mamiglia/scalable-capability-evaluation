@@ -108,8 +108,14 @@ def build_tasks(experiment: ExperimentConfig) -> list[Task]:
         if name not in items:
             logger.warning("%s: no items to judge on %s", exp.name, name)
             continue
-        logs = {m.shortname.lower(): next((l for b in benches if (l := successful_evals(exp.domain.task(b), m))), [])
-                for m in exp.models}
+        logs = {}
+        for model in exp.models:
+            logs[model.shortname.lower()] = []
+            for entry in benches:  # the first entry that has this model's logs
+                found = successful_evals(exp.domain.task(entry), model)
+                if found:
+                    logs[model.shortname.lower()] = found
+                    break
         solved = correct[correct.bench == name].groupby(["model", "repeat"]).item.agg(set)
         for major, minor in exp.ordered_pairs():
             names = major.shortname.lower(), minor.shortname.lower()
