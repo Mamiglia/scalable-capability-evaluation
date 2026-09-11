@@ -20,6 +20,7 @@ uv.lock
 
 # logs
 /logs/
+/judge/
 artifacts/
 /docs/
 analysis/

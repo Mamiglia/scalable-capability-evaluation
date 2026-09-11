@@ -7,28 +7,28 @@ description: Handling the logs/ repo of judge runs - layout, where a judging cam
 
 **Read `logs/CONTRACT.md` first** — it is the binding rulebook (layout, fixed areas,
 quarantine, sync). This skill is the operational companion. `logs/` holds *derived* data:
-every verdict is recomputable from `data/` + `configs/experiments/` (judge at temperature 0,
+every verdict is recomputable from `data/` + `configs/judges/` (judge at temperature 0,
 generate cache on), which is why the repo is gitignored in the parent and pinned nowhere.
 
 ## Where things are
 
-- Current runs: `logs/rank/<domain>/<judge shortname>/<condition hash>/`, one `.eval` per
-  `<bench, pair>` (pair in the task name). `ranking.csv` / `scores.csv` / `ranking.json`
-  sit beside the logs.
-- To find a run's dir, don't guess the hash — `condition_hash` (`src/configs/experiment.py`)
-  covers system_prompt, include_reasoning, truncate_frac, max_length, require_both_correct,
-  include_reverse; or just `ls -t logs/rank/<domain>/<judge>/`.
+- Current runs: `judge/<domain>/<semester>/<judge shortname>/<condition hash>/` (repo root,
+  gitignored), one `.eval` per `<bench, reference, target>` (`bench/reference|target` is the
+  task name). One dir per `<domain, semester, judge, condition>`, written by `JudgeBT`.
+- To find a run's dir, don't guess the hash — `JudgeConfig.condition_hash` (`src/configs/judge.py`)
+  covers system_prompt, include_reasoning, include_reverse, max_length, temperature; or just
+  `ls -t judge/<domain>/<semester>/<judge>/`.
+- `logs/rank/` = the old quartile experiments, unused.
 - `pilot*/`, `aime/`, `apex/` are frozen pre-08-26 experiments; `smoke/` is scratch;
   `legacy/` = superseded, `invalid/` = must-not-use (see its README).
 
 ## Running / resuming
 
 ```bash
-uv run judge --cfg configs/experiments/<domain>.yml [--limit 2]   # writes the layout itself
-uv run rank logs/rank/<domain>/<judge>/<hash> --domain configs/domain/<domain>.yml
+uv run evaluate configs/domain/<domain>.yml --judge configs/judges/<judge>.yml [--semester 2026-I]  # judges what is missing, then scores
 ```
 
-Re-running the same `judge` command resumes the same `eval_set` dir; adding models adds
+Re-running the same `evaluate --judge` resumes the same `eval_set` dir; a refrozen roster adds
 pairs to it. Never hand-create condition-hash dirs, never mix conditions in one dir.
 Re-judging an unchanged pair is free (generate cache).
 
