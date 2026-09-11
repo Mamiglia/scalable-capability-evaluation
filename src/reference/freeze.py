@@ -30,10 +30,11 @@ import pandas as pd
 import yaml
 
 from configs.domain import DomainConfig
+from configs.logs import logger
 from evals.responses import eval_logs, repeat0_paths, responses as read_responses
 from irt.data import encode
 from irt.fitting import fit
-from reference.tables import DATA, frozen_dir, load_semesters
+from reference.tables import DATA, frozen_dir, load, load_semesters
 
 TOP_K = 3  # reference models that define the EASY set
 
@@ -79,7 +80,7 @@ def roster(semesters: dict[str, list[str]], semester: str, collected: set[str]) 
     targets = [m for m in semesters[semester] if m in collected]
     missing = sorted(set(semesters[previous] + semesters[semester]) - collected)
     if missing:
-        print(f"{semester}: not collected: {missing}")
+        logger.warning("%s: not collected: %s", semester, missing)
     if len(references) < 2 or len(targets) < 2:
         raise ValueError(f"{semester}: {len(references)} references / {len(targets)} targets")
     return references, targets
@@ -119,7 +120,7 @@ def split_items(responses: pd.DataFrame, items: pd.DataFrame, top: list[str], tr
     status = easy_hard(responses, items, top)
     n_out = int((status == "").sum())
     if n_out:
-        print(f"  {n_out} items lack a repeat-0 answer from a top model -> out of the task")
+        logger.info("  %d items lack a repeat-0 answer from a top model -> out of the task", n_out)
     return pd.DataFrame({"set": status, "train": train_subset(items, status == "easy", train, seed)})
 
 
@@ -158,10 +159,12 @@ def semester_task(semester: str, references: list[str], targets: list[str], resp
     """
     top = models.global_theta.loc[references].nlargest(TOP_K).index.tolist()
     split = split_items(responses, items, top, train, seed)
+    logger.info("%s: %d references, %d targets; top %s; items %s, %d train",
+                semester, len(references), len(targets), top, split.set.value_counts().to_dict(), int(split.train.sum()))
+    logger.info("%s: local 2PL fit (theta only) on the HARD items...", semester)
     theta = local_fit(responses, items[split.set == "hard"], references + targets, warmup, samples, seed)
 
     role = pd.concat([pd.Series("reference", index=references), pd.Series("target", index=targets)]).rename("role")
-    print(f"{semester}: top {top}, {split.set.value_counts().to_dict()}, {int(split.train.sum())} train")
     print(theta.join(role).round(2).to_string())
     return split.add_prefix(f"{semester}_"), theta.join(role)[["role", "theta", "theta_sd"]].add_prefix(f"{semester}_"), top
 
@@ -176,21 +179,58 @@ def write(out: Path, models: pd.DataFrame, items: pd.DataFrame, responses: pd.Da
     fit_input = responses[["bench", "item", "model", "repeat", "correct"]]
     fit_input.sort_values(["bench", "item", "model", "repeat"]).to_csv(out / "responses.csv", index=False)
     (out / "fit.yml").write_text(yaml.safe_dump(settings, sort_keys=False))
-    print(f"wrote {out}")
+    logger.info("wrote %s", out)
+
+
+def changes(domain: DomainConfig) -> list[str]:
+    """What differs between the collected logs / roster and the frozen tables. Cheap: reads no log contents."""
+    models, _ = load(domain)
+    frozen = pd.read_csv(frozen_dir(domain) / "responses.csv", dtype={"item": str})
+    logs = eval_logs(domain)
+    found = []
+    now, then = set(logs.model), set(frozen.model)
+    if new := sorted(now - then):
+        found.append(f"models with logs that are not in the fit: {new}")
+    if gone := sorted(then - now):
+        found.append(f"models in the fit whose logs are gone: {gone}")
+    repeats_now = logs.groupby(["bench", "model"]).repeat.nunique()
+    repeats_then = frozen.groupby(["bench", "model"]).repeat.nunique().reindex(repeats_now.index).fillna(0)
+    if more := repeats_now[repeats_now > repeats_then].index.tolist():
+        found.append(f"new logs on (bench, model): {more}")
+    paths = repeat0_paths(logs, DATA)
+    for column in paths.columns:
+        both = paths.index.intersection(models.index)
+        if column in models and (moved := both[paths.loc[both, column].ne(models.loc[both, column]) & paths.loc[both, column].notna()].tolist()):
+            found.append(f"repeat-0 log of {column.removeprefix('path_')} changed for: {moved}")
+    semester_of = {m: s for s, roster in load_semesters().items() for m in roster}
+    then_roster = models.semester.dropna()
+    collected = now | then  # an uncollected roster model is not in the fit either way
+    if changed := sorted(m for m in then_roster.index.union(semester_of) if m in collected and then_roster.get(m) != semester_of.get(m)):
+        found.append(f"roster (configs/semesters.yml) changed for: {changed}")
+    return found
 
 
 def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, force=False) -> None:
     """Freeze a domain: steps 1-4 of the module docstring."""
     out = frozen_dir(domain)
     if (out / "models.csv").exists() and not force:
-        raise FileExistsError(f"{out} is frozen; refit deliberately with --force and commit the result")
+        found = changes(domain)
+        for line in found:
+            logger.warning("since the freeze: %s", line)
+        if not found:
+            logger.info("%s is frozen and nothing changed since: no refit needed", out)
+            return
+        raise FileExistsError(f"{out} is frozen and {len(found)} thing(s) changed since (above); refit with --force and commit")
 
     # 1. Every collected response of the domain, roster or not.
     responses = read_responses(domain)
+    logger.info("%s: %d responses, %d models, %d items", domain.name, len(responses), responses.model.nunique(),
+                len(responses[["bench", "item"]].drop_duplicates()))
     semesters = load_semesters()
     semester_of = {model: semester for semester, models in semesters.items() for model in models}
 
     # 2. Global fit; the models table also records each model's semester and repeat-0 logs.
+    logger.info("global 2PL fit: NUTS, %d warmup + %d samples (minutes)...", warmup, samples)
     models, items = global_fit(responses, warmup, samples, seed)
     models.insert(0, "semester", models.index.map(semester_of))
     models = models.join(repeat0_paths(eval_logs(domain), DATA))
@@ -220,7 +260,11 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--force", action="store_true", help="overwrite the frozen tables (then commit them)")
     args = parser.parse_args()
-    build(DomainConfig.from_cli(args.domain), args.train, args.warmup, args.samples, args.seed, args.force)
+    try:
+        build(DomainConfig.from_cli(args.domain), args.train, args.warmup, args.samples, args.seed, args.force)
+    except FileExistsError as exc:
+        logger.error("%s", exc)
+        return 1
     return 0
 
 

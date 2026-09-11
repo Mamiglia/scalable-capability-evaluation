@@ -14,6 +14,7 @@ from inspect_ai.log import read_eval_log_sample_summaries
 from inspect_evals.hle.hle import get_verified_gold_uids
 
 from configs.domain import DomainConfig
+from configs.logs import logger
 from configs.paths import get_eval_path, is_successful_eval
 from evals.sample import extract_score
 
@@ -44,19 +45,19 @@ def responses(domain: DomainConfig) -> pd.DataFrame:
     for bench in domain.benches:
         task = domain.task(bench)
         gold = get_verified_gold_uids() if bench.hle_gold else None
-        for model in domain.model_configs():
-            for log in sorted(get_eval_path(task, model).rglob("*.eval")):
-                if not is_successful_eval(log):
+        logs = [(model, log) for model in domain.model_configs()
+                for log in sorted(get_eval_path(task, model).rglob("*.eval")) if is_successful_eval(log)]
+        logger.info("%s: reading %d logs of %d models (%s)", task.name, len(logs), len({m.name for m, _ in logs}), bench.bench)
+        for model, log in logs:
+            for s in read_eval_log_sample_summaries(str(log)):
+                md = s.metadata or {}
+                if gold is not None and md.get("uid") not in gold:
                     continue
-                for s in read_eval_log_sample_summaries(str(log)):
-                    md = s.metadata or {}
-                    if gold is not None and md.get("uid") not in gold:
-                        continue
-                    if any(md.get(k) not in v for k, v in bench.metadata.items()):
-                        continue
-                    rows.append(dict(bench=task.name, model=model.shortname.lower(), item=str(s.id),
-                                     repeat=int(log.parent.name), correct=bool(extract_score(s)),
-                                     guess=guess_rate(s)))
+                if any(md.get(k) not in v for k, v in bench.metadata.items()):
+                    continue
+                rows.append(dict(bench=task.name, model=model.shortname.lower(), item=str(s.id),
+                                 repeat=int(log.parent.name), correct=bool(extract_score(s)),
+                                 guess=guess_rate(s)))
     if not rows:
         raise ValueError(f"domain {domain.name}: no successful logs for any bench x model")
     return pd.DataFrame(rows)

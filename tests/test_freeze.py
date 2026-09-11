@@ -69,8 +69,6 @@ def test_evaluate_on_frozen_tables(tmp_path, monkeypatch):
     table = evaluate.evaluate(domain, lambda t: truth[t.test.models.index], "toy")
     assert table.semester.tolist() == ["s2", "all"] and table.mse.lt(1e-9).all()
     assert (d / "eval_toy.csv").exists()
-    with pytest.raises(FileExistsError):
-        freeze.build(domain)
 
 
 def test_guess_rate():
@@ -99,3 +97,12 @@ def test_build_writes_the_frozen_tables(tmp_path, monkeypatch):
     assert set(items.s2_set) == {"easy", "hard"} and items.s2_train.sum() <= 4 and items[items.s2_train].s2_set.eq("easy").all()
     assert {"semester", "global_theta", "s2_theta", "s2_theta_sd"} <= set(models.columns)
     assert (tmp_path / "toy" / "responses.csv").exists() and (tmp_path / "toy" / "fit.yml").exists()
+    # frozen and unchanged: a second build is a no-op; a new log or a roster edit demands --force
+    freeze.build(domain)
+    assert freeze.changes(domain) == []
+    monkeypatch.setattr(freeze, "eval_logs", lambda domain: pd.concat([logs, pd.DataFrame([dict(bench="b", model="w", repeat=2, path="data/b/h/w/2/run.eval")])]))
+    assert freeze.changes(domain) == ["new logs on (bench, model): [('b', 'w')]"]
+    monkeypatch.setattr(freeze, "load_semesters", lambda: {"s1": ["x", "y", "z"], "s2": ["w", "v"]})  # v uncollected: ignored
+    assert freeze.changes(domain)[-1] == "roster (configs/semesters.yml) changed for: ['z']"
+    with pytest.raises(FileExistsError):
+        freeze.build(domain)

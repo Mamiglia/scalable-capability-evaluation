@@ -11,6 +11,7 @@ fallback would compute a different hash, write to a fresh directory and re-run
 (re-pay for) collection that is already on disk.
 """
 
+import functools
 import hashlib
 import inspect
 import json
@@ -29,6 +30,7 @@ class TaskResolutionError(RuntimeError):
     """Raised when a task cannot be resolved, so its args hash cannot be trusted."""
 
 
+@functools.cache  # load_tasks instantiates the task (dataset download included): once per spec
 def resolve_task_fn(task_spec: str) -> Callable[..., Any]:
     """Return the registered task function for ``task_spec`` (e.g. ``inspect_evals/mbpp``)."""
     fn = registry_lookup("task", task_spec)
