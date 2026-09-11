@@ -1,0 +1,132 @@
+"""Figures of a frozen domain: theta by semester, item difficulty per bench, accuracy heatmap.
+
+    uv run python scripts/analyses/domain_figures.py science
+
+Reads data/meta/<domain>/{models,items,responses}.csv, writes data/meta/<domain>/figures/*.{png,svg}.
+"""
+
+import sys
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,
+                     "ytick.labelsize": 7, "svg.fonttype": "none"})
+PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#4a3aa7"]
+GREY = "#9a9a9a"
+
+
+def offset(ax, x=True, y=True):
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    if x:
+        ax.spines["bottom"].set_position(("outward", 5))
+    if y:
+        ax.spines["left"].set_position(("outward", 5))
+
+
+def save(fig, stub: Path):
+    fig.savefig(stub.with_suffix(".png"), dpi=300, bbox_inches="tight")
+    fig.savefig(stub.with_suffix(".svg"), bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", stub.with_suffix(".png"))
+
+
+def theta_figure(models: pd.DataFrame, semesters: list[str], out: Path):
+    """a: global theta of every model by semester (roster coloured, others grey). b: local theta* vs global."""
+    color = dict(zip(semesters, PALETTE))
+    fig, (a, b) = plt.subplots(1, 2, figsize=(3.4, 1.9), gridspec_kw={"width_ratios": [1.3, 1]})
+    rng = np.random.default_rng(0)
+    for i, semester in enumerate(semesters):
+        rows = models[models.semester == semester]
+        x = i + rng.uniform(-0.18, 0.18, len(rows))
+        a.errorbar(x, rows.global_theta, yerr=rows.global_theta_sd, fmt="o", ms=3, lw=0.8, capsize=0,
+                   color=color[semester], label=semester)
+    a.set_xticks(range(len(semesters)), semesters)
+    a.tick_params(axis="x", rotation=90)
+    a.set_ylabel("Global θ")
+    tasks = [c.removesuffix("_role") for c in models.columns if c.endswith("_role")]
+    for task in tasks:
+        role = models[f"{task}_role"]
+        for marker, which in (("o", "target"), ("s", "reference")):
+            rows = models[role == which]
+            b.errorbar(rows.global_theta, rows[f"{task}_theta"], yerr=rows[f"{task}_theta_sd"], fmt=marker, ms=3,
+                       lw=0.8, capsize=0, color=color[task], mfc=color[task] if which == "target" else "white")
+    lo, hi = -3, 3  # global theta of every collected model lies inside; theta* intervals may spill over
+    ticks = [-3, 0, 3]
+    b.plot([lo, hi], [lo, hi], ls="--", lw=0.8, color=GREY)
+    b.set_xlim(lo, hi), b.set_ylim(lo, hi), b.set_xticks(ticks), b.set_yticks(ticks)
+    a.set_ylim(lo, hi), a.set_yticks(ticks)
+    b.set_xlabel("Global θ"), b.set_ylabel("θ* (HARD items)")
+    b.plot([], [], "o", color="k", ms=3, label="target"), b.plot([], [], "s", mfc="white", color="k", ms=3, label="reference")
+    for ax in (a, b):
+        offset(ax)
+    a.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, frameon=False, handletextpad=0.2, columnspacing=0.8)
+    b.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, handletextpad=0.2)
+    fig.tight_layout(w_pad=1.5)
+    save(fig, out / "theta")
+
+
+def difficulty_figure(items: pd.DataFrame, out: Path):
+    """Item difficulty b per bench (step histograms), with the discrimination a underneath."""
+    benches = sorted(items.bench.unique())
+    color = dict(zip(benches, PALETTE))
+    fig, (a, b) = plt.subplots(2, 1, figsize=(2.0, 2.4), sharex=True)
+    edges = np.linspace(np.floor(items.b.min()), np.ceil(items.b.max()), 25)
+    for bench in benches:
+        rows = items[items.bench == bench]
+        a.hist(rows.b, bins=edges, histtype="step", lw=1, color=color[bench], label=f"{bench} ({len(rows)})")
+        b.scatter(rows.b, rows.a, s=4, lw=0, alpha=0.6, color=color[bench])
+    a.set_ylabel("Items")
+    b.set_xlabel("Difficulty b"), b.set_ylabel("Discrimination a")
+    b.set_xlim(edges[0], edges[-1])
+    for ax in (a, b):
+        offset(ax)
+    a.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=1, frameon=False, handletextpad=0.4)
+    fig.tight_layout(h_pad=0.5)
+    save(fig, out / "difficulty")
+
+
+def accuracy_figure(models: pd.DataFrame, responses: pd.DataFrame, out: Path):
+    """Roster models (rows, by global theta) x bench: mean accuracy over every repeat. Blank = never run."""
+    roster = models[models.semester.notna()].sort_values("global_theta", ascending=False)
+    acc = responses[responses.model.isin(roster.index)].groupby(["model", "bench"]).correct.mean().unstack()
+    acc = acc.loc[roster.index]
+    # the row labels (model + semester) take ~1.9in; the cells themselves need ~0.25in per bench
+    fig = plt.figure(figsize=(3.3, 0.085 * len(acc) + 0.55))
+    ax = fig.add_axes([0.6, 0.1, 0.25, 0.88])
+    im = ax.imshow(acc.to_numpy(float), aspect="auto", cmap="Blues", vmin=0, vmax=1)
+    ax.set_xticks(range(acc.shape[1]), acc.columns, rotation=90, ha="center")
+    ax.set_yticks(range(len(acc)), [f"{m}  ({s})" for m, s in zip(acc.index, roster.semester)], fontsize=5)
+    ax.tick_params(length=0)
+    for i, row in enumerate(acc.to_numpy(float)):
+        for j, v in enumerate(row):
+            if not np.isnan(v):
+                ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=4.5, color="white" if v > 0.6 else "black")
+    cbar = fig.colorbar(im, cax=fig.add_axes([0.88, 0.1, 0.02, 0.3]), ticks=[0, 0.5, 1])
+    cbar.set_label("Accuracy")
+    cbar.outline.set_visible(False)
+    save(fig, out / "accuracy")
+
+
+def main(domain: str) -> int:
+    root = Path("data/meta") / domain
+    models = pd.read_csv(root / "models.csv", index_col="model")
+    items = pd.read_csv(root / "items.csv", dtype={"item": str})
+    responses = pd.read_csv(root / "responses.csv", dtype={"item": str})
+    semesters = [s for s in ["2023", "2024-I", "2024-II", "2025-I", "2025-II", "2026-I"] if s in set(models.semester.dropna())]
+    out = root / "figures"
+    out.mkdir(exist_ok=True)
+    theta_figure(models, semesters, out)
+    difficulty_figure(items, out)
+    accuracy_figure(models, responses, out)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1]))

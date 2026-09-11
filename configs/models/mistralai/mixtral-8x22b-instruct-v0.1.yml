@@ -22,6 +22,7 @@ runpod:
   env: {NCCL_P2P_DISABLE: "1", HF_HUB_ENABLE_HF_TRANSFER: "1"}
   container_disk_in_gb: 400
   ready_timeout: 7200
+  stall_timeout: 3600   # 281GB download is silent in the container log; 900s killed healthy pods
   model_args: {}
   vllm_args:
     - --dtype

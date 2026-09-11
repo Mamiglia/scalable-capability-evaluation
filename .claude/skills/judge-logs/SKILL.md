@@ -18,7 +18,8 @@ generate cache on), which is why the repo is gitignored in the parent and pinned
 - To find a run's dir, don't guess the hash — `JudgeConfig.condition_hash` (`src/configs/judge.py`)
   covers system_prompt, include_reasoning, include_reverse, max_length, temperature; or just
   `ls -t judge/<domain>/<semester>/<judge>/`.
-- `logs/rank/` = the old quartile experiments, unused.
+- `logs/rank/`, `logs/pilot*`, `logs/aime` = older campaigns; `scripts/judge/import_judge_logs.py <domain.yml>`
+  copies the (reference, target) pairs among them into `judge/` as `(imported)` tasks.
 - `pilot*/`, `aime/`, `apex/` are frozen pre-08-26 experiments; `smoke/` is scratch;
   `legacy/` = superseded, `invalid/` = must-not-use (see its README).
 

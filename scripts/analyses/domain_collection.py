@@ -43,6 +43,8 @@ DOMAINS = {
     "math": ("mmlu_pro_math", "aime2024",
              [("MMLU-Pro", ["mmlu_pro_math"]), ("AIME", ["aime2024", "aime2025", "aime2026"]),
               ("APEX", ["apex_2025", "apex_shortlist"]), ("HLE gold", ["hle", "hle_gold"])]),
+    "coding": ("swe_bench_mini", "swe_bench_mini",
+               [("SWE-bench mini", ["swe_bench_mini"]), ("Terminal-Bench 2.1", ["terminal_bench_2_1"])]),
 }
 
 plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,
@@ -67,6 +69,7 @@ def main(domain: str):
     anchor, against = label[anchor], label[against]
     roster = pd.DataFrame([(m, e, era) for era, ms in ROSTER.items() for m, e in ms], columns=["model", "expected", "era"])
     resp = resp[resp.model.isin(roster.model)]
+    roster = roster[roster.model.isin(resp.model)]  # coding: no pre-2025 agentic roster
     per_rep = resp.groupby(["bench", "model", "repeat"]).correct.mean().reset_index()
     acc = per_rep.groupby(["bench", "model"]).correct.agg(["mean", "std", "count"]).reset_index()
     wide = acc.pivot(index="model", columns="bench", values="mean").reindex(roster.model)
@@ -98,14 +101,14 @@ def main(domain: str):
     axes[0].set_yticks(range(len(order))); axes[0].set_yticklabels(order)
     axes[0].set_ylim(-.7, len(order) - .3)
     axes[1].set_xlabel("Accuracy")
-    handles = [plt.Line2D([], [], marker="o", ls="", ms=3.5, color=c, label=e) for e, c in ERA_COLOR.items()]
+    handles = [plt.Line2D([], [], marker="o", ls="", ms=3.5, color=c, label=e) for e, c in ERA_COLOR.items() if e in set(roster.era)]
     fig.legend(handles=handles, loc="lower center", ncol=6, frameon=False, bbox_to_anchor=(.55, -.005))
     fig.tight_layout(rect=(0, .03, 1, 1))
     fig.savefig(out / "accuracy_per_model.png", dpi=300, bbox_inches="tight")
     fig.savefig(out / "accuracy_per_model.svg", bbox_inches="tight")
 
     # Fig 2: collected vs expected on the anchor bench, and every other bench against the anchor.
-    pairs = [("expected", anchor, "Expected", anchor)] + [(against, b, against, b) for b, _ in panels if b != against]
+    pairs = ([("expected", anchor, "Expected", anchor)] if table.expected.notna().any() else []) + [(against, b, against, b) for b, _ in panels if b != against]
     fig, axes = plt.subplots(1, len(pairs), figsize=(1.1 * len(pairs) + 0.4, 1.5))
     for ax, (x, y, xl, yl) in zip(axes, pairs):
         for era, c in ERA_COLOR.items():
