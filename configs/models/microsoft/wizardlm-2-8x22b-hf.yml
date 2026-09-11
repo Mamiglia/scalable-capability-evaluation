@@ -26,6 +26,9 @@ runpod:
   env: {NCCL_P2P_DISABLE: "1", HF_HUB_ENABLE_HF_TRANSFER: "1"}
   container_disk_in_gb: 400
   ready_timeout: 7200
+  # vLLM logs nothing while it downloads the 281GB of weights (hf_transfer's progress bar is not
+  # a log line); the default 900s stall detector killed three healthy pods on 2026-09-11.
+  stall_timeout: 3600
   model_args: {}
   vllm_args:
     - --dtype
