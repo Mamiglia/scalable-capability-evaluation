@@ -36,3 +36,21 @@ configs/models/qwen/qwen3-32b.yml                         # 0.631
 configs/models/minimax/minimax-m1.yml                     # to collect (replaces llama-4-scout)
 configs/models/mistralai/mistral-small-3.2-24b.yml        # to collect (replaces mistral-small-2503)
 configs/models/google/gemma-3-27b-it.yml                  # 0.439
+# 2025-II (added 2026-09-10: every model gets the easy tier)
+configs/models/moonshotai/kimi-k2-thinking.yml            # 0.879
+configs/models/zai/glm-4.5.yml                            # 0.841
+configs/models/zai/glm-4.7.yml                            # 0.835
+configs/models/deepseek/deepseek-v3.2.yml                 # 0.824
+configs/models/qwen/qwen3-235b-a22b-thinking-2507.yml     # 0.801
+configs/models/minimax/minimax-m2.yml                     # to collect
+configs/models/openai/gpt-oss-120b.yml                    # 0.715
+configs/models/openai/gpt-oss-20b.yml                     # 0.588
+# 2026-I
+configs/models/zai/glm-5.1.yml                            # 0.899
+configs/models/moonshotai/kimi-k2.6.yml                   # 0.897
+configs/models/zai/glm-5.2.yml                            # 0.884
+configs/models/moonshotai/kimi-k2.5.yml                   # 0.876
+configs/models/google/gemma4-31b.yml                      # 0.865
+configs/models/qwen/qwen3.5-397b-a17b.yml                 # 0.859
+configs/models/qwen/qwen3.6-27b.yml                       # 0.859
+configs/models/nvidia/nemotron-3-ultra-550b-a55b.yml      # 0.837

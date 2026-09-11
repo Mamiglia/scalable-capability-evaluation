@@ -3,7 +3,7 @@
 # Local task: upstream's arc_challenge has no cot option, and a bare "ANSWER: X"
 # transcript gives the judge nothing to compare.
 name: arc_challenge
-task: src/collect/arc.py@arc_challenge_cot
+task: src/collect/tasks/arc.py@arc_challenge_cot
 task_args:
   cot: true
   # fixed random draw of 200 of the 1172 test items, identical across models;

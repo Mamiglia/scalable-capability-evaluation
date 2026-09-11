@@ -12,4 +12,4 @@
 # collect run supplies it with `uv run --with 'swebench>=3.0.15,<4'`.
 name: swe_bench_mini
 task: inspect_evals/swe_bench_verified_mini
-solver: src/collect/swe_solver.py@swe_bash_python
+solver: src/collect/tasks/swe_solver.py@swe_bash_python
