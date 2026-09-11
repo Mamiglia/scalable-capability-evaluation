@@ -1,3 +1,0 @@
-name: qwen3.5-4b-vs-gemma4-e2b-it
-major: !include ../../models/qwen/qwen3.5-4b.yml
-minor: !include ../../models/google/gemma4-e2b-it.yml

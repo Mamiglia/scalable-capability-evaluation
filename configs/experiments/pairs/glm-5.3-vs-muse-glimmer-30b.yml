@@ -1,3 +1,0 @@
-name: glm-5.3-vs-muse-glimmer-30b
-major: !include ../../models/zai/glm-5.3.yml
-minor: !include ../../models/meta/muse-glimmer-30b.yml

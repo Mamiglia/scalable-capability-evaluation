@@ -1,3 +1,0 @@
-name: qwen3.5-9b-vs-granite-4.1-8b
-major: !include ../../models/qwen/qwen3.5-9b.yml
-minor: !include ../../models/ibm/granite-4.1-8b.yml

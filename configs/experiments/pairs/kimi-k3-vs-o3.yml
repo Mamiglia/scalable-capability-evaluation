@@ -1,3 +1,0 @@
-name: kimi-k3-vs-o3
-major: !include ../../models/moonshotai/kimi-k3.yml
-minor: !include ../../models/openai/o3.yml

@@ -1,3 +1,0 @@
-name: gemini-3.5-flash-vs-nemotron-3.5-lightning
-major: !include ../../models/google/gemini-3.5-flash.yml
-minor: !include ../../models/nvidia/nemotron-3.5-lightning.yml

@@ -1,3 +1,0 @@
-name: o3-vs-deepseek-v3.2
-major: !include ../../models/openai/o3.yml
-minor: !include ../../models/deepseek/deepseek-v3.2.yml

@@ -1,3 +1,0 @@
-name: glm-4.6-vs-gemma4-e2b-it
-major: !include ../../models/zai/glm-4.6.yml
-minor: !include ../../models/google/gemma4-e2b-it.yml

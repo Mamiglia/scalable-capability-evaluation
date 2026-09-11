@@ -1,3 +1,0 @@
-name: nemotron-3.5-lightning-vs-gemma4-e2b-it
-major: !include ../../models/nvidia/nemotron-3.5-lightning.yml
-minor: !include ../../models/google/gemma4-e2b-it.yml

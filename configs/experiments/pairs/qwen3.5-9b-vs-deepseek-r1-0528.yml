@@ -1,3 +1,0 @@
-name: qwen3.5-9b-vs-deepseek-r1-0528
-major: !include ../../models/qwen/qwen3.5-9b.yml
-minor: !include ../../models/deepseek/deepseek-r1-0528.yml

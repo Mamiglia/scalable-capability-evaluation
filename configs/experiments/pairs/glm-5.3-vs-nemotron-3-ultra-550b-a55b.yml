@@ -1,3 +1,0 @@
-name: glm-5.3-vs-nemotron-3-ultra-550b-a55b
-major: !include ../../models/zai/glm-5.3.yml
-minor: !include ../../models/nvidia/nemotron-3-ultra-550b-a55b.yml

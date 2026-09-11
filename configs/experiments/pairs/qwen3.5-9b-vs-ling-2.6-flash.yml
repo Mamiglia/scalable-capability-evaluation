@@ -1,3 +1,0 @@
-name: qwen3.5-9b-vs-ling-2.6-flash
-major: !include ../../models/qwen/qwen3.5-9b.yml
-minor: !include ../../models/inclusionai/ling-2.6-flash.yml

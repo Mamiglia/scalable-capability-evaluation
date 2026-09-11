@@ -1,3 +1,0 @@
-name: glm-5.2-vs-gpt-5
-major: !include ../../models/zai/glm-5.2.yml
-minor: !include ../../models/openai/gpt-5.yml

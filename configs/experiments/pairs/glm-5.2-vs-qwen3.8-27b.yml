@@ -1,3 +1,0 @@
-name: glm-5.2-vs-qwen3.8-27b
-major: !include ../../models/zai/glm-5.2.yml
-minor: !include ../../models/qwen/qwen3.8-27b.yml

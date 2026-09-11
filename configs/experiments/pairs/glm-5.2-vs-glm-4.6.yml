@@ -1,3 +1,0 @@
-name: glm-5.2-vs-glm-4.6
-major: !include ../../models/zai/glm-5.2.yml
-minor: !include ../../models/zai/glm-4.6.yml
