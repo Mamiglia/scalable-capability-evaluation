@@ -19,7 +19,7 @@ import pandas as pd
 import yaml
 from inspect_ai.log import read_eval_log
 
-from judge.util import extract_score
+from evals.sample import extract_score
 
 HERE = Path(__file__).resolve().parent
 

@@ -35,8 +35,8 @@ def _key(name: str) -> str:
 def pinned_providers() -> dict[str, tuple[list[str], bool]]:
     """Per model shortname: the providers its config names, and whether the pin is binding."""
     pins = {}
-    for line in Path("configs/experiments/pairs/models.txt").read_text().split():
-        cfg = yaml.safe_load(open(line))
+    for path in sorted(Path("configs/models").rglob("*.yml")):
+        cfg = yaml.safe_load(open(path))
         prov = ((cfg.get("model_args") or {}).get("provider")) or {}
         named = prov.get("only") or prov.get("order") or []
         binding = bool(prov.get("only") and prov.get("allow_fallbacks") is False)

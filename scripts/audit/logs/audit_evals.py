@@ -57,7 +57,7 @@ from inspect_ai.log import read_eval_log, read_eval_log_samples
 
 from configs.paths import collection_logs, is_successful_eval
 from eval_edits import edit_history
-from judge.util import extract_transcript
+from evals.sample import extract_transcript
 
 # A summary is a fraction of the CoT it summarises. Raw reasoning runs ~3-4 chars/token,
 # so recovered chars below this share of (reasoning_tokens * 3) is summary-like, not CoT.

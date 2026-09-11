@@ -1,6 +1,6 @@
 """House-style plot primitives for the judge analysis (Arial, 400 dpi).
 
-Same design tokens as src/irt/plots.py and the lasr pilot; duplicated on
+Same design tokens as scripts/analyses/epoch_irt/plots.py and the lasr pilot; duplicated on
 purpose while this lives in scripts/.
 """
 

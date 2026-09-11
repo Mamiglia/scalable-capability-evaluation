@@ -28,10 +28,16 @@ tiny=(   # endpoint output cap is 8192
 small=(  # context <= 164k
   configs/models/deepseek/deepseek-v3-0324.yml
   configs/models/openai/gpt-oss-120b.yml
-  configs/models/openai/gpt-oss-20b.yml
   configs/models/qwen/qwen3-235b-a22b-thinking-2507.yml
   configs/models/zai/glm-4.5.yml
 )
+# DEFERRED 2026-09-10: gpt-oss-20b. Its only bf16 endpoint (deepinfra) 429s -- 0/50 after ~50 min,
+# retry 11 at 1800 s backoff, while gpt-oss-120b on the same endpoint crawled at 752 retries.
+# No other bf16 endpoint exists on the slug. When picking this up: gpt-oss ships natively with
+# MXFP4 MoE weights, so coreweave/fp4 or parasail/fp4 (both OK + tool-capable, probed 09-10) are
+# arguably the reference precision rather than a downgrade. Needs allow_fallbacks: true to route
+# past a 429ing first entry (see the qwen3.5-397b-a17b note).
+#   MAX_TOKENS_SMALL=16384 scripts/collect_swe_bench_mini.sh -m configs/models/openai/gpt-oss-20b.yml
 # DEFERRED 2026-09-08: qwen3.5-397b-a17b's pinned parasail/fp8 returns 429 on even a single
 # request (both this sweep and the concurrent hle_gold run wedge on it). Run it on its own once
 # hle_gold is done, and re-probe the endpoint first -- gmicloud/fp8 (the pin abandoned earlier

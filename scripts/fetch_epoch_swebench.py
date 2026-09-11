@@ -3,7 +3,7 @@
 Downloads all published SWE-bench Verified .eval log archives from Epoch AI's public S3 bucket.
 
 The bucket is world-readable and supports Range, so this route avoids the aws-waf-token
-CAPTCHA that gates logs.epoch.ai (the CDN host src/irt/fetch.py uses).
+CAPTCHA that gates logs.epoch.ai (the CDN host scripts/analyses/epoch_irt/fetch.py uses).
 
 Features:
 - Parallel downloads with configurable concurrency

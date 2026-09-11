@@ -38,6 +38,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--only-unparsed", action="store_true",
+                        help="re-parse only samples the stock parser left without an answer; never touch a parsed one")
     args = parser.parse_args()
 
     if args.out.resolve() == args.input.resolve():
@@ -46,9 +48,12 @@ def main() -> int:
     log = read_eval_log(args.input)
     changed = correct = 0
     for s in log.samples:
+        score = s.scores["choice"]
+        if args.only_unparsed and score.answer:
+            correct += score.value == "C"
+            continue
         answer = parse_answer(s.output.completion, len(s.choices))
         value = "C" if answer and answer == s.target else "I"
-        score = s.scores["choice"]
         if (score.value, score.answer) != (value, answer):
             changed += 1
         score.value, score.answer = value, answer
@@ -65,7 +70,7 @@ def main() -> int:
     stamp_edit(
         log,
         tool="scripts/judge/rescore_mcq.py",
-        reason=f"stock MCQ parser missed {changed} answers; re-parsed with {ANSWER_RE.pattern!r}",
+        reason=f"stock MCQ parser missed {changed} answers; re-parsed {'unparsed samples only ' if args.only_unparsed else ''}with {ANSWER_RE.pattern!r}",
         source=args.input,
         samples_changed=changed,
         before={"accuracy": old_accuracy},

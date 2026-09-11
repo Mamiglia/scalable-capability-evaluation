@@ -32,6 +32,6 @@ external_data/**/*.eval
 /external_data/epoch-gpqa/item_domains.csv
 /judge_results/
 /irt_models_slide.pptx
-/interactive_viewer/data/
+/scripts/interactive_viewer/data/
 AGENTS.md
 CLAUDE.md

@@ -34,7 +34,7 @@ from inspect_ai.log import read_eval_log
 from inspect_ai.scorer import choice
 from inspect_ai.solver import multiple_choice
 
-from judge.util import extract_score, extract_transcript
+from evals.sample import extract_score, extract_transcript
 
 HERE = Path(__file__).resolve().parent
 

@@ -13,21 +13,21 @@ import pandas as pd
 
 sys.path.insert(0, "src")
 from configs.domain import DomainConfig  # noqa: E402
-from domain.cli import responses  # noqa: E402
+from evals.responses import responses  # noqa: E402
 
 # era -> [(model, expected accuracy or None)]; the same roster for every domain.
 ROSTER = {
     "2023": [("mixtral-8x7b-instruct-v0.1", .306), ("llama-2-70b-chat-hf", .263), ("llama-2-13b-chat-hf", .240),
              ("mpt-30b", .222), ("qwen-72b-chat", None), ("nous-hermes-2-yi-34b", None), ("gpt-4-0613", .307),
              ("gpt-3.5-turbo-0125", None)],
-    "2024-I": [("wizardlm-2-8x22b", .434), ("qwen2-72b-instruct", .408), ("meta-llama-3-70b-instruct", .406),
-               ("gemma-2-27b-it", .365), ("open-mixtral-8x22b", .341), ("phi-3-medium-128k-instruct", .276),
+    "2024-I": [("wizardlm-2-8x22b-hf", None), ("qwen2-72b-instruct", .408), ("meta-llama-3-70b-instruct", .406),
+               ("gemma-2-27b-it", .365), ("qwen1.5-72b-chat", None), ("phi-3-medium-128k-instruct", .276),
                ("gpt-4o-2024-05-13", .489), ("gpt-4-turbo-2024-04-09", .466)],
-    "2024-II": [("phi-4", .561), ("qwen2.5-72b-instruct", .491), ("mistral-large-2407", .490),
+    "2024-II": [("phi-4", .561), ("qwen2.5-72b-instruct", .491), ("deepseek-v3", None),
                 ("llama-3.3-70b-instruct", .474), ("qwen2.5-32b-instruct", .461), ("hermes-3-llama-3.1-405b", None),
                 ("open-mistral-nemo-2407", .299), ("llama-3.1-8b-instruct", .259)],
     "2025-I": [("deepseek-r1-0528", .769), ("qwen3-235b-a22b", .707), ("deepseek-v3-0324", .676),
-               ("llama-4-maverick-17b-128e-instruct-fp8", .670), ("qwen3-32b", .631), ("minimax-m1", None),
+               ("qwen3-30b-a3b", None), ("qwen3-32b", .631), ("minimax-m1", None),
                ("mistral-small-3.2-24b-instruct", None), ("gemma-3-27b-it", .439)],
     "2025-II": [("kimi-k2-thinking", .879), ("glm-4.5", .841), ("glm-4.7", .835), ("deepseek-v3.2", .824),
                 ("qwen3-235b-a22b-thinking-2507", .801), ("minimax-m2", None), ("gpt-oss-120b", .715),

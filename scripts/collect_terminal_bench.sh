@@ -22,7 +22,7 @@ export UV_CACHE_DIR=/tmp/small-judge-uv-cache
 export DOCKER_HOST="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 
 # skip Runpod-hosted models (no runpodctl / Runpod funds here); open-weight models first, closed last
-mapfile -t all < <(grep -L '^  use: true$' $(grep -v '^#' "${MODELS_FILE:-configs/experiments/pairs/models.txt}"))
+mapfile -t all < <(grep -L '^  use: true$' $(grep -v '^#' "${MODELS_FILE:-configs/collect/agentic_models.txt}"))
 open=(); closed=()
 for m in "${all[@]}"; do [[ $m =~ anthropic/|openai/|gemini|mistral-medium ]] && closed+=("$m") || open+=("$m"); done
 models=("${open[@]}" "${closed[@]}")

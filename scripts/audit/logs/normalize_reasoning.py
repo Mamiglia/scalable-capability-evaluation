@@ -19,7 +19,7 @@ the same evidence reaches the judge tagged differently depending on who served t
    reasoning tokens, and the text reads as headed third-person prose). Other gemini variants
    measured at ~1.0-1.3x, i.e. genuine CoT -- do not convert them.
 
-After this, `judge/util.format_reasoning` needs one rule -- show `.reasoning` when the block
+After this, `evals/sample.format_reasoning` needs one rule -- show `.reasoning` when the block
 is not redacted, never anything else -- and `split_think` is dead code.
 
     uv run python scripts/audit/logs/normalize_reasoning.py data/                    # dry run (default)
@@ -44,7 +44,7 @@ from eval_edits import stamp_edit
 def split_think(text: str) -> tuple[str, str]:
     """Split a text block into (inline chain-of-thought, answer).
 
-    Lives here rather than in ``judge/util.py``: once the logs are normalized the judge
+    Lives here rather than in ``evals/sample.py``: once the logs are normalized the judge
     pipeline must never meet an inline ``<think>`` again -- it raises instead. This is the
     one place that still has to parse it.
     """

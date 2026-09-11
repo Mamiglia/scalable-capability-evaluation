@@ -13,7 +13,7 @@ import pandas as pd
 sys.path.insert(0, "src")
 sys.path.insert(0, "scripts/analyses")
 from configs.domain import DomainConfig  # noqa: E402
-from domain.cli import responses  # noqa: E402
+from evals.responses import responses  # noqa: E402
 from domain_collection import DOMAINS, ERA_COLOR, ROSTER  # noqa: E402
 
 plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,

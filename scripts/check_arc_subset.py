@@ -13,7 +13,7 @@ from collections import Counter
 
 from scipy.stats import chisquare
 
-from collect.arc import arc_challenge_cot
+from collect.tasks.arc import arc_challenge_cot
 
 p = argparse.ArgumentParser()
 p.add_argument("--subset", type=int, default=200)
