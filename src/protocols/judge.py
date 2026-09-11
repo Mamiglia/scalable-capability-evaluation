@@ -6,7 +6,7 @@ ranking.verdicts.from_logs turns such a dir into one row per verdict:
     bench, judge, item, model_left, model_right, pick_left (1 = picked the left one)
 
 One PairwiseJudge pools the runs of one judge (typically one dir per semester). For a task it
-keeps the verdicts on the task's train items between two of the task's models, fits
+keeps the verdicts on the task's train items between two of the task's models, fits one set of
 Bradley-Terry abilities (ranking.bradley_terry.rank), and maps ability to theta with a line
 fitted on the references' theta*.
 """
@@ -34,18 +34,18 @@ class PairwiseJudge(Protocol):
             self._verdicts = pd.concat([from_logs(d) for d in self.log_dirs], ignore_index=True)
         return self._verdicts
 
-    def __call__(self, task: Task) -> float:
-        """theta-hat of the target; NaN when the runs do not cover the task."""
-        models = set(task.references) | {task.target}
+    def __call__(self, task: Task) -> pd.Series:
+        """theta-hat per target; NaN for targets (or tasks) the runs do not cover."""
+        models = set(task.models.index)
         verdicts = self.verdicts.merge(task.items[["bench", "item"]])  # train items only
         verdicts = verdicts[verdicts.model_left.isin(models) & verdicts.model_right.isin(models)]
-        judged = set(verdicts.model_left) | set(verdicts.model_right)
-        if task.target not in judged:
-            return np.nan
+        nothing = pd.Series(np.nan, index=task.targets)
+        if verdicts.empty:
+            return nothing
 
         ability = rank(verdicts).set_index("model").ability
         references = ability.index.intersection(task.references)
         if len(references) < 2:  # a line needs two anchors
-            return np.nan
+            return nothing
         slope, intercept = np.polyfit(ability[references], task.theta_ref[references], 1)
-        return intercept + slope * ability[task.target]
+        return intercept + slope * ability.reindex(task.targets)

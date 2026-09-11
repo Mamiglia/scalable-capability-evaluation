@@ -24,16 +24,18 @@ from protocols.judge import PairwiseJudge
 
 
 def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "") -> pd.DataFrame:
-    """Run the protocol on every task; one score row per semester plus "all"."""
-    models = semesters.load(domain)[0]
+    """Run the protocol on every semester task; one score row per semester plus "all"."""
+    frozen_models = semesters.load(domain)[0]
     forecasts = []
     for task in tasks(domain):
-        forecasts.append({
-            "semester": task.semester,
-            "model": task.target,
-            "theta_hat": float(protocol(task)),
-            "theta": models.loc[task.target, f"{task.semester}_theta"],
-        })
+        theta_hat = protocol(task)
+        for target in task.targets:
+            forecasts.append({
+                "semester": task.semester,
+                "model": target,
+                "theta_hat": float(theta_hat[target]),
+                "theta": frozen_models.loc[target, f"{task.semester}_theta"],
+            })
     forecasts = pd.DataFrame(forecasts)
     if name:
         forecasts.to_csv(semesters.frozen_dir(domain) / f"eval_{name}.csv", index=False, float_format="%.4f")
