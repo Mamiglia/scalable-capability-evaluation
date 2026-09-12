@@ -4,11 +4,13 @@
 # 2026-09-08 swaps: mistral-small-2503 -> mistral-small-3.2-24b (3.1's vLLM tool path 400s on stray
 # [TOOL_CALLS] markers), llama-4-scout -> minimax-m1 (Llama 4's pythonic tool calls are parsed by
 # no endpoint on the slug). Both replacements are API-served, so no Runpod skip applies.
+# 2026-09-11: semesters.yml swapped 2025-I llama-4-maverick -> qwen3-30b-a3b, which was already on
+# this list -- maverick is dropped, so 2025-I has 7 agentic models (gemma-3-27b-it is the 8th in
+# semesters.yml and stays excluded here). Keep this file in sync with configs/semesters.yml.
 # 2025-I
 configs/models/deepseek/deepseek-r1-0528.yml
 configs/models/qwen/qwen3-235b-a22b.yml
 configs/models/deepseek/deepseek-v3-0324.yml
-configs/models/meta-llama/llama-4-maverick.yml
 configs/models/qwen/qwen3-32b.yml
 configs/models/qwen/qwen3-30b-a3b.yml
 configs/models/minimax/minimax-m1.yml
