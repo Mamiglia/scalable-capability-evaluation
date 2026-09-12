@@ -40,7 +40,7 @@ def save(fig, stub: Path):
 def theta_figure(models: pd.DataFrame, semesters: list[str], out: Path):
     """a: global theta of every model by semester (roster coloured, others grey). b: local theta* vs global."""
     color = dict(zip(semesters, PALETTE))
-    fig, (a, b) = plt.subplots(1, 2, figsize=(3.4, 1.9), gridspec_kw={"width_ratios": [1.3, 1]})
+    fig, (a, b) = plt.subplots(1, 2, figsize=(3.6, 2.1), gridspec_kw={"width_ratios": [1.3, 1]})
     rng = np.random.default_rng(0)
     for i, semester in enumerate(semesters):
         rows = models[models.semester == semester]
@@ -57,8 +57,9 @@ def theta_figure(models: pd.DataFrame, semesters: list[str], out: Path):
             rows = models[role == which]
             b.errorbar(rows.global_theta, rows[f"{task}_theta"], yerr=rows[f"{task}_theta_sd"], fmt=marker, ms=3,
                        lw=0.8, capsize=0, color=color[task], mfc=color[task] if which == "target" else "white")
-    lo, hi = -3, 3  # global theta of every collected model lies inside; theta* intervals may spill over
-    ticks = [-3, 0, 3]
+    roster = models[models.semester.notna()]  # coding's 2025-I roster goes below -3; theta* intervals may spill over
+    lo, hi = min(-3, np.floor(roster.global_theta.min())), max(3, np.ceil(roster.global_theta.max()))
+    ticks = [lo, 0, hi]
     b.plot([lo, hi], [lo, hi], ls="--", lw=0.8, color=GREY)
     b.set_xlim(lo, hi), b.set_ylim(lo, hi), b.set_xticks(ticks), b.set_yticks(ticks)
     a.set_ylim(lo, hi), a.set_yticks(ticks)
@@ -76,18 +77,18 @@ def difficulty_figure(items: pd.DataFrame, out: Path):
     """Item difficulty b per bench (step histograms), with the discrimination a underneath."""
     benches = sorted(items.bench.unique())
     color = dict(zip(benches, PALETTE))
-    fig, (a, b) = plt.subplots(2, 1, figsize=(2.0, 2.4), sharex=True)
+    fig, (a, b) = plt.subplots(2, 1, figsize=(2.3, 2.9), sharex=True)
     edges = np.linspace(np.floor(items.b.min()), np.ceil(items.b.max()), 25)
     for bench in benches:
         rows = items[items.bench == bench]
         a.hist(rows.b, bins=edges, histtype="step", lw=1, color=color[bench], label=f"{bench} ({len(rows)})")
         b.scatter(rows.b, rows.a, s=4, lw=0, alpha=0.6, color=color[bench])
     a.set_ylabel("Items")
-    b.set_xlabel("Difficulty b"), b.set_ylabel("Discrimination a")
-    b.set_xlim(edges[0], edges[-1])
+    b.set_xlabel("Difficulty b"), b.set_ylabel("Discrim. a")
+    b.set_xlim(edges[0], edges[-1]), b.set_xticks([edges[0], 0, edges[-1]])
     for ax in (a, b):
         offset(ax)
-    a.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=1, frameon=False, handletextpad=0.4)
+    a.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, frameon=False, handletextpad=0.4, columnspacing=0.8, fontsize=6)
     fig.tight_layout(h_pad=0.5)
     save(fig, out / "difficulty")
 
@@ -97,9 +98,11 @@ def accuracy_figure(models: pd.DataFrame, responses: pd.DataFrame, out: Path):
     roster = models[models.semester.notna()].sort_values("global_theta", ascending=False)
     acc = responses[responses.model.isin(roster.index)].groupby(["model", "bench"]).correct.mean().unstack()
     acc = acc.loc[roster.index]
-    # the row labels (model + semester) take ~1.9in; the cells themselves need ~0.25in per bench
-    fig = plt.figure(figsize=(3.3, 0.085 * len(acc) + 0.55))
-    ax = fig.add_axes([0.6, 0.1, 0.25, 0.88])
+    # the row labels (model + semester) take ~1.9in, the cells 0.3in per bench, the colorbar 0.6in
+    label_w, cell_w, cbar_w = 1.9, 0.3 * acc.shape[1], 0.6
+    width = label_w + cell_w + cbar_w
+    fig = plt.figure(figsize=(width, 0.085 * len(acc) + 0.55))
+    ax = fig.add_axes([label_w / width, 0.1, cell_w / width, 0.88])
     im = ax.imshow(acc.to_numpy(float), aspect="auto", cmap="Blues", vmin=0, vmax=1)
     ax.set_xticks(range(acc.shape[1]), acc.columns, rotation=90, ha="center")
     ax.set_yticks(range(len(acc)), [f"{m}  ({s})" for m, s in zip(acc.index, roster.semester)], fontsize=5)
@@ -108,7 +111,7 @@ def accuracy_figure(models: pd.DataFrame, responses: pd.DataFrame, out: Path):
         for j, v in enumerate(row):
             if not np.isnan(v):
                 ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=4.5, color="white" if v > 0.6 else "black")
-    cbar = fig.colorbar(im, cax=fig.add_axes([0.88, 0.1, 0.02, 0.3]), ticks=[0, 0.5, 1])
+    cbar = fig.colorbar(im, cax=fig.add_axes([(label_w + cell_w + 0.1) / width, 0.1, 0.02, 0.3]), ticks=[0, 0.5, 1])
     cbar.set_label("Accuracy")
     cbar.outline.set_visible(False)
     save(fig, out / "accuracy")
