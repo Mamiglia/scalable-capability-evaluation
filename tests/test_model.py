@@ -259,12 +259,12 @@ def test_stalled_pod_is_replaced_once(monkeypatch):
 
 
 def test_wait_raises_stalled_on_silent_log(monkeypatch):
-    import time as _time
-
     monkeypatch.setattr(runpod, "direct_url", lambda pod_id, port: None)
     monkeypatch.setattr(runpod, "is_healthy", lambda url, timeout=3: False)
-    monkeypatch.setattr(runpod, "last_log_time", lambda pod_id: _time.time() - 1000)
+    # The log's newest line never moves; wall and monotonic clocks advance together.
     clock = [0.0]
+    monkeypatch.setattr(runpod, "last_log_time", lambda pod_id: 1e9 - 1000)
+    monkeypatch.setattr(runpod.time, "time", lambda: 1e9 + clock[0])
     monkeypatch.setattr(runpod.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(runpod.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + 61))
 

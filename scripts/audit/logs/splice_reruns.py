@@ -111,6 +111,9 @@ def splice(target: Path, reruns: list[Path], write: bool) -> tuple[int, list[str
         if "accuracy" in sc.metrics and sc.name in accuracies:
             sc.metrics["accuracy"].value = accuracies[sc.name]
     accuracy = accuracies[names[0]]
+    if log.results:
+        # The header count is what validate_data.py reads; the spliced samples are no longer errors.
+        log.results.completed_samples = sum(1 for s in log.samples if not s.error)
     if write:
         stamp_edit(
             log,
