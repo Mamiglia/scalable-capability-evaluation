@@ -75,9 +75,9 @@ def test_verdicts_from_logs(monkeypatch, tmp_path):
     header = SimpleNamespace(status="success", eval=SimpleNamespace(
         model="judge", task="gpqa/big|small", metadata={"bench": "gpqa", "major": "big", "minor": "small", "semester": "s"}))
     summaries = [
-        SimpleNamespace(id="q1_1", scores={"s": SimpleNamespace(answer="1")}),  # big shown left, picked
-        SimpleNamespace(id="q1_2", scores={"s": SimpleNamespace(answer="1")}),  # small shown left, picked
-        SimpleNamespace(id="q2_1", scores={"s": SimpleNamespace(answer=None)}),  # no verdict
+        SimpleNamespace(id="q1_1", scores={"s": SimpleNamespace(answer="1")}, metadata={"chars_1": 900, "chars_2": 900}),  # big shown left, picked
+        SimpleNamespace(id="q1_2", scores={"s": SimpleNamespace(answer="1")}, metadata={"chars_1": 900, "chars_2": 900}),  # small shown left, picked
+        SimpleNamespace(id="q2_1", scores={"s": SimpleNamespace(answer=None)}, metadata={}),  # no verdict
     ]
     monkeypatch.setattr(judge_module, "read_eval_log", lambda *a, **k: header)
     monkeypatch.setattr(judge_module, "read_eval_log_sample_summaries", lambda *a, **k: summaries)

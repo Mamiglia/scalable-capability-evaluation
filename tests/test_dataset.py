@@ -8,6 +8,7 @@ from inspect_ai.model import ModelOutput
 from inspect_ai.scorer import Score
 
 from judge.dataset import (
+    response_chars,
     USER_PROMPT,
     build_dataset,
     has_reasoning,
@@ -16,8 +17,11 @@ from judge.dataset import (
 from evals.transcripts import Transcript, read_transcripts
 
 
-def transcript(text, id="q1", question="Question", options=(), epoch=1):
-    return Transcript(id=id, question=question, text=text, options=tuple(options), epoch=epoch)
+PAD = " " + "." * 30  # past MIN_RESPONSE_CHARS: the pairing tests are not about short answers
+
+
+def transcript(text, id="q1", question="Question", options=(), epoch=1, pad=True):
+    return Transcript(id=id, question=question, text=text + (PAD if pad else ""), options=tuple(options), epoch=epoch)
 
 
 def eval_sample(sample_id, content, correct=True, question=None, choices=None, epoch=1):
@@ -27,7 +31,7 @@ def eval_sample(sample_id, content, correct=True, question=None, choices=None, e
         input=question or f"Q{sample_id}",
         epoch=epoch,
         choices=choices,
-        output=ModelOutput.from_content(model="m", content=content),
+        output=ModelOutput.from_content(model="m", content=content + PAD),
         scores={"scorer": Score(value="C" if correct else "I")},
     )
 
@@ -161,7 +165,7 @@ class TestReadTranscripts:
         by_id = read_transcripts(Path("log.eval"))
 
         assert list(by_id) == ["q1"]
-        assert [t.text for t in by_id["q1"]] == ["first epoch", "second epoch"]
+        assert [t.text.rstrip(". ") for t in by_id["q1"]] == ["first epoch", "second epoch"]
 
     @patch("evals.transcripts.read_eval_log_samples")
     def test_keeps_incorrect_when_not_required(self, mock_samples):
@@ -270,3 +274,16 @@ class TestBuildDataset:
 def test_user_prompt_placeholders():
     for field in ("question", "options_1", "options_2", "transcript_1", "transcript_2"):
         assert "{" + field + "}" in USER_PROMPT
+
+
+def test_response_chars_ignores_role_prefixes_and_short_answers_are_skipped(monkeypatch):
+    assert response_chars("[Assistant]: ANSWER: B") == 9
+    assert response_chars("[User]: follow-up\n[Tool Output (bash)]: ok\n[Assistant]: done") == len("follow-up\nok\ndone")
+    logs = {"a.eval": {"q1": [transcript("[Assistant]: ANSWER: B", pad=False)], "q2": [transcript("[Assistant]: " + "x" * 30, id="q2", pad=False)]},
+            "b.eval": {"q1": [transcript("[Assistant]: " + "y" * 30, pad=False)], "q2": [transcript("[Assistant]: " + "y" * 30, id="q2", pad=False)]}}
+    import judge.dataset as module
+    monkeypatch.setattr(module, "read_transcripts", lambda path, *a, **k: logs[str(path)])
+    monkeypatch.setattr(module, "read_header", lambda path: MagicMock())
+    dataset = build_dataset(Path("a.eval"), Path("b.eval"), include_reasoning=False)
+    assert [s.id for s in dataset.samples] == ["q2_1", "q2_2"]  # q1: one side answer-only
+    assert dataset.samples[0].metadata["response_chars_1"] == 30

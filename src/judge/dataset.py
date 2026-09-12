@@ -5,6 +5,7 @@ transcripts. With ``include_reverse`` each pair also appears in the opposite ord
 is what makes position bias visible in the results.
 """
 
+import re
 from pathlib import Path
 
 from inspect_ai.dataset import MemoryDataset, Sample
@@ -14,6 +15,15 @@ from evals.transcripts import REASONING_MARK, Transcript, read_header, read_tran
 
 # Characters kept per transcript; must match the JudgeConfig default.
 MAX_LENGTH = 262144
+# A pair is judged on an item only if both models wrote at least this much (role prefixes excluded):
+# an answer-only "ANSWER: B" gives the judge nothing to compare. Always on, for every judging pair.
+MIN_RESPONSE_CHARS = 20
+ROLE_PREFIX = re.compile(r"^\[[^\]\n]+\]: ", re.M)  # "[Assistant]: ", "[User]: ", "[Tool Output (f)]: " (evals.sample)
+
+
+def response_chars(text: str) -> int:
+    """Characters the model itself wrote in a shown transcript: the text minus the renderer's role prefixes."""
+    return len(ROLE_PREFIX.sub("", text))
 
 USER_PROMPT = """Input question:
 ---
@@ -104,6 +114,8 @@ def responses_to_sample(
         metadata={
             "chars_1": len(text_1),
             "chars_2": len(text_2),
+            "response_chars_1": response_chars(text_1),
+            "response_chars_2": response_chars(text_2),
             "truncated_1": len(first.text) > max_len,
             "truncated_2": len(second.text) > max_len,
         },
@@ -132,6 +144,7 @@ def build_dataset(
         include_reverse: also add each pair with the transcripts swapped.
         include_reasoning: include CoT reasoning blocks in the transcripts.
         items: question ids to keep (e.g. one difficulty quartile); None = all.
+    Questions where either model wrote fewer than MIN_RESPONSE_CHARS are skipped.
     """
     self_pair = Path(major_path) == Path(minor_path)
     major = read_transcripts(major_path, require_both_correct, include_reasoning, items)
@@ -153,6 +166,8 @@ def build_dataset(
             first, second = major[sample_id][0], major[sample_id][1]
         else:
             first, second = major[sample_id][0], minor[sample_id][0]
+        if min(response_chars(first.text[:max_len]), response_chars(second.text[:max_len])) < MIN_RESPONSE_CHARS:
+            continue  # e.g. an answer-only transcript: nothing for the judge to compare
 
         pair_kwargs = dict(format_str=format_str, max_len=max_len)
         samples.append(responses_to_sample(first, second, target='1', **pair_kwargs))
