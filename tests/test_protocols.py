@@ -54,7 +54,9 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     built = []
     monkeypatch.setattr(judge_module, "judge_task", lambda *a, **k: built.append(k) or SimpleNamespace(name=k["task_name"]))
     tasks = p.tasks(t.train, t.test)
-    assert [x.name for x in tasks] == ["b/a|t", "b/b|t"] and all(k["items"] == {"0"} for k in built)  # 2 refs x 1 target, no t|u, no c
+    # 2 refs x 1 target on item 0, then the reference pair a|b on both items; no t|u, no c
+    assert [x.name for x in tasks] == ["b/a|t", "b/b|t", "b/a|b"]
+    assert [k["items"] for k in built] == [{"0"}, {"0"}, {"0", "1"}]
     assert built[0]["metadata"]["semester"] == "s" and built[0]["metadata"]["major"] == "a"
 
     ran = []
@@ -65,7 +67,7 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     monkeypatch.setattr(judge_module, "is_successful_eval", lambda path: True)
     monkeypatch.setattr(judge_module, "read_header", lambda path: SimpleNamespace(eval=SimpleNamespace(task=path.stem)))
     log_dir.mkdir(parents=True)
-    for name in ("b_a|t", "b_b|t"):
+    for name in ("b_a|t", "b_b|t", "b_a|b"):
         (log_dir / f"{name}.eval").touch()
     monkeypatch.setattr(judge_module, "read_header", lambda path: SimpleNamespace(eval=SimpleNamespace(task=path.stem.replace("_", "/", 1))))
     p.judge(t.train, t.test)

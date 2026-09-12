@@ -7,8 +7,10 @@ is `<item>_<shown position of the reference>`; the scorer's answer "1"/"2" says 
 transcript the judge picked. Tasks already finished in the dir are not re-run (eval_set resumes),
 and a dir with every task finished is only read.
 
-Targets are compared with the references only, never with each other: the references are pinned
-at theta* in the Bradley-Terry fit, so those are the comparisons that place a target.
+Targets are compared with the references, never with each other: the references are pinned
+at theta* in the Bradley-Terry fit, so those are the comparisons that place a target. References
+are also compared with each other: verdicts whose theta* is known on both sides, which JudgeWLS
+uses to calibrate the judge (they do not move a pinned Bradley-Terry fit).
 
 Logs imported from older campaigns (scripts/judge/import_judge_logs.py) sit in the same dir with
 an "(imported)" task-name suffix: they never count as the finished task, and where they overlap
@@ -69,32 +71,35 @@ class JudgeBT(PairwiseBT):
         return self.config.log_dir / self.domain.name / semester / self.config.judge.shortname.lower() / self.config.condition_hash
 
     def tasks(self, train: Cohort, test: Cohort) -> list[Task]:
-        """One judging task per <bench, reference, target>, on the train items both got right."""
+        """One judging task per <bench, reference, target> and per <bench, reference, reference> pair, on the train
+        items both got right. The reference pairs (theta* known on both sides) are the judge's calibration data."""
         tasks = []
         # Bench entries sharing a task name (hle.yml / hle_gold.yml: same items under two hashes)
         # are one bench: the frozen path_<bench> already points at whichever hash has the log.
         benches = {self.domain.task(bench).name: bench for bench in self.domain.benches}
+        references = list(train.models.index)
+        pairs = [(r, t, test) for t in test.models.index for r in references]
+        pairs += [(a, b, train) for i, a in enumerate(references) for b in references[i + 1:]]
         for name, bench in benches.items():
-            for target in test.models.index:
-                for reference in train.models.index:
-                    items = {item for b, item in train.transcripts[reference] if b == name}
-                    items &= {item for b, item in test.transcripts[target] if b == name}
-                    if not items:
-                        continue
-                    task = judge_task(
-                        DATA / train.models.loc[reference, f"path_{name}"], DATA / test.models.loc[target, f"path_{name}"],
-                        system_prompt=bench.system_prompt or self.config.system_prompt,
-                        max_length=self.config.max_length,
-                        include_reverse=self.config.include_reverse,
-                        include_reasoning=self.config.include_reasoning,
-                        task_name=f"{name}/{reference}|{target}",
-                        items=items,
-                        # Data-dir model names, so from_logs reads logs alone.
-                        metadata={"domain": self.domain.name, "bench": name, "major": reference, "minor": target,
-                                  "semester": test.semester},
-                    )
-                    if task is not None:
-                        tasks.append(task)
+            for major, minor, cohort in pairs:
+                items = {item for b, item in train.transcripts[major] if b == name}
+                items &= {item for b, item in cohort.transcripts[minor] if b == name}
+                if not items:
+                    continue
+                task = judge_task(
+                    DATA / train.models.loc[major, f"path_{name}"], DATA / cohort.models.loc[minor, f"path_{name}"],
+                    system_prompt=bench.system_prompt or self.config.system_prompt,
+                    max_length=self.config.max_length,
+                    include_reverse=self.config.include_reverse,
+                    include_reasoning=self.config.include_reasoning,
+                    task_name=f"{name}/{major}|{minor}",
+                    items=items,
+                    # Data-dir model names, so from_logs reads logs alone.
+                    metadata={"domain": self.domain.name, "bench": name, "major": major, "minor": minor,
+                              "semester": test.semester},
+                )
+                if task is not None:
+                    tasks.append(task)
         return tasks
 
     def judge(self, train: Cohort, test: Cohort) -> Path:
