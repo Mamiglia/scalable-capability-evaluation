@@ -50,7 +50,7 @@ Forecasts are on the θ scale by construction, so no shift- or scale-free varian
 uv run collect    1. rollouts of every model on every bench          -> data/<bench>/<hash>/<model>/<repeat>/*.eval
 uv run reference  2. freeze a domain: global 2PL, semester tasks, θ*  -> data/meta/<domain>/{models,items,responses}.csv
                   3. Task.from_semester: reference + target cohorts on the train items
-uv run evaluate   4. judging on demand (JudgeBT)                      -> judge/<domain>/<semester>/<judge>/<hash>/*.eval
+uv run evaluate   4. judging on demand (JudgeBT)                      -> logs/judge/<domain>/<semester>/<judge>/<hash>/*.eval
                   5. fit / predict every protocol, MSE vs θ*          -> data/meta/<domain>/eval_<protocol>.csv
 ```
 
@@ -90,7 +90,7 @@ src/
   judge/        stage 4: judging prompt and dataset, scorer, eval_set runner
   configs/      draccus config dataclasses and the two content hashes
 data/           git submodule synced to Hugging Face: collected logs + frozen tables
-judge/          judge runs (gitignored), one eval_set per <domain, semester, judge, condition>
+logs/           judge runs, its own git repo synced to Hugging Face; logs/judge/ = one eval_set per <domain, semester, judge, condition>
 scripts/        experiment helpers and analyses; nothing in src/ depends on them
 ```
 

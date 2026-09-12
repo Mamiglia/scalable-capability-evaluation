@@ -17,7 +17,7 @@ class JudgeConfig(DraccusConfig):
     max_length: int = 262144  # chars kept per transcript; two must fit the judge's context with its output
     temperature: float = 0.0
     cache: bool = True  # inspect generate cache, never expires: a repeated pair is free
-    log_dir: Path = Path("judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/
+    log_dir: Path = Path("logs/judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/ syncs to the HF judging repo)
     limit: int = 0  # samples per task, for smoke runs (such logs never count as complete)
 
     def __post_init__(self):

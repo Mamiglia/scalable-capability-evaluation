@@ -1,7 +1,7 @@
 """JudgeBT: an LLM judge's verdicts on every (target, reference) pair of the task, judged on demand.
 
 The run is one inspect eval_set per <domain, semester, judge, condition>, stored under
-<config.log_dir>/<domain>/<semester>/<judge>/<condition hash>/: one .eval per <bench, reference,
+<config.log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/judge/ by default): one .eval per <bench, reference,
 target>, on the train items both models got right on repeat 0, in both shown orders. A sample
 is `<item>_<shown position of the reference>`; the scorer's answer "1"/"2" says which shown
 transcript the judge picked. Tasks already finished in the dir are not re-run (eval_set resumes),

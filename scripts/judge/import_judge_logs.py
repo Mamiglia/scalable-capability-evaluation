@@ -4,7 +4,7 @@
 
 A log is imported when it is a successful, untruncated run on one of the domain's benches whose
 two models are a (reference, target) pair of a frozen semester task. It is rewritten into
-judge/<domain>/<semester>/<judge>/<condition hash>/ with:
+logs/judge/<domain>/<semester>/<judge>/<condition hash>/ with:
   - task name  bench/<reference>|<target> (imported)   -- the suffix keeps JudgeBT.judge from
     treating a partial old run as the finished task; its verdicts are pooled with the new run's
     and deduplicated per (item, pair, shown order), the new run winning.
