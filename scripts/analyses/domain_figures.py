@@ -2,7 +2,7 @@
 
     uv run python scripts/analyses/domain_figures.py science
 
-Reads data/meta/<domain>/{models,items,responses}.csv, writes data/meta/<domain>/figures/*.{png,svg}.
+Reads data/meta/<domain>/{models,items,responses}.csv, writes analysis/<domain>/{theta,difficulty,accuracy}.{png,svg}.
 """
 
 import sys
@@ -31,7 +31,8 @@ def offset(ax, x=True, y=True):
 
 
 def save(fig, stub: Path):
-    fig.savefig(stub.with_suffix(".png"), dpi=300, bbox_inches="tight")  # png only: the svgs are not kept in data/
+    fig.savefig(stub.with_suffix(".png"), dpi=300, bbox_inches="tight")
+    fig.savefig(stub.with_suffix(".svg"), bbox_inches="tight")
     plt.close(fig)
     print("wrote", stub.with_suffix(".png"))
 
@@ -122,8 +123,8 @@ def main(domain: str) -> int:
     items = pd.read_csv(root / "items.csv", dtype={"item": str})
     responses = pd.read_csv(root / "responses.csv", dtype={"item": str})
     semesters = [s for s in ["2023", "2024-I", "2024-II", "2025-I", "2025-II", "2026-I"] if s in set(models.semester.dropna())]
-    out = root / "figures"
-    out.mkdir(exist_ok=True)
+    out = Path("analysis") / domain
+    out.mkdir(parents=True, exist_ok=True)
     theta_figure(models, semesters, out)
     difficulty_figure(items, out)
     accuracy_figure(models, responses, out)

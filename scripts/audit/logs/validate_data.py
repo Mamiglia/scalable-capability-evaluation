@@ -114,6 +114,9 @@ def completion_hashes(path: Path, limit: int) -> dict:
     return _cached(path, f"hashes:{limit}", compute)
 
 
+SINGLE_REPEAT = {"swe_bench_mini", "terminal_bench_2_1", "terminal_bench_3", "mmlu_pro_math"}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("roots", nargs="*", type=Path, default=[Path("data")])
@@ -150,8 +153,11 @@ def main() -> int:
                 if is_imported:
                     imported.add(int(repeat_dir.name))
         own = set(usable) - imported
-        if len(usable) < args.min_repeats and (own or not usable):
-            problems.append(f"{model_dir}: {len(usable)} usable repeat(s), need {args.min_repeats}")
+        # Agentic benches (and the 150-item MMLU-Pro subset) are collected once by design: a
+        # sandboxed run costs hours per model and the judging pipeline only reads repeat 0.
+        need = 1 if model_dir.parts[1] in SINGLE_REPEAT else args.min_repeats
+        if len(usable) < need and (own or not usable):
+            problems.append(f"{model_dir}: {len(usable)} usable repeat(s), need {need}")
 
         texts = {}
         for repeat, path in usable.items():

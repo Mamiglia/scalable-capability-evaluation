@@ -81,8 +81,8 @@ def main(domain: str):
     print(table.round(3).to_string())
 
     # Fig 1: per-bench accuracy per model, rows sorted by the anchor bench (best on top), repeats as small points.
-    order = table[anchor].sort_values().index.tolist()
-    fig, axes = plt.subplots(1, len(panels), figsize=(1.1 * len(panels) + 1.1, 5.6), sharey=True)
+    order = table[[b for b, _ in panels]].dropna(how="all")[anchor].sort_values().index.tolist()
+    fig, axes = plt.subplots(1, len(panels), figsize=(1.25 * len(panels) + 1.5, 5.6), sharey=True)
     for ax, (bench, _) in zip(axes, panels):
         sub = per_rep[per_rep.bench == bench]
         for i, m in enumerate(order):
@@ -95,7 +95,7 @@ def main(domain: str):
         guess = resp[resp.bench == bench].guess.mean()
         if guess > 0:
             ax.axvline(guess, lw=.8, ls="--", color="grey")
-        ax.set_xlim(0, 1); ax.set_xticks([0, .5, 1])
+        ax.set_xlim(0, 1); ax.set_xticks([0, .5, 1]); ax.set_xticklabels(["0", ".5", "1"])
         ax.text(0, 1.01, bench, transform=ax.transAxes, color="grey", ha="left", va="bottom")
         offset(ax)
     axes[0].set_yticks(range(len(order))); axes[0].set_yticklabels(order)

@@ -10,12 +10,14 @@ logs/judge/<domain>/<semester>/<judge>/<condition hash>/ with:
     and deduplicated per (item, pair, shown order), the new run winning.
   - metadata   major = reference, minor = target, semester, imported_from
   - samples    ids <item>_<position of the reference>; where the old major was the target the
-    id suffix, target and score value flip so the convention holds.
+    id suffix, target and score value flip so the convention holds. Samples that break the
+    response-length rule (apply_response_rule.py) are dropped.
 The condition hash assumes the config-level default prompt (a bench's own prompt, e.g. mcq for
 gpqa, is applied per bench by JudgeBT and is not part of the hash).
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -26,6 +28,9 @@ from configs.domain import DomainConfig
 from configs.judge import JudgeConfig
 from configs.model import ModelConfig
 from reference import tables
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from apply_response_rule import apply as apply_response_rule  # noqa: E402
 
 AREAS = ["rank", "pilot", "pilot_reasoning", "aime", "apex"]
 SUFFIX = " (imported)"
@@ -104,6 +109,7 @@ def import_log(path: Path, domain: DomainConfig, pairs: dict, benches: set[str],
             flip(sample)
         if log.eval.dataset and log.eval.dataset.sample_ids:
             log.eval.dataset.sample_ids = [s.id for s in log.samples or []]
+    apply_response_rule(log)  # the judging rule holds for imported verdicts too
     out_dir.mkdir(parents=True, exist_ok=True)
     write_eval_log(log, str(out))
     return "imported", out
