@@ -114,7 +114,7 @@ def completion_hashes(path: Path, limit: int) -> dict:
     return _cached(path, f"hashes:{limit}", compute)
 
 
-SINGLE_REPEAT = {"swe_bench_mini", "terminal_bench_2_1", "terminal_bench_3", "mmlu_pro_math"}
+SINGLE_REPEAT = {"swe_bench_mini", "terminal_bench_2_1", "terminal_bench_3", "intercode", "mmlu_pro_math"}
 
 
 def main() -> int:

@@ -1,6 +1,6 @@
-# CYBER: Cybench (+ GDM InterCode-CTF once collected — uncomment).
+# CYBER: Cybench + GDM InterCode-CTF.
 # TBD
 name: cyber
 benches:
   - bench: configs/bench/cybench.yml
-  # - bench: configs/bench/intercode.yml
+  - bench: configs/bench/intercode.yml
