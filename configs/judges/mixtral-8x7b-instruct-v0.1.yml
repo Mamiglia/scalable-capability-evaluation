@@ -1,0 +1,4 @@
+# Reference-as-judge: one of the top-3 references of a science semester (data/meta/science/fit.yml).
+name: mixtral-8x7b-instruct-v0.1
+judge: configs/models/mistralai/mixtral-8x7b-instruct-v0.1.yml
+include_reasoning: false

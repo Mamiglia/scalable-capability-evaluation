@@ -1,0 +1,4 @@
+# Reference-as-judge: one of the top-3 references of a science semester (data/meta/science/fit.yml).
+name: minimax-m2
+judge: configs/models/minimax/minimax-m2.yml
+include_reasoning: false

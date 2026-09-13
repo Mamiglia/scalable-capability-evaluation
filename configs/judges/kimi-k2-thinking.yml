@@ -1,0 +1,4 @@
+# Reference-as-judge: one of the top-3 references of a science semester (data/meta/science/fit.yml).
+name: kimi-k2-thinking
+judge: configs/models/moonshotai/kimi-k2-thinking.yml
+include_reasoning: false

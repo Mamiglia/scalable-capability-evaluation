@@ -1,0 +1,4 @@
+# Reference-as-judge: one of the top-3 references of a science semester (data/meta/science/fit.yml).
+name: nous-hermes-2-yi-34b
+judge: configs/models/nousresearch/nous-hermes-2-yi-34b.yml
+include_reasoning: false

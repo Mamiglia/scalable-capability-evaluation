@@ -1,0 +1,4 @@
+# Reference-as-judge: one of the top-3 references of a science semester (data/meta/science/fit.yml).
+name: qwen3-235b-a22b
+judge: configs/models/qwen/qwen3-235b-a22b.yml
+include_reasoning: false

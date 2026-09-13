@@ -1,0 +1,4 @@
+# Reference-as-judge: one of the top-3 references of a science semester (data/meta/science/fit.yml).
+name: glm-4.7
+judge: configs/models/zai/glm-4.7.yml
+include_reasoning: false

@@ -1,0 +1,4 @@
+# Reference-as-judge: one of the top-3 references of a science semester (data/meta/science/fit.yml).
+name: wizardlm-2-8x22b-hf
+judge: configs/models/microsoft/wizardlm-2-8x22b-hf.yml
+include_reasoning: false

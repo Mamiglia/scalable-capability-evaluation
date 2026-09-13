@@ -1,0 +1,4 @@
+# Reference-as-judge: one of the top-3 references of a science semester (data/meta/science/fit.yml).
+name: deepseek-r1-0528
+judge: configs/models/deepseek/deepseek-r1-0528.yml
+include_reasoning: false

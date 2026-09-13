@@ -1,0 +1,6 @@
+# Reference-as-judge: one of the top-3 references of a science semester (data/meta/science/fit.yml).
+name: minimax-m1
+judge: configs/models/minimax/minimax-m1.yml
+include_reasoning: false
+# novita throttles this model: at 64 connections the run logged ~4k HTTP retries in 20 min (2026-09-12).
+_kwargs: {max_connections: 16}

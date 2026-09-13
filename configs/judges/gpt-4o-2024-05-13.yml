@@ -1,0 +1,4 @@
+# Reference-as-judge: one of the top-3 references of a science semester (data/meta/science/fit.yml).
+name: gpt-4o-2024-05-13
+judge: configs/models/openai/gpt-4o-2024-05-13.yml
+include_reasoning: false
