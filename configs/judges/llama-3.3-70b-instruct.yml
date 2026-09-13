@@ -1,0 +1,7 @@
+# Reference-as-judge: one of the top-3 references of a math semester (data/meta/math/fit.yml).
+name: llama-3.3-70b-instruct
+judge: configs/models/meta-llama/llama-3.3-70b-instruct.yml
+include_reasoning: false
+# crusoe/bf16 has a 131k context but the model config asks 117964 output tokens; a verdict is ~100 tokens,
+# and a long apex/hle transcript pair plus that request could exceed the window (phi-4 did, science 2026-09-12).
+_kwargs: {max_tokens: 4096}

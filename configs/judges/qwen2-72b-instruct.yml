@@ -1,0 +1,4 @@
+# Reference-as-judge: one of the top-3 references of a math semester (data/meta/math/fit.yml).
+name: qwen2-72b-instruct
+judge: configs/models/qwen/qwen2-72b-instruct.yml
+include_reasoning: false
