@@ -17,7 +17,8 @@ def toy_task():
     items = pd.DataFrame({"bench": "b", "item": ["0", "1"], "guess": 0.0, "a": 1.0, "b": 0.0})
     train = task.Cohort(pd.DataFrame({"theta": [0.0, 1.0, 2.0], "path_b": "b/h/0.eval"}, index=pd.Index(list("abc"), name="model")), items, "s")
     test = task.Cohort(pd.DataFrame({"theta": np.nan, "path_b": "b/h/0.eval"}, index=pd.Index(list("tu"), name="model")), items, "s")
-    return task.Task("s", train, test, pd.Series([3.0, 4.0], index=test.models.index))
+    historical = task.Cohort(train.models.iloc[:0], items, "s")
+    return task.Task("s", train, historical, test, pd.Series([3.0, 4.0], index=test.models.index))
 
 
 def toy_judge(tmp_path):
@@ -39,7 +40,7 @@ def test_judge_bt_places_targets_among_pinned_references(tmp_path, monkeypatch):
     monkeypatch.setattr(judge_module, "from_logs", lambda log_dir: pd.DataFrame(rows))
     theta_hat = p(t)
     assert p.name == "judge_j" and theta_hat["t"] > 2 and np.isnan(theta_hat["u"])
-    kept = p.verdicts(t.train, t.test)
+    kept = p.verdicts(t.references, t.test)
     assert len(kept) == len(rows) - 1 and kept[kept.item == "0"].pick_left.eq(1.0).all()
     # verdicts among targets only leave the scale unpinned
     monkeypatch.setattr(judge_module, "from_logs", lambda log_dir: pd.DataFrame(columns=judge_module.VERDICT_COLUMNS))
@@ -50,11 +51,11 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     t = toy_task()
     p = toy_judge(tmp_path)
     # transcripts (cached_property): references a, b solved both items, c none; target t solved item 0, u none
-    t.train.__dict__["transcripts"] = {"a": {("b", "0"): 1, ("b", "1"): 1}, "b": {("b", "0"): 1, ("b", "1"): 1}, "c": {}}
+    t.references.__dict__["transcripts"] = {"a": {("b", "0"): 1, ("b", "1"): 1}, "b": {("b", "0"): 1, ("b", "1"): 1}, "c": {}}
     t.test.__dict__["transcripts"] = {"t": {("b", "0"): 1}, "u": {}}
     built = []
     monkeypatch.setattr(judge_module, "judge_task", lambda *a, **k: built.append(k) or SimpleNamespace(name=k["task_name"]))
-    tasks = p.tasks(t.train, t.test)
+    tasks = p.tasks(t.references, t.test)
     # 2 refs x 1 target on item 0, then the reference pair a|b on both items; no t|u, no c
     assert [x.name for x in tasks] == ["b/a|t", "b/b|t", "b/a|b"]
     assert [k["items"] for k in built] == [{"0"}, {"0"}, {"0", "1"}]
@@ -62,7 +63,7 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
 
     ran = []
     monkeypatch.setattr(judge_module, "run_tasks", lambda tasks, config, log_dir: ran.append(log_dir) or True)
-    log_dir = p.judge(t.train, t.test)
+    log_dir = p.judge(t.references, t.test)
     assert log_dir == tmp_path / "dom" / "s" / "j" / p.config.condition_hash and ran == [log_dir]
     # every task finished in the dir -> read only
     monkeypatch.setattr(judge_module, "is_successful_eval", lambda path: True)
@@ -74,12 +75,12 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     judged = {"b/a|t": ["0"], "b/b|t": ["0"], "b/a|b": ["0", "1"]}
     monkeypatch.setattr(judge_module, "read_eval_log_sample_summaries",
                         lambda path: [SimpleNamespace(id=f"{i}_1") for i in judged[Path(path).stem.replace("_", "/", 1)]])
-    p.judge(t.train, t.test)
+    p.judge(t.references, t.test)
     assert ran == [log_dir]
     # a train item the dir has no verdict on (item 1 of a|b, after a refreeze) is judged on its own
     judged["b/a|b"] = ["0"]
     built.clear()
-    p.judge(t.train, t.test)
+    p.judge(t.references, t.test)
     assert ran == [log_dir, log_dir] and [(k["task_name"], k["items"]) for k in built] == [("b/a|b", {"1"})]
 
 

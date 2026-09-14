@@ -2,7 +2,7 @@
 
 Benchmark-free capability estimation. Can a model's capability be estimated from its
 transcripts alone, without scoring it on a benchmark, and does that work when the estimator
-is a weaker model, calibrated on last year's models and applied to this year's?
+is a weaker model, calibrated on earlier models and applied to this semester's?
 
 Built on [Inspect AI](https://inspect.aisi.org.uk/). Python ≥ 3.13, [`uv`](https://github.com/astral-sh/uv).
 
@@ -22,8 +22,10 @@ within a *domain* (science, math, coding, cyber), so every domain is fit separat
 **Semester tasks.** Models are grouped by release semester (`configs/semesters.yml`, 8 models
 each, 2023 as one semester). A *task* is one semester: the 8 models of the previous semester
 are the **references**, whose θ\* is known, and the 8 models of this semester are the
-**targets**, whose θ\* a protocol must forecast. Calibrating on the references and forecasting
-the targets is exactly the old-to-new question.
+**targets**, whose θ\* a protocol must forecast. Models from semesters before the references
+form the **historical** cohort. `Task.references` and `Task.historical` are disjoint;
+`Task.train` returns their union for supervised fitting. Only models with this task's θ\*
+can enter the historical cohort. Current, future, and unrostered models are excluded.
 
 **EASY, HARD, and θ\*.** For each task the 3 strongest references define the item split:
 items all 3 solve on their first attempt are EASY, items all 3 answered but some failed are
@@ -31,18 +33,28 @@ HARD. A protocol sees only a fixed subset of the EASY items (the *train set*, 25
 quartile) and only correct transcripts on them: nothing about what a model cannot do. The
 ground truth θ\* is fit on the HARD items only, with `a, b, c` fixed to the global fit, so it is
 capability beyond what the easy items measure, and it sits on one scale for every semester.
+Older models receive their own θ\* on this task's HARD items using the same global item
+parameters, in a separate fit that preserves the existing reference/target fit. Models with
+no HARD responses are reported and left unlabelled; no prior-only estimates or another
+semester's labels are substituted. Every cohort uses the same selected EASY items and
+correct repeat-0 transcripts. A cohort's `semester` identifies the task, not a release group.
 
-**Protocols.** A protocol is `fit(references) → predict(targets)`. Two families (or more) exist:
+**Protocols.** Supervised protocols use `fit(task.train) → predict(task.test)`:
 
 - *Tabular regression* on transcript statistics (length, answer length, reasoning length,
-  output tokens): a linear fit of θ\* on the references, applied to the targets.
+  output tokens): preprocessing and regression coefficients fit on references + history,
+  applied to the targets. Models with missing features are excluded from fitting/prediction.
 - *Pairwise judging*: an LLM judge compares a target's transcript with a reference's on the
   same item and picks the more capable model. Every (target, reference) pair is judged, in both
   shown orders. A Bradley-Terry model over the verdicts with the references **pinned at θ\***
-  places each target directly on the θ scale.
+  places each target directly on the θ scale. This protocol uses `task.references` only;
+  expanding history does not expand target pairings. Its likelihood is fixed, with no fitted
+  judge sensitivity or bias and no separate calibration stage. Existing reference–reference
+  judgments have no effect on target estimates; history–history judgments are not added.
 - *Direct judging*: an LLM judge rates each model's correct train transcripts from 1 to 10,
   with available reasoning shown and decimal ratings preserved. A linear calibration maps
-  reference mean ratings to their HARD-item θ*, then forecasts targets from their mean ratings.
+  mean ratings of references + history to their task-specific HARD-item θ*, then forecasts
+  targets from their mean ratings. Judging covers `task.train` and `task.test`.
 
 **Metric.** Mean squared error between θ̂ and θ\* over the targets, per semester and pooled.
 Forecasts are on the θ scale by construction, so no shift- or scale-free variant is reported.
@@ -52,7 +64,7 @@ Forecasts are on the θ scale by construction, so no shift- or scale-free varian
 ```
 uv run collect    1. rollouts of every model on every bench          -> data/<bench>/<hash>/<model>/<repeat>/*.eval
 uv run reference  2. freeze a domain: global 2PL, semester tasks, θ*  -> data/meta/<domain>/{models,items,responses}.csv
-                  3. Task.from_semester: reference + target cohorts on the train items
+                  3. Task.from_semester: references + historical + targets on shared EASY items
 uv run evaluate   4. judging on demand (JudgeBT)                      -> logs/judge/<domain>/<semester>/<judge>/<hash>/*.eval
                   5. fit / predict every protocol, MSE vs θ*          -> data/meta/<domain>/eval_<protocol>.csv
 ```
@@ -72,6 +84,11 @@ uv run evaluate configs/domain/science.yml --protocol chars ridge
 uv run evaluate configs/domain/science.yml --judge configs/judges/gemma4-31b.yml --semester 2026-I
 uv run evaluate configs/domain/science.yml --direct-judge configs/judges/gemma4-31b.yml --semester 2026-I
 ```
+
+Older frozen tables may lack the historical labels. Task construction reports and excludes
+those models, so fitting uses only the available labels until the frozen data is extended.
+Code updates do not modify frozen tables or automatically refit them; prepare and review a
+separate data update before treating results as using the full historical training set.
 
 `--direct-judge` accepts one or more existing judge YAMLs, using `DirectJudgeConfig` defaults
 and showing reasoning even if a reused pairwise config disables it. It defaults to
@@ -146,9 +163,11 @@ include_reasoning: false
 
 Subclass `protocols.Protocol`, implement `fit(train: Cohort)` and `predict(test: Cohort) -> pd.Series`
 (θ̂ indexed by target model, NaN where the protocol has nothing to say), and register an instance
-in `protocols.PROTOCOLS`. A cohort exposes `models` (θ, log paths), `items` (the train items) and
+in `protocols.PROTOCOLS`. The default entry point passes `task.train` to `fit`. A cohort exposes
+`models` (θ, log paths), `items` (the train items) and
 `transcripts` (model → (bench, item) → the correct first-attempt transcript). A comparison-based
-protocol subclasses `protocols.pairwise.PairwiseBT` and implements `verdicts(train, test)` only.
+protocol subclasses `protocols.pairwise.PairwiseBT` and implements `verdicts(train, test)` only;
+its entry point supplies `task.references`, keeping the historical cohort out of BT.
 
 See `CLAUDE.md` for the architecture and `AGENTS.md` for operations: collection sweeps,
 OpenRouter provider pinning, Runpod, resume semantics, data hygiene.

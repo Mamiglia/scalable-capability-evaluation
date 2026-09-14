@@ -1,6 +1,6 @@
 """JudgeDirect: one LLM rating per correct train transcript, judged on demand.
 
-The run mirrors JudgeBT, with one task per <bench, model> for references and targets
+The run uses one task per <bench, model> for references, historical models and targets
 instead of model pairs. Logs live under <log_dir>/direct/<domain>/<semester>/<judge>/<hash>/.
 Item IDs are preserved verbatim; no reverse order or shared-correct intersection applies.
 

@@ -9,8 +9,8 @@ and a dir with every task finished is only read.
 
 Targets are compared with the references, never with each other: the references are pinned
 at theta* in the Bradley-Terry fit, so those are the comparisons that place a target. References
-are also compared with each other: verdicts whose theta* is known on both sides, which JudgeWLS
-uses to calibrate the judge (they do not move a pinned Bradley-Terry fit).
+are also compared with each other under the existing collection scheme. These verdicts do
+not move the pinned Bradley-Terry fit. Historical models are not added to either set of pairs.
 
 Logs imported from older campaigns (scripts/judge/import_judge_logs.py) sit in the same dir with
 an "(imported)" task-name suffix: they never count as the finished task, and where they overlap
@@ -80,7 +80,7 @@ class JudgeBT(PairwiseBT):
 
     def tasks(self, train: Cohort, test: Cohort, done: dict[str, set[str]] | None = None) -> list[Task]:
         """One judging task per <bench, reference, target> and per <bench, reference, reference> pair, on the train
-        items both got right. The reference pairs (theta* known on both sides) are the judge's calibration data."""
+        items both got right. Reference–reference verdicts do not calibrate pinned BT."""
         tasks = []
         # Bench entries sharing a task name (hle.yml / hle_gold.yml: same items under two hashes)
         # are one bench: the frozen path_<bench> already points at whichever hash has the log.

@@ -52,6 +52,7 @@ def test_score_and_roster():
 
 def test_evaluate_on_frozen_tables(tmp_path, monkeypatch):
     monkeypatch.setattr(tables, "META", tmp_path)
+    monkeypatch.setattr(tables, "load_semesters", lambda: {"s1": list("abcd"), "s2": list("efgh")})
     d = tmp_path / "toy"
     d.mkdir()
     models = pd.DataFrame({"model": list("abcdefgh"), "semester": ["s1"] * 4 + ["s2"] * 4, "global_theta": np.arange(8.0),
@@ -61,10 +62,10 @@ def test_evaluate_on_frozen_tables(tmp_path, monkeypatch):
     domain = type("D", (), {"name": "toy", "source": ""})()
     assert evaluate.semester_names(domain) == ["s2"]
     t = task.Task.from_semester("s2", domain)
-    assert t.train.models.index.tolist() == list("abcd") and t.test.models.index.tolist() == list("efgh")
-    assert t.train.theta.tolist() == [0, 1, 2, 3] and t.test.theta.isna().all()  # targets' theta hidden
-    assert t.truth.tolist() == [4, 5, 6, 7] and len(t.train.items) == 4
-    assert t.train.transcripts == {m: {} for m in "abcd"}  # never run on bench b
+    assert t.references.models.index.tolist() == list("abcd") and t.test.models.index.tolist() == list("efgh")
+    assert t.references.theta.tolist() == [0, 1, 2, 3] and t.test.theta.isna().all()  # targets' theta hidden
+    assert t.truth.tolist() == [4, 5, 6, 7] and len(t.references.items) == 4
+    assert t.references.transcripts == {m: {} for m in "abcd"}  # never run on bench b
     truth = models.set_index("model").s2_theta
     table = evaluate.evaluate(domain, lambda t: truth[t.test.models.index], "toy")
     assert table.semester.tolist() == ["s2", "all"] and table.mse.lt(1e-9).all()
