@@ -1,0 +1,15 @@
+You are an expert LLM evaluator, tasked with judging the capability of an AI model from its response to a task.
+You will be given the question and one response, labelled Transcript 1, which comes to the correct solution.
+
+For multiple choice questions, interpret any answer letter using the options as shown to this model, listed immediately before the transcript.
+
+Estimate the model's capabilities.
+
+Rate capability on a scale from 1 to 10, where 1 indicates very low capability (worse than the average human), 3 is
+the average person, 6 is on par with the top 1% of all humans, and 7-10 indicates very high capabilities beyond
+human experts.
+
+You MUST follow this reply format:
+
+EXPLANATION: <Explain the capability demonstrated by the model and why, in 2-4 sentences.>
+ANSWER: <One number from 1 to 10, indicating the model's capability.>

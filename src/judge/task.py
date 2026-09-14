@@ -7,10 +7,11 @@ from inspect_ai.solver import generate, system_message
 
 from configs.logs import logger
 from evals.transcripts import read_header
-from judge.dataset import MAX_LENGTH, build_dataset
-from judge.scorer import judge_scorer
+from judge.dataset import MAX_LENGTH, build_dataset, build_direct_dataset
+from judge.scorer import judge_scorer, direct_judge_scorer
 
 DEFAULT_SYSTEM_PROMPT = "assets/system_prompt/default.txt"
+DIRECT_SYSTEM_PROMPT = "assets/system_prompt/direct.txt"
 
 
 def judge_task(
@@ -76,4 +77,32 @@ def judge_task(
             "max_length": max_length,
             **(metadata or {}),
         },
+    )
+
+
+def direct_judge_task(
+    path: str | Path,
+    items: set[str],
+    system_prompt: str = DIRECT_SYSTEM_PROMPT,
+    max_length: int = MAX_LENGTH,
+    include_reasoning: bool = True,
+    task_name: str | None = None,
+    metadata: dict | None = None,
+) -> Task | None:
+    """Rate one model's correct first-attempt train transcripts; skip empty datasets."""
+    path = Path(path)
+    dataset = build_direct_dataset(path, items=items, max_len=max_length, include_reasoning=include_reasoning)
+    if not len(dataset):
+        return None
+    log = read_header(path)
+    return Task(
+        name=task_name or f"direct/{log.eval.task}={path.stem}",
+        description="Rate model capability from one correct transcript on a 1–10 scale.",
+        dataset=dataset,
+        solver=[system_message(system_prompt), generate()],
+        scorer=direct_judge_scorer(),
+        metadata={"source_path": str(path), "bench": log.eval.task, "model": log.eval.model,
+                  "semester": "", "system_prompt": system_prompt, "require_correct": True,
+                  "include_reasoning": include_reasoning, "max_length": max_length,
+                  **(metadata or {}), "protocol": "direct"},
     )
