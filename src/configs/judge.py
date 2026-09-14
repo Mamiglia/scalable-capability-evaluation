@@ -1,7 +1,7 @@
 """An LLM judge and its judging condition. A JudgeBT protocol (protocols.pairwise) is built from one."""
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from configs.base import DraccusConfig
@@ -22,6 +22,9 @@ class JudgeConfig(DraccusConfig):
     # judge only a stratified subset of the train items: this many per global-b quartile (0 = all),
     # the same items for every pair and judge of a task (seeded). Part of the condition.
     train_per_quartile: int = 0
+    # models (data-dir shortnames) left out of every pair for now, e.g. while their logs are being
+    # repaired; not part of the condition, so their pairs are added to the same run dir later.
+    exclude_models: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         if isinstance(self.judge, (str, Path)):
