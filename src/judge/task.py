@@ -1,5 +1,6 @@
 """One inspect Task: a judge compares two models' correct transcripts of the same items."""
 
+import zlib
 from pathlib import Path
 
 from inspect_ai import Task
@@ -62,6 +63,9 @@ def judge_task(
         name=name,
         description="Judge the responses of two AI models to the same input prompt.",
         dataset=dataset,
+        # eval_set pairs a task with its logs by identity (name, model, config, version), not by
+        # items: an item subset gets its own version so a top-up of a judged pair is run, not skipped.
+        version=zlib.crc32(",".join(sorted(items)).encode()) if items else 0,
         solver=[system_message(system_prompt), generate()],
         scorer=judge_scorer(),
         metadata={
