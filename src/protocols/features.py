@@ -1,7 +1,8 @@
-"""Transcript-statistics baselines and the shared TabularRegression wrapper.
+"""Legacy length baselines and the shared TabularRegression wrapper.
 
 A model is one row of features — the mean log length of its correct train transcripts — and
 a protocol is a sklearn estimator of theta* on some of those columns, fit on the references and historical models.
+The new length/regex/structure GLM feature sets live in transcript_features/features.py.
 """
 
 import re
@@ -50,9 +51,20 @@ class TabularRegression(Protocol):
         self.fitted = False
         
     def get_features(self, cohort: Cohort) -> pd.DataFrame:
+        """Cohort -> float DataFrame of selected columns, with one row per model.
+
+        The default uses legacy mean-log-length features; subclasses supply their
+        own feature tables. Row labels must match cohort.models.index.
+        """
         return feature_table(cohort)[self.features]
 
     def fit(self, train: Cohort) -> None:
+        """Fit a fresh estimator using train's feature rows and matching theta labels.
+
+        Rows with any nonfinite feature or label are excluded. Returns None;
+        fewer than two usable references leaves the estimator marked unfitted.
+        Each call clears the previous fit, including when the new data is unusable.
+        """
         self.fitted = False
         self.estimator = clone(self.estimator)
         x = self.get_features(train)
@@ -64,6 +76,11 @@ class TabularRegression(Protocol):
         self.fitted = True
 
     def predict(self, test: Cohort) -> pd.Series:
+        """Return predicted theta* as a float Series indexed like test.models.
+
+        Uses features only, never test.theta. Nonfinite feature rows receive NaN;
+        if fit has not produced a usable estimator, every prediction is NaN.
+        """
         prediction = pd.Series(np.nan, index=test.models.index)
         if not self.fitted:
             return prediction
