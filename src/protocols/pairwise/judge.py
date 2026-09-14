@@ -118,8 +118,11 @@ class JudgeBT(PairwiseBT):
         log_dir = self.log_dir(test.semester)
         tasks = self.tasks(train, test)
         done = {read_header(p).eval.task for p in log_dir.glob("*.eval") if is_successful_eval(p)}  # imported names differ
-        if any(task.name not in done for task in tasks):
-            if not run_tasks(tasks, self.config, log_dir):
+        # Only the unfinished tasks go to eval_set: a finished task is done by name, whatever eval_set
+        # kwargs (max_tokens, ...) it was judged with, so a config tweak never re-judges the rest.
+        todo = [task for task in tasks if task.name not in done]
+        if todo:
+            if not run_tasks(todo, self.config, log_dir):
                 raise RuntimeError(f"judge run failed in {log_dir}")
         return log_dir
 
