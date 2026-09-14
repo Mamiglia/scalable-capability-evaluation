@@ -51,17 +51,17 @@ def test_read_transcripts_with_items_reads_only_those_samples(monkeypatch):
     assert read == ["q1", "q3", "q2"]
 
 
-def test_build_dataset_refuses_reasoning_on_one_side_only(monkeypatch):
+def test_build_dataset_keeps_pairs_with_reasoning_on_one_side_only(monkeypatch):
     import judge.dataset as module
 
-    with_cot = "<THOUGHT_START>\n think\n<THOUGHT_END>\nANSWER: 1"
-    logs = {"a.eval": {"q1": [transcript(with_cot)]}, "b.eval": {"q1": [transcript("ANSWER: 1")]}}
+    with_cot = "<THOUGHT_START>\n think\n<THOUGHT_END>\nANSWER: 1 and the derivation follows here in some detail."
+    plain = "The answer is 1 because of the derivation given here in some detail.\nANSWER: 1"
+    logs = {"a.eval": {"q1": [transcript(with_cot)]}, "b.eval": {"q1": [transcript(plain)]}}
     monkeypatch.setattr(module, "read_transcripts", lambda path, *a, **k: logs[str(path)])
     monkeypatch.setattr(module, "read_header", lambda path: MagicMock())
-    assert len(build_dataset(Path("a.eval"), Path("b.eval"), include_reasoning=True)) == 0
-    assert len(build_dataset(Path("a.eval"), Path("b.eval"), include_reasoning=False)) == 2  # both hidden: fine
-    logs["b.eval"] = {"q1": [transcript(with_cot)]}
-    assert len(build_dataset(Path("a.eval"), Path("b.eval"), include_reasoning=True)) == 2
+    # a reasoning model vs a non-reasoning one: the trace is shown on the side that has it
+    samples = build_dataset(Path("a.eval"), Path("b.eval"), include_reasoning=True)
+    assert len(samples) == 2 and "<THOUGHT_START>" in samples[0].input and "<THOUGHT_START>" in samples[1].input
 
 
 def test_question_text_takes_user_text_of_chat_inputs():

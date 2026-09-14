@@ -62,6 +62,14 @@ def from_logs(log_dir: str | Path) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=VERDICT_COLUMNS)
 
 
+def stratified_items(items: pd.DataFrame, per_quartile: int, seed: int = 0) -> set[str]:
+    """The task's train items, or a seeded subset of `per_quartile` items per global-b quartile."""
+    if not per_quartile:
+        return set(items.item)
+    quartile = pd.qcut(items.b.rank(method="first"), 4, labels=False)
+    return set(items.groupby(quartile, group_keys=False).apply(lambda g: g.sample(min(per_quartile, len(g)), random_state=seed)).item)
+
+
 class JudgeBT(PairwiseBT):
     def __init__(self, config: JudgeConfig, domain: DomainConfig):
         self.config, self.domain = config, domain
@@ -77,13 +85,14 @@ class JudgeBT(PairwiseBT):
         # Bench entries sharing a task name (hle.yml / hle_gold.yml: same items under two hashes)
         # are one bench: the frozen path_<bench> already points at whichever hash has the log.
         benches = {self.domain.task(bench).name: bench for bench in self.domain.benches}
+        keep = stratified_items(train.items, self.config.train_per_quartile)
         references = list(train.models.index)
         pairs = [(r, t, test) for t in test.models.index for r in references]
         pairs += [(a, b, train) for i, a in enumerate(references) for b in references[i + 1:]]
         for name, bench in benches.items():
             for major, minor, cohort in pairs:
                 items = {item for b, item in train.transcripts[major] if b == name}
-                items &= {item for b, item in cohort.transcripts[minor] if b == name}
+                items &= {item for b, item in cohort.transcripts[minor] if b == name} & keep
                 if not items:
                     continue
                 task = judge_task(

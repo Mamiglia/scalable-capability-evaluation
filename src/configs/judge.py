@@ -19,6 +19,9 @@ class JudgeConfig(DraccusConfig):
     cache: bool = True  # inspect generate cache, never expires: a repeated pair is free
     log_dir: Path = Path("logs/judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/ syncs to the HF judging repo)
     limit: int = 0  # samples per task, for smoke runs (such logs never count as complete)
+    # judge only a stratified subset of the train items: this many per global-b quartile (0 = all),
+    # the same items for every pair and judge of a task (seeded). Part of the condition.
+    train_per_quartile: int = 0
 
     def __post_init__(self):
         if isinstance(self.judge, (str, Path)):
@@ -28,4 +31,6 @@ class JudgeConfig(DraccusConfig):
     def condition_hash(self) -> str:
         condition = (str(self.system_prompt), bool(self.include_reasoning), bool(self.include_reverse),
                      int(self.max_length), float(self.temperature))
+        if self.train_per_quartile:  # appended only when set, so the full-set hashes stay as they were
+            condition += (int(self.train_per_quartile),)
         return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
