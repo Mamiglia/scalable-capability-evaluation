@@ -1,7 +1,8 @@
 """The frozen tables of a domain (data/meta/<domain>/, written by `uv run reference`) and the roster.
 
     models.csv  index model; semester; global_theta; path_<bench> (repeat-0 log, relative to data/);
-                per task <sem>_role (reference / target / blank), <sem>_theta, <sem>_theta_sd
+                per task <sem>_role (reference / historical / target / blank), <sem>_theta, <sem>_theta_sd
+                Historical theta is missing if that model has no responses on this task's HARD set.
     items.csv   bench, item, guess, a, b (+ _sd); per task <sem>_set (easy / hard / ""), <sem>_train
 """
 

@@ -1,17 +1,19 @@
-"""A semester task: a train cohort (the references, theta* known) and a test cohort (the targets).
+"""A semester task: previous-semester references, older history, and current targets.
 
-Built from the frozen tables (reference.tables). Both cohorts sit on the same train items:
-a protocol fits on the references' theta* and forecasts the targets, and it may read the correct
-repeat-0 transcripts of either cohort on those items. The targets' theta* is kept on the task
-for the metric only. Nothing about the HARD items is exposed.
+All cohorts use the same selected EASY items and correct repeat-0 transcripts. Supervised
+protocols fit on train (references + historical); pinned pairwise BT uses references only.
+Labels come from this task's HARD items. Target theta* is kept in truth for evaluation only;
+neither target labels nor HARD responses are exposed through the cohorts.
 """
 
 from dataclasses import dataclass
 from functools import cached_property
 
+import numpy as np
 import pandas as pd
 
 from configs.domain import DomainConfig
+from configs.logs import logger
 from evals.transcripts import Transcript, read_transcripts
 from reference import tables
 
@@ -20,7 +22,11 @@ TRAIN_COLUMNS = ["bench", "item", "guess", "a", "b"]
 
 @dataclass
 class Cohort:
-    """Some models on the train items: their theta (NaN on the test cohort) and their transcripts."""
+    """Models on one task's selected EASY items, possibly from several release semesters.
+
+    semester identifies the evaluation task, not the models' release dates. theta is NaN
+    on the test cohort; labelled cohorts carry this task's HARD-item theta*.
+    """
 
     # Indexed by model: theta, and one column per bench, `path_<bench>`, with the repeat-0 log.
     models: pd.DataFrame
@@ -49,9 +55,16 @@ class Cohort:
 @dataclass
 class Task:
     semester: str
-    train: Cohort  # references, theta = theta*
+    references: Cohort  # previous semester, theta = theta*
+    historical: Cohort  # semesters before the references, theta = this task's theta*
     test: Cohort  # targets, theta = NaN
     truth: pd.Series  # the targets' theta*, for the metric only
+
+    @property
+    def train(self) -> Cohort:
+        """The labelled union of references and history, for supervised protocol fitting."""
+        models = pd.concat([self.references.models, self.historical.models], verify_integrity=True)
+        return Cohort(models, self.references.items, self.semester)
 
     @classmethod
     def from_semester(cls, semester: str, domain: DomainConfig) -> "Task":
@@ -59,7 +72,19 @@ class Task:
         role = frozen_models[f"{semester}_role"]
         models = pd.DataFrame({"theta": frozen_models[f"{semester}_theta"]}).join(frozen_models.filter(like="path_"))
         items = frozen_items[frozen_items[f"{semester}_train"]][TRAIN_COLUMNS].reset_index(drop=True)
-        train = Cohort(models[role == "reference"], items, semester)
+        references = Cohort(models[role == "reference"], items, semester)
+        rosters = tables.load_semesters()
+        semesters = list(rosters)
+        earlier = semesters[:max(0, semesters.index(semester) - 1)]
+        older_models = {model for past in earlier for model in rosters[past]}
+        historical = (frozen_models.semester.isin(earlier) & models.index.isin(older_models)
+                      & ~role.isin(["reference", "target"]))
+        missing = historical & ~np.isfinite(models.theta)
+        if missing.any():
+            logger.warning("%s: no task-specific theta*; excluding historical models %s. "
+                           "Check HARD coverage and extend the frozen labels before fitting on full history.",
+                           semester, models.index[missing].tolist())
+        historical = Cohort(models[historical & ~missing], items, semester)
         truth = models.theta[role == "target"]
         test = Cohort(models[role == "target"].assign(theta=float("nan")), items, semester)
-        return cls(semester, train, test, truth)
+        return cls(semester, references, historical, test, truth)

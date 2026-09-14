@@ -1,6 +1,7 @@
 """Benchmark-free protocols: a Protocol maps a semester Task (capability.task) to theta-hat of its targets.
 
-fit sees the train cohort (references with theta*), predict the test cohort (targets, theta NaN).
+fit sees train (references + historical models with task-specific theta*), predict sees targets
+with theta NaN. PairwiseBT overrides this routing to use only the previous-semester references.
 To add one: subclass Protocol, give it a `name`, and add an instance to PROTOCOLS below;
 `uv run evaluate` picks it up. Protocols that need arguments (JudgeBT needs a judge's logs)
 are constructed by the CLI instead.

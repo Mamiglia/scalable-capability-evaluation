@@ -48,9 +48,9 @@ def main(domain_path: str, judge_path: str, semester: str) -> int:
     domain = DomainConfig.from_cli(Path(domain_path))
     protocol = JudgeBT(JudgeConfig.from_cli(Path(judge_path)), domain)
     task = Task.from_semester(semester, domain)
-    verdicts = from_logs(protocol.log_dir(semester)).merge(task.train.items[["bench", "item"]])
-    references, targets = task.train.models.index, task.test.models.index
-    theta = pd.concat([task.train.theta, task.truth])
+    verdicts = from_logs(protocol.log_dir(semester)).merge(task.references.items[["bench", "item"]])
+    references, targets = task.references.models.index, task.test.models.index
+    theta = pd.concat([task.references.theta, task.truth])
 
     # one row per verdict as (target, reference, target_picked, target_shown_first)
     is_target_left = verdicts.model_left.isin(targets)
@@ -62,7 +62,7 @@ def main(domain_path: str, judge_path: str, semester: str) -> int:
         "bench": verdicts.bench,
     })
     rows = rows[rows.target.isin(targets) & rows.reference.isin(references)]
-    protocol.fit(task.train)
+    protocol.fit(task.references)
     theta_hat = protocol.predict(task.test)
 
     fig, axes = plt.subplots(2, 2, figsize=(4.4, 3.8), gridspec_kw={"height_ratios": [1.25, 1]})
@@ -95,7 +95,7 @@ def main(domain_path: str, judge_path: str, semester: str) -> int:
     # c. theta-hat against theta*
     lo, hi = -3, 3
     c.plot([lo, hi], [lo, hi], ls="--", lw=0.8, color=GREY)
-    c.scatter(task.train.theta, task.train.theta, s=12, marker="s", facecolor="white", edgecolor="k", lw=0.6, label="reference (pinned)")
+    c.scatter(task.references.theta, task.references.theta, s=12, marker="s", facecolor="white", edgecolor="k", lw=0.6, label="reference (pinned)")
     c.scatter(task.truth[targets], theta_hat[targets], s=12, color=ORANGE, lw=0, label="target")
     off = [m for m in theta_hat[targets].sort_values(ascending=False).index if theta_hat[m] - task.truth[m] > 1]
     for i, m in enumerate(off):  # stacked so the labels of the over-shot targets do not collide

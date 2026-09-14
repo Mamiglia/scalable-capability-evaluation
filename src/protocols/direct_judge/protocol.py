@@ -1,11 +1,10 @@
-"""DirectRegression: mean ratings calibrated to the references' HARD-item
-theta* (matching pairwise).
+"""DirectRegression: mean ratings calibrated to the training models' HARD-item theta*.
 
 Implemented to roughly match structure of ../pairwise.
 
-A subclass supplies direct scores on correct train transcripts. Like PairwiseBT,
-fit keeps the references and predict obtains judgments for both cohorts on demand.
-Only reference theta* enters the calibration; targets are returned on the same scale.
+A subclass supplies direct scores on correct train transcripts. fit keeps task.train
+(references + historical models) and predict obtains judgments for training models and
+targets on demand. Only training theta* enters calibration; target theta is never read.
 """
 
 import pandas as pd

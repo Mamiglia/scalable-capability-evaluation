@@ -212,10 +212,12 @@ def test_evaluate_cli_loads_judge_yamls_and_writes_direct_forecasts(tmp_path, mo
     domain_path.write_text("name: d\nbenches: []\n")
     model_path.write_text("name: j\nslug: mockllm/model\n")
     judge_path.write_text(f"name: j\njudge: {model_path}\ninclude_reasoning: false\n")
-    models = pd.DataFrame({"s_role": ["reference", "reference", "target"], "s_theta": [0., 2., 5.],
+    models = pd.DataFrame({"semester": ["previous", "previous", "s"],
+                           "s_role": ["reference", "reference", "target"], "s_theta": [0., 2., 5.],
                            "path_b": str(source)}, index=["r1", "r2", "t"])
     items = pd.DataFrame({"bench": ["b"], "item": ["short"], "guess": [0.], "a": [1.], "b": [0.], "s_train": [True]})
     monkeypatch.setattr(tables, "load", lambda domain: (models, items))
+    monkeypatch.setattr(tables, "load_semesters", lambda: {"previous": ["r1", "r2"], "s": ["t"]})
     monkeypatch.setattr(tables, "frozen_dir", lambda domain: tmp_path)
 
     def direct_scores(self, train, test):

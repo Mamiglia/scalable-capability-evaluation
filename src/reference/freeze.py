@@ -15,7 +15,9 @@ only once the domain's collection is complete). `build` runs the steps in order:
       generation never ran), out of the task. The train set is a fixed, seeded subset of EASY
       (--train N per quartile of global b; 0 = all EASY), item-level so identical for every model.
    b. LOCAL IRT: theta* of references + targets on the HARD items with a, b, guess fixed to the
-      global fit, so every semester's theta* is on the global scale. theta* is what protocols forecast.
+      global fit. Older models are fitted separately on the same HARD set, preserving the original
+      reference/target fit. Historical models without HARD responses are reported and left unlabelled.
+      Every task's theta* is on the global scale; another task's labels are never substituted.
 4. WRITE      models.csv, items.csv, responses.csv (the fit input), fit.yml (settings + provenance).
 
 The frozen columns a consumer needs are listed in reference.tables, which reads them back.
@@ -150,14 +152,14 @@ def local_fit(responses: pd.DataFrame, hard: pd.DataFrame, models: list[str], wa
     return theta
 
 
-def semester_task(semester: str, references: list[str], targets: list[str], responses: pd.DataFrame,
+def semester_task(semester: str, references: list[str], targets: list[str], historical: list[str], responses: pd.DataFrame,
                   models: pd.DataFrame, items: pd.DataFrame, train: int, warmup: int, samples: int,
                   seed: int) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     """Steps 3a-3b for one semester.
 
     Returns
         item_columns:  <sem>_set, <sem>_train, aligned with `items`
-        model_columns: <sem>_role, <sem>_theta, <sem>_theta_sd, indexed by model (references + targets)
+        model_columns: <sem>_role, <sem>_theta, <sem>_theta_sd (references + targets + history)
         top:           the TOP_K references that defined EASY / HARD
     """
     top = models.global_theta.loc[references].nlargest(TOP_K).index.tolist()
@@ -165,11 +167,22 @@ def semester_task(semester: str, references: list[str], targets: list[str], resp
     logger.info("%s: %d references, %d targets; top %s; items %s, %d train",
                 semester, len(references), len(targets), top, split.set.value_counts().to_dict(), int(split.train.sum()))
     logger.info("%s: local 2PL fit (theta only) on the HARD items...", semester)
-    theta = local_fit(responses, items[split.set == "hard"], references + targets, warmup, samples, seed)
+    hard = items[split.set == "hard"]
+    theta = local_fit(responses, hard, references + targets, warmup, samples, seed)
+    observed = set(responses.merge(hard[["bench", "item"]]).model)
+    missing = sorted(set(historical) - observed)
+    if missing:
+        logger.warning("%s: historical models lack HARD responses; leaving theta* missing: %s", semester, missing)
+    available = [m for m in historical if m in observed]
+    if available:
+        older_theta = local_fit(responses, hard, available, warmup, samples, seed)
+        theta = pd.concat([theta, older_theta])
 
-    role = pd.concat([pd.Series("reference", index=references), pd.Series("target", index=targets)]).rename("role")
-    print(theta.join(role).round(2).to_string())
-    return split.add_prefix(f"{semester}_"), theta.join(role)[["role", "theta", "theta_sd"]].add_prefix(f"{semester}_"), top
+    role = pd.concat([pd.Series("reference", index=references), pd.Series("target", index=targets),
+                      pd.Series("historical", index=historical)]).rename("role")
+    labels = role.to_frame().join(theta)
+    print(labels.round(2).to_string())
+    return split.add_prefix(f"{semester}_"), labels.add_prefix(f"{semester}_"), top
 
 
 # ----------------------------------------------------------------------------- build
@@ -240,12 +253,13 @@ def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, for
 
     # 3. One task per semester from the second on.
     top_per_semester = {}
-    for semester in list(semesters)[1:]:
+    for index, semester in enumerate(list(semesters)[1:], start=1):
         references, targets = roster(semesters, semester, set(responses.model))
         if not references:
             continue
+        historical = [m for past in list(semesters)[:index - 1] for m in semesters[past] if m in models.index]
         item_columns, model_columns, top = semester_task(
-            semester, references, targets, responses, models, items, train, warmup, samples, seed)
+            semester, references, targets, historical, responses, models, items, train, warmup, samples, seed)
         items = items.join(item_columns)
         models = models.join(model_columns)
         top_per_semester[semester] = top

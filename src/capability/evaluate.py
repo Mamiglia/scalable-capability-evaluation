@@ -3,7 +3,7 @@
     uv run evaluate configs/domain/science.yml [--protocol chars ridge ...] [--semester 2026-I ...]
 
 --protocol selects entries of protocols.PROTOCOLS (default: all). --judge adds pairwise
-judging; --direct-judge adds direct ratings calibrated on reference capability.
+judging; --direct-judge adds direct ratings calibrated on reference + historical capability.
 Both take judge YAMLs and collect missing judgments on demand. --semester restricts the tasks.
 
 Scores are per semester and pooled over all semesters ("all"; valid because every local fit
@@ -29,7 +29,7 @@ from reference import tables
 def score(pred: pd.Series, truth: pd.Series) -> dict:
     """MSE of theta-hat against theta* over the models both series index; NaN forecasts are dropped.
 
-    Every protocol forecasts on the theta scale (the references' theta* anchor it), so the raw
+    Every protocol forecasts on the task's theta* scale, so the raw
     squared error is the metric: no shift/scale-free variant.
     """
     pred, truth = pred.align(truth, join="inner")

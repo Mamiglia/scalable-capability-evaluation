@@ -1,7 +1,7 @@
-"""Transcript-statistics baselines: theta-hat from how much a model writes on the train items.
+"""Transcript-statistics baselines and the shared TabularRegression wrapper.
 
 A model is one row of features — the mean log length of its correct train transcripts — and
-a protocol is a sklearn estimator of theta* on some of those columns, fit on the references.
+a protocol is a sklearn estimator of theta* on some of those columns, fit on the references and historical models.
 """
 
 import re
@@ -11,7 +11,7 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.base import RegressorMixin as SKlearnRegressor
+from sklearn.base import RegressorMixin as SKlearnRegressor, clone
 
 from capability.task import Cohort
 from protocols import Protocol
@@ -37,29 +37,43 @@ def feature_table(cohort: Cohort) -> pd.DataFrame:
     rows = {}
     for model, transcripts in cohort.transcripts.items():
         table = pd.DataFrame([{name: f(t) for name, f in FEATURES.items()} for t in transcripts.values()],
-                             columns=list(FEATURES))
+                             columns=list(FEATURES), dtype=float)
         rows[model] = np.log1p(table).mean()
     return pd.DataFrame(rows).T.reindex(cohort.models.index)
 
 
 class TabularRegression(Protocol):
-    """A sklearn estimator of theta* on some feature columns, fit on the references."""
+    """Regress task-specific theta* on feature columns; incomplete rows remain unpredicted."""
 
     def __init__(self, name: str, features: list[str], estimator : SKlearnRegressor):
         self.name, self.features, self.estimator = name, features, estimator
+        self.fitted = False
         
     def get_features(self, cohort: Cohort) -> pd.DataFrame:
         return feature_table(cohort)[self.features]
 
     def fit(self, train: Cohort) -> None:
+        self.fitted = False
+        self.estimator = clone(self.estimator)
         x = self.get_features(train)
-        self.estimator.fit(x, train.theta)
+        y = train.theta.reindex(x.index)
+        known = np.isfinite(x).all(axis=1) & np.isfinite(y)
+        if known.sum() < 2:
+            return
+        self.estimator.fit(x.loc[known], y.loc[known])
+        self.fitted = True
 
     def predict(self, test: Cohort) -> pd.Series:
+        prediction = pd.Series(np.nan, index=test.models.index)
+        if not self.fitted:
+            return prediction
         x = self.get_features(test)
-        return pd.Series(self.estimator.predict(x), index=x.index)
+        known = np.isfinite(x).all(axis=1)
+        if known.any():
+            prediction.loc[x.index[known]] = self.estimator.predict(x.loc[known])
+        return prediction
 
 
 PROTOCOLS: dict[str, Protocol] = {f: TabularRegression(f, [f], LinearRegression()) for f in FEATURES}
-# Eight references against four collinear features: standardise and shrink, or the fit is arbitrary.
+# Small training cohorts against collinear features: standardise and shrink, or the fit is arbitrary.
 PROTOCOLS["ridge"] = TabularRegression("ridge", list(FEATURES), make_pipeline(StandardScaler(), Ridge(1.0)))

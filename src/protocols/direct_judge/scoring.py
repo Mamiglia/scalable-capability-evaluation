@@ -1,4 +1,4 @@
-"""Mean direct ratings -> capability, linearly calibrated on the references' theta*.
+"""Mean direct ratings -> capability, linearly calibrated on the training models' theta*.
 
 One row per judgment: bench, model, item, score (a number from 1 to 10, decimals preserved).
 Repeated judging epochs are averaged per transcript before taking the model mean.
@@ -23,11 +23,11 @@ def mean_scores(scores: pd.DataFrame) -> pd.Series:
 
 
 def calibrate(scores: pd.DataFrame, anchors: pd.Series) -> pd.Series:
-    """theta-hat indexed by model: OLS of reference theta* on their mean ratings.
+    """theta-hat indexed by model: OLS of training theta* on their mean ratings.
 
-    Each reference contributes one row. Missing ratings or theta* are excluded; fewer
-    than two usable references leaves every forecast NaN. Constant reference ratings
-    produce a zero slope and the mean reference theta*. Forecasts are not clipped.
+    Each training model (reference or historical) contributes one row. Missing ratings or
+    theta* are excluded; fewer than two usable models leaves every forecast NaN. Constant
+    training ratings produce a zero slope and the mean training theta*. Forecasts are not clipped.
     """
     means = mean_scores(scores)
     reference = means.reindex(anchors.index)
