@@ -77,6 +77,10 @@ def split_gemma_thought(text: str) -> tuple[str, str] | None:
     if not THOUGHT_PREFIX.match(text):
         return None
     body = THOUGHT_PREFIX.sub("", text, count=1)
+    if "<channel|>" in body:
+        # The closing token survived (parasail on tool-call turns): an exact boundary.
+        thought, answer = body.split("<channel|>", 1)
+        return thought, answer
     joins = list(GLUE.finditer(body))
     if len(joins) == 1:
         cut = joins[0].end()
@@ -119,13 +123,19 @@ def normalize_message(message, to_summary: bool) -> tuple[int, int, int]:
             if thinking.strip():
                 out.append(ContentReasoning(type="reasoning", reasoning=thinking.strip()))
                 split += 1
+            elif not answer.strip():
+                # A bare `<think>` and nothing else: the model opened a thought and stopped.
+                # Keep it as an empty reasoning block so no inline tag survives.
+                out.append(ContentReasoning(type="reasoning", reasoning=""))
+                split += 1
             if answer.strip():
                 out.append(ContentText(type="text", text=answer))
             continue
         if kind == "text" and (parts := split_gemma_thought(block.text or "")):
             thinking, answer = parts
             out.append(ContentReasoning(type="reasoning", reasoning=thinking.strip()))
-            out.append(ContentText(type="text", text=answer.strip()))
+            if answer.strip():   # a tool-call turn can be thought only
+                out.append(ContentText(type="text", text=answer.strip()))
             split += 1
             continue
         if kind == "reasoning" and not getattr(block, "redacted", False):
