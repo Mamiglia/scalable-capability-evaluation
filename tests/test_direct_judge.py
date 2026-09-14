@@ -1,15 +1,45 @@
-"""Direct judging: correct first attempts and numeric ratings."""
+"""Direct judging: correct first attempts, numeric ratings, and Inspect log compatibility."""
 
 from types import SimpleNamespace
+from pathlib import Path
+from dataclasses import replace
 
 import numpy as np
+import pandas as pd
 import pytest
+from inspect_ai import eval as inspect_eval
 from inspect_ai.log import EvalConfig, EvalDataset, EvalLog, EvalSample, EvalSpec, write_eval_log
-from inspect_ai.model import ChatMessageAssistant, ChatMessageUser, ContentReasoning, ContentText, ModelOutput
+from inspect_ai.model import ChatMessageAssistant, ChatMessageUser, ContentReasoning, ContentText, ModelOutput, ModelUsage, get_model
 from inspect_ai.scorer import Score, Target
 
+from capability.task import Cohort
+from configs.domain import DomainBench, DomainConfig
+from configs import DirectJudgeConfig
+from configs.judge import JudgeConfig
+from configs.model import ModelConfig
 from judge.dataset import build_direct_dataset
 from judge.scorer import direct_judge_scorer
+from judge.task import direct_judge_task
+from protocols.direct_judge import JudgeDirect, from_logs
+from protocols.direct_judge.scoring import calibrate, mean_scores
+
+
+def test_direct_config_defaults_and_condition_identity(tmp_path):
+    config = DirectJudgeConfig.from_cli({"name": "j", "judge": {"name": "j", "slug": "mockllm/model"}})
+    assert config.system_prompt == "assets/system_prompt/direct.txt"
+    assert config.include_reasoning and not config.include_reverse
+    pairwise = JudgeConfig(name="j", judge=config.judge, system_prompt=config.system_prompt,
+                           include_reasoning=True, include_reverse=False)
+    assert config.condition_hash != pairwise.condition_hash
+    assert replace(config, include_reverse=True).condition_hash == config.condition_hash
+    for change in ({"include_reasoning": False}, {"max_length": 100}, {"temperature": 0.5}):
+        assert replace(config, **change).condition_hash != config.condition_hash
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("First rating prompt.")
+    changed = replace(config, system_prompt=str(prompt))
+    previous = changed.condition_hash
+    prompt.write_text("Revised rating prompt.")
+    assert changed.condition_hash != previous
 
 
 def source_log(tmp_path):
@@ -26,7 +56,6 @@ def source_log(tmp_path):
                   samples=samples)
     write_eval_log(log, path)
     return path
-
 
 
 def test_dataset_uses_correct_first_attempts_with_options_and_reasoning_control(tmp_path):
@@ -51,7 +80,6 @@ def test_dataset_uses_correct_first_attempts_with_options_and_reasoning_control(
             build_direct_dataset(path, items={"short"}, max_len=length)
 
 
-
 async def test_decimal_ratings_stay_unrounded_and_invalid_answers_stay_missing():
     scorer = direct_judge_scorer()
     for text, expected in [("ANSWER: 1", 1.), ("**ANSWER:** $7.5$", 7.5), ("ANSWER: 10", 10.),
@@ -67,3 +95,84 @@ async def test_decimal_ratings_stay_unrounded_and_invalid_answers_stay_missing()
     explained = await scorer(SimpleNamespace(output=ModelOutput.from_content(
         "judge", "EXPLANATION: Clear reasoning.\nANSWER: 7.5")), Target(""))
     assert explained.explanation == "Clear reasoning."
+    scores = pd.DataFrame({"model": ["a", "a", "b", "t"], "item": ["0", "1", "0", "0"],
+                           "bench": "b", "score": [1., 2., 3.5, 5.5]})
+    assert mean_scores(scores)["b"] == 3.5
+    assert calibrate(scores, pd.Series({"a": 0., "b": 2.}))["t"] == pytest.approx(4.)
+
+
+def test_direct_protocol_shows_reasoning_when_reusing_pairwise_config(tmp_path):
+    path = source_log(tmp_path)
+    items = pd.DataFrame({"bench": ["b"], "item": ["short"]})
+    train = Cohort(pd.DataFrame({"theta": [0.], "path_b": [str(path)]}, index=["r"]), items, "s")
+    test = Cohort(pd.DataFrame({"theta": [np.nan], "path_b": [str(path)]}, index=["t"]), items, "s")
+    domain = DomainConfig(name="d", benches=[DomainBench(bench="b")])
+    domain.task = lambda bench: SimpleNamespace(name="b")
+    config = JudgeConfig(name="j", judge=ModelConfig(name="j", slug="mockllm/model"),
+                         system_prompt="assets/system_prompt/direct.txt", include_reasoning=False)
+    judge = JudgeDirect(config, domain)
+    tasks = judge.tasks(train, test)
+    assert len(tasks) == 2
+    assert all("Private reasoning" in task.dataset[0].input for task in tasks)
+    assert all(task.metadata["include_reasoning"] for task in tasks)
+    assert judge.config.include_reasoning and not config.include_reasoning
+    assert judge.config.condition_hash != config.condition_hash
+
+
+def test_benchmark_prompt_overrides_and_log_identity_use_the_same_resolution(tmp_path):
+    path = source_log(tmp_path)
+    first, chosen = tmp_path / "first.txt", tmp_path / "chosen.txt"
+    first.write_text("First benchmark prompt.")
+    chosen.write_text("Chosen benchmark prompt.")
+    domain = DomainConfig.from_cli({"name": "d", "benches": [
+        {"bench": "b", "direct_system_prompt": str(first)},
+        {"bench": "b_alias", "direct_system_prompt": str(chosen), "system_prompt": "pairwise.txt"},
+    ]})
+    domain.task = lambda bench: SimpleNamespace(name="b")
+    items = pd.DataFrame({"bench": ["b"], "item": ["short"]})
+    train = Cohort(pd.DataFrame({"theta": [0.], "path_b": [str(path)]}, index=["r"]), items, "s")
+    test = Cohort(pd.DataFrame({"theta": [np.nan], "path_b": [str(path)]}, index=["t"]), items, "s")
+    config = DirectJudgeConfig(name="j", judge=ModelConfig(name="j", slug="mockllm/model"), log_dir=tmp_path)
+    judge = JudgeDirect(config, domain)
+    tasks = judge.tasks(train, test)
+    assert [task.name for task in tasks] == ["b/r", "b/t"]
+    assert all(task.metadata["system_prompt"] == str(chosen) for task in tasks)
+    before = judge.log_dir("s")
+    first.write_text("An unused alias must not change the run.")
+    domain.benches[-1].system_prompt = "another-pairwise.txt"
+    assert judge.log_dir("s") == before
+    chosen.write_text("Revised chosen prompt.")
+    assert judge.log_dir("s") != before
+    domain.benches[-1].direct_system_prompt = ""
+    fallback = judge.log_dir("s")
+    assert all(task.metadata["system_prompt"] == config.system_prompt for task in judge.tasks(train, test))
+    chosen.write_text("An unused override must not change the run.")
+    assert judge.log_dir("s") == fallback
+
+
+def test_direct_task_roundtrips_decimal_and_missing_scores_through_inspect(tmp_path, monkeypatch):
+    # Keep Inspect's trace/cache files inside the test directory.
+    from inspect_ai._util import appdirs
+    monkeypatch.setattr(appdirs, "user_data_path", lambda name: tmp_path / "inspect-data")
+    monkeypatch.setattr(appdirs, "user_cache_path", lambda name: tmp_path / "inspect-cache")
+    path = source_log(tmp_path)
+    assert direct_judge_task(path, items={"wrong"}) is None
+    task = direct_judge_task(path, items={"short", "unselected"}, task_name="b/m",
+                             metadata={"bench": "b", "model": "m", "semester": "s"})
+    assert task.metadata["protocol"] == "direct" and task.metadata["require_correct"]
+    assert task.metadata["source_path"] == str(path)
+    assert task.metadata["include_reasoning"] is True
+    outputs = [ModelOutput.from_content("mockllm/model", text)
+               for text in ("EXPLANATION: Clear reasoning.\nANSWER: 7.5", "No rating.")]
+    for output in outputs:
+        output.usage = ModelUsage(input_tokens=1, output_tokens=1, total_tokens=2)  # no tokenizer download
+    logs = inspect_eval(task, model=get_model("mockllm/model", custom_outputs=outputs),
+                        log_dir=str(tmp_path / "judgments"), display="none", max_samples=1)
+    assert logs[0].status == "success", logs[0].error
+    table = from_logs(tmp_path / "judgments")
+    assert table[["model", "item", "score"]].to_dict("records") == [
+        {"model": "m", "item": "short", "score": 7.5}]
+    assert mean_scores(table)["m"] == 7.5
+    system = next(m.content for m in logs[0].samples[0].messages if m.role == "system")
+    assert system == Path("assets/system_prompt/direct.txt").read_text()
+    assert any("Private reasoning" in m.text for m in logs[0].samples[0].messages if m.role == "user")

@@ -1,4 +1,4 @@
-"""An LLM judge and its judging condition. A JudgeBT protocol (protocols.pairwise) is built from one."""
+"""An LLM judge and its pairwise or direct judging condition."""
 
 import hashlib
 from dataclasses import dataclass
@@ -10,6 +10,7 @@ from configs.model import ModelConfig
 
 @dataclass(kw_only=True)
 class JudgeConfig(DraccusConfig):
+    # Pairwise judging
     judge: ModelConfig | str
     system_prompt: str = "assets/system_prompt/default.txt"  # a DomainBench.system_prompt overrides it per bench
     include_reasoning: bool = False  # show the models' reasoning blocks to the judge
@@ -27,5 +28,21 @@ class JudgeConfig(DraccusConfig):
     @property
     def condition_hash(self) -> str:
         condition = (str(self.system_prompt), bool(self.include_reasoning), bool(self.include_reverse),
+                     int(self.max_length), float(self.temperature))
+        return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
+
+
+@dataclass(kw_only=True)
+class DirectJudgeConfig(JudgeConfig):
+    """Direct judging defaults"""
+
+    system_prompt: str = "assets/system_prompt/direct.txt"
+    include_reasoning: bool = True
+    include_reverse: bool = False  # accepted for compatibility; unused by direct judging
+
+    @property
+    def condition_hash(self) -> str:
+        prompt = Path(self.system_prompt).read_text(encoding="utf-8")
+        condition = ("direct", prompt, bool(self.include_reasoning),
                      int(self.max_length), float(self.temperature))
         return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
