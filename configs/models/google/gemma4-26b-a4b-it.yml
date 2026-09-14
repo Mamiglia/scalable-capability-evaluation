@@ -1,15 +1,34 @@
-# Quantization: Unquantized BF16 (NextBit)
+# Quantization: Unquantized BF16 (vLLM / Runpod). Self-hosted since 2026-09-14: the OpenRouter
+# NextBit endpoint ignored enable_thinking on the 2026-08-12 aime/gpqa runs (no CoT at all).
 name: google/gemma-4-26B-A4B-it
-slug: openrouter/google/gemma-4-26b-a4b-it
+slug: vllm/google/gemma-4-26B-A4B-it
 release_date: '2026-03-31'
 generate_args:
+  max_tokens: 122880
   extra_body:
-    reasoning:
-      enabled: true
-model_args:
-  provider:
-    only:
-    - nextbit/bf16
-    allow_fallbacks: false
-    quantizations:
-    - bf16
+    chat_template_kwargs:
+      enable_thinking: true
+runpod:
+  use: true
+  model: google/gemma-4-26B-A4B-it   # gated: HF_TOKEN must have accepted the Gemma license
+  name: small-judge-gemma4-26b-a4b
+  cloud_type: SECURE
+  # ~52GB of bf16 MoE weights, TP=2 on 2x80GB (A40 pairs leave ~17GB KV per card, too tight at 131k).
+  gpu_id: NVIDIA A100 80GB PCIe
+  gpu_count: 2
+  fallback_gpus: ["NVIDIA A100-SXM4-80GB", "NVIDIA H100 PCIe", "NVIDIA H100 80GB HBM3", "NVIDIA H100 NVL", "NVIDIA H200"]
+  env: {NCCL_P2P_DISABLE: "1", HF_HUB_ENABLE_HF_TRANSFER: "1"}
+  container_disk_in_gb: 160
+  ready_timeout: 3600
+  stall_timeout: 1800
+  vllm_args:
+    - --tensor-parallel-size
+    - "2"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "131072"
+    - --reasoning-parser
+    - gemma4
+    - --enable-auto-tool-choice
+    - --tool-call-parser
+    - gemma4

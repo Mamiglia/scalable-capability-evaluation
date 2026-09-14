@@ -1,0 +1,10 @@
+# Reasoning-on twin of configs/judges/glm-4.5.yml: the subjects' reasoning traces are shown (a plain model's
+# transcript is shown as is), nothing is truncated, and a pair too long for the judge's context is left
+# unscored (fail_on_error off) instead of failing the task.
+name: glm-4.5
+judge: configs/models/zai/glm-4.5.yml
+include_reasoning: true
+max_length: 100000000
+_kwargs: {fail_on_error: false, max_tokens: 32768}
+# 2026-I judge: the most expensive task, judged on 10 train items per global-b quartile (seeded, same for every pair).
+train_per_quartile: 10

@@ -1,29 +1,42 @@
-# Quantization: FP8 (Parasail), 262144 ctx / 235929 output.
-# Repin 2026-09-09 (was venice/bf16): as an HLE-gold *subject* this model hit venice's
-# 8192 output cap on 54% of samples (acc 0.193), far past the contract's 20% bar. No bf16
-# endpoint has headroom - novita/bf16 declares 131072 but is status -2 and rejects requests
-# as "input is longer than the model's context length" depending on max_tokens rather than
-# the prompt (probed 2026-08-27); coreweave dropped its bf16 endpoint on long prompts.
-# Crusoe/Phala/Together/SambaNova declare no precision; DeepInfra and Friendli cap at 8192-16384;
-# Cerebras fp16 returns no reasoning. So parasail/fp8 is the only healthy endpoint that is
-# both declared and long enough - a bf16 -> fp8 drop, taken because truncation biases
-# deliberate: capability is biased far more by truncation than by the quantization drop.
-# Judge note: this model is also the study's judge. Verdicts collected before this date were
-# served at venice/bf16; judge runs from here on are fp8. Verdicts run ~1-4k tokens either way.
-
+# Quantization: Unquantized BF16 (vLLM / Runpod). Self-hosted since 2026-09-14.
+# History: venice/bf16 on OpenRouter capped output at 8192 (54% of HLE-gold samples truncated);
+# the 2026-09-09 repin to parasail/fp8 fixed the cap at a precision drop; the 2026-08-12 aime
+# runs on OpenInference silently ignored enable_thinking (no CoT at all); and the July local
+# vLLM run had no reasoning parser, so the thought came back glued to the answer. Self-hosting
+# with vLLM's gemma4 reasoning parser removes every one of those: bf16, our cap, our parser.
+# Judge note: this model is also the study's judge. Judge verdicts before 2026-09-09 were
+# venice/bf16, 2026-09-09..13 parasail/fp8, from here on this pod.
 name: google/gemma-4-31b-it
-slug: openrouter/google/gemma-4-31b-it
+slug: vllm/google/gemma-4-31b-it
 release_date: '2026-03-31'
 generate_args:
-  max_tokens: 235929
+  max_tokens: 122880   # 131072 context minus room for the prompt
   extra_body:
-    reasoning:
-      enabled: true
-model_args:
-  provider:
-    only:
-    - parasail/fp8
-    allow_fallbacks: false
-    require_parameters: true
-    quantizations:
-    - fp8
+    chat_template_kwargs:
+      enable_thinking: true
+runpod:
+  use: true
+  model: google/gemma-4-31b-it   # gated: HF_TOKEN must have accepted the Gemma license
+  name: small-judge-gemma4-31b
+  cloud_type: SECURE
+  # 62GB of bf16 weights, TP=2: 2x80GB leaves ~40GB of KV per card at 131k context.
+  # 2x48GB (A40) leaves ~12GB per card, too little for HLE/apex-length generations.
+  gpu_id: NVIDIA A100 80GB PCIe
+  gpu_count: 2
+  fallback_gpus: ["NVIDIA A100-SXM4-80GB", "NVIDIA H100 PCIe", "NVIDIA H100 80GB HBM3", "NVIDIA H100 NVL", "NVIDIA H200"]
+  # PCIe hosts ship with GPU peer-to-peer broken; a 2-GPU pod needs both flags explicitly.
+  env: {NCCL_P2P_DISABLE: "1", HF_HUB_ENABLE_HF_TRANSFER: "1"}
+  container_disk_in_gb: 160
+  ready_timeout: 3600
+  stall_timeout: 1800   # vLLM logs nothing while it downloads 62GB
+  vllm_args:
+    - --tensor-parallel-size
+    - "2"
+    - --disable-custom-all-reduce
+    - --max-model-len
+    - "131072"
+    - --reasoning-parser
+    - gemma4
+    - --enable-auto-tool-choice
+    - --tool-call-parser
+    - gemma4

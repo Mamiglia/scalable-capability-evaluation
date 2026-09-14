@@ -11,7 +11,7 @@ from pathlib import Path
 from inspect_ai.dataset import MemoryDataset, Sample
 
 from configs.logs import logger
-from evals.transcripts import REASONING_MARK, Transcript, read_header, read_transcripts
+from evals.transcripts import Transcript, read_header, read_transcripts
 
 # Characters kept per transcript; must match the JudgeConfig default.
 MAX_LENGTH = 262144
@@ -168,12 +168,8 @@ def build_dataset(
     minor = major if self_pair else read_transcripts(minor_path, require_both_correct, include_reasoning, items)
 
     ids = major.keys() & minor.keys()
-    if include_reasoning and ids and not self_pair:
-        # Reasoning shown on one side only is not a comparison of models: refuse the pair.
-        shown = [any(REASONING_MARK in t.text for i in ids for t in side[i]) for side in (major, minor)]
-        if shown[0] != shown[1]:
-            logger.warning("%s vs %s: reasoning present on one side only, refusing the pair", major_path, minor_path)
-            ids = set()
+    # With include_reasoning a reasoning model's trace is shown and a non-reasoning model's
+    # transcript is shown as is: mixed pairs are judged like any other.
     samples = []
     for sample_id in sorted(ids):
         if self_pair:

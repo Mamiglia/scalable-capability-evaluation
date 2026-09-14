@@ -26,6 +26,9 @@ class DomainConfig(DraccusConfig):
     benches: List[DomainBench]
     # Model configs whose logs feed the fit; empty = every configs/models/**/*.yml.
     models: List[str] = field(default_factory=list)
+    # Models (data-dir shortnames) kept out of every judged pair of this domain for now, e.g. while
+    # their logs are being repaired (JudgeConfig.exclude_models is the per-judge equivalent).
+    exclude_models: List[str] = field(default_factory=list)
     source: str = ""  # path this config was parsed from
 
     @classmethod

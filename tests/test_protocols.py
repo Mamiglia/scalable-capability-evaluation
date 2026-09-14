@@ -81,3 +81,19 @@ def test_tabular_regression(monkeypatch):
                         lambda cohort: pd.DataFrame({"chars": [chars[m] for m in cohort.models.index]}, index=cohort.models.index))
     theta_hat = features.TabularRegression("chars", ["chars"], LinearRegression())(t)
     assert np.allclose(theta_hat[["t", "u"]], [3.0, -1.0])
+
+
+def test_stratified_items_is_seeded_per_quartile_and_off_by_default():
+    import pandas as pd
+
+    from configs.judge import JudgeConfig
+    from protocols.pairwise.judge import stratified_items
+
+    items = pd.DataFrame({"bench": "b", "item": [str(i) for i in range(100)], "b": range(100)})
+    assert stratified_items(items, 0) == set(items.item)
+    picked = stratified_items(items, 10)
+    assert len(picked) == 40 and picked == stratified_items(items, 10)
+    assert sum(int(i) < 25 for i in picked) == 10  # 10 from the easiest quartile
+    cfg = dict(name="x", judge="configs/models/zai/glm-4.7.yml", include_reasoning=False)
+    assert JudgeConfig.from_cli(cfg).condition_hash == "7ea04f2b"  # unchanged with the default
+    assert JudgeConfig.from_cli(cfg | {"train_per_quartile": 10}).condition_hash != "7ea04f2b"

@@ -26,6 +26,12 @@ Flags (per log, as a rate over the samples read):
   reas_lost     usage reports reasoning tokens but no reasoning content was recovered
   reas_thin     recovered reasoning is far shorter than the reasoning tokens billed
                 -> summary-like even when the block is not marked redacted
+  reas_inline   CoT sits in the text as an un-normalized inline <think> block -> dropped at
+                render time; normalize_reasoning.py fixes it
+  thought_inline gemma-4 CoT glued into the text: vLLM stripped the <|channel>thought /
+                <channel|> tokens, leaving a text that starts with the word `thought` and
+                runs into the answer with no separator. The judge reads the CoT in *both*
+                arms; normalize_reasoning.py splits it
   think_open    inline <think> never closed -> whole budget on CoT, no answer
   no_answer_field the bench's scorer never records an answer at all (nl2bash, cybashbench,
                 math500, the agentic benches) -- structural, not a per-model parser defect
@@ -78,6 +84,9 @@ SELF_ID = re.compile(
     rf"(?i)\b(?:I am|I'm|I was|trained by|developed by|created by|made by)\b[^.\n]{{0,80}}\b(?:{VENDORS})\b"
 )
 THINK_OPEN = re.compile(r"<think>(?!.*</think>)", re.S)
+# Gemma-4 served by vLLM with special tokens stripped: `<|channel>thought\n...<channel|>`
+# survives only as a leading "thought\n". normalize_reasoning.THOUGHT_PREFIX is the same rule.
+THOUGHT_PREFIX = re.compile(r"\A\s*thought\n")
 
 
 def asked_for_reasoning(header) -> bool:
@@ -90,8 +99,13 @@ def asked_for_reasoning(header) -> bool:
     dumped = config.model_dump(exclude_none=True) if config else {}
     if dumped.get("reasoning_effort") or dumped.get("reasoning_tokens") or dumped.get("reasoning_summary"):
         return True
-    reasoning = (dumped.get("extra_body") or {}).get("reasoning") or {}
-    return bool(reasoning.get("enabled") or reasoning.get("effort") or reasoning.get("max_tokens"))
+    extra = dumped.get("extra_body") or {}
+    reasoning = extra.get("reasoning") or {}
+    if reasoning.get("enabled") or reasoning.get("effort") or reasoning.get("max_tokens"):
+        return True
+    # The chat-template form (qwen3 / gemma-4 style). Providers can ignore it silently: the
+    # 2026-08-12 gemma-4 aime/gpqa runs asked this way and got answers with no thinking.
+    return bool((extra.get("chat_template_kwargs") or {}).get("enable_thinking"))
 
 
 def scan(path: Path, limit: int) -> dict:
@@ -169,6 +183,10 @@ def scan(path: Path, limit: int) -> dict:
                         reasoning_chars += len(text)
                         if THINK_OPEN.search(text):
                             counts["think_open"] += 1
+                    elif msg.role == "assistant" and THOUGHT_PREFIX.match(text):
+                        has_reasoning = True
+                        counts["thought_inline"] += 1
+                        reasoning_chars += len(text)
             # Three shapes, by what the judge is shown for this sample. An un-normalized
             # inline <think> is dropped at render time, so it is not `plain` here -- the
             # reas_inline counter reports it separately, and normalize_reasoning.py fixes it.
@@ -221,6 +239,10 @@ def selfcheck() -> int:
     assert not SELF_ID.search("Compare the OpenAI and Google results in Table 2.")
     assert THINK_OPEN.search("<think> reasoning that never ends")
     assert not THINK_OPEN.search("<think>a</think> ANSWER: B")
+    assert THOUGHT_PREFIX.match("thought\n*   Energy levels...")
+    assert not THOUGHT_PREFIX.match("The thought\nexperiment shows")
+    assert "thought_inline 100%" in flags({"n": 10, "thought_inline": 10, "reasoning": 10}, 0.10)
+    assert "reas_inline 50%" in flags({"n": 10, "reas_inline": 5, "reasoning": 10}, 0.10)
     assert flags({"n": 20, "unparsed": 8, "reasoning": 0}, 0.10) == ["unparsed 40%"]
     assert "no_reasoning 0%" in flags({"n": 20, "reasoning": 0, "asked_reasoning": True}, 0.10)
     assert flags({"n": 20, "unparsed": 1, "reasoning": 20, "asked_reasoning": True}, 0.10) == []
@@ -266,8 +288,8 @@ def flags(row: dict, thresh: float) -> list[str]:
         row = {**row, "unparsed": 0}
     if n and row.get("short_tx", 0) / n >= max(thresh, 0.5):
         out.append(f"short_tx {row['short_tx']/n:.0%} (~{row.get('tx_chars_noreas',0)//n}ch)")
-    for key in ("unparsed", "truncated", "no_output", "think_open", "media", "self_id",
-                "degenerate", "empty_tx", "render_err", "multi_scorer", "reas_empty"):
+    for key in ("unparsed", "truncated", "no_output", "reas_inline", "thought_inline", "think_open",
+                "media", "self_id", "degenerate", "empty_tx", "render_err", "multi_scorer", "reas_empty"):
         if n and row.get(key, 0) / n >= thresh:
             out.append(f"{key} {row[key]/n:.0%}")
     if row.get("asked_reasoning") and n and row.get("reasoning", 0) / n < 0.5:
