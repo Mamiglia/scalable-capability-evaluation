@@ -104,8 +104,9 @@ class JudgeDirect(DirectRegression):
         log_dir = self.log_dir(test.semester)
         tasks = self.tasks(train, test)
         done = {read_header(p).eval.task for p in log_dir.glob("*.eval") if is_successful_eval(p)}
-        if any(task.name not in done for task in tasks):
-            if not run_tasks(tasks, self.config, log_dir):
+        todo = [task for task in tasks if task.name not in done]
+        if todo:
+            if not run_tasks(todo, self.config, log_dir):
                 raise RuntimeError(f"direct judge run failed in {log_dir}")
         return log_dir
 

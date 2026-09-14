@@ -178,6 +178,30 @@ def test_direct_task_roundtrips_decimal_and_missing_scores_through_inspect(tmp_p
     assert any("Private reasoning" in m.text for m in logs[0].samples[0].messages if m.role == "user")
 
 
+def test_direct_judge_submits_only_unfinished_tasks(tmp_path, monkeypatch):
+    from protocols.direct_judge import judge as judge_module
+
+    config = DirectJudgeConfig(name="j", judge=ModelConfig(name="j", slug="mockllm/model"), log_dir=tmp_path)
+    judge = JudgeDirect(config, DomainConfig(name="d", benches=[]))
+    tasks = [SimpleNamespace(name="b/done"), SimpleNamespace(name="b/new")]
+    monkeypatch.setattr(judge, "tasks", lambda train, test: tasks)
+    log_dir = judge.log_dir("s")
+    log_dir.mkdir(parents=True)
+    log = EvalLog(status="success", eval=EvalSpec(created="2026-09-14T12:00:00Z", task="b/done",
+                  dataset=EvalDataset(name="b", samples=1), model="mockllm/model", config=EvalConfig()))
+    write_eval_log(log, log_dir / "done.eval")
+    submitted = []
+    monkeypatch.setattr(judge_module, "run_tasks",
+                        lambda tasks, config, path: submitted.append([task.name for task in tasks]) or True)
+
+    assert judge.judge(None, SimpleNamespace(semester="s")) == log_dir
+    assert submitted == [["b/new"]]
+    log.eval.task = "b/new"
+    write_eval_log(log, log_dir / "new.eval")
+    judge.judge(None, SimpleNamespace(semester="s"))
+    assert submitted == [["b/new"]]
+
+
 def test_evaluate_cli_loads_judge_yamls_and_writes_direct_forecasts(tmp_path, monkeypatch, capsys):
     from capability import evaluate
     from protocols.pairwise import JudgeBT
