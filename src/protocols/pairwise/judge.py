@@ -89,7 +89,8 @@ class JudgeBT(PairwiseBT):
         references = list(train.models.index)
         pairs = [(r, t, test) for t in test.models.index for r in references]
         pairs += [(a, b, train) for i, a in enumerate(references) for b in references[i + 1:]]
-        pairs = [p for p in pairs if not {p[0], p[1]} & set(self.config.exclude_models)]
+        excluded = set(self.config.exclude_models) | set(self.domain.exclude_models)
+        pairs = [p for p in pairs if not {p[0], p[1]} & excluded]
         for name, bench in benches.items():
             for major, minor, cohort in pairs:
                 items = {item for b, item in train.transcripts[major] if b == name}
