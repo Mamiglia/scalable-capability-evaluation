@@ -1,0 +1,17 @@
+# JUDGE-ONLY endpoint for MiniMax-M1: the MiniMax first-party endpoint (precision undeclared,
+# $0.40/$2.20 per M, 40k output cap) instead of novita/bf16, which 429-throttles judging to a crawl
+# (20k+ retries, ~40 h per 2025-II run, 2026-09-14). Same `name`, so verdicts land in the same
+# logs/judge/<domain>/<sem>/minimax-m1/ dirs. Never collect subject data with this config.
+name: MiniMaxAI/MiniMax-M1
+slug: openrouter/minimax/minimax-m1
+release_date: '2025-06-16'
+model_args:
+  provider:
+    only:
+    - minimax
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 40000
+  extra_body:
+    reasoning:
+      enabled: true
