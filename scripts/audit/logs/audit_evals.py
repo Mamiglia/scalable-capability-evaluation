@@ -97,7 +97,9 @@ def asked_for_reasoning(header) -> bool:
     """
     config = header.eval.model_generate_config
     dumped = config.model_dump(exclude_none=True) if config else {}
-    if dumped.get("reasoning_effort") or dumped.get("reasoning_tokens") or dumped.get("reasoning_summary"):
+    # reasoning_effort "none" (the `_none` imports) is a request for *no* reasoning.
+    effort = dumped.get("reasoning_effort")
+    if (effort and effort != "none") or dumped.get("reasoning_tokens") or dumped.get("reasoning_summary"):
         return True
     extra = dumped.get("extra_body") or {}
     reasoning = extra.get("reasoning") or {}
