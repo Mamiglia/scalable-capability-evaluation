@@ -179,7 +179,8 @@ def parse_direct_judge_output(output_text: str):
     text = output_text or ""
     answers = []
     for line in text.splitlines():
-        if re.match(r"^[ \t]*[*_`]*(?:ANSWER|EXPLANATION)[*_`]*:", line, re.I):
+        # A final field may follow a sentence on the same line; keep quoted mentions out.
+        if re.search(r"(?:^|[.!?])[ \t]*[*_`]*(?:ANSWER|EXPLANATION)[*_`]*:", line, re.I):
             fields = list(re.finditer(r"[*_`]*ANSWER[*_`]*:[*_`]*[ \t]*", line, re.I))
             if fields:
                 answers.append(line[fields[-1].end():])
