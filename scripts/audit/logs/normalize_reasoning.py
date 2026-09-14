@@ -11,7 +11,14 @@ the same evidence reaches the judge tagged differently depending on who served t
    text field at all (claude-opus-4.7, gemini-3.1-flash-lite). It is not CoT and holds nothing
    recoverable, so it is marked ``redacted`` and renders as nothing. Detected structurally --
    no model list, the block itself is the evidence.
-3. **a provider *thought summary* returned in `.reasoning` with `redacted=False`**
+3. **gemma-4 CoT glued into the text** (local vLLM 2026-07-17/18 and the Runpod e2b runs):
+   the chat template wraps thinking in ``<|channel>thought\n…<channel|>`` and vLLM stripped
+   the special tokens, so the text starts with the literal word ``thought`` and the answer
+   follows the CoT with *no separator* ("…This matches.To find the concentration…"). Split
+   at the one place a sentence end is glued to a capitalised word; if there is none, the
+   answer is the trailing ``ANSWER:`` line. A text with no such point, or more than one, is
+   left alone and stays flagged ``thought_inline`` by audit_evals.py.
+4. **a provider *thought summary* returned in `.reasoning` with `redacted=False`**
    -> moved to `.summary` with `redacted=True`, which is what it actually is: the real CoT
    never left the provider. Nothing in the log marks this, so it is gated on an explicit
    ``--summary-models`` list that **defaults to empty** -- never guessed, never a family-wide
@@ -31,6 +38,7 @@ Every rewritten log is stamped via ``eval_edits.stamp_edit``. Dry run touches no
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -57,6 +65,27 @@ def split_think(text: str) -> tuple[str, str]:
     return "", text
 
 
+THOUGHT_PREFIX = re.compile(r"\A\s*thought\n")
+# Sentence end glued to a capitalised word with no whitespace: the spot where `<channel|>`
+# was. Wider classes (`)`, `$`, `*`) match chemistry and markdown inside the CoT.
+GLUE = re.compile(r"[.!?](?=[A-Z][a-z])")
+TRAILING_ANSWER = re.compile(r"\n\n(ANSWER:[^\n]*)\s*\Z")
+
+
+def split_gemma_thought(text: str) -> tuple[str, str] | None:
+    """Split a stripped-token gemma-4 text into (thought, answer), or None if ambiguous."""
+    if not THOUGHT_PREFIX.match(text):
+        return None
+    body = THOUGHT_PREFIX.sub("", text, count=1)
+    joins = list(GLUE.finditer(body))
+    if len(joins) == 1:
+        cut = joins[0].end()
+        return body[:cut], body[cut:]
+    if not joins and (m := TRAILING_ANSWER.search(body)):
+        return body[:m.start()], m.group(1)
+    return None
+
+
 def is_signature_payload(reasoning: str) -> bool:
     """True for a JSON envelope that carries a signature but no reasoning text."""
     text = reasoning.lstrip()
@@ -78,7 +107,7 @@ def normalize_message(message, to_summary: bool) -> tuple[int, int, int]:
     """Rewrite one assistant message in place. Returns (inline split, summaries moved, payloads)."""
     content = message.content
     if not isinstance(content, list):
-        if not isinstance(content, str) or "<think>" not in content:
+        if not isinstance(content, str) or ("<think>" not in content and not THOUGHT_PREFIX.match(content)):
             return 0, 0, 0
         content = [ContentText(type="text", text=content)]
 
@@ -92,6 +121,12 @@ def normalize_message(message, to_summary: bool) -> tuple[int, int, int]:
                 split += 1
             if answer.strip():
                 out.append(ContentText(type="text", text=answer))
+            continue
+        if kind == "text" and (parts := split_gemma_thought(block.text or "")):
+            thinking, answer = parts
+            out.append(ContentReasoning(type="reasoning", reasoning=thinking.strip()))
+            out.append(ContentText(type="text", text=answer.strip()))
+            split += 1
             continue
         if kind == "reasoning" and not getattr(block, "redacted", False):
             body = getattr(block, "reasoning", "") or ""
@@ -129,7 +164,7 @@ def normalize_log(path: Path, to_summary: bool, write: bool) -> tuple[int, int, 
     if (split or moved or payloads) and write:
         reason = []
         if split:
-            reason.append(f"{split} inline <think> block(s) split into ContentReasoning")
+            reason.append(f"{split} inline <think> / glued gemma-4 thought block(s) split into ContentReasoning")
         if moved:
             reason.append(f"{moved} provider summary block(s) moved from .reasoning to .summary")
         if payloads:
