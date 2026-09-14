@@ -40,6 +40,9 @@ capability beyond what the easy items measure, and it sits on one scale for ever
   same item and picks the more capable model. Every (target, reference) pair is judged, in both
   shown orders. A Bradley-Terry model over the verdicts with the references **pinned at θ\***
   places each target directly on the θ scale.
+- *Direct judging*: an LLM judge rates each model's correct train transcripts from 1 to 10,
+  with available reasoning shown and decimal ratings preserved. A linear calibration maps
+  reference mean ratings to their HARD-item θ*, then forecasts targets from their mean ratings.
 
 **Metric.** Mean squared error between θ̂ and θ\* over the targets, per semester and pooled.
 Forecasts are on the θ scale by construction, so no shift- or scale-free variant is reported.
@@ -67,7 +70,17 @@ uv run reference configs/domain/science.yml
 # 4+5. score protocols; --judge adds an LLM judge and runs the judging it is missing (costs money)
 uv run evaluate configs/domain/science.yml --protocol chars ridge
 uv run evaluate configs/domain/science.yml --judge configs/judges/gemma4-31b.yml --semester 2026-I
+uv run evaluate configs/domain/science.yml --direct-judge configs/judges/gemma4-31b.yml --semester 2026-I
 ```
+
+`--direct-judge` accepts one or more existing judge YAMLs, using `DirectJudgeConfig` defaults
+and showing reasoning even if a reused pairwise config disables it. It defaults to
+`assets/system_prompt/direct.txt`; a domain bench can override this with `direct_system_prompt`.
+An explicit `system_prompt` in the judge YAML must be a direct-rating prompt.
+Direct logs live in `logs/judge/direct/<domain>/<semester>/<judge>/<condition hash>/`, and
+forecasts go to `data/meta/<domain>/eval_direct_judge_<judge>.csv`. Missing judgments are collected
+on demand. `--judge` and `--direct-judge` can be used together; baseline selection still uses
+`--protocol` (all baselines by default).
 
 ## Layout
 

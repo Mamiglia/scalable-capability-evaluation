@@ -176,3 +176,41 @@ def test_direct_task_roundtrips_decimal_and_missing_scores_through_inspect(tmp_p
     system = next(m.content for m in logs[0].samples[0].messages if m.role == "system")
     assert system == Path("assets/system_prompt/direct.txt").read_text()
     assert any("Private reasoning" in m.text for m in logs[0].samples[0].messages if m.role == "user")
+
+
+def test_evaluate_cli_loads_judge_yamls_and_writes_direct_forecasts(tmp_path, monkeypatch, capsys):
+    from capability import evaluate
+    from protocols.pairwise import JudgeBT
+    from reference import tables
+
+    source = source_log(tmp_path)
+    domain_path, model_path, judge_path = (tmp_path / name for name in ("domain.yml", "model.yml", "judge.yml"))
+    domain_path.write_text("name: d\nbenches: []\n")
+    model_path.write_text("name: j\nslug: mockllm/model\n")
+    judge_path.write_text(f"name: j\njudge: {model_path}\ninclude_reasoning: false\n")
+    models = pd.DataFrame({"s_role": ["reference", "reference", "target"], "s_theta": [0., 2., 5.],
+                           "path_b": str(source)}, index=["r1", "r2", "t"])
+    items = pd.DataFrame({"bench": ["b"], "item": ["short"], "guess": [0.], "a": [1.], "b": [0.], "s_train": [True]})
+    monkeypatch.setattr(tables, "load", lambda domain: (models, items))
+    monkeypatch.setattr(tables, "frozen_dir", lambda domain: tmp_path)
+
+    def direct_scores(self, train, test):
+        assert isinstance(self.config, DirectJudgeConfig) and self.config.include_reasoning
+        assert self.config.system_prompt == "assets/system_prompt/direct.txt"
+        return pd.DataFrame({"bench": "b", "item": "short", "semester": "s",
+                             "model": ["r1", "r2", "t"], "score": [2., 4., 6.]})
+
+    def pairwise_verdicts(self, train, test):
+        assert not self.config.include_reasoning
+        assert self.config.system_prompt == "assets/system_prompt/default.txt"
+        return pd.DataFrame(columns=["bench", "item", "model_left", "model_right", "pick_left"])
+
+    monkeypatch.setattr(JudgeDirect, "scores", direct_scores)
+    monkeypatch.setattr(JudgeBT, "verdicts", pairwise_verdicts)
+    monkeypatch.setattr("sys.argv", ["evaluate", str(domain_path), "--protocol", "chars",
+                                    "--judge", str(judge_path), "--direct-judge", str(judge_path), "--semester", "s"])
+    assert evaluate.main() == 0
+    output = capsys.readouterr().out
+    assert all(name in output for name in ("chars", "judge_j", "direct_judge_j"))
+    prediction = pd.read_csv(tmp_path / "eval_direct_judge_j.csv")
+    assert prediction.to_dict("records") == [{"semester": "s", "model": "t", "theta_hat": 4., "theta": 5.}]
