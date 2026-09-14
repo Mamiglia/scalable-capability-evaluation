@@ -65,6 +65,11 @@ def split_think(text: str) -> tuple[str, str]:
     return "", text
 
 
+# Models whose literal `<think>` tags are a writing quirk, not a transport artefact: their
+# real CoT is redacted by the provider and the tagged text is answer text the model chose to
+# show. Left as text by decision (2026-09-14, cybench gemini-3.5-flash: 772 turns).
+INLINE_IS_TEXT = {"gemini-3.5-flash"}
+
 THOUGHT_PREFIX = re.compile(r"\A\s*thought\n")
 # Sentence end glued to a capitalised word with no whitespace: the spot where `<channel|>`
 # was. Wider classes (`)`, `$`, `*`) match chemistry and markdown inside the CoT.
@@ -107,7 +112,7 @@ def is_signature_payload(reasoning: str) -> bool:
     )
 
 
-def normalize_message(message, to_summary: bool) -> tuple[int, int, int]:
+def normalize_message(message, to_summary: bool, inline_is_text: bool = False) -> tuple[int, int, int]:
     """Rewrite one assistant message in place. Returns (inline split, summaries moved, payloads)."""
     content = message.content
     if not isinstance(content, list):
@@ -118,7 +123,7 @@ def normalize_message(message, to_summary: bool) -> tuple[int, int, int]:
     out, split, moved, payloads = [], 0, 0, 0
     for block in content:
         kind = getattr(block, "type", None)
-        if kind == "text" and "<think>" in (block.text or ""):
+        if kind == "text" and "<think>" in (block.text or "") and not inline_is_text:
             thinking, answer = split_think(block.text)
             if thinking.strip():
                 out.append(ContentReasoning(type="reasoning", reasoning=thinking.strip()))
@@ -163,12 +168,13 @@ def normalize_message(message, to_summary: bool) -> tuple[int, int, int]:
 
 def normalize_log(path: Path, to_summary: bool, write: bool) -> tuple[int, int, int]:
     log = read_eval_log(str(path))
+    inline_is_text = path.parts[-3] in INLINE_IS_TEXT
     split = moved = payloads = 0
     for sample in log.samples or []:
         for message in sample.messages or []:
             if getattr(message, "role", None) != "assistant":
                 continue
-            s, m, q = normalize_message(message, to_summary)
+            s, m, q = normalize_message(message, to_summary, inline_is_text)
             split, moved, payloads = split + s, moved + m, payloads + q
 
     if (split or moved or payloads) and write:

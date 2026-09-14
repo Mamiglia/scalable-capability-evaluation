@@ -159,7 +159,7 @@ def scan(path: Path, limit: int) -> dict:
             has_reasoning = has_media = redacted = summary = empty_block = False
             # `plain` is the only shape that reaches the judge: util.format_reasoning shows
             # .reasoning when the block is not redacted, and nothing otherwise.
-            plain = False
+            plain = inline_seen = open_seen = thought_seen = False
             reasoning_chars = 0
             for msg in sample.messages or []:
                 content = msg.content if isinstance(msg.content, list) else [msg.content]
@@ -180,15 +180,16 @@ def scan(path: Path, limit: int) -> dict:
                         continue
                     text = block if isinstance(block, str) else getattr(block, "text", "") or ""
                     if "<think>" in text:
-                        has_reasoning = True
-                        counts["reas_inline"] += 1
+                        has_reasoning = inline_seen = True
                         reasoning_chars += len(text)
-                        if THINK_OPEN.search(text):
-                            counts["think_open"] += 1
+                        open_seen |= bool(THINK_OPEN.search(text))
                     elif msg.role == "assistant" and THOUGHT_PREFIX.match(text):
-                        has_reasoning = True
-                        counts["thought_inline"] += 1
+                        has_reasoning = thought_seen = True
                         reasoning_chars += len(text)
+            # Once per sample, not per message: agentic transcripts have dozens of turns.
+            counts["reas_inline"] += inline_seen
+            counts["think_open"] += open_seen
+            counts["thought_inline"] += thought_seen
             # Three shapes, by what the judge is shown for this sample. An un-normalized
             # inline <think> is dropped at render time, so it is not `plain` here -- the
             # reas_inline counter reports it separately, and normalize_reasoning.py fixes it.
