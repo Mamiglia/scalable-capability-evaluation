@@ -15,5 +15,3 @@ benches:
   - bench: configs/bench/hle_gold.yml
     hle_gold: true
     metadata: {category: [Math]}
-# gemma-4-31b-it's aime logs carry no reasoning block yet (repair in progress, 2026-09-14): out of every judged pair until then.
-exclude_models: [gemma-4-31b-it]
