@@ -83,9 +83,13 @@ def test_dataset_uses_correct_first_attempts_with_options_and_reasoning_control(
 async def test_decimal_ratings_stay_unrounded_and_invalid_answers_stay_missing():
     scorer = direct_judge_scorer()
     for text, expected in [("ANSWER: 1", 1.), ("**ANSWER:** $7.5$", 7.5), ("ANSWER: 10", 10.),
+                           ("ANSWER: 7. This model demonstrates strong capability.", 7.),
+                           ("ANSWER: 7<|endoftext|>", 7.),
+                           ("EXPLANATION: Strong reasoning. ANSWER: 8", 8.),
                            ("ANSWER: 2\nANSWER: 8.25", 8.25), ("The transcript says ANSWER: 2", None),
                            ("ANSWER: 7.5\nANSWER: 11", None), ("ANSWER: 7.5\nANSWER:", None),
-                           ("ANSWER: 0.9", None), ("ANSWER: 10.5", None), ("ANSWER: 7/10", None),
+                           ("ANSWER: 7/10", 7.), ("ANSWER: 7.5/10", 7.5), ("ANSWER: 7/11", None),
+                           ("ANSWER: 0.9", None), ("ANSWER: 10.5", None),
                            ("ANSWER: nan", None), ("ANSWER: inf", None), ("", None)]:
         result = await scorer(SimpleNamespace(output=ModelOutput.from_content("judge", text)), Target(""))
         if expected is None:

@@ -177,9 +177,15 @@ def judge_scorer():
 def parse_direct_judge_output(output_text: str):
     """Read the final ANSWER field as a 1–10 rating, preserving decimals."""
     text = output_text or ""
-    answers = re.findall(r"^[ \t]*[*_`]*ANSWER[*_`]*:[*_`]*[ \t]*([^\r\n]*)", text, re.I | re.M)
-    match = re.fullmatch(r"[*_`$]*[ \t]*([0-9]+(?:\.[0-9]+)?)[ \t]*[*_`$]*[.!]?",
-                         answers[-1].strip()) if answers else None
+    answers = []
+    for line in text.splitlines():
+        if re.match(r"^[ \t]*[*_`]*(?:ANSWER|EXPLANATION)[*_`]*:", line, re.I):
+            fields = list(re.finditer(r"[*_`]*ANSWER[*_`]*:[*_`]*[ \t]*", line, re.I))
+            if fields:
+                answers.append(line[fields[-1].end():])
+    match = re.match(r"[*_`$]*[ \t]*([0-9]+(?:\.[0-9]+)?)(?![0-9]|\.[0-9])"
+                     r"(?:[ \t]*/[ \t]*10)?[ \t]*[*_`$]*(?=$|[^0-9A-Za-z/])",
+                     answers[-1].strip()) if answers else None
     answer = match.group(1) if match else None
     if answer is not None and not 1 <= float(answer) <= 10:
         answer = None
