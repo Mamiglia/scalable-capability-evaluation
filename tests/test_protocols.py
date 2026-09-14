@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
@@ -70,8 +71,16 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     for name in ("b_a|t", "b_b|t", "b_a|b"):
         (log_dir / f"{name}.eval").touch()
     monkeypatch.setattr(judge_module, "read_header", lambda path: SimpleNamespace(eval=SimpleNamespace(task=path.stem.replace("_", "/", 1))))
+    judged = {"b/a|t": ["0"], "b/b|t": ["0"], "b/a|b": ["0", "1"]}
+    monkeypatch.setattr(judge_module, "read_eval_log_sample_summaries",
+                        lambda path: [SimpleNamespace(id=f"{i}_1") for i in judged[Path(path).stem.replace("_", "/", 1)]])
     p.judge(t.train, t.test)
     assert ran == [log_dir]
+    # a train item the dir has no verdict on (item 1 of a|b, after a refreeze) is judged on its own
+    judged["b/a|b"] = ["0"]
+    built.clear()
+    p.judge(t.train, t.test)
+    assert ran == [log_dir, log_dir] and [(k["task_name"], k["items"]) for k in built] == [("b/a|b", {"1"})]
 
 
 def test_tabular_regression(monkeypatch):

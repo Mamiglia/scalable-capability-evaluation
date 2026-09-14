@@ -78,7 +78,7 @@ class JudgeBT(PairwiseBT):
     def log_dir(self, semester: str) -> Path:
         return self.config.log_dir / self.domain.name / semester / self.config.judge.shortname.lower() / self.config.condition_hash
 
-    def tasks(self, train: Cohort, test: Cohort) -> list[Task]:
+    def tasks(self, train: Cohort, test: Cohort, done: dict[str, set[str]] | None = None) -> list[Task]:
         """One judging task per <bench, reference, target> and per <bench, reference, reference> pair, on the train
         items both got right. The reference pairs (theta* known on both sides) are the judge's calibration data."""
         tasks = []
@@ -95,6 +95,7 @@ class JudgeBT(PairwiseBT):
             for major, minor, cohort in pairs:
                 items = {item for b, item in train.transcripts[major] if b == name}
                 items &= {item for b, item in cohort.transcripts[minor] if b == name} & keep
+                items -= (done or {}).get(f"{name}/{major}|{minor}", set())
                 if not items:
                     continue
                 task = judge_task(
@@ -114,13 +115,17 @@ class JudgeBT(PairwiseBT):
         return tasks
 
     def judge(self, train: Cohort, test: Cohort) -> Path:
-        """The run dir for this task, judging whatever is not finished in it yet."""
+        """The run dir for this task, judging whatever (pair, item) is not judged in it yet."""
         log_dir = self.log_dir(test.semester)
-        tasks = self.tasks(train, test)
-        done = {read_header(p).eval.task for p in log_dir.glob("*.eval") if is_successful_eval(p)}  # imported names differ
-        # Only the unfinished tasks go to eval_set: a finished task is done by name, whatever eval_set
-        # kwargs (max_tokens, ...) it was judged with, so a config tweak never re-judges the rest.
-        todo = [task for task in tasks if task.name not in done]
+        # Resume at item level: only the items of a pair without a verdict in the dir are judged, into
+        # a further log of the same task name (from_logs pools them). So a finished pair is never
+        # re-judged after an eval_set kwarg tweak, and a refrozen train set only adds its new items.
+        done: dict[str, set[str]] = {}
+        for p in log_dir.glob("*.eval"):
+            if is_successful_eval(p):  # imported names differ, so they never count
+                done.setdefault(read_header(p).eval.task, set()).update(
+                    str(s.id).rsplit("_", 1)[0] for s in read_eval_log_sample_summaries(str(p)))
+        todo = self.tasks(train, test, done)
         if todo:
             if not run_tasks(todo, self.config, log_dir):
                 raise RuntimeError(f"judge run failed in {log_dir}")
