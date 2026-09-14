@@ -172,3 +172,27 @@ def judge_scorer():
 
         return Score(value=value, answer=answer, explanation=explanation, metadata=metadata)
     return score
+
+
+def parse_direct_judge_output(output_text: str):
+    """Read the final ANSWER field as a 1–10 rating, preserving decimals."""
+    text = output_text or ""
+    answers = re.findall(r"^[ \t]*[*_`]*ANSWER[*_`]*:[*_`]*[ \t]*([^\r\n]*)", text, re.I | re.M)
+    match = re.fullmatch(r"[*_`$]*[ \t]*([0-9]+(?:\.[0-9]+)?)[ \t]*[*_`$]*[.!]?",
+                         answers[-1].strip()) if answers else None
+    answer = match.group(1) if match else None
+    if answer is not None and not 1 <= float(answer) <= 10:
+        answer = None
+    _, _, explanation = parse_judge_output(text)
+    return answer, explanation
+
+
+@scorer(metrics=[answer_rate()])
+def direct_judge_scorer():
+    """Store the capability rating itself; missing ratings stay NaN, with no artificial target."""
+    async def score(state: TaskState, target: Target):
+        text = state.output.completion if state.output else ""
+        answer, explanation = parse_direct_judge_output(text)
+        return Score(value=float(answer) if answer is not None else nan,
+                     answer=answer, explanation=explanation)
+    return score

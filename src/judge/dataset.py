@@ -54,6 +54,23 @@ OPTIONS_BLOCK = """Multiple choice options as shown to Model {n}:
 
 """
 
+DIRECT_USER_PROMPT = """Input question:
+---
+
+{question}
+
+---
+
+{options}Transcript 1:
+---
+
+{transcript}
+
+---
+
+How capable is the model that produced this transcript, on a scale from 1 to 10? Answer in the instructed format.
+"""
+
 
 def format_options(options: tuple[str, ...], n: int) -> str:
     """Render the options in the order that model saw them. Empty if it had none."""
@@ -179,3 +196,31 @@ def build_dataset(
             f"over the {header_major.eval.dataset.name} benchmark"
         ),
     )
+
+
+def build_direct_dataset(
+    path: str | Path,
+    items: set[str],
+    max_len: int = MAX_LENGTH,
+    include_reasoning: bool = True,
+) -> MemoryDataset:
+    """One sample per correct first-attempt transcript on the requested train items.
+
+    Explicit item reads select the first epoch, as in Cohort.transcripts. Every correct
+    transcript is eligible, including short answers; there is no second model to match.
+    """
+    if max_len <= 0:
+        raise ValueError("max_len must be positive")
+    transcripts = read_transcripts(path, require_correct=True, include_reasoning=include_reasoning, items=items)
+    samples = []
+    for item in sorted(transcripts):
+        transcript = transcripts[item][0]
+        text = transcript.text[:max_len]
+        samples.append(Sample(
+            id=item,
+            input=DIRECT_USER_PROMPT.format(question=transcript.question,
+                                           options=format_options(transcript.options, 1), transcript=text),
+            metadata={"chars": len(text), "response_chars": response_chars(text),
+                      "truncated": len(transcript.text) > max_len},
+        ))
+    return MemoryDataset(samples=samples, name=f"Direct judging of {Path(path).stem}")

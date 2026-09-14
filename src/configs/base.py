@@ -36,7 +36,9 @@ class DraccusConfig:
         elif isinstance(spec, dict):
             cfg = draccus.decode(cls, spec)
         elif isinstance(spec, (str, Path)) and Path(spec).exists():
-            cfg = draccus.parse(cls, config_path=Path(spec), args=[] if cli_args is None else cli_args)
+            # File-only loads need no argparse setup (which rejects Optional types on Python 3.14).
+            cfg = (draccus.parse(cls, config_path=Path(spec), args=cli_args)
+                   if cli_args else draccus.load(cls, Path(spec)))
         elif str(spec).endswith(CONFIG_SUFFIXES):
             raise FileNotFoundError(f"config file not found: {spec}")
         else:

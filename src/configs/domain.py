@@ -18,6 +18,7 @@ class DomainBench:
     metadata: Dict[str, List[Any]] = field(default_factory=dict)
     hle_gold: bool = False  # keep only HLE-Verified gold items (uids from inspect_evals)
     system_prompt: str = ""  # judge prompt for this bench; empty = the experiment's default
+    direct_system_prompt: str = ""  # direct judge prompt; empty = DirectJudgeConfig.system_prompt
 
 
 @dataclass(kw_only=True)
