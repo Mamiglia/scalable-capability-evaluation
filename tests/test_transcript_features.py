@@ -54,6 +54,10 @@ def test_extraction_uses_assistant_text_and_excludes_tool_payloads():
     for text, feature, expected in [("I = 1", "personal_pronouns", 0), ("I\nthink", "hedging", 500),
                                      ("I don’t know", "uncertainty", 1000 / 3), ("waiting", "backtracking", 0)]:
         assert lexical_features(text)[feature] == expected
+    hidden = extract_features(messages, include_reasoning=False)
+    assert hidden["log_chars"] == pytest.approx(np.log1p(len(answer))) and hidden["visible_reasoning"] == 0
+    assert hidden["hedging"] == 0 and hidden["backtracking"] == pytest.approx(1000 / 2)  # answer prose only
+    assert lexical_features("costs $5 to $10 but $x$")["contrast"] == 1000 / 5  # dollar amounts are prose
     assert all(np.isnan(v) for v in extract_features([]).values())
     empty = extract_features([ChatMessageAssistant(content="")])
     assert empty["log_chars"] == empty["visible_reasoning"] == empty["hedging"] == empty["log_tool_calls"] == 0

@@ -20,6 +20,7 @@ uv.lock
 
 # logs
 /logs/
+/glm_features/
 artifacts/
 /docs/
 analysis/
