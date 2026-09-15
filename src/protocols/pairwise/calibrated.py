@@ -25,6 +25,7 @@ from reference import tables
 from reference.freeze import TOP_K
 
 SHRINK = 2.0  # penalty on (log alpha_b - mean)^2, i.e. a N(., 0.5^2) prior; only bites on benches with few verdicts
+MARGIN = 2.0  # theta-hat is searched within [min ref - MARGIN, max ref + MARGIN]: keeps the LOO error finite
 
 
 def bernoulli_nll(eta: np.ndarray, y: np.ndarray) -> float:
@@ -58,8 +59,8 @@ def estimate(verdicts: pd.DataFrame, model: str, theta: pd.Series, alpha: pd.Ser
         return float("nan")
     sign = np.where(is_left, 1.0, -1.0)
     a, theta_o, y = alpha[v.bench].to_numpy(), theta[opponent].to_numpy(), v.pick_left.to_numpy(float)
-    centre = float(theta.mean())
-    return float(minimize_scalar(lambda t: bernoulli_nll(a * sign * (t - theta_o) + beta, y), bracket=(centre - 1, centre + 1)).x)
+    lo, hi = float(theta.min()) - MARGIN, float(theta.max()) + MARGIN  # unbeaten (or never-winning) models have an infinite ML
+    return float(minimize_scalar(lambda t: bernoulli_nll(a * sign * (t - theta_o) + beta, y), bounds=(lo, hi), method="bounded").x)
 
 
 def estimate_all(verdicts: pd.DataFrame, refs: pd.Series, models: list[str]) -> pd.Series:
@@ -90,10 +91,10 @@ class JudgeCalibrated(JudgeBT):
         semesters = list(rosters)
         i = semesters.index(semester)
         refs = theta.reindex(rosters[semesters[i - 1]]).dropna()
-        if i < 2:
+        previous = theta.reindex(rosters[semesters[i - 2]]).dropna() if i >= 2 else pd.Series(dtype=float)
+        if previous.empty:  # no models of the semester before the references (first task of a domain)
             return float(refs.nlargest(TOP_K).mean()), float(refs.var())
-        previous = theta.reindex(rosters[semesters[i - 2]]).dropna().nlargest(TOP_K).mean()
-        return float(refs.nlargest(TOP_K).mean()), float(((refs - previous) ** 2).mean())
+        return float(refs.nlargest(TOP_K).mean()), float(((refs - previous.nlargest(TOP_K).mean()) ** 2).mean())
 
     def predict(self, test: Cohort) -> pd.Series:
         verdicts = self.verdicts(self.train, test).merge(test.items[["bench", "item"]])
