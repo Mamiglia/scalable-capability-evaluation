@@ -3,13 +3,13 @@
 import numpy as np
 import pandas as pd
 
-from analysis.baselines import AccuracyOracle, Intercept
+from analysis.baselines import AccuracyOracle, EasyItemPrediction
 from test_protocols import toy_task
 
 
-def test_intercept_and_oracle(monkeypatch):
+def test_easy_item_prediction_and_oracle(monkeypatch):
     t = toy_task()  # references a, b, c with theta 0, 1, 2 on train items "0", "1"; targets t, u
-    assert Intercept()(t).eq(1.0).all()
+    assert EasyItemPrediction()(t).eq(1.0).all()
     # a HARD item "9" over two repeats: a 0/2, b 1/2, c 2/2, t 2/2, u 0/2 -> theta = 2 * accuracy on the toy
     rows = [dict(bench="b", item="9", model=m, repeat=r, correct=int(r < k))
             for m, k in {"a": 0, "b": 1, "c": 2, "t": 2, "u": 0}.items() for r in (0, 1)]
@@ -73,15 +73,15 @@ from analysis import stats
 
 
 def toy_forecasts():
-    """Two semesters, two targets each (theta* 1): the intercept forecasts 3 for a and 2 for b (errors 4 and
+    """Two semesters, two targets each (theta* 1): easy-item prediction forecasts 3 for a and 2 for b (errors 4 and
     1, MSE 2.5), the oracle is exact, glm is off by 1, and a direct judge protocol (variant raw) has two
     judges: "weak" exact with a poor reference LOO, "strong" off by 1 with the better LOO; "strong" also
     has a reasoning-hidden run off by 4."""
     base = dict(domain="d", variant="-", judge="-", condition="-", judge_loo_mse=np.nan, missing=0, theta=1.0)
     rows = []
     for sem in ("s1", "s2"):
-        for model, intercept in (("a", 3.0), ("b", 2.0)):
-            rows += [dict(base, semester=sem, model=model, protocol=stats.BASELINE, theta_hat=intercept),
+        for model, baseline in (("a", 3.0), ("b", 2.0)):
+            rows += [dict(base, semester=sem, model=model, protocol=stats.BASELINE, theta_hat=baseline),
                      dict(base, semester=sem, model=model, protocol=stats.ORACLE, theta_hat=1.0),
                      dict(base, semester=sem, model=model, protocol="glm_regex", theta_hat=2.0),
                      dict(base, semester=sem, model=model, protocol="direct", variant="raw", judge="weak",
@@ -114,12 +114,12 @@ def test_core_condition_falls_back_to_hidden_reasoning():
     assert set(hidden[hidden.protocol == "direct"].condition) == {"reasoning-hidden"}
 
 
-def test_task_metrics_are_paired_against_the_intercept():
+def test_task_metrics_are_paired_against_easy_item_prediction():
     m = stats.task_metrics(toy_forecasts())
     s1 = m[(m.domain == "d") & (m.semester == "s1")].set_index(["protocol", "judge"])
-    # glm: squared errors 1, 1 against the intercept's 4, 1 -> delta -1.5; the paired deltas (-3, 0) vary, so z is finite
+    # glm: squared errors 1, 1 against easy-item prediction's 4, 1 -> delta -1.5; the paired deltas (-3, 0) vary, so z is finite
     assert s1.delta[("glm_regex", "-")] == -1.5 and s1.baseline_mse[("glm_regex", "-")] == 2.5 and np.isfinite(s1.z[("glm_regex", "-")])
-    # the intercept against itself: delta 0, no spread -> z NaN
+    # easy-item prediction against itself: delta 0, no spread -> z NaN
     assert s1.delta[(stats.BASELINE, "-")] == 0.0 and np.isnan(s1.z[(stats.BASELINE, "-")])
     # judge rows enter as the best judge on references only
     assert s1.delta[("direct", stats.BEST)] == -1.5 and (m.judge != stats.MEAN).all()

@@ -1,14 +1,14 @@
 """Stats: MSE of theta-hat against theta* with a bootstrap interval over targets, pooled over
 semesters and domains; judge summaries (best judge on references, mean over judges); skill
-relative to the intercept and the oracle; and the per-task metrics the figures and tables
-use: raw MSE, delta from the intercept, and the paired-bootstrap z of that delta.
+relative to easy-item prediction and the oracle; and the per-task metrics the figures and
+tables use: raw MSE, delta from easy-item prediction, and the paired-bootstrap z of that delta.
 """
 
 import numpy as np
 import pandas as pd
 
 KEYS = ["domain", "protocol", "variant", "judge", "condition"]
-BASELINE, ORACLE = "intercept", "accuracy_hard"
+BASELINE, ORACLE = "easy_items", "accuracy_hard"
 JUDGED = ("pairwise", "direct")
 BEST, MEAN = "best judge on references", "mean over judges"
 METRICS = ("mse", "delta", "z")
@@ -73,14 +73,15 @@ def scores(forecasts: pd.DataFrame) -> pd.DataFrame:
 
 
 def summary(scores: pd.DataFrame) -> pd.DataFrame:
-    """Pooled (semester "all") rows with the domain's intercept and oracle MSE alongside and
-    skill = (intercept - mse) / (intercept - oracle): 1 at the oracle, 0 at the intercept,
-    negative below it. For domain "all" the anchors are the domain-"all" rows."""
+    """Pooled (semester "all") rows with the domain's easy-item-prediction and oracle MSE
+    alongside and skill = (baseline - mse) / (baseline - oracle): 1 at the oracle, 0 at
+    easy-item prediction, negative below it. For domain "all" the anchors are the
+    domain-"all" rows."""
     pooled = scores[scores.semester == "all"].copy()
     anchors = pooled[pooled.protocol.isin([BASELINE, ORACLE])].pivot(index="domain", columns="protocol", values="mse")
-    pooled["intercept"] = pooled.domain.map(anchors[BASELINE])
+    pooled["baseline"] = pooled.domain.map(anchors[BASELINE])
     pooled["oracle"] = pooled.domain.map(anchors[ORACLE])
-    pooled["skill"] = (pooled.intercept - pooled.mse) / (pooled.intercept - pooled.oracle)
+    pooled["skill"] = (pooled.baseline - pooled.mse) / (pooled.baseline - pooled.oracle)
     return pooled
 
 
@@ -108,7 +109,7 @@ def paired_metrics(errors: pd.DataFrame, seed: int = 0, draws: int = 2000) -> di
 
 def task_metrics(forecasts: pd.DataFrame) -> pd.DataFrame:
     """One row per (domain, semester) x protocol x variant x judge x condition with the three
-    metrics paired against the intercept on the same targets (one_per_target rows only), plus
+    metrics paired against easy-item prediction on the same targets (one_per_target rows only), plus
     semester "all" per domain and domain "all" per condition over the pooled targets.
     Columns: domain, semester, protocol, variant, judge, condition, n, mse, baseline_mse,
     delta, z. A target the condition did not forecast is dropped from both sides."""

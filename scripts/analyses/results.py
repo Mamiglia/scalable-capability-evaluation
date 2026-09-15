@@ -1,4 +1,4 @@
-"""Results of the forecasting task: the five conditions against the intercept and the oracle.
+"""Results of the forecasting task: the five conditions against easy-item prediction and the oracle.
 
 Cell script: run top to bottom as `PYTHONPATH=src uv run python scripts/analyses/results.py`,
 or cell by cell (`# %%`) in PyCharm / VS Code after the cells above it. State lives in the
@@ -64,7 +64,7 @@ scores.to_csv(OUT / "scores.csv", index=False, float_format="%.4f")
 summary.to_csv(OUT / "summary.csv", index=False, float_format="%.4f")
 metrics.to_csv(OUT / "metrics.csv", index=False, float_format="%.4f")
 core = summary[summary.judge.isin(["-", stats.BEST, stats.MEAN])]
-print(core[["domain", "protocol", "variant", "judge", "n", "missing", "mse", "intercept", "oracle", "skill"]].round(3).to_string(index=False))
+print(core[["domain", "protocol", "variant", "judge", "n", "missing", "mse", "baseline", "oracle", "skill"]].round(3).to_string(index=False))
 
 # %% tables: semester x condition, every metric, per domain and pooled
 for metric in stats.METRICS:

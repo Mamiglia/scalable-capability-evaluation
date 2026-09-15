@@ -1,8 +1,8 @@
-"""Baselines that read no transcript: the intercept, and theta* calibrated on HARD-item accuracy.
+"""Baselines that read no transcript: easy-item prediction, and theta* calibrated on HARD-item accuracy.
 
-Intercept: every target forecast as the references' mean theta*. Accuracy on the saturated
-train items is 1 for every model, so a regression of theta* on it is exactly this intercept;
-a condition that cannot beat it has learned nothing.
+Easy-item prediction: every target forecast as the references' mean theta*. Accuracy on the
+saturated train items is 1 for every model, so a regression of theta* on it is exactly this
+baseline; a condition that cannot beat it has learned nothing.
 
 Oracle (accuracy_hard): OLS of theta* on mean accuracy over every repeat on this task's HARD
 items, the responses theta* itself was fit on. Calibrated on the 8 references, so it is not
@@ -19,13 +19,13 @@ from protocols import Protocol
 from reference import tables
 
 
-class Intercept(Protocol):
+class EasyItemPrediction(Protocol):
     """Forecast every target as the mean theta* of the previous semester's references.
 
     Uses task.references only (not history), like the judge conversions.
     """
 
-    name = "intercept"
+    name = "easy_items"
 
     def __call__(self, task: Task) -> pd.Series:
         self.fit(task.references)

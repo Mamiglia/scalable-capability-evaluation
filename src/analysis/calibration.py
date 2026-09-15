@@ -1,6 +1,6 @@
 """Calibration: every signal to theta-hat on the theta* scale, one forecast row per target.
 
-Transcript protocols (intercept, oracle, surface-feature ridge, embedding ridge) fit
+Transcript protocols (easy-item prediction, oracle, surface-feature ridge, embedding ridge) fit
 themselves on the task. Judge runs are converted offline from their matched tables with
 every variant (pairwise: linear and calibrated; direct: raw and item_z), and each judge run
 carries its reference leave-one-out error so stats can pick the best judge without labels.
@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from analysis import judges
-from analysis.baselines import AccuracyOracle, Intercept
+from analysis.baselines import AccuracyOracle, EasyItemPrediction
 from analysis.embeddings import EmbeddingRegression
 from analysis.loading import JudgeRun
 from capability.evaluate import forecast
@@ -26,10 +26,10 @@ COLUMNS = ["domain", "semester", "protocol", "variant", "judge", "condition", "j
 
 
 def transcript_protocols(dom: DomainConfig, embedding_variants: tuple[str, ...] = ("full", "answer")) -> list[tuple[Protocol, str]]:
-    """(protocol, variant) pairs needing no judge: intercept, oracle, glm_regex, and one
+    """(protocol, variant) pairs needing no judge: easy-item prediction, oracle, glm_regex, and one
     embedding ridge per variant. Fresh instances per domain (the oracle reads that domain's
     frozen tables)."""
-    out = [(Intercept(), "-"), (AccuracyOracle(dom), "-"), (PROTOCOLS["glm_regex"], "-")]
+    out = [(EasyItemPrediction(), "-"), (AccuracyOracle(dom), "-"), (PROTOCOLS["glm_regex"], "-")]
     return out + [(EmbeddingRegression(v), v) for v in embedding_variants]
 
 

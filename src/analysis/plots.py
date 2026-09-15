@@ -3,8 +3,8 @@
 forecast_figure   one panel per domain, semesters along x; within a semester the targets
                   sorted by theta*, black = true theta, orange = forecast, dotted connectors
 bar_figure        four bars (the conditions) at the mean of a per-(domain, semester) metric,
-                  jittered circles for the individual (domain, semester) values, the
-                  intercept as a dashed line
+                  jittered circles for the individual (domain, semester) values, easy-item
+                  prediction as a dashed line
 semester_table    semester x condition for one domain, or pooled over the domains that have
                   the semester, with an "all" row
 
@@ -28,11 +28,11 @@ plt.rcParams.update({
     "svg.fonttype": "none", "savefig.dpi": 300,
 })
 CONDITIONS = ["glm_regex", "embedding", "direct", "pairwise"]  # the four bars, in this order
-LABELS = {BASELINE: "intercept", "glm_regex": "length+regex", "embedding": "embedding", "direct": "direct judge",
+LABELS = {BASELINE: "easy-item prediction", "glm_regex": "length+regex", "embedding": "embedding", "direct": "direct judge",
           "pairwise": "pairwise judge"}
 COLORS = dict(zip(CONDITIONS, ["#1baf7a", "#4a3aa7", "#eb6834", "#2a78d6"]))
 TRUE, PRED = "black", "#eb6834"
-METRIC_LABELS = {"mse": "MSE (θ units)", "delta": "MSE − intercept MSE", "z": "z of MSE − intercept (paired bootstrap)"}
+METRIC_LABELS = {"mse": "MSE (θ units)", "delta": "MSE − easy-item MSE", "z": "z of MSE − easy-item MSE (paired bootstrap)"}
 
 
 def chosen(metrics: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
@@ -96,7 +96,7 @@ def zigzag(ax, y: float, size: float = 0.02) -> None:
 def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], path, seed: int = 0) -> None:
     """Four bars, one per condition in CONDITIONS, at the mean over (domain, semester) of the
     metric ("mse", "delta" or "z"); the individual (domain, semester) values as jittered
-    circles; the intercept as a dashed grey line (its mean raw MSE, or 0 for delta and z).
+    circles; easy-item prediction as a dashed grey line (its mean raw MSE, or 0 for delta and z).
     Values beyond Tukey's far-out fence (outlier_split) go to a short upper panel above a
     zigzag axis break, so one blown-up fit cannot squash the others."""
     assert metric in METRICS, metric
@@ -135,7 +135,7 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
     ax.tick_params(axis="x", rotation=90)
     (top or ax).set_ylabel(METRIC_LABELS[metric]) if top is None else fig.supylabel(METRIC_LABELS[metric], fontsize=8)
     # constrained layout reserves room for an "outside" legend, in both the one- and two-panel branches
-    fig.legend(handles=[plt.Line2D([], [], color="grey", lw=0.8, ls="--", label="intercept"),
+    fig.legend(handles=[plt.Line2D([], [], color="grey", lw=0.8, ls="--", label="easy-item prediction"),
                         plt.Line2D([], [], color="black", marker="o", ms=2, ls="", label="one domain × semester")],
                loc="outside lower center", ncol=2, frameon=False)
     fig.savefig(path, bbox_inches="tight")
@@ -143,7 +143,7 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
 
 
 def semester_table(metrics: pd.DataFrame, metric: str, variants: dict[str, str], domain: str | None = None) -> pd.DataFrame:
-    """Semester x condition (intercept first, then CONDITIONS) for one domain, or pooled when
+    """Semester x condition (easy-item prediction first, then CONDITIONS) for one domain, or pooled when
     `domain` is None: the mean over the domains that have that semester, plus an "all" row
     (the domain's pooled row, or the mean over every (domain, semester) cell). Columns are
     the LABELS; a condition without a value is NaN."""
