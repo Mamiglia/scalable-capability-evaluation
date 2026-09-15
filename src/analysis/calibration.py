@@ -45,7 +45,8 @@ def ensemble_runs(runs: list[JudgeRun]) -> list[JudgeRun]:
     """Per protocol, one pooled JudgeRun (judge ENSEMBLE, condition "core") over the core runs
     of at least two judges: tables concatenated (pairwise: every judge's verdict is one more
     observation of the pair; direct: a transcript's ratings from several judges average in
-    valid_ratings), `missing` summed, `harness` the first member's. Empty when no protocol
+    valid_ratings), `missing` summed over the pooled runs (a transcript unrated by several
+    judges counts once per judge), `harness` the first member's. Empty when no protocol
     has two judges."""
     out = []
     core = core_runs(runs)
@@ -60,8 +61,9 @@ def ensemble_runs(runs: list[JudgeRun]) -> list[JudgeRun]:
 
 def transcript_protocols(dom: DomainConfig, embedding_variants: tuple[str, ...] = ("full", "answer")) -> list[tuple[Protocol, str]]:
     """(protocol, variant) pairs needing no judge: easy-item prediction, oracle, glm_regex, and one
-    embedding ridge per variant. Fresh instances per domain (the oracle reads that domain's
-    frozen tables)."""
+    embedding ridge per variant. Fresh instances per domain for the oracle (reads that domain's
+    frozen tables) and the embedding ridge; PROTOCOLS["glm_regex"] is a shared singleton, safe
+    because TabularRegression.fit clones the estimator."""
     out = [(EasyItemPrediction(), "-"), (AccuracyOracle(dom), "-"), (PROTOCOLS["glm_regex"], "-")]
     return out + [(EmbeddingRegression(v), v) for v in embedding_variants]
 
@@ -70,7 +72,12 @@ def judge_forecast(run: JudgeRun, task: Task, variant: str) -> tuple[pd.Series, 
     """(theta-hat indexed by target, reference leave-one-out MSE) for one judge run under one
     variant. Pairwise "calibrated" shrinks toward JudgeCalibrated's frontier prior for the
     semester, as the protocol does (frontier_prior needs only a `.domain`); "linear" needs
-    none. Direct variants are OLS on mean ratings, raw or item-z-scored."""
+    none. Direct variants are OLS on mean ratings, raw or item-z-scored. A target with no
+    verdicts against the references gets the prior mean, not NaN; the run's `missing` count
+    says how many judgments are absent. The calibrated LOO (pairwise_reference_loo) shrinks
+    each held-out reference toward the other references' own (mean, var), while the forecast
+    above shrinks toward the frontier prior: `loo`/judge_loo_mse orders judges but is not the
+    forecast's own error estimate."""
     refs, targets = task.references.theta, list(task.test.models.index)
     if run.protocol == "pairwise":
         prior = (JudgeCalibrated.frontier_prior(SimpleNamespace(domain=run.harness.domain), task.semester)

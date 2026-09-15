@@ -28,6 +28,7 @@ class EasyItemPrediction(Protocol):
     name = "easy_items"
 
     def __call__(self, task: Task) -> pd.Series:
+        """Fit on the task's references, then forecast every target."""
         self.fit(task.references)
         return self.predict(task.test)
 
@@ -50,6 +51,7 @@ class AccuracyOracle(Protocol):
     name = "accuracy_hard"
 
     def __init__(self, domain: DomainConfig):
+        """Load the domain's frozen response and item tables for the HARD-item accuracy fit."""
         self.responses = tables.load_responses(domain)  # bench, item, model, repeat, correct
         self.items = tables.load(domain)[1]  # bench, item, ..., <semester>_set (easy / hard / "")
         self.estimator: LinearRegression | None = None

@@ -45,6 +45,7 @@ class EmbeddingRegression(TabularRegression):
     """Fit reference embeddings to theta*, predict target theta* (protocol name "embedding")."""
 
     def __init__(self, variant: str = "full"):
+        """variant: "full" (reasoning included) or "answer" (reasoning stripped)."""
         assert variant in VARIANTS, variant
         self.variant = variant
         super().__init__("embedding", [], RidgeCV(alphas=ALPHAS))
@@ -65,6 +66,8 @@ class EmbeddingRegression(TabularRegression):
                     vectors.append(v)
             rows[model] = np.concatenate(vectors).mean(axis=0) if vectors else None
         dim = next((len(v) for v in rows.values() if v is not None), 0)
+        if dim == 0:  # no model has a readable vector: a 0-column frame makes sklearn raise
+            return pd.DataFrame(np.nan, index=cohort.models.index, columns=["0"])
         table = pd.DataFrame({m: (v if v is not None else np.full(dim, np.nan)) for m, v in rows.items()}).T
         table.columns = [str(i) for i in range(dim)]
         return table.reindex(cohort.models.index)

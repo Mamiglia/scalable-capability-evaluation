@@ -22,7 +22,9 @@ DIRECT = ("raw", "item_z")
 def pairwise_theta(verdicts: pd.DataFrame, refs: pd.Series, models: list[str], conversion: str,
                    prior: tuple[float, float] | None = None) -> pd.Series:
     """theta-hat of `models` from `verdicts` (bench, item, model_left, model_right, pick_left, ...)
-    with the references `refs` (theta* indexed by model) fixed; index = models, NaN without evidence.
+    with the references `refs` (theta* indexed by model) fixed; index = models. A target with no
+    verdicts against the references gets the prior mean, not NaN; the run's `missing` count says
+    how many judgments are absent.
 
     conversion "linear": weighted_theta. "calibrated": calibrate on the reference pairs, 1-D ML
     per model, shrunk by the judge's leave-one-out error on the references toward `prior`
