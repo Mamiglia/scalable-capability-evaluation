@@ -6,6 +6,7 @@
     items.csv   bench, item, guess, a, b (+ _sd); per task <sem>_set (easy / hard / ""), <sem>_train
 """
 
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -14,9 +15,10 @@ import yaml
 from configs.domain import DomainConfig
 
 SEMESTERS = Path("configs/semesters.yml")
-DATA = Path("data")
+# Transcript logs; SMALL_JUDGE_DATA points at a checkout elsewhere (e.g. an external volume).
+DATA = Path(os.environ.get("SMALL_JUDGE_DATA", "data"))
 FEATURES = Path("glm_features")  # per-transcript feature CSVs mirroring data/ (LASR-G5/glm_features)
-META = DATA / "meta"
+META = Path("data") / "meta"  # the frozen tables stay in the repo checkout
 
 
 def frozen_dir(domain: DomainConfig) -> Path:
