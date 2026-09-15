@@ -154,7 +154,9 @@ def transcript_labels(parser, parts):
         if kind in ("text", "reasoning"):
             try:
                 types = prose_labels(parser, part["text"])
-            except Exception:  # parser rejects some inputs (e.g. no tokens); the part is dropped
+            except Exception as error:  # parser rejects some inputs (e.g. no tokens); the part is dropped
+                if type(error).__name__ == "OutOfMemoryError":  # GPU pressure, not this part: die and resume later
+                    raise
                 failed += 1
                 continue
             labels += [[t, kind == "reasoning"] for t in types]

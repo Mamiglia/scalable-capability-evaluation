@@ -109,15 +109,14 @@ def test_glm_variants_fit_references_only_and_reset_between_cohorts(tmp_path):
     train = cohort(tmp_path / "train", {"a": 0., "b": 1., "c": 2., "empty": 9., "unlabelled": np.inf},
                    {"a": [""], "b": ["a"], "c": ["aaa"], "unlabelled": ["aaaaaa"]})
     test = cohort(tmp_path / "test", {"t": np.nan, "empty": np.nan}, {"t": ["a" * 1023]})
-    length, regex, tools, structure = [TranscriptRegression(variant=v) for v in ("length", "regex", "tools", "structure")]
-    length_x, regex_x, tools_x = length.get_features(train), regex.get_features(train), tools.get_features(train)
+    length, regex, structure = [TranscriptRegression(variant=v) for v in ("length", "regex", "structure")]
+    length_x, regex_x, structure_x = length.get_features(train), regex.get_features(train), structure.get_features(train)
     assert "hedging" not in length_x and "hedging" in regex_x and "log_tool_calls" not in regex_x
     pd.testing.assert_frame_equal(regex_x[length_x.columns], length_x)
-    pd.testing.assert_frame_equal(tools_x[regex_x.columns], regex_x)
-    assert tools_x.loc["a", "log_tool_calls"] == 0.
-    with pytest.raises(NotImplementedError, match="RST"):
-        structure.get_features(train)
-    assert [len(FEATURE_SETS[v]) for v in ("length", "regex", "tools", "structure")] == [3, 12, 13, 24]
+    pd.testing.assert_frame_equal(structure_x[regex_x.columns], regex_x)
+    assert structure_x.loc["a", "log_tool_calls"] == 0.
+    assert structure_x["transition__equation__equation"].isna().all()  # no RST labels merged into these CSVs
+    assert [len(FEATURE_SETS[v]) for v in ("length", "regex", "structure")] == [3, 12, 24]
     assert TranscriptRegression(variant="regex", reasoning="hidden").name == "glm_regex_reasoning-hidden"
     length.fit(train)
     result = length.predict(test)

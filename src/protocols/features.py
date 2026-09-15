@@ -97,5 +97,5 @@ PROTOCOLS["ridge"] = TabularRegression("ridge", list(FEATURES), make_pipeline(St
 
 from protocols.transcript_features.protocol import TranscriptRegression  # noqa: E402  (subclasses TabularRegression)
 
-for variant in ("length", "regex", "tools"):
+for variant in ("length", "regex", "structure"):
     PROTOCOLS[f"glm_{variant}"] = TranscriptRegression(variant=variant)

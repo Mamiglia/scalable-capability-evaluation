@@ -24,6 +24,7 @@ from reference import tables
 ClauseTyper = Callable[[Sequence[ChatMessage]], Sequence[str]]
 MEMBER = re.compile(r"samples/(.+)_epoch_(\d+)\.json$")
 VIEWS = ("visible", "hidden")
+COLUMNS = FEATURES + STRUCTURE_FEATURES  # structure columns are filled by scripts/glm_features/merge_labels.py
 
 
 def sample_features(sample: EvalSample, *, include_reasoning: bool = True,
@@ -67,21 +68,22 @@ def features_path(log_path: str | Path) -> Path:
 
 
 def read_features(path: Path, items: set[str], *, reasoning: str = "visible") -> pd.DataFrame:
-    """Correct first attempts on `items` from one feature CSV, FEATURES columns indexed by item.
+    """Correct first attempts on `items` from one feature CSV, COLUMNS indexed by item.
 
-    A missing CSV (log not extracted) is reported and reads as no observations.
+    Structure columns a CSV lacks (no RST labels merged yet) read as NaN. A missing CSV
+    (log not extracted) is reported and reads as no observations.
     """
-    empty = pd.DataFrame(columns=FEATURES, dtype=float).rename_axis("item")
+    empty = pd.DataFrame(columns=COLUMNS, dtype=float).rename_axis("item")
     if not path.exists():
         logger.warning("%s: no feature CSV; run scripts/glm_features/extract.py", path)
         return empty
     table = pd.read_csv(path, dtype={"item": str})
     keep = (table.epoch == 1) & table.correct & (table.reasoning == reasoning) & table.item.isin(set(map(str, items)))
-    return table[keep].set_index("item")[FEATURES].astype(float) if keep.any() else empty
+    return table[keep].set_index("item").reindex(columns=COLUMNS).astype(float) if keep.any() else empty
 
 
 def feature_table(cohort: Cohort, *, reasoning: str = "visible") -> pd.DataFrame:
-    """One FEATURES row per model of cohort.models: the mean over its available transcripts.
+    """One COLUMNS row per model of cohort.models: the mean over its available transcripts.
 
     Reads the repeat-0 path_<bench> logs' CSVs for the cohort's selected (bench, item) pairs,
     weighting items equally across benches. Missing paths are skipped; no observations gives NaN.
@@ -91,5 +93,5 @@ def feature_table(cohort: Cohort, *, reasoning: str = "visible") -> pd.DataFrame
         frames = [read_features(features_path(path), set(item_ids), reasoning=reasoning)
                   for bench, item_ids in cohort.items.groupby("bench").item
                   if isinstance(path := cohort.models.loc[model, f"path_{bench}"], str)]
-        rows.append(pd.concat(frames).mean() if frames else pd.Series(np.nan, index=FEATURES))
-    return pd.DataFrame(rows, index=cohort.models.index, columns=FEATURES, dtype=float)
+        rows.append(pd.concat(frames).mean() if frames else pd.Series(np.nan, index=COLUMNS))
+    return pd.DataFrame(rows, index=cohort.models.index, columns=COLUMNS, dtype=float)

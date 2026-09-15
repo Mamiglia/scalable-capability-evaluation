@@ -23,8 +23,7 @@ class TranscriptRegression(TabularRegression):
 
     Args:
         features: Optional column names overriding the variant's defaults.
-        variant: A key of FEATURE_SETS; protocol name glm_<variant>. "structure" needs the
-            RST labeller, whose labels are not in the feature CSVs yet.
+        variant: A key of FEATURE_SETS ("length", "regex", "structure"); protocol name glm_<variant>.
         reasoning: "visible" (text + raw CoT) or "hidden" (text only); a non-default view is
             appended to the protocol name.
     """
@@ -37,8 +36,7 @@ class TranscriptRegression(TabularRegression):
                          make_pipeline(StandardScaler(), RidgeCV(alphas=ALPHAS)))
 
     def get_features(self, cohort: Cohort) -> pd.DataFrame:
-        if self.variant == "structure":
-            raise NotImplementedError("structure GLM needs RST clause labels, which are not extracted yet")
+        """Selected columns per model; structure columns are NaN for models whose transcripts lack RST labels."""
         return feature_table(cohort, reasoning=self.reasoning)[self.features]
 
     def fit(self, train: Cohort) -> None:

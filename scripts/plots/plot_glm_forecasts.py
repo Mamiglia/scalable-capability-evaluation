@@ -1,6 +1,6 @@
 """True vs predicted theta* of every semester's targets, one figure per transcript-GLM tier.
 
-    PYTHONPATH=src .venv/bin/python scripts/plots/plot_glm_forecasts.py [glm_length glm_regex glm_tools] [--out analysis/glm]
+    PYTHONPATH=src .venv/bin/python scripts/plots/plot_glm_forecasts.py [glm_length glm_regex glm_structure] [--out analysis/glm]
 
 Reads data/meta/<domain>/eval_<protocol>.csv (written by `uv run evaluate`) for science, math,
 coding and cyber, and writes <out>/<protocol>.{png,svg}. Targets are ordered by true theta*
@@ -57,7 +57,7 @@ def panel(ax, forecasts: pd.DataFrame, tag: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("protocols", nargs="*", default=["glm_length", "glm_regex", "glm_tools"])
+    parser.add_argument("protocols", nargs="*", default=["glm_length", "glm_regex", "glm_structure"])
     parser.add_argument("--out", type=Path, default=Path("analysis/glm"))
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
