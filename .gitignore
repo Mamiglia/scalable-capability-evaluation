@@ -23,7 +23,7 @@ uv.lock
 /glm_features/
 artifacts/
 /docs/
-analysis/
+/analysis/
 legacy/
 
 # external reference data: keep small CSVs for scores only, ignore downloaded logs

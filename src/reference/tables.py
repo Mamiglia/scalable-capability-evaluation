@@ -36,3 +36,12 @@ def load(domain: DomainConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
 def load_semesters(path: Path = SEMESTERS) -> dict[str, list[str]]:
     """configs/semesters.yml as {semester: [model shortname, ...]}, in file order."""
     return {str(k): list(v) for k, v in yaml.safe_load(path.read_text()).items()}
+
+
+def load_responses(domain: DomainConfig) -> pd.DataFrame:
+    """Every scored response of the domain, from data/meta/<domain>/responses.csv.
+
+    Returns one row per (bench, item, model, repeat) with columns bench, item (str),
+    model, repeat (int), correct (bool). Covers every item and repeat, EASY and HARD.
+    """
+    return pd.read_csv(frozen_dir(domain) / "responses.csv", dtype={"item": str})
