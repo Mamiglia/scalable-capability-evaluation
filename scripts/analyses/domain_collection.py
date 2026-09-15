@@ -44,7 +44,9 @@ DOMAINS = {
              [("MMLU-Pro", ["mmlu_pro_math"]), ("AIME", ["aime2024", "aime2025", "aime2026"]),
               ("APEX", ["apex_2025", "apex_shortlist"]), ("HLE gold", ["hle", "hle_gold"])]),
     "coding": ("swe_bench_mini", "swe_bench_mini",
-               [("SWE-bench mini", ["swe_bench_mini"]), ("Terminal-Bench 2.1", ["terminal_bench_2_1"])]),
+               [("SWE-bench mini", ["swe_bench_mini"]), ("Terminal-Bench 2.1", ["terminal_bench_2_1"]),
+                ("AgentBench OS", ["agent_bench_os"])]),
+    "cyber": ("cybench", "cybench", [("CyBench", ["cybench"]), ("InterCode", ["intercode"])]),
 }
 
 plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,

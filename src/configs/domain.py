@@ -43,4 +43,10 @@ class DomainConfig(DraccusConfig):
 
     def model_configs(self) -> List[ModelConfig]:
         paths = self.models or sorted(str(p) for p in MODEL_CONFIGS.rglob("*.yml"))
-        return [ModelConfig.from_cli(p) for p in paths]
+        # One config per data dir: a judge-only config (minimax-m1-judge.yml) shares its model's
+        # name, and reading both would count that model's logs twice.
+        configs = {}
+        for p in paths:
+            config = ModelConfig.from_cli(p)
+            configs.setdefault(config.shortname.lower(), config)
+        return list(configs.values())
