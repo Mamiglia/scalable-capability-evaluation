@@ -22,6 +22,7 @@ from configs.domain import DomainConfig
 from configs.judge import JudgeConfig, DirectJudgeConfig
 from protocols import PROTOCOLS, Protocol
 from protocols.pairwise import JudgeBT
+from protocols.pairwise.calibrated import JudgeCalibrated
 from protocols.direct_judge import JudgeDirect
 from reference import tables
 
@@ -78,7 +79,8 @@ def main() -> int:
     args = parser.parse_args()
     domain = DomainConfig.from_cli(args.domain)
 
-    judges = [JudgeBT(JudgeConfig.from_cli(path), domain) for path in args.judge]
+    # JudgeBT and JudgeCalibrated read the same run dir, so the judging happens once.
+    judges = [cls(JudgeConfig.from_cli(path), domain) for path in args.judge for cls in (JudgeBT, JudgeCalibrated)]
     judges += [JudgeDirect(DirectJudgeConfig.from_cli(path), domain) for path in args.direct_judge]
     protocols = [PROTOCOLS[name] for name in args.protocol or PROTOCOLS] + judges
 
