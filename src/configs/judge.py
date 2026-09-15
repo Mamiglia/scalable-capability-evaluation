@@ -45,6 +45,7 @@ class DirectJudgeConfig(JudgeConfig):
     """Direct judging defaults"""
 
     system_prompt: str = "assets/system_prompt/direct.txt"
+    log_dir: Path = Path("logs")
     include_reasoning: bool = True
     include_reverse: bool = False  # accepted for compatibility; unused by direct judging
 

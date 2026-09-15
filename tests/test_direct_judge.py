@@ -27,6 +27,7 @@ from protocols.direct_judge.scoring import calibrate, mean_scores
 def test_direct_config_defaults_and_condition_identity(tmp_path):
     config = DirectJudgeConfig.from_cli({"name": "j", "judge": {"name": "j", "slug": "mockllm/model"}})
     assert config.system_prompt == "assets/system_prompt/direct.txt"
+    assert config.log_dir == Path("logs")
     assert config.include_reasoning and not config.include_reverse
     pairwise = JudgeConfig(name="j", judge=config.judge, system_prompt=config.system_prompt,
                            include_reasoning=True, include_reverse=False)
@@ -121,6 +122,16 @@ def test_direct_protocol_shows_reasoning_when_reusing_pairwise_config(tmp_path):
     assert all(task.metadata["include_reasoning"] for task in tasks)
     assert judge.config.include_reasoning and not config.include_reasoning
     assert judge.config.condition_hash != config.condition_hash
+
+    hidden = JudgeDirect(config, domain, include_reasoning=False)
+    hidden_tasks = hidden.tasks(train, test)
+    assert len(hidden_tasks) == 2
+    assert all("Private reasoning" not in task.dataset[0].input for task in hidden_tasks)
+    assert all("ANSWER: A" in task.dataset[0].input for task in hidden_tasks)
+    assert all(not task.metadata["include_reasoning"] for task in hidden_tasks)
+    assert hidden.log_dir("s") != judge.log_dir("s")
+    assert judge.log_dir("s").relative_to(config.log_dir).parts[0] == "direct"
+    assert hidden.log_dir("s").relative_to(config.log_dir).parts[0] == "direct_reasoning-hidden"
 
 
 def test_benchmark_prompt_overrides_and_log_identity_use_the_same_resolution(tmp_path):
