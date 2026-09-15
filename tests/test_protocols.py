@@ -107,3 +107,10 @@ def test_stratified_items_is_seeded_per_quartile_and_off_by_default():
     cfg = dict(name="x", judge="configs/models/zai/glm-4.7.yml", include_reasoning=False)
     assert JudgeConfig.from_cli(cfg).condition_hash == "7ea04f2b"  # unchanged with the default
     assert JudgeConfig.from_cli(cfg | {"train_per_quartile": 10}).condition_hash != "7ea04f2b"
+
+
+def test_mean_reference_baselines():
+    from protocols.baseline import MeanReference
+    t = toy_task()
+    assert MeanReference("m")(t).eq(1.0).all()  # mean of 0, 1, 2
+    assert MeanReference("f", 2)(t).eq(1.5).all()  # top 2: 1, 2

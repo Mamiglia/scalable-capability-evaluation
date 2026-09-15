@@ -29,3 +29,6 @@ class Protocol:
 
 # Imported after Protocol is defined, because the module subclasses it.
 from protocols.features import PROTOCOLS  # noqa: E402, F401
+from protocols.baseline import PROTOCOLS as _BASELINES  # noqa: E402
+
+PROTOCOLS.update(_BASELINES)
