@@ -1,13 +1,14 @@
-"""Read selected correct first attempts into feature rows, without the judging reader.
+"""Per-model feature rows from the per-transcript CSVs in glm_features/ (LASR-G5/glm_features).
 
-Only small numeric tables are cached; raw messages are released after extraction.
-Source logs are treated as immutable during an evaluation, as in evals.transcripts.
+scripts/glm_features/extract.py writes one CSV per successful log with extract_log: one row per
+sample and reasoning view. feature_table selects a cohort's correct first attempts on its
+items from those CSVs and averages per model, so fitting needs no .eval logs at all.
 """
 
+import re
+import zipfile
 from collections.abc import Callable, Sequence
-from functools import lru_cache
 from pathlib import Path
-from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
@@ -17,58 +18,12 @@ from inspect_ai.model import ChatMessage
 from capability.task import Cohort
 from configs.logs import logger
 from evals.sample import extract_score
-from evals.transcripts import _read_samples
 from protocols.transcript_features.features import FEATURES, STRUCTURE_FEATURES, extract_features, transition_features
 from reference import tables
 
 ClauseTyper = Callable[[Sequence[ChatMessage]], Sequence[str]]
-
-
-def read_features(path: str | Path, items: set[str], *, clause_typer: ClauseTyper | None = None) -> pd.DataFrame:
-    """Read selected correct first attempts from one Inspect .eval log.
-
-    Args:
-        items: Set of item-ID strings to read at epoch 1. Empty means no file access.
-        clause_typer: Optional hashable callable taking a sequence of ChatMessage
-            objects and returning ordered labels from CLAUSE_TYPES.
-
-    Returns:
-        Float DataFrame indexed by item ID (index name: "item"). Columns are
-        the 13 non-RST FEATURES (including tool-call count), plus 11 STRUCTURE_FEATURES
-        when a labeller is supplied. Incorrect items and absent first attempts
-        are omitted. Missing history
-        leaves tool-call count and RST/transition values NaN;
-        available final-output text can still supply length and regex features.
-        The returned table is a copy of the cached result.
-
-    Absent epoch-1 records are reported; missing log files and corrupt records
-    still raise their read errors.
-    """
-    return _read_features(str(path), tuple(sorted(map(str, items))), clause_typer).copy()
-
-
-@lru_cache(maxsize=128)
-def _read_features(path: str, items: tuple[str, ...], clause_typer: ClauseTyper | None) -> pd.DataFrame:
-    """Cached implementation of read_features with sorted item IDs as a tuple.
-
-    Returns the stored DataFrame itself; callers must not mutate it. Cache keys
-    are (path, items, clause_typer), so file changes do not invalidate a result.
-    """
-    columns = FEATURES + (STRUCTURE_FEATURES if clause_typer is not None else [])
-    rows = {}
-    present = ()
-    if items:
-        with ZipFile(path) as archive:
-            members = set(archive.namelist())
-        present = tuple(item for item in items if f"samples/{item}_epoch_1.json" in members)
-        if len(present) < len(items):
-            logger.warning("%s: %d/%d selected items lack epoch 1; using available items",
-                           path, len(items) - len(present), len(items))
-    # Empty selections need no file access. Never substitute a later correct attempt.
-    for sample in _read_samples(path, list(present), epoch=1) if present else ():
-        if extract_score(sample):
-            rows[str(sample.id)] = sample_features(sample, clause_typer=clause_typer)
-    return pd.DataFrame.from_dict(rows, orient="index", columns=columns, dtype=float).rename_axis("item")
+MEMBER = re.compile(r"samples/(.+)_epoch_(\d+)\.json$")
+VIEWS = ("visible", "hidden")
 
 
 def sample_features(sample: EvalSample, *, include_reasoning: bool = True,
@@ -92,30 +47,49 @@ def sample_features(sample: EvalSample, *, include_reasoning: bool = True,
     return row
 
 
-def feature_table(cohort: Cohort, *, clause_typer: ClauseTyper | None = None) -> pd.DataFrame:
-    """Aggregate transcript features into one regression row per model.
+def extract_log(path: str | Path) -> pd.DataFrame:
+    """Every sample of one .eval log as rows: item, epoch, correct, reasoning view, FEATURES."""
+    rows = []
+    with zipfile.ZipFile(path) as archive:
+        for name in archive.namelist():
+            if not (member := MEMBER.match(name)):
+                continue
+            sample = EvalSample.model_validate_json(archive.read(name))
+            for view in VIEWS:
+                rows.append({"item": member[1], "epoch": int(member[2]), "correct": extract_score(sample),
+                             "reasoning": view, **sample_features(sample, include_reasoning=view == "visible")})
+    return pd.DataFrame(rows, columns=["item", "epoch", "correct", "reasoning", *FEATURES])
 
-    Args:
-        cohort: Cohort whose models table contains repeat-0 path_<bench> columns
-            and whose items table contains the selected (bench, item) pairs.
-            Stored relative paths are resolved under reference.tables.DATA.
-        clause_typer: Optional ChatMessage-sequence -> clause-label-sequence
-            callable, as in read_features. No capability labels are read here.
 
-    Returns:
-        Float DataFrame with the same model index/order as cohort.models and
-        FEATURES columns (plus STRUCTURE_FEATURES if requested). Each value is
-        the mean of available per-transcript values, weighting items equally
-        across benches. Missing paths are skipped; no observations gives NaN.
+def features_path(log_path: str | Path) -> Path:
+    """The feature CSV of a data/ log: the same relative path under tables.FEATURES."""
+    return tables.FEATURES / Path(log_path).with_suffix(".csv")
+
+
+def read_features(path: Path, items: set[str], *, reasoning: str = "visible") -> pd.DataFrame:
+    """Correct first attempts on `items` from one feature CSV, FEATURES columns indexed by item.
+
+    A missing CSV (log not extracted) is reported and reads as no observations.
     """
-    columns = FEATURES + (STRUCTURE_FEATURES if clause_typer is not None else [])
+    empty = pd.DataFrame(columns=FEATURES, dtype=float).rename_axis("item")
+    if not path.exists():
+        logger.warning("%s: no feature CSV; run scripts/glm_features/extract.py", path)
+        return empty
+    table = pd.read_csv(path, dtype={"item": str})
+    keep = (table.epoch == 1) & table.correct & (table.reasoning == reasoning) & table.item.isin(set(map(str, items)))
+    return table[keep].set_index("item")[FEATURES].astype(float) if keep.any() else empty
+
+
+def feature_table(cohort: Cohort, *, reasoning: str = "visible") -> pd.DataFrame:
+    """One FEATURES row per model of cohort.models: the mean over its available transcripts.
+
+    Reads the repeat-0 path_<bench> logs' CSVs for the cohort's selected (bench, item) pairs,
+    weighting items equally across benches. Missing paths are skipped; no observations gives NaN.
+    """
     rows = []
     for model in cohort.models.index:
-        frames = []
-        for bench, item_ids in cohort.items.groupby("bench").item:
-            path = cohort.models.loc[model, f"path_{bench}"]
-            if isinstance(path, str):
-                frames.append(read_features(tables.DATA / path, set(item_ids), clause_typer=clause_typer))
-        values = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=columns, dtype=float)
-        rows.append(values.mean())
-    return pd.DataFrame(rows, index=cohort.models.index, columns=columns, dtype=float)
+        frames = [read_features(features_path(path), set(item_ids), reasoning=reasoning)
+                  for bench, item_ids in cohort.items.groupby("bench").item
+                  if isinstance(path := cohort.models.loc[model, f"path_{bench}"], str)]
+        rows.append(pd.concat(frames).mean() if frames else pd.Series(np.nan, index=FEATURES))
+    return pd.DataFrame(rows, index=cohort.models.index, columns=FEATURES, dtype=float)

@@ -15,6 +15,7 @@ from configs.domain import DomainConfig
 
 SEMESTERS = Path("configs/semesters.yml")
 DATA = Path("data")
+FEATURES = Path("glm_features")  # per-transcript feature CSVs mirroring data/ (LASR-G5/glm_features)
 META = DATA / "meta"
 
 
