@@ -10,33 +10,14 @@ logs newer than their CSV are extracted; `legacy/`, `judge/` and crashed/partial
 """
 
 import argparse
-import re
 from concurrent.futures import ProcessPoolExecutor
-import zipfile
 from pathlib import Path
 
-import pandas as pd
-from inspect_ai.log import EvalSample
-
 from configs.paths import is_successful_eval
-from evals.sample import extract_score
-from protocols.transcript_features.reader import sample_features
+from protocols.transcript_features.reader import extract_log
 
-MEMBER = re.compile(r"samples/(.+)_epoch_(\d+)\.json$")
+
 SKIP = {"legacy", "judge"}
-
-
-def extract_log(path: Path) -> pd.DataFrame:
-    rows = []
-    with zipfile.ZipFile(path) as archive:
-        for name in archive.namelist():
-            if not (member := MEMBER.match(name)):
-                continue
-            sample = EvalSample.model_validate_json(archive.read(name))
-            for view in ("visible", "hidden"):
-                rows.append({"item": member[1], "epoch": int(member[2]), "correct": extract_score(sample),
-                             "reasoning": view, **sample_features(sample, include_reasoning=view == "visible")})
-    return pd.DataFrame(rows)
 
 
 def main() -> None:

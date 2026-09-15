@@ -94,3 +94,8 @@ class TabularRegression(Protocol):
 PROTOCOLS: dict[str, Protocol] = {f: TabularRegression(f, [f], LinearRegression()) for f in FEATURES}
 # Small training cohorts against collinear features: standardise and shrink, or the fit is arbitrary.
 PROTOCOLS["ridge"] = TabularRegression("ridge", list(FEATURES), make_pipeline(StandardScaler(), Ridge(1.0)))
+
+from protocols.transcript_features.protocol import TranscriptRegression  # noqa: E402  (subclasses TabularRegression)
+
+for variant in ("length", "regex", "tools"):
+    PROTOCOLS[f"glm_{variant}"] = TranscriptRegression(variant=variant)

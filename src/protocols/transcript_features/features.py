@@ -81,6 +81,7 @@ STRUCTURE_FEATURES += ["tool_action_share"]
 FEATURE_SETS = {
     "length": LENGTH_FEATURES,
     "regex": LENGTH_FEATURES + REGEX_FEATURES,
+    "tools": FEATURES,  # + tool-call count: the structure tier without its RST transitions
     "structure": FEATURES + STRUCTURE_FEATURES,
 }
 
