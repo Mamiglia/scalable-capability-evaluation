@@ -2,7 +2,7 @@
 
 forecast_figure   one panel per domain, semesters along x; within a semester the targets
                   sorted by theta*, black = true theta, orange = forecast, dotted connectors
-bar_figure        four bars (the conditions) at the mean of a per-(domain, semester) metric,
+bar_figure        six bars (the conditions) at the mean of a per-(domain, semester) metric,
                   jittered circles for the individual (domain, semester) values, easy-item
                   prediction as a dashed line
 semester_table    semester x condition for one domain, or pooled over the domains that have
@@ -27,10 +27,11 @@ plt.rcParams.update({
     "xtick.major.width": 0.8, "ytick.major.width": 0.8, "axes.spines.top": False, "axes.spines.right": False,
     "svg.fonttype": "none", "savefig.dpi": 300,
 })
-CONDITIONS = ["glm_regex", "embedding", "direct", "pairwise"]  # the four bars, in this order
-LABELS = {BASELINE: "easy-item prediction", "glm_regex": "length+regex", "embedding": "embedding", "direct": "direct judge",
-          "pairwise": "pairwise judge"}
-COLORS = dict(zip(CONDITIONS, ["#1baf7a", "#4a3aa7", "#eb6834", "#2a78d6"]))
+CONDITIONS = ["glm_regex", "embedding", "direct", "direct_ensemble", "pairwise", "pairwise_ensemble"]  # the bars, in this order
+LABELS = {BASELINE: "easy-item prediction", "glm_regex": "length+regex", "embedding": "embedding",
+          "direct": "direct judge", "direct_ensemble": "direct judges, pooled",
+          "pairwise": "pairwise judge", "pairwise_ensemble": "pairwise judges, pooled"}
+COLORS = dict(zip(CONDITIONS, ["#1baf7a", "#4a3aa7", "#eb6834", "#f4a581", "#2a78d6", "#8fb8e8"]))
 TRUE, PRED = "black", "#eb6834"
 METRIC_LABELS = {"mse": "MSE (θ units)", "delta": "MSE − easy-item MSE", "z": "z of MSE − easy-item MSE (paired bootstrap)"}
 
@@ -98,7 +99,7 @@ def zigzag(ax, y: float, size: float = 0.02) -> None:
 
 
 def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], path, seed: int = 0) -> None:
-    """Four bars, one per condition in CONDITIONS, at the mean over (domain, semester) of the
+    """Six bars, one per condition in CONDITIONS, at the mean over (domain, semester) of the
     metric ("mse", "delta" or "z"); the individual (domain, semester) values as jittered
     circles; easy-item prediction as a dashed grey line (its mean raw MSE, or 0 for delta and z).
     Values beyond Tukey's far-out fence (outlier_split) go to a short upper panel above a
@@ -112,11 +113,11 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
     baseline = m[m.protocol == BASELINE].mse.mean() if metric == "mse" else 0.0
     inliers, outliers = outlier_split(every)
     if len(outliers):
-        fig, (top, ax) = plt.subplots(2, 1, figsize=(2.6, 2.6), sharex=True, layout="constrained",
+        fig, (top, ax) = plt.subplots(2, 1, figsize=(3.4, 2.6), sharex=True, layout="constrained",
                                       gridspec_kw={"height_ratios": [1, 3]})
         panels = [top, ax]
     else:
-        fig, ax = plt.subplots(figsize=(2.6, 2.2), layout="constrained")
+        fig, ax = plt.subplots(figsize=(3.4, 2.2), layout="constrained")
         top, panels = None, [ax]
     for panel in panels:
         for i, p in enumerate(CONDITIONS):

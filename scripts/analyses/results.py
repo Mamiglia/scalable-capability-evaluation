@@ -35,7 +35,8 @@ OUT = Path("analysis/results")
 PAIRWISE_CONVERSION = "calibrated"  # or "linear"
 DIRECT_NORMALISATION = "raw"  # or "item_z"
 EMBEDDING_VARIANT = "full"  # or "answer"
-VARIANTS = {"pairwise": PAIRWISE_CONVERSION, "direct": DIRECT_NORMALISATION, "embedding": EMBEDDING_VARIANT}
+VARIANTS = {"pairwise": PAIRWISE_CONVERSION, "pairwise_ensemble": PAIRWISE_CONVERSION,
+            "direct": DIRECT_NORMALISATION, "direct_ensemble": DIRECT_NORMALISATION, "embedding": EMBEDDING_VARIANT}
 (OUT / "tables").mkdir(parents=True, exist_ok=True)
 
 # %% loading: semester tasks and the judge runs on disk

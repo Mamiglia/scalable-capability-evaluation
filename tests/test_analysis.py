@@ -125,3 +125,22 @@ def test_task_metrics_are_paired_against_easy_item_prediction():
     assert s1.delta[("direct", stats.BEST)] == -1.5 and (m.judge != stats.MEAN).all()
     pooled = m[(m.domain == "all") & (m.semester == "all") & (m.protocol == "glm_regex")]
     assert pooled.n.item() == 4 and pooled.delta.item() == -1.5
+
+
+from types import SimpleNamespace
+
+from analysis import calibration
+from analysis.loading import JudgeRun
+
+
+def test_ensemble_runs_pool_the_core_condition_of_every_judge():
+    def run(protocol, judge, condition, n, missing=0):
+        table = pd.DataFrame({"bench": "b", "item": [str(i) for i in range(n)], "judge": judge})
+        return JudgeRun(protocol, judge, condition, SimpleNamespace(domain=None), table, missing)
+    runs = [run("pairwise", "j1", "reasoning-shown", 3, 1), run("pairwise", "j1", "reasoning-hidden", 9),
+            run("pairwise", "j2", "reasoning-hidden", 4, 2), run("pairwise", "j3", "reasoning-shown-10pq", 7),
+            run("direct", "j1", "reasoning-shown", 5)]
+    pooled = calibration.ensemble_runs(runs)
+    # pairwise: j1's shown run and j2's hidden run pooled; the 10pq run is never core; direct has one judge only
+    assert [(r.protocol, r.judge, r.condition, len(r.table), r.missing) for r in pooled] == [("pairwise", "ensemble", "core", 7, 3)]
+    assert sorted(pooled[0].table.judge.unique()) == ["j1", "j2"]
