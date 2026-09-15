@@ -10,6 +10,9 @@ semester_table    semester x condition for one domain, or pooled over the domain
 
 Judge protocols appear as the best judge on references (task_metrics has no other judge
 rows); one variant per protocol is drawn, chosen by the runner's toggles.
+
+matplotlib.use("Agg") below is deliberate: figures go to files, nothing renders inline in an
+IDE cell.
 """
 
 import matplotlib
@@ -151,28 +154,44 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
     if len(outliers):
         fig, (top, ax) = plt.subplots(2, 1, figsize=(3.4, 2.8), sharex=True, layout="constrained",
                                       gridspec_kw={"height_ratios": [1, 3]})
-        panels = [top, ax]
     else:
         fig, ax = plt.subplots(figsize=(3.4, 2.4), layout="constrained")
-        top, panels = None, [ax]
-    for panel in panels:
-        for i, p in enumerate(CONDITIONS):
-            g = groups[p]
-            if g.empty:
-                continue
-            values = g[metric].to_numpy()
-            panel.bar(i, values.mean(), color=BAR, width=0.72, zorder=1)
-            panel.hlines(values.mean(), i - 0.36, i + 0.36, color="black", lw=1.0, zorder=4)
-            if np.isfinite(half := ci95(values)):
-                panel.errorbar(i, values.mean(), yerr=half, color="black", lw=0.8, capsize=0, zorder=4)
-            panel.scatter(i + swarm_offsets(values), values, s=14, c=[DOMAIN_COLORS.get(d, "black") for d in g.domain],
-                          edgecolor="white", linewidth=0.5, zorder=3)
-        panel.axhline(baseline, color="grey", lw=0.8, ls="--", zorder=0)
+        top = None
+    for i, p in enumerate(CONDITIONS):  # the lower panel draws everything and clips
+        g = groups[p]
+        if g.empty:
+            continue
+        values = g[metric].to_numpy()
+        ax.bar(i, values.mean(), color=BAR, width=0.72, zorder=1)
+        ax.hlines(values.mean(), i - 0.36, i + 0.36, color="black", lw=1.0, zorder=4)
+        if np.isfinite(half := ci95(values)):
+            ax.errorbar(i, values.mean(), yerr=half, color="black", lw=0.8, capsize=0, zorder=4)
+        ax.scatter(i + swarm_offsets(values), values, s=14, c=[DOMAIN_COLORS.get(d, "black") for d in g.domain],
+                   edgecolor="white", linewidth=0.5, zorder=3)
+    ax.axhline(baseline, color="grey", lw=0.8, ls="--", zorder=0)
     if top is not None:
         pad = 0.1 * max(np.ptp(inliers), 1e-9)
         ax.set_ylim(min(inliers.min(), baseline) - pad, max(inliers.max(), baseline) + pad)
         span = max(np.ptp(outliers), pad)
         top.set_ylim(outliers.min() - 0.5 * span, outliers.max() + 0.5 * span)
+        lo, hi = top.get_ylim()
+        for i, p in enumerate(CONDITIONS):  # the upper panel draws only the outlier points and, per condition, a bar/mean line only if its mean is in view
+            g = groups[p]
+            if g.empty:
+                continue
+            values = g[metric].to_numpy()
+            far = np.isin(values, outliers)
+            if far.any():
+                far_values = values[far]
+                top.scatter(i + swarm_offsets(far_values), far_values, s=14,
+                            c=[DOMAIN_COLORS.get(d, "black") for d in g.domain.to_numpy()[far]],
+                            edgecolor="white", linewidth=0.5, zorder=3)
+            if lo <= values.mean() <= hi:
+                top.bar(i, values.mean(), color=BAR, width=0.72, zorder=1)
+                top.hlines(values.mean(), i - 0.36, i + 0.36, color="black", lw=1.0, zorder=4)
+                if np.isfinite(half := ci95(values)):
+                    top.errorbar(i, values.mean(), yerr=half, color="black", lw=0.8, capsize=0, zorder=4)
+        top.axhline(baseline, color="grey", lw=0.8, ls="--", zorder=0)
         top.spines["bottom"].set_visible(False)
         top.tick_params(axis="x", bottom=False)
         zigzag(ax, 1.0)
