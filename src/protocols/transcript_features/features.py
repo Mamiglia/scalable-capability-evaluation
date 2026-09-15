@@ -22,14 +22,13 @@ TERMS = {
     "hedging": ["perhaps", "possibly", "might", "may", "maybe", "seems", "seem", "seemed",
                 "seemingly", "appears to", "appear to", "appeared to", "likely", "unlikely",
                 "presumably", "arguably", "probably", "potentially", "I think", "I believe",
-                "I suspect", "could be", "may be", "tends to", "generally",
-                "typically", "in general", "sort of", "kind of"],
-    "backtracking": ["wait", "actually", "on second", "let me reconsider", "reconsider",
+                "I suspect", "could be", "may be", "tends to", "sort of", "kind of"],
+    "backtracking": ["wait", "on second", "let me reconsider", "reconsider",
                      "rethink", "re-examine", "scratch that", "I made a mistake", "mistake",
                      "oh wait", "hold on", "hm", "hmm", "hmmm", "no wait",
                      "never mind", "I was wrong",
                      "that's wrong", "that's not right", "not right", "let me redo", "try again",
-                     "start over", "go back", "backtrack"],
+                     "start over", "backtrack"],
     "uncertainty": ["unsure", "not sure", "not certain", "uncertain", "unclear", "ambiguous",
                     "guess", "guessing", "hard to say", "hard to tell", "difficult to say",
                     "I don't know", "don't know", "not confident", "can't be sure",
@@ -37,7 +36,7 @@ TERMS = {
     "confidence": ["obviously", "certainly", "definitely", "undoubtedly", "of course", "surely",
                    "without doubt", "no doubt", "indeed", "evidently", "unquestionably",
                    "must be", "it is clear", "it's clear", "absolutely", "for sure",
-                   "straightforward", "trivially", "trivial"],
+                   "trivially"],
     "questions": ["?"],
     "verification": ["check", "checks", "checked", "checking", "recheck", "re-check",
                      "confirm", "confirms", "confirmed", "confirming",
@@ -46,13 +45,13 @@ TERMS = {
                      "validate", "validated", "validating", "make sure", "making sure",
                      "sanity check", "plug back", "plugging back", "substitute back",
                      "substituting back", "plug in", "plugging in", "let me see if"],
-    "connectives": ["therefore", "thus", "hence", "because", "since", "it follows",
+    "connectives": ["therefore", "thus", "hence", "because", "it follows",
                     "follows that", "which means", "this means", "means that", "this implies",
-                    "implies", "implying", "consequently", "so that", "as a result",
-                    "given that", "leads to", "in turn", "accordingly", "thereby"],
+                    "implies", "implying", "consequently", "as a result",
+                    "given that", "leads to", "accordingly", "thereby"],
     "contrast": ["however", "but", "although", "though", "on the other hand", "nevertheless",
-                 "nonetheless", "whereas", "yet", "in contrast", "conversely", "instead",
-                 "rather", "despite", "even though", "still", "otherwise", "alternatively", "unlike"],
+                 "nonetheless", "whereas", "in contrast", "conversely", "instead",
+                 "despite", "even though", "otherwise", "alternatively", "unlike"],
 }
 
 LENGTH_FEATURES = ["log_chars", "log_reasoning_chars", "visible_reasoning"]
@@ -89,7 +88,8 @@ FEATURE_SETS = {
 STANDALONE_I = re.compile(r"\bI(?=(?:'[a-z])|(?:\s+[a-z]))(?!\s+is\b)")
 # ponytail: Markdown/LaTeX regexes cover common spans; use a parser if nested syntax matters.
 CODE = re.compile(r"(?P<fence>`{3,}|~{3,})[^\n]*\n.*?(?:(?P=fence)|\Z)|`+[^`\n]*`+", re.S)
-MATH = re.compile(r"\$\$.*?\$\$|\$[^$\n]*\$|\\\[.*?\\\]|\\\(.*?\\\)", re.S)
+# Inline $...$ must not start or end with a space, so "$5 to $10" is prose, not maths.
+MATH = re.compile(r"\$\$.*?\$\$|\$(?!\s)[^$\n]*?(?<!\s)\$|\\\[.*?\\\]|\\\(.*?\\\)", re.S)
 ANSWER = re.compile(r"^[ \t]*(?:\*\*)?ANSWER:(?:\*\*)?[^\n]*$", re.I | re.M)
 
 
@@ -177,10 +177,11 @@ def transition_features(types: Sequence[str]) -> dict[str, float]:
     }
 
 
-def extract_features(messages: Sequence[ChatMessage]) -> dict[str, float]:
+def extract_features(messages: Sequence[ChatMessage], include_reasoning: bool = True) -> dict[str, float]:
     """Extract base features from a sequence of Inspect ChatMessage objects.
 
-    Reads assistant text and visible reasoning blocks, and counts structured tool
+    Reads assistant text and visible reasoning blocks (none when include_reasoning is
+    False: the reasoning-hidden view), and counts structured tool
     calls. Tool arguments, user/system/tool text and redacted reasoning are excluded
     from text features. The caller is
     responsible for selecting the item and checking correctness/attempt number.
@@ -209,7 +210,7 @@ def extract_features(messages: Sequence[ChatMessage]) -> dict[str, float]:
             for block in message.content:
                 if block.type == "text":
                     text.append(format_text(block.text))
-                elif block.type == "reasoning" and format_reasoning(block):
+                elif block.type == "reasoning" and include_reasoning and format_reasoning(block):
                     text.append(block.reasoning)
                     reasoning.append(block.reasoning)
 

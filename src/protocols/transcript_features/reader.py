@@ -11,6 +11,7 @@ from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
+from inspect_ai.log import EvalSample
 from inspect_ai.model import ChatMessage
 
 from capability.task import Cohort
@@ -65,20 +66,30 @@ def _read_features(path: str, items: tuple[str, ...], clause_typer: ClauseTyper 
                            path, len(items) - len(present), len(items))
     # Empty selections need no file access. Never substitute a later correct attempt.
     for sample in _read_samples(path, list(present), epoch=1) if present else ():
-        if not extract_score(sample):
-            continue
-        messages = sample.messages
-        if not messages:
-            choices = getattr(sample.output, "choices", None) or []
-            messages = [choices[0].message] if choices else []
-        row = extract_features(messages)
-        if not sample.messages:
-            row["log_tool_calls"] = np.nan  # a final output cannot establish total trajectory calls
-        if clause_typer is not None:
-            row.update(transition_features(clause_typer(messages)) if sample.messages
-                       else dict.fromkeys(STRUCTURE_FEATURES, np.nan))
-        rows[str(sample.id)] = row
+        if extract_score(sample):
+            rows[str(sample.id)] = sample_features(sample, clause_typer=clause_typer)
     return pd.DataFrame.from_dict(rows, orient="index", columns=columns, dtype=float).rename_axis("item")
+
+
+def sample_features(sample: EvalSample, *, include_reasoning: bool = True,
+                    clause_typer: ClauseTyper | None = None) -> dict[str, float]:
+    """One sample's FEATURES row (plus STRUCTURE_FEATURES with a labeller), regardless of score.
+
+    include_reasoning=False is the reasoning-hidden view: reasoning blocks are dropped
+    before every text feature. Without message history the final output still supplies
+    text features, but call/structure values are NaN.
+    """
+    messages = sample.messages
+    if not messages:
+        choices = getattr(sample.output, "choices", None) or []
+        messages = [choices[0].message] if choices else []
+    row = extract_features(messages, include_reasoning)
+    if not sample.messages:
+        row["log_tool_calls"] = np.nan  # a final output cannot establish total trajectory calls
+    if clause_typer is not None:
+        row.update(transition_features(clause_typer(messages)) if sample.messages
+                   else dict.fromkeys(STRUCTURE_FEATURES, np.nan))
+    return row
 
 
 def feature_table(cohort: Cohort, *, clause_typer: ClauseTyper | None = None) -> pd.DataFrame:
