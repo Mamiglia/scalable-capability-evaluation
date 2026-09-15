@@ -26,6 +26,9 @@ sys.path.insert(0, str(REPO / "scripts/audit/logs"))
 from eval_edits import stamp_edit
 
 
+CUT_WORDS = {"head": "first {n}", "tail": "last {n}", "ends": "first and last {n} ('...' between)"}
+
+
 def sha(value):
     return hashlib.sha256(value.encode() if isinstance(value, str) else value).hexdigest()
 
@@ -69,6 +72,7 @@ def prepare(condition):
     payload = json.loads((inputs / "job.json").read_text())
     domain, judge, max_length, mode = payload["domain"], payload["judge"], payload["max_length"], payload["truncate"]
     label = f"truncated_{mode}_{max_length}_chars"
+    CUT_WORDS = {k: v.format(n=max_length if k != "ends" else max_length // 2) for k, v in globals()["CUT_WORDS"].items()}
     route = {"judge_config": payload["judge_config"], "model_config": payload["model_config"]}
     failures = {(row["task"], row["item"]) for row in audit.get("declared_failures", [])}
     cfg = DirectJudgeConfig.from_cli(payload["config"])
@@ -188,7 +192,7 @@ def prepare(condition):
         "effective_config": payload["config"], "domain": domain, "semester": payload["semester"],
         "source_snapshot": payload["source_snapshot"], "condition_hash": destination.name,
         "input_manifest_sha256": sha((inputs / "job.json").read_bytes()),
-        "judgment_input": f"Each transcript longer than {max_length} characters cut to its {'first' if mode == 'head' else 'last'} {max_length} before rendering (JudgeConfig.max_length, truncate={mode}); shorter transcripts unchanged and their full-transcript ratings reused; calibration and target transcripts alike; subject reasoning visible; retained set and exclusions identical to the full-transcript campaign.",
+        "judgment_input": f"Each transcript longer than {max_length} characters cut to its {CUT_WORDS[mode]} before rendering (JudgeConfig.max_length, truncate={mode}); shorter transcripts unchanged and their full-transcript ratings reused; calibration and target transcripts alike; subject reasoning visible; retained set and exclusions identical to the full-transcript campaign.",
         "truncated_inputs": sum(row["truncated"] for row in payload["audit"]),
         "calibration": "previous-semester references only", "ratings": len(ratings),
         "retained_judgments": sum(len(ids) for ids in expected.values()), "declared_failures": audit.get("declared_failures", []),
@@ -196,7 +200,7 @@ def prepare(condition):
         "reused_ratings": len(payload["reused_ratings"]), "files": records,
         "audit": {k: audit[k] for k in ("audited_at", "counts", "providers", "stop_reasons", "cache_provenance", "reused_provenance")}}
     (stage / "condition.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    (stage / "README.md").write_text(f"# Direct judging: transcripts truncated to their {'first' if mode == 'head' else 'last'} {max_length} characters\n\n"
+    (stage / "README.md").write_text(f"# Direct judging: transcripts truncated to their {CUT_WORDS[mode]} characters\n\n"
         f"{judge}, {domain}, {payload['semester']}; `max_length: {max_length}`, `truncate: {mode}` (characters kept per transcript, same limit on calibration and target transcripts). "
         f"{len(ratings)} audited ratings on the full-transcript campaign's retained set, including {len(payload['reused_ratings'])} verified identical-input reuses of inputs shorter than the limit.\n\n"
         "The condition hash and log metadata separate it from the full-transcript run. "
@@ -212,5 +216,5 @@ def prepare(condition):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("condition", help="<domain>/<judge>/<semester>/<head|tail>-<max_length>")
+    parser.add_argument("condition", help="<domain>/<judge>/<semester>/<head|tail|ends>-<max_length>")
     prepare(parser.parse_args().condition)

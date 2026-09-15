@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 from inspect_ai.log import read_eval_log, read_eval_log_sample, read_eval_log_sample_summaries
-from judge.dataset import DIRECT_USER_PROMPT
+from judge.dataset import DIRECT_USER_PROMPT, cut
 from judge.scorer import parse_direct_judge_output
 from challenges.truncation.run import condition_summary, tag
 
@@ -105,7 +105,7 @@ def audit(domain, log_dir=None):
             kept, body, full_body = (sample.metadata or {}).get("chars") or 0, sample.input[:-len(suffix)], full_inputs[key][:-len(suffix)]
             text, head = body[len(body) - kept:], body[:len(body) - kept]
             check(sample.input.endswith(suffix) and full_body.startswith(head)
-                  and (full_body.startswith(head + text) if mode == "head" else full_body.endswith(text)), "not a cut of the full transcript", where)
+                  and text == cut(full_body[len(head):], max_length, mode), "not a cut of the full transcript", where)
             serialized = sample.model_dump_json()
             check(not any(secret in serialized for secret in secrets) and not secret_pattern.search(serialized), "credential content", where)
             successful = [e for e in sample.events if e.event == "model" and not e.error and e.output.choices]
@@ -254,7 +254,7 @@ def audit(domain, log_dir=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("domains", nargs="+", help="conditions: <domain>/<judge>/<semester>/<head|tail>-<max_length>")
+    parser.add_argument("domains", nargs="+", help="conditions: <domain>/<judge>/<semester>/<head|tail|ends>-<max_length>")
     parser.add_argument("--partial", action="store_true", help="Allow unfinished workers; never a publication gate")
     parser.add_argument("--log-dir", type=Path, help="Audit consolidated recovery copies for one condition")
     args = parser.parse_args()

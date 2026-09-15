@@ -21,10 +21,19 @@ MIN_RESPONSE_CHARS = 20
 ROLE_PREFIX = re.compile(r"^\[[^\]\n]+\]: ", re.M)  # "[Assistant]: ", "[User]: ", "[Tool Output (f)]: " (evals.sample)
 
 
+ENDS_SEPARATOR = "\n...\n"  # marks the elided middle of a transcript cut to its two ends
+
+
 def cut(text: str, max_len: int, truncate: str = "head") -> str:
-    """The max_len characters a judge sees of a longer transcript: its prefix (head) or suffix (tail)."""
-    if truncate not in ("head", "tail"):
-        raise ValueError(f"truncate must be head or tail, got {truncate!r}")
+    """The max_len characters a judge sees of a longer transcript: its prefix (head), suffix (tail),
+    or first and last max_len/2 with ENDS_SEPARATOR between (ends). Shorter transcripts are unchanged."""
+    if truncate not in ("head", "tail", "ends"):
+        raise ValueError(f"truncate must be head, tail or ends, got {truncate!r}")
+    if len(text) <= max_len:
+        return text
+    if truncate == "ends":
+        half = max_len // 2
+        return text[:half] + ENDS_SEPARATOR + text[-half:]
     return text[:max_len] if truncate == "head" else text[-max_len:]
 
 

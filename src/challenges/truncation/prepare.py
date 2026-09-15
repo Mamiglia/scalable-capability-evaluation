@@ -1,9 +1,9 @@
-"""Freeze matched truncated direct inputs for <domain>/<judge>/<semester>/<head|tail>-<max_length>; no API calls.
+"""Freeze matched truncated direct inputs for <domain>/<judge>/<semester>/<head|tail|ends>-<max_length>; no API calls.
 
 A condition reuses the full-transcript campaign's exact retained inputs, exclusions, references and
 target truth, re-rendered with JudgeConfig.max_length (characters kept per transcript, applied to
 calibration and target transcripts alike). Ratings are reused wherever the limit leaves the rendered
-input unchanged; every truncated transcript is verified to be a prefix (head) or suffix (tail) of the full one.
+input unchanged; every truncated transcript is verified to equal the head, tail or ends cut of the full one.
 """
 import argparse
 import hashlib
@@ -19,7 +19,7 @@ import capability.task as cohort_module
 from configs import DirectJudgeConfig
 from configs.domain import DomainConfig
 from evals.transcripts import read_transcripts
-from judge.dataset import DIRECT_USER_PROMPT
+from judge.dataset import DIRECT_USER_PROMPT, cut as cut_text
 from protocols.direct_judge import JudgeDirect
 from protocols.direct_judge import judge as judge_module
 from reference import tables
@@ -139,10 +139,9 @@ def prepare(domain_name, judge_name, semester, cut):
             kept, full_chars = sample.metadata["chars"], original.metadata["chars"]
             text, full_text = body[len(body) - kept:], full_body[len(full_body) - full_chars:]
             assert body[:len(body) - kept] == full_body[:len(full_body) - full_chars], key  # same question and options
-            assert (full_text.startswith(text) if mode == "head" else full_text.endswith(text)), key  # deterministic cut
-            cut = len(full_body) > len(body)
-            assert sample.metadata["truncated"] is cut, key
-            assert sample.metadata["chars"] == min(max_length, original.metadata["chars"]), key
+            assert text == cut_text(full_text, max_length, mode), key  # deterministic cut of the full transcript
+            cut = len(full_text) > max_length
+            assert sample.metadata["truncated"] is cut and (cut or text == full_text), key
             # A shorter input still satisfies the full campaign's context preflight.
             unchanged = sample.input == original.input
             assert unchanged is not cut

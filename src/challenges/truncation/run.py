@@ -116,7 +116,7 @@ def run(condition, max_retries=None, max_connections=None):
 if __name__ == "__main__":
     load_dotenv(Path.cwd() / ".env", override=True)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("condition", help="<domain>/<judge>/<semester>/<head|tail>-<max_length>")
+    parser.add_argument("condition", help="<domain>/<judge>/<semester>/<head|tail|ends>-<max_length>")
     parser.add_argument("--max-retries", type=int, help="override the frozen job's API retry count")
     parser.add_argument("--max-connections", type=int, help="override the frozen job's concurrency")
     args = parser.parse_args()

@@ -67,5 +67,5 @@ def main(domain):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("domain", help="<domain>/<judge>/<semester>/<head|tail>-<max_length>")
+    parser.add_argument("domain", help="<domain>/<judge>/<semester>/<head|tail|ends>-<max_length>")
     main(parser.parse_args().domain)

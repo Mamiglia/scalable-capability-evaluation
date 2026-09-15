@@ -19,7 +19,7 @@ class JudgeConfig(DraccusConfig):
     include_reasoning: bool = False  # show the models' reasoning blocks to the judge
     include_reverse: bool = True  # judge every pair in both shown orders (position bias)
     max_length: int = FULL_LENGTH  # chars kept per transcript; two must fit the judge's context with its output
-    truncate: str = "head"  # which max_length chars to keep when a transcript is longer: head (prefix) or tail (suffix)
+    truncate: str = "head"  # which max_length chars to keep when a transcript is longer: head (prefix), tail (suffix) or ends (both halves, "..." between)
     temperature: float = 0.0
     cache: bool = True  # inspect generate cache, never expires: a repeated pair is free
     log_dir: Path = Path("logs/judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/ syncs to the HF judging repo)
@@ -34,8 +34,8 @@ class JudgeConfig(DraccusConfig):
     def __post_init__(self):
         if isinstance(self.judge, (str, Path)):
             self.judge = ModelConfig.from_cli(self.judge)
-        if self.truncate not in ("head", "tail"):
-            raise ValueError(f"truncate must be head or tail, got {self.truncate!r}")
+        if self.truncate not in ("head", "tail", "ends"):
+            raise ValueError(f"truncate must be head, tail or ends, got {self.truncate!r}")
 
     @property
     def condition_hash(self) -> str:
