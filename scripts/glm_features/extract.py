@@ -5,8 +5,8 @@
 glm_features/ is a clone of https://huggingface.co/datasets/LASR-G5/glm_features and mirrors
 data/'s layout: <bench>/<task_args_hash>/<model>/<repeat>/<eval id>.csv, one row per sample
 and reasoning view (visible: text + raw CoT; hidden: text only). Values are per-transcript
-rates; averaging over a model's selected items happens at fit time. Only logs newer than
-their CSV are re-extracted; `legacy/` and `judge/` are skipped.
+rates; averaging over a model's selected items happens at fit time. Only successful full-run
+logs newer than their CSV are extracted; `legacy/`, `judge/` and crashed/partial logs are skipped.
 """
 
 import argparse
@@ -18,6 +18,7 @@ from pathlib import Path
 import pandas as pd
 from inspect_ai.log import EvalSample
 
+from configs.paths import is_successful_eval
 from evals.sample import extract_score
 from protocols.transcript_features.reader import sample_features
 
@@ -55,6 +56,9 @@ def main() -> None:
             continue
         if log.stat().st_size < 1024 and log.read_bytes().startswith(b"version https://git-lfs"):
             print(f"skip (LFS pointer, not fetched): {log}")
+            continue
+        if not is_successful_eval(log):  # crashed/partial runs left beside the real one for resume
+            print(f"skip (not a successful full run): {log}")
             continue
         jobs.append((log, target))
     # ponytail: one process per log; big HLE logs cost a few hundred MB each, hence --workers.
