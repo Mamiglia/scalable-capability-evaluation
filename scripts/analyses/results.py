@@ -81,7 +81,10 @@ best = pooled.sort_values("mse").iloc[0]
 latest = max(sem for _, sem in tasks)
 plots.forecast_figure(forecasts, best.protocol, best.variant, OUT / f"forecasts_{best.protocol}.svg")
 plots.forecast_figure(forecasts, best.protocol, best.variant, OUT / f"forecasts_{best.protocol}_{latest}.svg", semesters=[latest])
+semesters = sorted({sem for _, sem in tasks})
 for metric in stats.METRICS:
     plots.bar_figure(metrics, metric, VARIANTS, OUT / f"bars_{metric}.svg")
+    for sem in semesters:
+        plots.bar_figure(metrics, metric, VARIANTS, OUT / f"bars_{metric}_{sem}.svg", semester=sem)
 print("best condition:", best.protocol, best.variant, "pooled mse", round(best.mse, 3))
 print("wrote", sorted(p.name for p in OUT.iterdir()))

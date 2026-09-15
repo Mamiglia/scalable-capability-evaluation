@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy import stats as scipy_stats
 
 from analysis.stats import BASELINE, BEST, JUDGED, METRICS, one_per_target
 
@@ -34,6 +35,41 @@ LABELS = {BASELINE: "easy-item prediction", "glm_regex": "length+regex", "embedd
 COLORS = dict(zip(CONDITIONS, ["#1baf7a", "#4a3aa7", "#eb6834", "#f4a581", "#2a78d6", "#8fb8e8"]))
 TRUE, PRED = "black", "#eb6834"
 METRIC_LABELS = {"mse": "MSE (θ units)", "delta": "MSE − easy-item MSE", "z": "z of MSE − easy-item MSE (paired bootstrap)"}
+DOMAIN_COLORS = {"science": "#2a78d6", "math": "#eb6834", "coding": "#1baf7a", "cyber": "#eda100"}
+BAR = "#d9d7d0"  # neutral bar; colour is reserved for the domain of a point
+
+
+def swarm_offsets(values: np.ndarray, width: float = 0.3, min_gap: float | None = None) -> np.ndarray:
+    """Deterministic beeswarm x-offsets in [-width, width] for 1-D `values`: points are placed in
+    value order, each at the offset nearest the centre that keeps it at least `min_gap` (in the
+    values' units; default 1/25 of their range) from every already-placed point closer than
+    that vertically. No random jitter, so a figure is reproducible."""
+    values = np.asarray(values, float)
+    n = len(values)
+    if n == 0:
+        return values
+    gap = min_gap if min_gap is not None else max(np.ptp(values), 1e-9) / 25
+    slots = np.linspace(-width, width, 2 * n + 1)
+    slots = slots[np.argsort(np.abs(slots), kind="stable")]  # centre first, then outward
+    offsets = np.zeros(n)
+    placed: list[tuple[float, float]] = []  # (value, offset)
+    for i in np.argsort(values, kind="stable"):
+        for s in slots:
+            if all(abs(values[i] - v) >= gap or abs(s - o) >= width / max(n, 1) * 2 for v, o in placed):
+                offsets[i] = s
+                break
+        else:
+            offsets[i] = slots[-1]
+        placed.append((values[i], offsets[i]))
+    return offsets
+
+
+def ci95(values: np.ndarray) -> float:
+    """Half-width of the t-based 95% interval of the mean of `values`; NaN with fewer than 3."""
+    n = len(values)
+    if n < 3:
+        return float("nan")
+    return float(scipy_stats.t.ppf(0.975, n - 1) * np.std(values, ddof=1) / np.sqrt(n))
 
 
 def chosen(metrics: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
@@ -53,28 +89,26 @@ def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, 
         f = f[f.semester.isin(semesters)]
     domains = list(dict.fromkeys(f.domain))
     widths = [f[f.domain == d].semester.nunique() for d in domains]
-    fig, axes = plt.subplots(1, len(domains), figsize=(0.9 * sum(widths) + 0.6 * len(domains), 2.2), sharey=True,
-                             gridspec_kw={"width_ratios": widths})
+    fig, axes = plt.subplots(1, len(domains), figsize=(0.95 * sum(widths) + 0.5 * len(domains), 2.1), sharey=True,
+                             gridspec_kw={"width_ratios": widths}, layout="constrained")
     for ax, dom in zip(np.atleast_1d(axes), domains):
         d = f[f.domain == dom]
         sems = sorted(dict.fromkeys(d.semester))  # "2024-I" < "2024-II" < "2025-I": chronological
         for i, sem in enumerate(sems):
             g = d[d.semester == sem].sort_values("theta")
-            x = i + np.linspace(-0.35, 0.35, len(g))  # targets spread within the semester's slot
-            for xi, t, p in zip(x, g.theta, g.theta_hat):
-                ax.plot([xi, xi], [t, p], color="grey", lw=0.6, ls=":")
-            ax.plot(x, g.theta, "o", color=TRUE, ms=3)
-            ax.plot(x, g.theta_hat, "o", color=PRED, ms=3)
-            if (dom, sem) in baseline.index:  # the easy-item prediction: the same value for every target of the task
-                ax.plot([i - 0.42, i + 0.42], [baseline[(dom, sem)]] * 2, color="grey", lw=0.8, ls="--")
+            x = i + np.linspace(-0.36, 0.36, len(g))  # targets spread within the semester's slot
+            ax.vlines(x, np.minimum(g.theta, g.theta_hat), np.maximum(g.theta, g.theta_hat), color="#b0aea6", lw=0.6, zorder=1)
+            if (dom, sem) in baseline.index:  # the easy-item prediction: one level per task
+                ax.hlines(baseline[(dom, sem)], i - 0.45, i + 0.45, color="grey", lw=0.8, ls="--", zorder=0)
+            ax.scatter(x, g.theta, s=16, facecolor="white", edgecolor=TRUE, linewidth=0.8, zorder=3)
+            ax.scatter(x, g.theta_hat, s=16, facecolor=PRED, edgecolor="white", linewidth=0.5, zorder=4)
         ax.set_xticks(range(len(sems)), sems, rotation=90 if len(sems) > 3 else 0)
         ax.text(0, 1.02, dom, transform=ax.transAxes, color="grey", ha="left")
     np.atleast_1d(axes)[0].set_ylabel("θ")
-    fig.legend(handles=[plt.Line2D([], [], color=TRUE, marker="o", ms=3, ls="", label="true θ"),
-                        plt.Line2D([], [], color=PRED, marker="o", ms=3, ls="", label=f"forecast ({LABELS.get(protocol, protocol)})"),
-                        plt.Line2D([], [], color="grey", lw=0.8, ls="--", label=LABELS[BASELINE])],
-               loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, -0.15))
-    fig.tight_layout()
+    handles = [plt.Line2D([], [], marker="o", ms=4, ls="", markerfacecolor="white", markeredgecolor=TRUE, label="true θ"),
+               plt.Line2D([], [], marker="o", ms=4, ls="", color=PRED, label=f"forecast ({LABELS.get(protocol, protocol)})"),
+               plt.Line2D([], [], color="grey", lw=0.8, ls="--", label=LABELS[BASELINE])]
+    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 
@@ -98,37 +132,44 @@ def zigzag(ax, y: float, size: float = 0.02) -> None:
     ax.plot(x, yy, color="black", lw=0.8, clip_on=False, transform=ax.transAxes, solid_capstyle="round")
 
 
-def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], path, seed: int = 0) -> None:
-    """Six bars, one per condition in CONDITIONS, at the mean over (domain, semester) of the
-    metric ("mse", "delta" or "z"); the individual (domain, semester) values as jittered
-    circles; easy-item prediction as a dashed grey line (its mean raw MSE, or 0 for delta and z).
-    Values beyond Tukey's far-out fence (outlier_split) go to a short upper panel above a
-    zigzag axis break, so one blown-up fit cannot squash the others."""
+def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], path, semester: str | None = None) -> None:
+    """Bars per condition in CONDITIONS (neutral fill) at the mean over (domain, semester) of the
+    metric ("mse", "delta" or "z"), a black line at the mean with a capless 95% t-interval over
+    those points (none below 3 points), the points as a deterministic beeswarm coloured by
+    domain, the easy-item prediction as a dashed grey line (its mean raw MSE, or 0 for delta
+    and z). `semester` restricts to one semester (points are then the domains). Values beyond
+    Tukey's far-out fence go to a short upper panel above a zigzag axis break."""
     assert metric in METRICS, metric
     m = chosen(metrics, variants)
     m = m[(m.semester != "all") & (m.domain != "all")]
-    rng = np.random.default_rng(seed)
-    points = {p: m[m.protocol == p][metric].dropna().to_numpy() for p in CONDITIONS}
-    every = np.concatenate([v for v in points.values() if len(v)]) if any(len(v) for v in points.values()) else np.array([])
+    if semester:
+        m = m[m.semester == semester]
+    groups = {p: m[m.protocol == p].dropna(subset=[metric]) for p in CONDITIONS}
+    every = np.concatenate([g[metric].to_numpy() for g in groups.values() if len(g)]) if any(len(g) for g in groups.values()) else np.array([])
     baseline = m[m.protocol == BASELINE].mse.mean() if metric == "mse" else 0.0
     inliers, outliers = outlier_split(every)
     if len(outliers):
-        fig, (top, ax) = plt.subplots(2, 1, figsize=(3.4, 2.6), sharex=True, layout="constrained",
+        fig, (top, ax) = plt.subplots(2, 1, figsize=(3.4, 2.8), sharex=True, layout="constrained",
                                       gridspec_kw={"height_ratios": [1, 3]})
         panels = [top, ax]
     else:
-        fig, ax = plt.subplots(figsize=(3.4, 2.2), layout="constrained")
+        fig, ax = plt.subplots(figsize=(3.4, 2.4), layout="constrained")
         top, panels = None, [ax]
     for panel in panels:
         for i, p in enumerate(CONDITIONS):
-            values = points[p]
-            if len(values) == 0:
+            g = groups[p]
+            if g.empty:
                 continue
-            panel.bar(i, values.mean(), color=COLORS[p], width=0.7)
-            panel.plot(i + rng.uniform(-0.2, 0.2, len(values)), values, "o", color="black", ms=2, alpha=0.6, mew=0)
-        panel.axhline(baseline, color="grey", lw=0.8, ls="--")
+            values = g[metric].to_numpy()
+            panel.bar(i, values.mean(), color=BAR, width=0.72, zorder=1)
+            panel.hlines(values.mean(), i - 0.36, i + 0.36, color="black", lw=1.0, zorder=4)
+            if np.isfinite(half := ci95(values)):
+                panel.errorbar(i, values.mean(), yerr=half, color="black", lw=0.8, capsize=0, zorder=4)
+            panel.scatter(i + swarm_offsets(values), values, s=14, c=[DOMAIN_COLORS.get(d, "black") for d in g.domain],
+                          edgecolor="white", linewidth=0.5, zorder=3)
+        panel.axhline(baseline, color="grey", lw=0.8, ls="--", zorder=0)
     if top is not None:
-        pad = 0.1 * max(np.ptp(inliers), 1e-9)  # np.ptp: the ndarray method is gone in NumPy 2.x
+        pad = 0.1 * max(np.ptp(inliers), 1e-9)
         ax.set_ylim(min(inliers.min(), baseline) - pad, max(inliers.max(), baseline) + pad)
         span = max(np.ptp(outliers), pad)
         top.set_ylim(outliers.min() - 0.5 * span, outliers.max() + 0.5 * span)
@@ -138,11 +179,15 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
         zigzag(top, 0.0)
     ax.set_xticks(range(len(CONDITIONS)), [LABELS[p] for p in CONDITIONS])
     ax.tick_params(axis="x", rotation=90)
-    (top or ax).set_ylabel(METRIC_LABELS[metric]) if top is None else fig.supylabel(METRIC_LABELS[metric], fontsize=8)
-    # constrained layout reserves room for an "outside" legend, in both the one- and two-panel branches
-    fig.legend(handles=[plt.Line2D([], [], color="grey", lw=0.8, ls="--", label="easy-item prediction"),
-                        plt.Line2D([], [], color="black", marker="o", ms=2, ls="", label="one domain × semester")],
-               loc="outside lower center", ncol=2, frameon=False)
+    if top is None:
+        ax.set_ylabel(METRIC_LABELS[metric])
+    else:
+        fig.supylabel(METRIC_LABELS[metric], fontsize=8)
+    domains = [d for d in DOMAIN_COLORS if d in set(m.domain)]
+    handles = [plt.Line2D([], [], marker="o", ms=4, ls="", color=DOMAIN_COLORS[d], markeredgecolor="white", label=d) for d in domains]
+    handles += [plt.Line2D([], [], color="black", lw=1, label="mean ± 95% CI over tasks"),
+                plt.Line2D([], [], color="grey", lw=0.8, ls="--", label=LABELS[BASELINE])]
+    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, handletextpad=0.4, columnspacing=1.0)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 
