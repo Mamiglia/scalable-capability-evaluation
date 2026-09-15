@@ -40,12 +40,6 @@ def chosen(metrics: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
     return metrics[[variants.get(p, "-") == v for p, v in zip(metrics.protocol, metrics.variant)]]
 
 
-def offset_spines(ax) -> None:
-    """Nature-panel axes: left and bottom spines 3pt outward."""
-    for side in ("left", "bottom"):
-        ax.spines[side].set_position(("outward", 3))
-
-
 def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, semesters: list[str] | None = None) -> None:
     """True theta (black) and the condition's forecast (orange) for every target: one panel per
     domain (panel width follows its number of semesters), semesters along x, targets within
@@ -71,7 +65,6 @@ def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, 
             ax.plot(x, g.theta_hat, "o", color=PRED, ms=3)
         ax.set_xticks(range(len(sems)), sems, rotation=90 if len(sems) > 3 else 0)
         ax.text(0, 1.02, dom, transform=ax.transAxes, color="grey", ha="left")
-        offset_spines(ax)
     np.atleast_1d(axes)[0].set_ylabel("θ")
     fig.legend(handles=[plt.Line2D([], [], color=TRUE, marker="o", ms=3, ls="", label="true θ"),
                         plt.Line2D([], [], color=PRED, marker="o", ms=3, ls="", label=f"forecast ({LABELS.get(protocol, protocol)})")],
@@ -81,31 +74,70 @@ def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, 
     plt.close(fig)
 
 
+def outlier_split(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(inliers, outliers) of a 1-D array: an outlier lies beyond 3 interquartile ranges from
+    the quartiles (Tukey's far-out fence). With fewer than 4 values nothing is an outlier."""
+    values = np.asarray(values, float)
+    if len(values) < 4:
+        return values, values[:0]
+    q1, q3 = np.percentile(values, [25, 75])
+    fence = 3 * (q3 - q1)
+    far = (values > q3 + fence) | (values < q1 - fence)
+    return values[~far], values[far]
+
+
+def zigzag(ax, y: float, size: float = 0.02) -> None:
+    """A small zigzag across the left spine at axes-fraction height `y`, marking an axis break."""
+    x = np.array([-1, -0.5, 0.5, -0.5, 0.5, 1]) * size
+    yy = y + np.linspace(-1.5, 1.5, len(x)) * size
+    ax.plot(x, yy, color="black", lw=0.8, clip_on=False, transform=ax.transAxes, solid_capstyle="round")
+
+
 def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], path, seed: int = 0) -> None:
     """Four bars, one per condition in CONDITIONS, at the mean over (domain, semester) of the
     metric ("mse", "delta" or "z"); the individual (domain, semester) values as jittered
-    circles; the intercept as a dashed grey line (its mean raw MSE, or 0 for delta and z)."""
+    circles; the intercept as a dashed grey line (its mean raw MSE, or 0 for delta and z).
+    Values beyond Tukey's far-out fence (outlier_split) go to a short upper panel above a
+    zigzag axis break, so one blown-up fit cannot squash the others."""
     assert metric in METRICS, metric
     m = chosen(metrics, variants)
     m = m[(m.semester != "all") & (m.domain != "all")]
     rng = np.random.default_rng(seed)
-    fig, ax = plt.subplots(figsize=(2.6, 2.0))
-    for i, p in enumerate(CONDITIONS):
-        values = m[m.protocol == p][metric].dropna().to_numpy()
-        if len(values) == 0:
-            continue
-        ax.bar(i, values.mean(), color=COLORS[p], width=0.7)
-        ax.plot(i + rng.uniform(-0.2, 0.2, len(values)), values, "o", color="black", ms=2, alpha=0.6, mew=0)
+    points = {p: m[m.protocol == p][metric].dropna().to_numpy() for p in CONDITIONS}
+    every = np.concatenate([v for v in points.values() if len(v)]) if any(len(v) for v in points.values()) else np.array([])
     baseline = m[m.protocol == BASELINE].mse.mean() if metric == "mse" else 0.0
-    ax.axhline(baseline, color="grey", lw=0.8, ls="--")
+    inliers, outliers = outlier_split(every)
+    if len(outliers):
+        fig, (top, ax) = plt.subplots(2, 1, figsize=(2.6, 2.6), sharex=True, layout="constrained",
+                                      gridspec_kw={"height_ratios": [1, 3]})
+        panels = [top, ax]
+    else:
+        fig, ax = plt.subplots(figsize=(2.6, 2.2), layout="constrained")
+        top, panels = None, [ax]
+    for panel in panels:
+        for i, p in enumerate(CONDITIONS):
+            values = points[p]
+            if len(values) == 0:
+                continue
+            panel.bar(i, values.mean(), color=COLORS[p], width=0.7)
+            panel.plot(i + rng.uniform(-0.2, 0.2, len(values)), values, "o", color="black", ms=2, alpha=0.6, mew=0)
+        panel.axhline(baseline, color="grey", lw=0.8, ls="--")
+    if top is not None:
+        pad = 0.1 * max(np.ptp(inliers), 1e-9)  # np.ptp: the ndarray method is gone in NumPy 2.x
+        ax.set_ylim(min(inliers.min(), baseline) - pad, max(inliers.max(), baseline) + pad)
+        span = max(np.ptp(outliers), pad)
+        top.set_ylim(outliers.min() - 0.5 * span, outliers.max() + 0.5 * span)
+        top.spines["bottom"].set_visible(False)
+        top.tick_params(axis="x", bottom=False)
+        zigzag(ax, 1.0)
+        zigzag(top, 0.0)
     ax.set_xticks(range(len(CONDITIONS)), [LABELS[p] for p in CONDITIONS])
     ax.tick_params(axis="x", rotation=90)
-    ax.set_ylabel(METRIC_LABELS[metric])
-    offset_spines(ax)
+    (top or ax).set_ylabel(METRIC_LABELS[metric]) if top is None else fig.supylabel(METRIC_LABELS[metric], fontsize=8)
+    # constrained layout reserves room for an "outside" legend, in both the one- and two-panel branches
     fig.legend(handles=[plt.Line2D([], [], color="grey", lw=0.8, ls="--", label="intercept"),
                         plt.Line2D([], [], color="black", marker="o", ms=2, ls="", label="one domain × semester")],
-               loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.5, -0.02))
-    fig.tight_layout(rect=(0, 0.08, 1, 1))
+               loc="outside lower center", ncol=2, frameon=False)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 
