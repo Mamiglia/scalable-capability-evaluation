@@ -38,7 +38,8 @@ class JudgeRun:
     harness    the JudgeBT / JudgeDirect that wrote the logs; matching uses it to count
                the judgments the campaign still lacks
     table      the raw rows: pairwise -> bench, judge, item, model_left, model_right,
-               pick_left, semester, imported; direct -> bench, model, item, score, semester
+               pick_left, semester, imported; direct -> bench, judge, item, model, score,
+               semester, epoch (ensemble_runs relies on judge)
     missing    judgments still unjudged on the train items (0 until matching fills it)
     """
 
@@ -111,10 +112,15 @@ def pairwise_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
 
 def direct_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
     """Every fetched direct run for the task, subject reasoning shown and hidden, for every
-    judge YAML in configs/judges/. The run directory comes from JudgeDirect.log_dir, which
-    hashes the prompts too, so a config whose directory does not exist was never run."""
+    judge YAML in configs/judges/ whose judge is in the semester's top-3 roster
+    (data/meta/<domain>/fit.yml `top`; file stems are the roster shortnames). The run
+    directory comes from JudgeDirect.log_dir, which hashes the prompts too, so a config whose
+    directory does not exist was never run."""
+    roster = yaml.safe_load((tables.frozen_dir(dom) / "fit.yml").read_text())["top"][task.semester]
     runs = []
     for path in sorted(JUDGES.glob("*.yml")):
+        if path.stem not in roster:
+            continue
         for hidden in (False, True):
             harness = JudgeDirect(DirectJudgeConfig.from_cli(path), dom, include_reasoning=not hidden)
             run_dir = harness.log_dir(task.semester)

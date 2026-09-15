@@ -144,3 +144,33 @@ def test_ensemble_runs_pool_the_core_condition_of_every_judge():
     # pairwise: j1's shown run and j2's hidden run pooled; the 10pq run is never core; direct has one judge only
     assert [(r.protocol, r.judge, r.condition, len(r.table), r.missing) for r in pooled] == [("pairwise", "ensemble", "core", 7, 3)]
     assert sorted(pooled[0].table.judge.unique()) == ["j1", "j2"]
+
+
+from analysis import loading
+
+
+def test_direct_runs_restricts_to_the_top3_roster(tmp_path, monkeypatch):
+    judges_dir = tmp_path / "judges"
+    judges_dir.mkdir()
+    for name in "abcd":
+        (judges_dir / f"{name}.yml").write_text("")
+    frozen = tmp_path / "frozen"
+    frozen.mkdir()
+    (frozen / "fit.yml").write_text("top: {s: [a, b, c]}")
+
+    class FakeJudgeDirect:
+        def __init__(self, config, domain, include_reasoning=True):
+            pass
+
+        def log_dir(self, semester):
+            return tmp_path  # exists for every judge; fetched() finds no .eval stubs there
+
+    monkeypatch.setattr(loading, "JUDGES", judges_dir)
+    monkeypatch.setattr(loading.DirectJudgeConfig, "from_cli", staticmethod(lambda path: path))
+    monkeypatch.setattr(loading, "JudgeDirect", FakeJudgeDirect)
+    monkeypatch.setattr(loading, "direct_from_logs", lambda run_dir: pd.DataFrame())
+    monkeypatch.setattr(loading.tables, "frozen_dir", lambda dom: frozen)
+
+    task, dom = SimpleNamespace(semester="s"), SimpleNamespace(name="dom")
+    runs = loading.direct_runs(dom, task)
+    assert sorted({r.judge for r in runs}) == ["a", "b", "c"]
