@@ -46,6 +46,7 @@ def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, 
     a semester sorted by theta*, a dotted connector per target. `semesters` restricts the
     x-axis (e.g. the latest one). Judge protocols are drawn as the best judge on references."""
     f = one_per_target(forecasts)
+    baseline = f[f.protocol == BASELINE].groupby(["domain", "semester"]).theta_hat.first()  # one value per task
     f = f[(f.protocol == protocol) & (f.variant == variant)]
     if semesters:
         f = f[f.semester.isin(semesters)]
@@ -63,12 +64,15 @@ def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, 
                 ax.plot([xi, xi], [t, p], color="grey", lw=0.6, ls=":")
             ax.plot(x, g.theta, "o", color=TRUE, ms=3)
             ax.plot(x, g.theta_hat, "o", color=PRED, ms=3)
+            if (dom, sem) in baseline.index:  # the easy-item prediction: the same value for every target of the task
+                ax.plot([i - 0.42, i + 0.42], [baseline[(dom, sem)]] * 2, color="grey", lw=0.8, ls="--")
         ax.set_xticks(range(len(sems)), sems, rotation=90 if len(sems) > 3 else 0)
         ax.text(0, 1.02, dom, transform=ax.transAxes, color="grey", ha="left")
     np.atleast_1d(axes)[0].set_ylabel("θ")
     fig.legend(handles=[plt.Line2D([], [], color=TRUE, marker="o", ms=3, ls="", label="true θ"),
-                        plt.Line2D([], [], color=PRED, marker="o", ms=3, ls="", label=f"forecast ({LABELS.get(protocol, protocol)})")],
-               loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.5, -0.15))
+                        plt.Line2D([], [], color=PRED, marker="o", ms=3, ls="", label=f"forecast ({LABELS.get(protocol, protocol)})"),
+                        plt.Line2D([], [], color="grey", lw=0.8, ls="--", label=LABELS[BASELINE])],
+               loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, -0.15))
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
