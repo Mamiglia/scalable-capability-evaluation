@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 from inspect_ai.log import read_eval_log, read_eval_log_sample, read_eval_log_sample_summaries
-from judge.dataset import DIRECT_USER_PROMPT, cut
+from judge.dataset import DIRECT_USER_PROMPT, ENDS_SEPARATOR, cut
 from judge.scorer import parse_direct_judge_output
 from challenges.truncation.run import condition_summary, tag
 
@@ -101,7 +101,7 @@ def audit(domain, log_dir=None):
             check(isinstance(sample.input, str) and sha(sample.input) == all_inputs[key]["truncated_sha256"], "input mismatch", where)
             check(sample.input == expected[key]["input"], "frozen input mismatch", where)
             check((sample.metadata or {}).get("truncated") is all_inputs[key]["truncated"], "truncation flag", where)
-            check((sample.metadata or {}).get("chars") == all_inputs[key]["truncated_chars"] <= max_length, "kept characters", where)
+            check((sample.metadata or {}).get("chars") == all_inputs[key]["truncated_chars"] <= max_length + (len(ENDS_SEPARATOR) if mode == "ends" else 0), "kept characters", where)
             kept, body, full_body = (sample.metadata or {}).get("chars") or 0, sample.input[:-len(suffix)], full_inputs[key][:-len(suffix)]
             text, head = body[len(body) - kept:], body[:len(body) - kept]
             check(sample.input.endswith(suffix) and full_body.startswith(head)

@@ -19,6 +19,7 @@ from configs import DirectJudgeConfig
 from configs.paths import is_successful_eval
 from evals.transcripts import read_header
 from judge.run import run_tasks
+from judge.dataset import ENDS_SEPARATOR
 from judge.scorer import direct_judge_scorer
 from protocols.direct_judge import from_logs
 from protocols.direct_judge.scoring import calibrate, mean_scores
@@ -68,7 +69,8 @@ def run(condition, max_retries=None, max_connections=None):
         if record["name"] in done:
             continue
         samples = [Sample.model_validate(s) for s in record["samples"]]
-        assert all(s.metadata["chars"] <= payload["max_length"] for s in samples)
+        slack = len(ENDS_SEPARATOR) if payload["truncate"] == "ends" else 0  # the separator is not transcript text
+        assert all(s.metadata["chars"] <= payload["max_length"] + slack for s in samples)
         assert record["metadata"]["include_reasoning"] is True and record["metadata"]["max_length"] == payload["max_length"]
         assert record["metadata"]["truncate"] == payload["truncate"]
         tasks.append(Task(name=record["name"], dataset=MemoryDataset(samples),
