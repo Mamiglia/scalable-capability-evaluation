@@ -7,20 +7,24 @@ and target transcripts alike). Cyber and coding only.
 
 ## Conditions
 
-`<domain>/<judge>/<semester>/<max_length>`; two limits and one judge per semester:
+`<domain>/<judge>/<semester>/<head|tail>-<max_length>`: 4,000 characters, head (first 4,000) and tail
+(last 4,000), best full-transcript judge per domain and semester. Frozen inputs, logs and results live
+under `artifacts/direct-judging-truncation/`.
 
-| Domain | Judge | Semester | Limits (chars) | Retained inputs | Truncated at 2,000 / 8,000 |
-| --- | --- | --- | --- | ---: | ---: |
-| cyber | Qwen3-235B-A22B | 2025-II | 2,000; 8,000 | 985 | 878 / 416 |
-| cyber | DeepSeek-V3.2 | 2026-I | 2,000; 8,000 | 1,155 | 985 / 328 |
-| coding | Qwen3-235B-A22B | 2025-II | 2,000; 8,000 | 779 | 590 / 269 |
-| coding | DeepSeek-V3.2 | 2026-I | 2,000; 8,000 | 1,154 | 915 / 331 |
+| Domain | Semester | Judge | Retained inputs | Cut at 4,000 |
+| --- | --- | --- | ---: | ---: |
+| cyber | 2025-II | Qwen3-235B-A22B | 985 | 664 |
+| cyber | 2026-I | Kimi-K2-Thinking | 1,231 | 723 |
+| coding | 2025-II | Qwen3-235B-A22B | 779 | 404 |
+| coding | 2026-I | DeepSeek-V3.2 | 1,154 | 578 |
 
-2,000 characters cuts most transcripts (question plus the opening moves survive); 8,000 cuts the
-long tail (roughly a third to a half of inputs). Retained sets, exclusion masks (context preflight
-of the full-transcript campaign) and reference cohorts are exactly the published full-transcript
-campaigns'. Inputs shorter than the limit render identically and reuse the full-transcript rating;
-every truncated input is verified to be a prefix of the full one.
+Retained sets, exclusion masks (context preflight of the full-transcript campaign) and reference
+cohorts are exactly the published full-transcript campaigns'. Inputs shorter than the limit render
+identically and reuse the full-transcript rating; every cut transcript is verified to be a prefix
+(head) or suffix (tail) of the full one. Published under `direct_truncated-<head|tail>-4000/` in the
+judging repo. Pairwise truncation (2,000 per transcript, `judge_truncated-...`) waits for the pairwise
+cyber and coding baselines. `artifacts/.../superseded-char-limits/` keeps an earlier head-only
+2,000 / 8,000 freeze that predates this design.
 
 ## Baselines
 
@@ -35,6 +39,7 @@ every truncated input is verified to be a prefix of the full one.
 
 ## Scripts
 
+Run as `PYTHONPATH=src .venv/bin/python src/challenges/truncation/<script>.py <condition>`.
 `prepare.py` freezes inputs (no API calls) → `run.py` collects (10 retries baked in; `--max-connections`
 override, SiliconFlow served the baseline at 64) → `audit.py` verifies inputs, prefixes, pins, served
 providers and reuse provenance against the baseline logs → `recollect.py` / `consolidate.py` retry
