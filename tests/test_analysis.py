@@ -67,3 +67,61 @@ def test_pairwise_reference_loo_recovers_references():
     for conversion in judges.PAIRWISE:
         loo = judges.pairwise_reference_loo(verdicts, refs, conversion)
         assert loo.index.equals(refs.index) and ((loo - refs).abs() < 0.8).all(), conversion
+
+
+from analysis import stats
+
+
+def toy_forecasts():
+    """Two semesters, two targets each (theta* 1): the intercept forecasts 3 for a and 2 for b (errors 4 and
+    1, MSE 2.5), the oracle is exact, glm is off by 1, and a direct judge protocol (variant raw) has two
+    judges: "weak" exact with a poor reference LOO, "strong" off by 1 with the better LOO; "strong" also
+    has a reasoning-hidden run off by 4."""
+    base = dict(domain="d", variant="-", judge="-", condition="-", judge_loo_mse=np.nan, missing=0, theta=1.0)
+    rows = []
+    for sem in ("s1", "s2"):
+        for model, intercept in (("a", 3.0), ("b", 2.0)):
+            rows += [dict(base, semester=sem, model=model, protocol=stats.BASELINE, theta_hat=intercept),
+                     dict(base, semester=sem, model=model, protocol=stats.ORACLE, theta_hat=1.0),
+                     dict(base, semester=sem, model=model, protocol="glm_regex", theta_hat=2.0),
+                     dict(base, semester=sem, model=model, protocol="direct", variant="raw", judge="weak",
+                          judge_loo_mse=0.9, condition="reasoning-shown", theta_hat=1.0),
+                     dict(base, semester=sem, model=model, protocol="direct", variant="raw", judge="strong",
+                          judge_loo_mse=0.1, condition="reasoning-shown", theta_hat=2.0),
+                     dict(base, semester=sem, model=model, protocol="direct", variant="raw", judge="strong",
+                          judge_loo_mse=0.1, condition="reasoning-hidden", theta_hat=5.0)]
+    return pd.DataFrame(rows)
+
+
+def test_scores_pool_and_summary():
+    s = stats.scores(toy_forecasts())
+    pooled = s[(s.semester == "all") & (s.domain == "d") & (s.judge == "-")].set_index("protocol").mse
+    assert pooled[stats.BASELINE] == 2.5 and pooled[stats.ORACLE] == 0.0 and pooled["glm_regex"] == 1.0
+    assert s[(s.semester == "s1") & (s.protocol == stats.BASELINE)].n.item() == 2
+    r = stats.summary(s)
+    # the core rows only: per-condition judge rows would make (protocol, judge) non-unique
+    r = r[(r.domain == "d") & r.condition.isin(["-", "core"])].set_index(["protocol", "judge"])
+    assert r.skill[("glm_regex", "-")] == 0.6 and r.skill[(stats.ORACLE, "-")] == 1.0
+    # the best judge on references is "strong" (lowest LOO), off by 1; the mean over judges is off by 0.5
+    assert r.mse[("direct", stats.BEST)] == 1.0 and r.mse[("direct", stats.MEAN)] == 0.5
+
+
+def test_core_condition_falls_back_to_hidden_reasoning():
+    f = toy_forecasts()
+    shown = stats.core_condition(f)
+    assert set(shown[shown.protocol == "direct"].condition) == {"reasoning-shown"}
+    hidden = stats.core_condition(f[f.condition != "reasoning-shown"])
+    assert set(hidden[hidden.protocol == "direct"].condition) == {"reasoning-hidden"}
+
+
+def test_task_metrics_are_paired_against_the_intercept():
+    m = stats.task_metrics(toy_forecasts())
+    s1 = m[(m.domain == "d") & (m.semester == "s1")].set_index(["protocol", "judge"])
+    # glm: squared errors 1, 1 against the intercept's 4, 1 -> delta -1.5; the paired deltas (-3, 0) vary, so z is finite
+    assert s1.delta[("glm_regex", "-")] == -1.5 and s1.baseline_mse[("glm_regex", "-")] == 2.5 and np.isfinite(s1.z[("glm_regex", "-")])
+    # the intercept against itself: delta 0, no spread -> z NaN
+    assert s1.delta[(stats.BASELINE, "-")] == 0.0 and np.isnan(s1.z[(stats.BASELINE, "-")])
+    # judge rows enter as the best judge on references only
+    assert s1.delta[("direct", stats.BEST)] == -1.5 and (m.judge != stats.MEAN).all()
+    pooled = m[(m.domain == "all") & (m.semester == "all") & (m.protocol == "glm_regex")]
+    assert pooled.n.item() == 4 and pooled.delta.item() == -1.5
