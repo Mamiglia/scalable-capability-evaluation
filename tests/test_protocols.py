@@ -130,6 +130,10 @@ def test_calibrated_recovers_theta_from_synthetic_verdicts():
     verdicts = pd.DataFrame(rows)
     a_hat, b_hat = calibrated.calibrate(verdicts, refs)
     assert abs(a_hat["gpqa"] - 1.5) < 0.3 and abs(a_hat["arc"] - 0.3) < 0.15 and abs(b_hat - 0.4) < 0.15
-    theta_hat = calibrated.place_all(verdicts, refs, list(truth))
+    theta_hat = calibrated.estimate_all(verdicts, refs, list(truth))
     assert all(abs(theta_hat[t] - truth[t]) < 0.3 for t in truth)
-    assert ((calibrated.loo(verdicts, refs) - refs) ** 2).mean() < 0.1
+    sigma2 = ((calibrated.loo(verdicts, refs) - refs) ** 2).mean()
+    assert sigma2 < 0.1
+    # a small held-out error keeps the estimate; a model without evidence gets the prior mean
+    shrunk = calibrated.shrink(theta_hat, sigma2, (0.0, 1.0))
+    assert abs(shrunk["t1"] - truth["t1"]) < 0.4 and calibrated.shrink(pd.Series({"x": np.nan}), sigma2, (0.5, 1.0))["x"] == 0.5
