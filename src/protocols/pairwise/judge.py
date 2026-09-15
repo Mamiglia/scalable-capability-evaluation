@@ -76,7 +76,10 @@ class JudgeBT(PairwiseBT):
         self.name = f"judge_{config.judge.shortname.lower()}"
 
     def log_dir(self, semester: str) -> Path:
-        return self.config.log_dir / self.domain.name / semester / self.config.judge.shortname.lower() / self.config.condition_hash
+        base = self.config.log_dir
+        if self.config.truncation_label:  # e.g. logs/judge_truncated-head-2000
+            base = base.with_name(f"{base.name}_{self.config.truncation_label}")
+        return base / self.domain.name / semester / self.config.judge.shortname.lower() / self.config.condition_hash
 
     def tasks(self, train: Cohort, test: Cohort, done: dict[str, set[str]] | None = None) -> list[Task]:
         """One judging task per <bench, reference, target> and per <bench, reference, reference> pair, on the train
@@ -104,6 +107,7 @@ class JudgeBT(PairwiseBT):
                     max_length=self.config.max_length,
                     include_reverse=self.config.include_reverse,
                     include_reasoning=self.config.include_reasoning,
+                    truncate=self.config.truncate,
                     task_name=f"{name}/{major}|{minor}",
                     items=items,
                     # Data-dir model names, so from_logs reads logs alone.

@@ -287,3 +287,14 @@ def test_response_chars_ignores_role_prefixes_and_short_answers_are_skipped(monk
     dataset = build_dataset(Path("a.eval"), Path("b.eval"), include_reasoning=False)
     assert [s.id for s in dataset.samples] == ["q2_1", "q2_2"]  # q1: one side answer-only
     assert dataset.samples[0].metadata["response_chars_1"] == 30
+
+
+def test_cut_modes():
+    from judge.dataset import ENDS_SEPARATOR, cut
+    text = "".join(chr(ord("a") + i % 26) for i in range(100))
+    assert cut(text, 100, "head") == cut(text, 100, "tail") == cut(text, 100, "ends") == text
+    assert cut(text, 10, "head") == text[:10] and cut(text, 10, "tail") == text[-10:]
+    assert cut(text, 10, "ends") == text[:5] + ENDS_SEPARATOR + text[-5:]
+    import pytest
+    with pytest.raises(ValueError):
+        cut(text, 10, "middle")

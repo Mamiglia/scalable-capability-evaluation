@@ -94,10 +94,14 @@ separate data update before treating results as using the full historical traini
 and showing reasoning even if a reused pairwise config disables it. It defaults to
 `assets/system_prompt/direct.txt`; a domain bench can override this with `direct_system_prompt`.
 An explicit `system_prompt` in the judge YAML must be a direct-rating prompt.
-Direct logs live in `logs/judge/direct/<domain>/<semester>/<judge>/<condition hash>/`, and
+Direct logs live in `logs/direct/<domain>/<semester>/<judge>/<condition hash>/`, and
 forecasts go to `data/meta/<domain>/eval_direct_judge_<judge>.csv`. Missing judgments are collected
 on demand. `--judge` and `--direct-judge` can be used together; baseline selection still uses
 `--protocol` (all baselines by default).
+
+With `JudgeDirect(..., include_reasoning=False)`, logs use `direct_reasoning-hidden/` instead
+of `direct/` under the configured log directory. The HF judging repository uses these as
+separate top-level folders, retaining the domain/semester/judge/condition structure.
 
 ## Layout
 

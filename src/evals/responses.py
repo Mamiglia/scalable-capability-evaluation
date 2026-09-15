@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pandas as pd
 from inspect_ai.log import read_eval_log_sample_summaries
-from inspect_evals.hle.hle import get_verified_gold_uids
 
 from configs.domain import DomainConfig
 from configs.logs import logger
@@ -44,7 +43,11 @@ def responses(domain: DomainConfig) -> pd.DataFrame:
     rows = []
     for bench in domain.benches:
         task = domain.task(bench)
-        gold = get_verified_gold_uids() if bench.hle_gold else None
+        gold = None
+        if bench.hle_gold:
+            from inspect_evals.hle.dataset import get_verified_gold_uids
+
+            gold = get_verified_gold_uids()
         logs = [(model, log) for model in domain.model_configs()
                 for log in sorted(get_eval_path(task, model).rglob("*.eval")) if is_successful_eval(log)]
         logger.info("%s: reading %d logs of %d models (%s)", task.name, len(logs), len({m.name for m, _ in logs}), bench.bench)

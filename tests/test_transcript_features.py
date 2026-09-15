@@ -12,6 +12,8 @@ from inspect_ai.tool import ToolCall
 from capability.task import Cohort
 from protocols.transcript_features import TranscriptRegression
 from protocols.transcript_features.features import FEATURE_SETS, extract_features, lexical_features, transition_features
+from protocols.transcript_features.protocol import ALPHAS
+from protocols.transcript_features.reader import extract_log, feature_table, features_path, read_features
 
 
 def cohort(directory, theta, texts, extra_samples=()):
@@ -27,6 +29,7 @@ def cohort(directory, theta, texts, extra_samples=()):
                       dataset=EvalDataset(name="b", samples=len(samples)), config=EvalConfig()), samples=samples)
         path = directory / f"{model}.eval"
         write_eval_log(log, path)
+        extract_log(path).to_csv(features_path(path), index=False)  # as scripts/glm_features/extract.py does
         models.loc[model, "path_b"] = str(path)
     return Cohort(models, items, "semester")
 
@@ -54,14 +57,16 @@ def test_extraction_uses_assistant_text_and_excludes_tool_payloads():
     for text, feature, expected in [("I = 1", "personal_pronouns", 0), ("I\nthink", "hedging", 500),
                                      ("I don’t know", "uncertainty", 1000 / 3), ("waiting", "backtracking", 0)]:
         assert lexical_features(text)[feature] == expected
+    hidden = extract_features(messages, include_reasoning=False)
+    assert hidden["log_chars"] == pytest.approx(np.log1p(len(answer))) and hidden["visible_reasoning"] == 0
+    assert hidden["hedging"] == 0 and hidden["backtracking"] == pytest.approx(1000 / 2)  # answer prose only
+    assert lexical_features("costs $5 to $10 but $x$")["contrast"] == 1000 / 5  # dollar amounts are prose
     assert all(np.isnan(v) for v in extract_features([]).values())
     empty = extract_features([ChatMessageAssistant(content="")])
     assert empty["log_chars"] == empty["visible_reasoning"] == empty["hedging"] == empty["log_tool_calls"] == 0
 
 
 def test_aggregation_preserves_item_rates_and_missing_observations(tmp_path):
-    from protocols.transcript_features.reader import feature_table, read_features
-
     rates = transition_features(["tool_output", "tool_inspect", "tool_output", "tool_act", "tool_output",
                                  "feedback", "organization", "equation", "equation", "explanation"])
     assert len(rates) == 11  # six transition rates + four flags + action share
@@ -87,15 +92,17 @@ def test_aggregation_preserves_item_rates_and_missing_observations(tmp_path):
     assert table.loc["a", "hedging"] == 500  # mean of per-item rates, not pooled word counts
     assert table.loc["a", "log_chars"] == pytest.approx((np.log(6) + np.log(17)) / 2)
     assert table.loc["missing"].isna().all()
-    rows = read_features(observed.models.loc["a", "path_b"], {"0", "wrong", "fallback", "later_only", "not_collected"})
-    assert set(rows.index) == {"0", "fallback"}
+    csv = features_path(observed.models.loc["a", "path_b"])
+    stored = pd.read_csv(csv, dtype={"item": str})
+    assert stored.reasoning.value_counts().to_dict() == {"visible": 7, "hidden": 7}  # every sample, both views
+    assert stored.correct.sum() == 12 and set(stored.columns[:4]) == {"item", "epoch", "correct", "reasoning"}
+    rows = read_features(csv, {"0", "wrong", "fallback", "later_only", "not_collected"})
+    assert set(rows.index) == {"0", "fallback"}  # correct first attempts only; never a later correct epoch
     assert rows.loc["fallback", "hedging"] == 1000
     assert np.isnan(rows.loc["fallback", "log_tool_calls"])  # no history does not establish zero calls
-    structured = read_features(observed.models.loc["a", "path_b"], {"fallback"},
-                               clause_typer=lambda messages: ["organization", "equation"])
-    assert np.isnan(structured.loc["fallback", "transition__organization__equation"])
-    assert read_features(observed.models.loc["a", "path_b"], {"not_collected"}).empty
-    assert read_features(tmp_path / "nonexistent.eval", set()).empty
+    assert read_features(csv, {"0"}, reasoning="hidden").loc["0", "log_chars"] == rows.loc["0", "log_chars"]
+    assert read_features(csv, {"not_collected"}).empty
+    assert read_features(tmp_path / "nonexistent.csv", {"0"}).empty
 
 
 def test_glm_variants_fit_references_only_and_reset_between_cohorts(tmp_path):
@@ -103,30 +110,58 @@ def test_glm_variants_fit_references_only_and_reset_between_cohorts(tmp_path):
                    {"a": [""], "b": ["a"], "c": ["aaa"], "unlabelled": ["aaaaaa"]})
     test = cohort(tmp_path / "test", {"t": np.nan, "empty": np.nan}, {"t": ["a" * 1023]})
     length, regex, structure = [TranscriptRegression(variant=v) for v in ("length", "regex", "structure")]
-    length_x, regex_x = length.get_features(train), regex.get_features(train)
+    length_x, regex_x, structure_x = length.get_features(train), regex.get_features(train), structure.get_features(train)
     assert "hedging" not in length_x and "hedging" in regex_x and "log_tool_calls" not in regex_x
     pd.testing.assert_frame_equal(regex_x[length_x.columns], length_x)
-    with pytest.raises(ValueError, match="RST clause labeller"):
-        structure.get_features(train)
-    structure.clause_typer = lambda messages: ["organization", "equation"]
-    structure_x = structure.get_features(train)
     pd.testing.assert_frame_equal(structure_x[regex_x.columns], regex_x)
-    assert structure_x.loc["a", "transition__organization__equation"] == 1.
     assert structure_x.loc["a", "log_tool_calls"] == 0.
-    assert structure_x.loc["a", "tool_action_share"] == 0.
-    assert "transition__organization__tool_act" not in structure_x
-    assert "transition__organization__tool_inspect" not in structure_x
+    assert structure_x["transition__equation__equation"].isna().all()  # no RST labels merged into these CSVs
     assert [len(FEATURE_SETS[v]) for v in ("length", "regex", "structure")] == [3, 12, 24]
-    assert structure_x.shape[1] == 24
+    assert TranscriptRegression(variant="regex", reasoning="hidden").name == "glm_regex_reasoning-hidden"
     length.fit(train)
     result = length.predict(test)
     empty = Cohort(train.models.iloc[:0], train.items, "empty")
     assert length.predict(empty).empty
-    # Standardised ridge(alpha=1) shrinks this three-reference OLS slope by 3/4.
-    assert result["t"] == pytest.approx(7.75) and np.isnan(result["empty"])
+    # theta is exactly linear in log_chars on the three references, so leave-one-out picks a light penalty.
+    assert length.estimator[-1].alpha_ in ALPHAS
+    assert result["t"] == pytest.approx(10, abs=0.5) and np.isnan(result["empty"])
     test.models.theta = -1000
     pd.testing.assert_series_equal(length.predict(test), result)
     length.fit(cohort(tmp_path / "next", {"a": 0.}, {"a": ["a"]}))
     assert length.predict(test).isna().all()
     length.fit(empty)
     assert length.predict(test).isna().all()
+
+
+def test_rst_labeller_orders_clauses_and_protected_spans():
+    """scripts/glm_features/rst_labels.py with a stub parser: one node per clause, protected spans in place."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("rst_labels", "scripts/glm_features/rst_labels.py")
+    rl = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rl)
+
+    class Unit:
+        def __init__(self, start, end, left=None, right=None, relation=None, nuclearity=None):
+            self.start, self.end, self.left, self.right, self.relation, self.nuclearity = start, end, left, right, relation, nuclearity
+
+    class StubParser:
+        """Splits at sentence ends; joins every pair as elaboration with the first sentence as nucleus."""
+        def __call__(self, text):
+            cuts, leaves = [0] + [i + 1 for i, c in enumerate(text) if c == "."], []
+            leaves = [Unit(a, b) for a, b in zip(cuts, cuts[1:]) if text[a:b].strip()]
+            tree = leaves[0]
+            for leaf in leaves[1:]:
+                tree = Unit(tree.start, leaf.end, tree, leaf, "elaboration", "NS")
+            return {"rst": [tree]}
+
+    plain = "First clause. Second clause. Third clause."
+    assert rl.prose_labels(StubParser(), plain) == ["elaboration"] * 3  # no protected span: every clause kept
+    mixed = "Intro. $$x=1$$ Then more.\nANSWER: 3"
+    assert rl.prose_labels(StubParser(), mixed) == ["elaboration", "equation", "elaboration", "answer"]
+    labels, failed = rl.transcript_labels(StubParser(), [
+        {"kind": "reasoning", "text": "Think. Again."}, {"kind": "text", "text": "Done."},
+        {"kind": "tool_call", "text": '{"cmd": "cat a"}', "function": "bash"},
+        {"kind": "tool_output", "text": "a"}, {"kind": "feedback", "text": "try again"}])
+    assert failed == 0
+    assert labels == [["elaboration", True], ["elaboration", True], ["root", False], ["tool_inspect", False],
+                      ["tool_output", False], ["feedback", False]]

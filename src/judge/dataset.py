@@ -21,6 +21,22 @@ MIN_RESPONSE_CHARS = 20
 ROLE_PREFIX = re.compile(r"^\[[^\]\n]+\]: ", re.M)  # "[Assistant]: ", "[User]: ", "[Tool Output (f)]: " (evals.sample)
 
 
+ENDS_SEPARATOR = "\n...\n"  # marks the elided middle of a transcript cut to its two ends
+
+
+def cut(text: str, max_len: int, truncate: str = "head") -> str:
+    """The max_len characters a judge sees of a longer transcript: its prefix (head), suffix (tail),
+    or first and last max_len/2 with ENDS_SEPARATOR between (ends). Shorter transcripts are unchanged."""
+    if truncate not in ("head", "tail", "ends"):
+        raise ValueError(f"truncate must be head, tail or ends, got {truncate!r}")
+    if len(text) <= max_len:
+        return text
+    if truncate == "ends":
+        half = max_len // 2
+        return text[:half] + ENDS_SEPARATOR + text[-half:]
+    return text[:max_len] if truncate == "head" else text[-max_len:]
+
+
 def response_chars(text: str) -> int:
     """Characters the model itself wrote in a shown transcript: the text minus the renderer's role prefixes."""
     return len(ROLE_PREFIX.sub("", text))
@@ -99,6 +115,7 @@ def responses_to_sample(
     target: str = '1',
     format_str: str = USER_PROMPT,
     max_len: int = MAX_LENGTH,
+    truncate: str = "head",
 ) -> Sample:
     """Render two transcripts of the same question as one judging sample.
 
@@ -110,11 +127,12 @@ def responses_to_sample(
         target: which position holds the more capable model ('1' or '2').
         format_str: prompt template to fill.
         max_len: maximum characters kept per transcript.
+        truncate: which end of a longer transcript is kept, head or tail.
     """
     assert first.id == second.id, "Sample IDs must match for comparison."
     assert first.question == second.question, "Sample inputs must match for comparison."
 
-    text_1, text_2 = first.text[:max_len], second.text[:max_len]
+    text_1, text_2 = cut(first.text, max_len, truncate), cut(second.text, max_len, truncate)
 
     return Sample(
         id=f"{first.id}_{target}",
@@ -148,6 +166,7 @@ def build_dataset(
     include_reverse: bool = True,
     include_reasoning: bool = True,
     items: set[str] | None = None,
+    truncate: str = "head",
 ) -> MemoryDataset:
     """Build the judging dataset comparing a major and a minor model's eval log.
 
@@ -179,10 +198,10 @@ def build_dataset(
             first, second = major[sample_id][0], major[sample_id][1]
         else:
             first, second = major[sample_id][0], minor[sample_id][0]
-        if min(response_chars(first.text[:max_len]), response_chars(second.text[:max_len])) < MIN_RESPONSE_CHARS:
+        if min(response_chars(cut(first.text, max_len, truncate)), response_chars(cut(second.text, max_len, truncate))) < MIN_RESPONSE_CHARS:
             continue  # e.g. an answer-only transcript: nothing for the judge to compare
 
-        pair_kwargs = dict(format_str=format_str, max_len=max_len)
+        pair_kwargs = dict(format_str=format_str, max_len=max_len, truncate=truncate)
         samples.append(responses_to_sample(first, second, target='1', **pair_kwargs))
         if include_reverse:
             samples.append(responses_to_sample(second, first, target='2', **pair_kwargs))
@@ -203,6 +222,7 @@ def build_direct_dataset(
     items: set[str],
     max_len: int = MAX_LENGTH,
     include_reasoning: bool = True,
+    truncate: str = "head",
 ) -> MemoryDataset:
     """One sample per correct first-attempt transcript on the requested train items.
 
@@ -215,7 +235,7 @@ def build_direct_dataset(
     samples = []
     for item in sorted(transcripts):
         transcript = transcripts[item][0]
-        text = transcript.text[:max_len]
+        text = cut(transcript.text, max_len, truncate)
         samples.append(Sample(
             id=item,
             input=DIRECT_USER_PROMPT.format(question=transcript.question,

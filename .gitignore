@@ -20,6 +20,7 @@ uv.lock
 
 # logs
 /logs/
+/glm_features/
 artifacts/
 /docs/
 analysis/
@@ -32,5 +33,3 @@ external_data/**/*.eval
 /judge_results/
 /irt_models_slide.pptx
 /scripts/interactive_viewer/data/
-AGENTS.md
-CLAUDE.md

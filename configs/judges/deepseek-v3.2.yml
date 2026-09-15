@@ -1,0 +1,4 @@
+# Reference-as-judge configuration for domains where DeepSeek-V3.2 is selected.
+name: deepseek-v3.2
+judge: configs/models/deepseek/deepseek-v3.2.yml
+include_reasoning: true

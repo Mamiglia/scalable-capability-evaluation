@@ -1,51 +1,45 @@
-"""Three Gaussian identity-link GLMs: length, length+regex, length+regex+RST structure.
+"""Nested GLM tiers on transcript features: length, length+regex, and (pending RST) structure.
 
-All use the same standardised ridge fit on the supplied reference Cohort.
+Standardised ridge with the penalty chosen by leave-one-out on the training cohort.
 """
 
+import numpy as np
 import pandas as pd
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import RidgeCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from capability.task import Cohort
+from configs.logs import logger
 from protocols.features import TabularRegression
 from protocols.transcript_features.features import FEATURE_SETS
-from protocols.transcript_features.reader import ClauseTyper, feature_table
+from protocols.transcript_features.reader import feature_table
+
+ALPHAS = np.logspace(-3, 3, 13)
 
 
 class TranscriptRegression(TabularRegression):
     """Fit reference-model features to theta* and predict target-model theta*.
 
     Args:
-        features: Optional list of feature-column names overriding the variant's
-            defaults. The variant still controls whether structure is extracted.
-        variant: "length", "regex" or "structure", selecting the nested sets in
-            FEATURE_SETS. Output protocol names are glm_<variant>.
-        clause_typer: Optional callable mapping structured messages to ordered
-            clause labels; required when evaluating the structure variant.
-
-    fit(Cohort) trains standardisation and ridge on reference rows. predict(Cohort)
-    returns a model-indexed float Series, with NaN for unusable observations.
-    Reference selection belongs to the caller; this class does not choose semesters.
+        features: Optional column names overriding the variant's defaults.
+        variant: A key of FEATURE_SETS ("length", "regex", "structure"); protocol name glm_<variant>.
+        reasoning: "visible" (text + raw CoT) or "hidden" (text only); a non-default view is
+            appended to the protocol name.
     """
-    def __init__(self, features: list[str] | None = None, *, variant: str = "regex",
-                 clause_typer: ClauseTyper | None = None):
+    def __init__(self, features: list[str] | None = None, *, variant: str = "regex", reasoning: str = "visible"):
         if variant not in FEATURE_SETS:
             raise ValueError(f"unknown transcript GLM variant: {variant}")
-        self.variant = variant
-        self.clause_typer = clause_typer
-        super().__init__(f"glm_{variant}", list(FEATURE_SETS[variant] if features is None else features),
-                         make_pipeline(StandardScaler(), Ridge(alpha=1.0)))
+        self.variant, self.reasoning = variant, reasoning
+        name = f"glm_{variant}" + ("" if reasoning == "visible" else f"_reasoning-{reasoning}")
+        super().__init__(name, list(FEATURE_SETS[variant] if features is None else features),
+                         make_pipeline(StandardScaler(), RidgeCV(alphas=ALPHAS)))
 
     def get_features(self, cohort: Cohort) -> pd.DataFrame:
-        """Return selected float feature columns, indexed like cohort.models.
+        """Selected columns per model; structure columns are NaN for models whose transcripts lack RST labels."""
+        return feature_table(cohort, reasoning=self.reasoning)[self.features]
 
-        Reads the cohort's selected items from its log paths. Raises ValueError
-        when the structure variant has no clause labeller; unknown column names
-        raise KeyError. Capability labels are not used in feature extraction.
-        """
-        if self.variant == "structure" and self.clause_typer is None:
-            raise ValueError("structure GLM requires an RST clause labeller")
-        typer = self.clause_typer if self.variant == "structure" else None
-        return feature_table(cohort, clause_typer=typer)[self.features]
+    def fit(self, train: Cohort) -> None:
+        super().fit(train)
+        if self.fitted:
+            logger.info("%s %s: alpha=%g", self.name, train.semester, self.estimator[-1].alpha_)

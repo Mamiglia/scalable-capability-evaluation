@@ -1,7 +1,9 @@
 """JudgeDirect: one LLM rating per correct train transcript, judged on demand.
 
 The run uses one task per <bench, model> for references, historical models and targets
-instead of model pairs. Logs live under <log_dir>/direct/<domain>/<semester>/<judge>/<hash>/.
+instead of model pairs. Logs use direct/ for visible subject reasoning and
+direct_reasoning-hidden/ for hidden subject reasoning, with a _truncated-<head|tail>-<chars>
+suffix when max_length cuts transcripts, followed by domain/semester/judge/hash.
 Item IDs are preserved verbatim; no reverse order or shared-correct intersection applies.
 
 Collection requires judge.task.direct_judge_task and a direct-rating JudgeConfig/prompt,
@@ -55,10 +57,10 @@ def from_logs(log_dir: str | Path) -> pd.DataFrame:
 
 
 class JudgeDirect(DirectRegression):
-    def __init__(self, config: JudgeConfig, domain: DomainConfig):
-        # Direct judging shows reasoning even when reusing a no-reasoning pairwise
-        # config. Copy it so the run hash reflects this without changing pairwise.
-        self.config, self.domain = replace(config, include_reasoning=True), domain
+    def __init__(self, config: JudgeConfig, domain: DomainConfig, *, include_reasoning: bool = True):
+        # Keep reasoning visible by default when reusing pairwise configs; experiments
+        # can explicitly hide it. Copy so the effective setting enters the run hash.
+        self.config, self.domain = replace(config, include_reasoning=include_reasoning), domain
         self.name = f"direct_judge_{config.judge.shortname.lower()}"
 
     def _prompts(self) -> dict[str, str]:
@@ -71,7 +73,10 @@ class JudgeDirect(DirectRegression):
                         for name, prompt in sorted(self._prompts().items()))
         condition = (self.config.condition_hash, prompts)
         condition_hash = hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
-        return (self.config.log_dir / "direct" / self.domain.name / semester
+        directory = "direct" if self.config.include_reasoning else "direct_reasoning-hidden"
+        if self.config.truncation_label:  # e.g. direct_truncated-tail-4000
+            directory += f"_{self.config.truncation_label}"
+        return (self.config.log_dir / directory / self.domain.name / semester
                 / self.config.judge.shortname.lower() / condition_hash)
 
     def tasks(self, train: Cohort, test: Cohort) -> list[Task]:
@@ -91,6 +96,7 @@ class JudgeDirect(DirectRegression):
                         DATA / cohort.models.loc[model, f"path_{name}"], items=items,
                         system_prompt=system_prompt,
                         max_length=self.config.max_length, include_reasoning=self.config.include_reasoning,
+                        truncate=self.config.truncate,
                         task_name=f"{name}/{model}",
                         metadata={"protocol": "direct", "domain": self.domain.name, "bench": name,
                                   "model": model, "semester": test.semester},

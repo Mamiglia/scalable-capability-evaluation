@@ -2,6 +2,6 @@
 name: llama-3.3-70b-instruct
 judge: configs/models/meta-llama/llama-3.3-70b-instruct.yml
 include_reasoning: false
-# crusoe/bf16 has a 131k context but the model config asks 117964 output tokens; a verdict is ~100 tokens,
-# and a long apex/hle transcript pair plus that request could exceed the window (phi-4 did, science 2026-09-12).
+# Novita BF16 has a 12,288-token context. The 4,096-token judge override leaves 8,192
+# prompt tokens; direct-judging preflight excludes longer inputs rather than truncating them.
 _kwargs: {max_tokens: 4096}

@@ -8,6 +8,9 @@ from configs.base import DraccusConfig
 from configs.model import ModelConfig
 
 
+FULL_LENGTH = 262144  # the untruncated default; a smaller max_length is a truncation condition
+
+
 @dataclass(kw_only=True)
 class JudgeConfig(DraccusConfig):
     # Pairwise judging
@@ -15,7 +18,8 @@ class JudgeConfig(DraccusConfig):
     system_prompt: str = "assets/system_prompt/default.txt"  # a DomainBench.system_prompt overrides it per bench
     include_reasoning: bool = False  # show the models' reasoning blocks to the judge
     include_reverse: bool = True  # judge every pair in both shown orders (position bias)
-    max_length: int = 262144  # chars kept per transcript; two must fit the judge's context with its output
+    max_length: int = FULL_LENGTH  # chars kept per transcript; two must fit the judge's context with its output
+    truncate: str = "head"  # which max_length chars to keep when a transcript is longer: head (prefix), tail (suffix) or ends (both halves, "..." between)
     temperature: float = 0.0
     cache: bool = True  # inspect generate cache, never expires: a repeated pair is free
     log_dir: Path = Path("logs/judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/ syncs to the HF judging repo)
@@ -30,6 +34,8 @@ class JudgeConfig(DraccusConfig):
     def __post_init__(self):
         if isinstance(self.judge, (str, Path)):
             self.judge = ModelConfig.from_cli(self.judge)
+        if self.truncate not in ("head", "tail", "ends"):
+            raise ValueError(f"truncate must be head, tail or ends, got {self.truncate!r}")
 
     @property
     def condition_hash(self) -> str:
@@ -37,7 +43,14 @@ class JudgeConfig(DraccusConfig):
                      int(self.max_length), float(self.temperature))
         if self.train_per_quartile:  # appended only when set, so the full-set hashes stay as they were
             condition += (int(self.train_per_quartile),)
+        if self.truncate != "head":  # likewise: head truncation is the historical behaviour
+            condition += (self.truncate,)
         return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
+
+    @property
+    def truncation_label(self) -> str:
+        """Readable log-directory suffix of a truncation condition, e.g. truncated-head-4000; empty when untruncated."""
+        return f"truncated-{self.truncate}-{self.max_length}" if self.max_length < FULL_LENGTH else ""
 
 
 @dataclass(kw_only=True)
@@ -45,6 +58,7 @@ class DirectJudgeConfig(JudgeConfig):
     """Direct judging defaults"""
 
     system_prompt: str = "assets/system_prompt/direct.txt"
+    log_dir: Path = Path("logs")
     include_reasoning: bool = True
     include_reverse: bool = False  # accepted for compatibility; unused by direct judging
 
@@ -53,4 +67,6 @@ class DirectJudgeConfig(JudgeConfig):
         prompt = Path(self.system_prompt).read_text(encoding="utf-8")
         condition = ("direct", prompt, bool(self.include_reasoning),
                      int(self.max_length), float(self.temperature))
+        if self.truncate != "head":
+            condition += (self.truncate,)
         return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
