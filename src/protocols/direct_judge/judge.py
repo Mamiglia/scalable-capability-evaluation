@@ -2,7 +2,8 @@
 
 The run uses one task per <bench, model> for references, historical models and targets
 instead of model pairs. Logs use direct/ for visible subject reasoning and
-direct_reasoning-hidden/ for hidden subject reasoning, followed by domain/semester/judge/hash.
+direct_reasoning-hidden/ for hidden subject reasoning, with a _truncated-<head|tail>-<chars>
+suffix when max_length cuts transcripts, followed by domain/semester/judge/hash.
 Item IDs are preserved verbatim; no reverse order or shared-correct intersection applies.
 
 Collection requires judge.task.direct_judge_task and a direct-rating JudgeConfig/prompt,
@@ -73,6 +74,8 @@ class JudgeDirect(DirectRegression):
         condition = (self.config.condition_hash, prompts)
         condition_hash = hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
         directory = "direct" if self.config.include_reasoning else "direct_reasoning-hidden"
+        if self.config.truncation_label:  # e.g. direct_truncated-tail-4000
+            directory += f"_{self.config.truncation_label}"
         return (self.config.log_dir / directory / self.domain.name / semester
                 / self.config.judge.shortname.lower() / condition_hash)
 
@@ -93,6 +96,7 @@ class JudgeDirect(DirectRegression):
                         DATA / cohort.models.loc[model, f"path_{name}"], items=items,
                         system_prompt=system_prompt,
                         max_length=self.config.max_length, include_reasoning=self.config.include_reasoning,
+                        truncate=self.config.truncate,
                         task_name=f"{name}/{model}",
                         metadata={"protocol": "direct", "domain": self.domain.name, "bench": name,
                                   "model": model, "semester": test.semester},

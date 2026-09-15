@@ -26,6 +26,7 @@ def judge_task(
     task_name: str | None = None,
     items: set[str] | None = None,
     metadata: dict | None = None,
+    truncate: str = "head",
 ) -> Task | None:
     """Build the judging task that compares one major eval log against one minor log.
 
@@ -54,6 +55,7 @@ def judge_task(
         include_reverse=include_reverse,
         include_reasoning=include_reasoning,
         items=items,
+        truncate=truncate,
     )
     if len(dataset) == 0:
         logger.warning("%s: no samples after filtering (%s vs %s), skipping", name, major_path, minor_path)
@@ -79,6 +81,7 @@ def judge_task(
             "include_reverse": include_reverse,
             "include_reasoning": include_reasoning,
             "max_length": max_length,
+            "truncate": truncate,
             **(metadata or {}),
         },
     )
@@ -92,10 +95,11 @@ def direct_judge_task(
     include_reasoning: bool = True,
     task_name: str | None = None,
     metadata: dict | None = None,
+    truncate: str = "head",
 ) -> Task | None:
     """Rate one model's correct first-attempt train transcripts; skip empty datasets."""
     path = Path(path)
-    dataset = build_direct_dataset(path, items=items, max_len=max_length, include_reasoning=include_reasoning)
+    dataset = build_direct_dataset(path, items=items, max_len=max_length, include_reasoning=include_reasoning, truncate=truncate)
     if not len(dataset):
         return None
     log = read_header(path)
@@ -107,6 +111,6 @@ def direct_judge_task(
         scorer=direct_judge_scorer(),
         metadata={"source_path": str(path), "bench": log.eval.task, "model": log.eval.model,
                   "semester": "", "system_prompt": system_prompt, "require_correct": True,
-                  "include_reasoning": include_reasoning, "max_length": max_length,
+                  "include_reasoning": include_reasoning, "max_length": max_length, "truncate": truncate,
                   **(metadata or {}), "protocol": "direct"},
     )
