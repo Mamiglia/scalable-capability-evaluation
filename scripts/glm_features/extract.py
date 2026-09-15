@@ -11,6 +11,7 @@ their CSV are re-extracted; `legacy/` and `judge/` are skipped.
 
 import argparse
 import re
+from concurrent.futures import ProcessPoolExecutor
 import zipfile
 from pathlib import Path
 
@@ -42,7 +43,9 @@ def main() -> None:
     parser.add_argument("benches", nargs="*", help="default: every bench under --data")
     parser.add_argument("--data", default="data", type=Path)
     parser.add_argument("--out", default="glm_features", type=Path)
+    parser.add_argument("--workers", default=6, type=int)
     args = parser.parse_args()
+    jobs = []
     for log in sorted(args.data.glob("*/*/*/*/*.eval")):
         relative = log.relative_to(args.data)
         if relative.parts[0] in SKIP or (args.benches and relative.parts[0] not in args.benches):
@@ -53,9 +56,21 @@ def main() -> None:
         if log.stat().st_size < 1024 and log.read_bytes().startswith(b"version https://git-lfs"):
             print(f"skip (LFS pointer, not fetched): {log}")
             continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        extract_log(log).to_csv(target, index=False)
-        print(target)
+        jobs.append((log, target))
+    # ponytail: one process per log; big HLE logs cost a few hundred MB each, hence --workers.
+    with ProcessPoolExecutor(args.workers) as pool:
+        for target in pool.map(_write, jobs):
+            print(target, flush=True)
+
+
+def _write(job: tuple[Path, Path]) -> str:
+    log, target = job
+    rows = extract_log(log)
+    if rows.empty:  # an interrupted start (only _journal/start.json), not a run
+        return f"skip (no samples): {log}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    rows.to_csv(target, index=False)
+    return str(target)
 
 
 if __name__ == "__main__":
