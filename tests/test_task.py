@@ -52,6 +52,7 @@ class TestJudgeTask:
             include_reverse=True,
             include_reasoning=True,
             items=None,
+            truncate="head",
         )
 
 
