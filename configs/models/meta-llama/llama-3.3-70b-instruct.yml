@@ -1,13 +1,28 @@
-# Quantization: Unquantized BF16 (Crusoe).
+# Previous BF16 route, removed from OpenRouter's live endpoint list on 2026-09-15:
+# model_args:
+#   provider:
+#     only:
+#       - crusoe/bf16
+#     allow_fallbacks: false
+#     quantizations: [bf16]
+# generate_args:
+#   max_tokens: 117964
+#
+# Active route: Novita's provider-reported BF16 endpoint. OpenRouter currently reports
+# a 12,288-token context and 11,059-token output cap.
+# deliberate: prefer the only live BF16 endpoint over roomier FP8 endpoints; callers must
+# preflight the 12,288-token context rather than silently change serving precision.
 name: meta-llama/Llama-3.3-70B-Instruct
 slug: openrouter/meta-llama/llama-3.3-70b-instruct
 release_date: '2024-12-06'
 model_args:
   provider:
     only:
-    - crusoe/bf16
+    - novita/bf16
     allow_fallbacks: false
     quantizations:
     - bf16
+    require_parameters: true
+    data_collection: deny
 generate_args:
-  max_tokens: 117964
+  max_tokens: 11059
