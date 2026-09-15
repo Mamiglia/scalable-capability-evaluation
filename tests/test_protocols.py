@@ -114,3 +114,33 @@ def test_mean_reference_baselines():
     t = toy_task()
     assert MeanReference("m")(t).eq(1.0).all()  # mean of 0, 1, 2
     assert MeanReference("f", 2)(t).eq(1.5).all()  # top 2: 1, 2
+
+
+def test_calibrated_recovers_theta_from_synthetic_verdicts():
+    from protocols.pairwise import calibrated
+    rng = np.random.default_rng(0)
+    refs = pd.Series(np.linspace(-2, 2, 8), index=[f"r{i}" for i in range(8)])
+    truth = {"t0": -1.0, "t1": 1.5}
+    theta = pd.concat([refs, pd.Series(truth)])
+    alpha, beta = {"gpqa": 1.5, "arc": 0.3}, 0.4
+    rows = []
+    for a in theta.index:
+        for b in theta.index:
+            if a >= b or (a in truth and b in truth):
+                continue
+            for bench in alpha:
+                for item in range(60):
+                    for left, right in ((a, b), (b, a)):
+                        p = 1 / (1 + np.exp(-(alpha[bench] * (theta[left] - theta[right]) + beta)))
+                        rows.append(dict(bench=bench, judge="j", item=str(item), model_left=left, model_right=right,
+                                         pick_left=float(rng.random() < p)))
+    verdicts = pd.DataFrame(rows)
+    a_hat, b_hat = calibrated.calibrate(verdicts, refs)
+    assert abs(a_hat["gpqa"] - 1.5) < 0.3 and abs(a_hat["arc"] - 0.3) < 0.15 and abs(b_hat - 0.4) < 0.15
+    theta_hat = calibrated.estimate_all(verdicts, refs, list(truth))
+    assert all(abs(theta_hat[t] - truth[t]) < 0.3 for t in truth)
+    sigma2 = ((calibrated.loo(verdicts, refs) - refs) ** 2).mean()
+    assert sigma2 < 0.1
+    # a small held-out error keeps the estimate; a model without evidence gets the prior mean
+    shrunk = calibrated.shrink(theta_hat, sigma2, (0.0, 1.0))
+    assert abs(shrunk["t1"] - truth["t1"]) < 0.4 and calibrated.shrink(pd.Series({"x": np.nan}), sigma2, (0.5, 1.0))["x"] == 0.5
