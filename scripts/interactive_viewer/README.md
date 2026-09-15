@@ -65,8 +65,8 @@ uv run python scripts/analyses/export_rank_dashboard.py logs/rank/math/gemma-4-3
 One dataset per condition dir, id `<domain>-q<q_src>-<judge>`, prepended to the menu.
 
 The X-axis control offers every contiguous quartile subset of the domain (`Q1`…`Q4`,
-`Q1–Q2`, `Q2–Q4`, …, `all`), computed from `data/meta/domains/<domain>/` — so it needs the
-domain artefacts (`uv run domain`) and a run from the repo root; without them the axis falls
+`Q1–Q2`, `Q2–Q4`, …, `all`), computed from the old `data/meta/domains/<domain>/` artefacts
+(`uv run domain`, removed 2026-09-15 with the quartile pipeline) — without them the axis falls
 back to the `q_dst` accuracy recorded in the judge logs. It opens on `q_dst`, the subset the
 pairs were oriented by; pick another and the hint line says so, since which model counts as
 "major" does not change with the axis.
