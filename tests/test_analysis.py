@@ -98,6 +98,10 @@ def test_scores_pool_and_summary():
     pooled = s[(s.semester == "all") & (s.domain == "d") & (s.judge == "-")].set_index("protocol").mse
     assert pooled[stats.BASELINE] == 2.5 and pooled[stats.ORACLE] == 0.0 and pooled["glm_regex"] == 1.0
     assert s[(s.semester == "s1") & (s.protocol == stats.BASELINE)].n.item() == 2
+    # best-judge rows are one forecast per target (interval kept); mean-over-judges pools judges (interval blanked)
+    direct = s[(s.semester == "all") & (s.domain == "d") & (s.protocol == "direct")].set_index("judge")
+    assert np.isfinite(direct.loc[stats.BEST, "lo"]) and np.isfinite(direct.loc[stats.BEST, "hi"])
+    assert np.isnan(direct.loc[stats.MEAN, "lo"]) and np.isnan(direct.loc[stats.MEAN, "hi"])
     r = stats.summary(s)
     # the core rows only: per-condition judge rows would make (protocol, judge) non-unique
     r = r[(r.domain == "d") & r.condition.isin(["-", "core"])].set_index(["protocol", "judge"])

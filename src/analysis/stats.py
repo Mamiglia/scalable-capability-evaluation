@@ -56,8 +56,9 @@ def scores(forecasts: pd.DataFrame) -> pd.DataFrame:
     """One row per domain x semester x protocol x variant x judge x condition (n, missing,
     mse, lo, hi), plus semester "all" per domain and domain "all" per protocol x variant x
     judge x condition (pooled over every semester of every domain). The judge summary rows
-    are included with condition "core"; their interval is NaN because their pooled rows are
-    not independent targets (the unit there is the judge)."""
+    are included with condition "core"; the mean-over-judges rows' interval is NaN because
+    their pooled rows are not independent targets (the unit there is the judge), unlike the
+    best-judge rows, which are one forecast per target like any other protocol."""
     rows = []
     for f in (forecasts, judge_summaries(forecasts)):
         for k, g in f.groupby(["semester", *KEYS], sort=False):
@@ -68,7 +69,7 @@ def scores(forecasts: pd.DataFrame) -> pd.DataFrame:
             rows.append(dict(zip(KEYS[1:], k), domain="all", semester="all",
                              missing=int(g.groupby(["domain", "semester"]).missing.max().sum()), **mse_row(g)))
     table = pd.DataFrame(rows)[["domain", "semester", *KEYS[1:], "n", "missing", "mse", "lo", "hi"]]
-    table.loc[table.condition == "core", ["lo", "hi"]] = np.nan
+    table.loc[table.judge == MEAN, ["lo", "hi"]] = np.nan
     return table
 
 
