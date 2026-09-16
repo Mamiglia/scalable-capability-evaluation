@@ -111,16 +111,16 @@ def format_content(content: Any, include_reasoning: bool = True, shown: frozense
 def format_single_message(msg: ChatMessage | str | Any, include_reasoning: bool = True,
                           shown: frozenset[str] = ALL_CHANNELS) -> str:
     """
-    Format a single message (assistant, user, system, or tool). Tool calls and tool outputs
-    are the "tools" channel of ``shown``.
+    Format a single message (assistant, user, system, or tool). Tool calls are the "calls"
+    channel of ``shown``, tool outputs the "outputs" channel.
     """
     if isinstance(msg, str):
         return msg if "text" in shown else ""
 
     parts = []
-    # Handle tool output role: its content is the tool's output, part of the "tools" channel
+    # Handle tool output role: its content is the tool's output, the "outputs" channel
     if getattr(msg, "role", None) == "tool":
-        if "tools" not in shown:
+        if "outputs" not in shown:
             return ""
         content_str = format_content(getattr(msg, "content", ""), include_reasoning=include_reasoning)
         func = getattr(msg, "function", "tool")
@@ -135,7 +135,7 @@ def format_single_message(msg: ChatMessage | str | Any, include_reasoning: bool 
 
     # Handle tool calls on assistant messages
     tool_calls = getattr(msg, "tool_calls", None)
-    if tool_calls and "tools" in shown:
+    if tool_calls and "calls" in shown:
         tc_strs = []
         for call in tool_calls:
             func = getattr(call, "function", "tool")

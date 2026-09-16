@@ -237,7 +237,7 @@ class TestStripThink:
 
 
 class TestChannels:
-    """A channel spec keeps or drops one of reasoning, text and tools (calls with their outputs)."""
+    """A channel spec keeps or drops one of reasoning, text, calls and outputs; tools is calls with outputs."""
 
     turns = [
         ChatMessageAssistant(
@@ -263,12 +263,18 @@ class TestChannels:
         tools = self.render("only-tools")
         assert "[Tool Call: bash" in tools and "[Tool Output (bash)]: file.txt" in tools
         assert "Plan" not in tools and "Looking" not in tools and "ANSWER" not in tools
+        calls = self.render("only-calls")
+        assert "[Tool Call: bash" in calls and "Tool Output" not in calls and "Plan" not in calls and "Looking" not in calls
+        outputs = self.render("only-outputs")
+        assert "[Tool Output (bash)]: file.txt" in outputs and "Tool Call" not in outputs and "ANSWER" not in outputs
 
     def test_drop_one_channel(self):
         assert "THOUGHT" not in self.render("drop-reasoning") and "Looking" in self.render("drop-reasoning")
         assert "Looking" not in self.render("drop-text") and "Plan" in self.render("drop-text")
         dropped = self.render("drop-tools")
         assert "Tool" not in dropped and "Plan" in dropped and "Looking" in dropped
+        no_outputs = self.render("drop-outputs")
+        assert "[Tool Call: bash" in no_outputs and "Tool Output" not in no_outputs and "Plan" in no_outputs
 
     def test_empty_turns_vanish(self):
         """A turn with nothing left in it is not shown as an empty role line."""

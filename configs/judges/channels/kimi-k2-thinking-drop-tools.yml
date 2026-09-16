@@ -1,4 +1,4 @@
-# Pairwise channel condition (coding, cyber 2026-I): configs/judges/reasoning/kimi-k2-thinking-full.yml showing everything but the tools channel of each transcript (tools = tool calls with their outputs). Same items, prompt and orders as the full-transcript baseline.
+# Pairwise channel condition (coding, cyber 2026-I): configs/judges/reasoning/kimi-k2-thinking-full.yml showing everything but the tool calls and tool outputs of each transcript (channels: reasoning, text, calls, outputs). Same items, prompt and orders as the full-transcript baseline.
 name: kimi-k2-thinking
 judge: configs/models/moonshotai/kimi-k2-thinking.yml
 include_reasoning: true

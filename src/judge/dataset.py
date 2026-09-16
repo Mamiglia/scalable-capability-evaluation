@@ -200,7 +200,7 @@ def build_dataset(
         include_reasoning: include CoT reasoning blocks in the transcripts.
         items: question ids to keep (e.g. one difficulty quartile); None = all.
         window: keep-k/n or drop-k/n, a fraction of each transcript by characters.
-        channels: only-<c> or drop-<c>, which transcript channels are rendered (reasoning, text, tools).
+        channels: only-<c> or drop-<c>, which transcript channels are rendered (reasoning, text, calls, outputs; tools is calls and outputs).
     Questions where either model wrote fewer than MIN_RESPONSE_CHARS (after the window) are skipped.
     """
     self_pair = Path(major_path) == Path(minor_path)

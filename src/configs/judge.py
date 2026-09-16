@@ -9,7 +9,8 @@ from configs.model import ModelConfig
 
 
 FULL_LENGTH = 262144  # the untruncated default; a smaller max_length is a truncation condition
-CHANNELS = ("reasoning", "text", "tools")  # what a rendered transcript is made of: CoT blocks, assistant prose, tool calls with their outputs
+CHANNELS = ("reasoning", "text", "calls", "outputs")  # what a rendered transcript is made of: CoT blocks, assistant prose, tool calls, tool outputs
+CHANNEL_GROUPS = {"tools": ("calls", "outputs")}  # a spec name standing for several channels
 
 
 def parse_window(spec: str) -> tuple[str, int, int]:
@@ -22,13 +23,14 @@ def parse_window(spec: str) -> tuple[str, int, int]:
 
 
 def parse_channels(spec: str) -> frozenset[str]:
-    """The channels a spec shows: all of CHANNELS for "", one for "only-<c>", all but one for "drop-<c>"."""
+    """The channels a spec shows: all of CHANNELS for "", c for "only-<c>", all but c for "drop-<c>" (c may be a CHANNEL_GROUPS name)."""
     if not spec:
         return frozenset(CHANNELS)
     mode, _, channel = spec.partition("-")
-    if mode not in ("only", "drop") or channel not in CHANNELS:
-        raise ValueError(f"channels must be only-<c> or drop-<c> with c in {CHANNELS}, got {spec!r}")
-    return frozenset([channel]) if mode == "only" else frozenset(CHANNELS) - {channel}
+    picked = frozenset(CHANNEL_GROUPS.get(channel, (channel,)))
+    if mode not in ("only", "drop") or not picked <= set(CHANNELS):
+        raise ValueError(f"channels must be only-<c> or drop-<c> with c in {CHANNELS + tuple(CHANNEL_GROUPS)}, got {spec!r}")
+    return picked if mode == "only" else frozenset(CHANNELS) - picked
 
 
 @dataclass(kw_only=True)
@@ -41,7 +43,7 @@ class JudgeConfig(DraccusConfig):
     max_length: int = FULL_LENGTH  # chars kept per transcript; two must fit the judge's context with its output
     truncate: str = "head"  # which max_length chars to keep when a transcript is longer: head (prefix), tail (suffix) or ends (both halves, "..." between)
     window: str = ""  # a fraction of each transcript by characters, keep-k/n (show only the k-th n-th) or drop-k/n (hide it); applied before max_length
-    channels: str = ""  # only-<c> shows one channel of the transcript, drop-<c> hides one: reasoning, text or tools (calls with their outputs)
+    channels: str = ""  # only-<c> shows one channel of the transcript, drop-<c> hides it: reasoning, text, calls, outputs or tools (calls and outputs)
     temperature: float = 0.0
     cache: bool = True  # inspect generate cache, never expires: a repeated pair is free
     log_dir: Path = Path("logs/judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/ syncs to the HF judging repo)
