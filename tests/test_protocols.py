@@ -109,6 +109,13 @@ def test_stratified_items_is_seeded_per_quartile_and_off_by_default():
     assert JudgeConfig.from_cli(cfg | {"train_per_quartile": 10}).condition_hash != "7ea04f2b"
 
 
+def test_mean_reference_baselines():
+    from protocols.baseline import MeanReference
+    t = toy_task()
+    assert MeanReference("m")(t).eq(1.0).all()  # mean of 0, 1, 2
+    assert MeanReference("f", 2)(t).eq(1.5).all()  # top 2: 1, 2
+
+
 def test_calibrated_recovers_theta_from_synthetic_verdicts():
     from protocols.pairwise import calibrated
     rng = np.random.default_rng(0)
