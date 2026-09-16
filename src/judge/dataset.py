@@ -39,13 +39,16 @@ def cut(text: str, max_len: int, truncate: str = "head") -> str:
 
 
 def window_text(text: str, spec: str) -> str:
-    """The k-th n-th of the text by characters (keep-k/n), or the text without it and ENDS_SEPARATOR
-    in its place (drop-k/n); "" leaves the text alone. The n windows tile the text exactly."""
+    """The k-th n-th of the text by characters (keep-k/n), or the text without it (drop-k/n); "" leaves
+    the text alone. ENDS_SEPARATOR stands for whatever was cut, before and after a kept slice, in place
+    of a dropped one, so the judge sees where the transcript continues. The n slices tile the text."""
     if not spec:
         return text
     mode, k, n = parse_window(spec)
     start, stop = len(text) * (k - 1) // n, len(text) * k // n
-    return text[start:stop] if mode == "keep" else text[:start] + ENDS_SEPARATOR + text[stop:]
+    if mode == "drop":
+        return text[:start] + ENDS_SEPARATOR + text[stop:]
+    return (ENDS_SEPARATOR if start else "") + text[start:stop] + (ENDS_SEPARATOR if stop < len(text) else "")
 
 
 def response_chars(text: str) -> int:
