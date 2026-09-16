@@ -33,3 +33,4 @@ external_data/**/*.eval
 /judge_results/
 /irt_models_slide.pptx
 /scripts/interactive_viewer/data/
+/embeddings/
