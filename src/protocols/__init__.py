@@ -30,5 +30,9 @@ class Protocol:
 # Imported after Protocol is defined, because the module subclasses it.
 from protocols.features import PROTOCOLS  # noqa: E402, F401
 from protocols.baseline import PROTOCOLS as _BASELINES  # noqa: E402
+from protocols.embeddings import PROTOCOLS as _EMBEDDINGS  # noqa: E402  emb_kr / emb_knn / emb_ens (+ _answer)
+from protocols.accuracy import PROTOCOLS as _ACCURACY  # noqa: E402  acc_train / acc_easy / acc_all: benchmark-score baselines
 
 PROTOCOLS.update(_BASELINES)
+PROTOCOLS.update(_EMBEDDINGS)
+PROTOCOLS.update(_ACCURACY)

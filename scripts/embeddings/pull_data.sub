@@ -1,0 +1,18 @@
+universe = vanilla
+initialdir = /home/jyeon/LASR/small-judge
+executable = /usr/bin/python3
+arguments = scripts/embeddings/pull_data.py
+output = /fast/jyeon/smalljudge_data/condor/pull_data.$(Cluster).out
+error = /fast/jyeon/smalljudge_data/condor/pull_data.$(Cluster).err
+log = /fast/jyeon/smalljudge_data/condor/pull_data.$(Cluster).log
+getenv = PATH,HOME,USER,LOGNAME,LANG,LC_ALL
+environment = "HF_HUB_DISABLE_PROGRESS_BARS=1 PYTHONUNBUFFERED=1"
+request_cpus = 4
+request_memory = 8GB
+request_disk = 4GB
+# g132's /fast client returns EIO on writes (seen 2026-09-15)
+requirements = (Machine != "g132.internal.cluster.is.localnet")
+should_transfer_files = NO
++MaxRuntime = 21600
++BypassLXCfs = "true"
+queue

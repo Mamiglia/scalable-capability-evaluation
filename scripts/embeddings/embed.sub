@@ -1,0 +1,22 @@
+# One-GPU transcript embedding. Override the arguments at submission, e.g.
+#   condor_submit_bid 100 scripts/embeddings/embed.sub -append 'arguments = --bench gpqa --limit-logs 2 --limit-samples 8'
+universe = vanilla
+initialdir = /home/jyeon/LASR/small-judge
+executable = scripts/embeddings/embed.sh
+arguments = --bench gpqa arc_challenge hle
+output = /fast/jyeon/smalljudge_embeddings/condor/embed.$(Cluster).out
+error = /fast/jyeon/smalljudge_embeddings/condor/embed.$(Cluster).err
+log = /fast/jyeon/smalljudge_embeddings/condor/embed.$(Cluster).log
+getenv = PATH,HOME,USER,LOGNAME,LANG,LC_ALL
+request_cpus = 8
+request_memory = 64GB
+request_disk = 20GB
+request_gpus = 1
+requirements = (TARGET.CUDAGlobalMemoryMb >= 40000) && (TARGET.CUDACapability <= 9.0)
+# nvidia-smi failing in embed.sh (broken GPU on the node) exits 6: put the job back in the queue
+# instead of finishing, up to 5 starts.
+on_exit_remove = (ExitBySignal == True) || (ExitCode != 6) || (NumJobStarts >= 5)
+should_transfer_files = NO
++MaxRuntime = 43200
++BypassLXCfs = "true"
+queue

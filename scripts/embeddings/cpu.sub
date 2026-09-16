@@ -1,0 +1,22 @@
+# Generic CPU job in the smalljudge-embed venv, repo root as working directory. Override `arguments`:
+#   condor_submit_bid 100 scripts/embeddings/cpu.sub -append 'arguments = -m pytest -q tests/test_embeddings.py tests/test_protocols.py'
+#   condor_submit_bid 100 scripts/embeddings/cpu.sub -append 'arguments = -m capability.evaluate configs/domain/science.yml --protocol emb_full emb_answer'
+#   condor_submit_bid 100 scripts/embeddings/cpu.sub -append 'arguments = scripts/embeddings/push.py'
+universe = vanilla
+initialdir = /home/jyeon/LASR/small-judge
+executable = /home/jyeon/.venvs/smalljudge-embed/bin/python
+arguments = -m capability.evaluate configs/domain/science.yml --protocol embedding emb_kr emb_knn emb_ens chars ridge
+output = /fast/jyeon/smalljudge_embeddings/condor/cpu.$(Cluster).out
+error = /fast/jyeon/smalljudge_embeddings/condor/cpu.$(Cluster).err
+log = /fast/jyeon/smalljudge_embeddings/condor/cpu.$(Cluster).log
+getenv = PATH,HOME,USER,LOGNAME,LANG,LC_ALL
+environment = "PYTHONPATH=src SMALL_JUDGE_EMBEDDINGS=/fast/jyeon/smalljudge_embeddings HF_HUB_DISABLE_PROGRESS_BARS=1 PYTHONUNBUFFERED=1 OMP_NUM_THREADS=4"
+request_cpus = 4
+request_memory = 16GB
+request_disk = 8GB
+# g132's /fast client returns EIO / "transport endpoint shutdown" (seen 2026-09-15 on three jobs)
+requirements = (Machine != "g132.internal.cluster.is.localnet")
+should_transfer_files = NO
++MaxRuntime = 21600
++BypassLXCfs = "true"
+queue
