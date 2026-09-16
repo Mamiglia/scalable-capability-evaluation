@@ -298,3 +298,32 @@ def test_cut_modes():
     import pytest
     with pytest.raises(ValueError):
         cut(text, 10, "middle")
+
+
+def test_window_modes():
+    """keep-k/n shows the k-th n-th of the text by characters; drop-k/n elides it."""
+    from judge.dataset import ENDS_SEPARATOR, window_text
+    text = "".join(chr(ord("a") + i) for i in range(20))
+    assert window_text(text, "") == text
+    assert window_text(text, "keep-1/4") == text[:5] and window_text(text, "keep-4/4") == text[15:]
+    assert window_text(text, "keep-3/10") == text[4:6]
+    assert window_text(text, "drop-2/4") == text[:5] + ENDS_SEPARATOR + text[10:]
+    assert window_text(text, "drop-1/4") == ENDS_SEPARATOR + text[5:]
+    assert window_text(text, "drop-10/10") == text[:18] + ENDS_SEPARATOR
+    assert "".join(window_text(text, f"keep-{k}/7") for k in range(1, 8)) == text  # windows tile the text
+    with pytest.raises(ValueError):
+        window_text(text, "keep-5/4")
+
+
+def test_window_applies_before_cut_and_short_windows_are_skipped(monkeypatch):
+    text = "".join(chr(ord("a") + i) for i in range(20))
+    res = responses_to_sample(transcript(text, pad=False), transcript(text, pad=False), max_len=3, window="keep-2/4")
+    assert res.metadata["chars_1"] == 3 and text[5:8] in res.input and text[:5] not in res.input
+    # a window under MIN_RESPONSE_CHARS leaves nothing to judge: the pair is skipped like a short answer
+    import judge.dataset as module
+    long = "x" * 200
+    monkeypatch.setattr(module, "read_transcripts", lambda path, *a, **k: {"q1": [transcript(long, pad=False)]})
+    monkeypatch.setattr(module, "read_header",
+                        lambda p: SimpleNamespace(eval=SimpleNamespace(model="m", dataset=SimpleNamespace(name="b"))))
+    assert len(build_dataset(Path("a.eval"), Path("b.eval"), window="keep-1/4")) == 2
+    assert len(build_dataset(Path("a.eval"), Path("b.eval"), window="keep-1/20")) == 0

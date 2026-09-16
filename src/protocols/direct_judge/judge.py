@@ -96,7 +96,7 @@ class JudgeDirect(DirectRegression):
                         DATA / cohort.models.loc[model, f"path_{name}"], items=items,
                         system_prompt=system_prompt,
                         max_length=self.config.max_length, include_reasoning=self.config.include_reasoning,
-                        truncate=self.config.truncate,
+                        truncate=self.config.truncate, window=self.config.window, channels=self.config.channels,
                         task_name=f"{name}/{model}",
                         metadata={"protocol": "direct", "domain": self.domain.name, "bench": name,
                                   "model": model, "semester": test.semester},
