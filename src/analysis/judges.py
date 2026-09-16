@@ -3,7 +3,8 @@ leave-one-out error that selects a judge without target labels.
 
 Pairwise: "linear" is JudgeLinear's per-bench weighted least squares on pair logits
 (protocols.pairwise.linear); "calibrated" is JudgeCalibrated's calibrated Bradley-Terry with
-shrinkage (protocols.pairwise.calibrated). Direct: OLS of theta* on a model's mean rating,
+shrinkage (protocols.pairwise.calibrated); "bt" is plain Bradley-Terry with the references
+pinned at theta* (protocols.pairwise.bradley_terry.rank), no calibration and no prior. Direct: OLS of theta* on a model's mean rating,
 "raw" or "item_z" (each rating z-scored per (bench, item) with the references' mean and sd).
 Every statistic comes from the references passed in; targets never enter a fit.
 """
@@ -13,9 +14,10 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 
 from protocols.pairwise import calibrated
+from protocols.pairwise.bradley_terry import rank
 from protocols.pairwise.linear import weighted_theta
 
-PAIRWISE = ("linear", "calibrated")
+PAIRWISE = ("linear", "calibrated", "bt")
 DIRECT = ("raw", "item_z")
 
 
@@ -26,12 +28,19 @@ def pairwise_theta(verdicts: pd.DataFrame, refs: pd.Series, models: list[str], c
     verdicts against the references gets the prior mean, not NaN; the run's `missing` count says
     how many judgments are absent.
 
-    conversion "linear": weighted_theta. "calibrated": calibrate on the reference pairs, 1-D ML
+    conversion "linear": weighted_theta. "bt": plain pinned Bradley-Terry over the verdicts that
+    involve a reference (`prior` unused). "calibrated": calibrate on the reference pairs, 1-D ML
     per model, shrunk by the judge's leave-one-out error on the references toward `prior`
     (mean, variance); prior None means the references' own mean and variance.
     """
     if conversion == "linear":
         return weighted_theta(verdicts, refs, list(models)).reindex(models)
+    if conversion == "bt":  # pinned Bradley-Terry: a model never compared with a pinned reference stays NaN
+        keep = verdicts[(verdicts.model_left.isin(refs.index) | verdicts.model_right.isin(refs.index))
+                        & (verdicts.model_left.isin(list(models) + list(refs.index)) & verdicts.model_right.isin(list(models) + list(refs.index)))]
+        if keep.empty:
+            return pd.Series(np.nan, index=models)
+        return rank(keep, anchors=refs).set_index("model").ability.reindex(models)
     assert conversion == "calibrated", conversion
     alpha, beta = calibrated.calibrate(verdicts, refs)
     if alpha.empty:

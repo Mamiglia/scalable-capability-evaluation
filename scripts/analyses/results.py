@@ -30,9 +30,11 @@ DOMAINS = ["science", "math", "coding", "cyber"]
 SEMESTERS = None  # e.g. ["2026-I"]; None = every frozen semester task
 OUT = Path("analysis/results")
 # Every variant is computed and scored; these pick the ones the figures and tables show.
-# Defaults chosen by the reference leave-one-out error (mean over judge runs, four domains):
-# pairwise calibrated 0.34 vs linear 0.45; direct raw 0.43 vs item_z 0.59. Never by target MSE.
-PAIRWISE_CONVERSION = "calibrated"  # or "linear"
+# Pairwise: the user's condition is the linear calibration (per-bench slope and noise on the reference
+# pairs, positive slopes only, sampling-noise floor, references' N(mean, var) prior); "bt" is plain
+# pinned Bradley-Terry for comparison; "calibrated" (frontier-prior shrinkage) is kept in the tables only.
+# Direct raw vs item_z by reference leave-one-out error (0.43 vs 0.59). Never by target MSE.
+PAIRWISE_CONVERSION = "linear"  # or "bt", "calibrated"
 DIRECT_NORMALISATION = "raw"  # or "item_z"
 EMBEDDING_VARIANT = "full"  # or "answer"
 VARIANTS = {"pairwise": PAIRWISE_CONVERSION, "pairwise_ensemble": PAIRWISE_CONVERSION,
