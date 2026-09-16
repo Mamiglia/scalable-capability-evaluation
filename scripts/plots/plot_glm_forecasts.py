@@ -26,24 +26,26 @@ plt.rcParams.update({
 })
 
 
-def panel(ax, forecasts: pd.DataFrame, tag: str) -> None:
+def panel(ax, forecasts: pd.DataFrame, tag: str, color: str = GREEN) -> None:
+    """One x per target (ordered by true theta within a semester); several forecast rows per target are all drawn."""
     semesters = list(dict.fromkeys(forecasts.semester))
     centres = []
     x = 0
     for semester in semesters:
-        group = forecasts[forecasts.semester == semester].sort_values("theta")
-        xs = x + np.arange(len(group))
+        group = forecasts[forecasts.semester == semester]
+        truth = group.groupby("model").theta.first().sort_values()
+        xs = pd.Series(x + np.arange(len(truth)), index=truth.index)
         centres.append(xs.mean())
-        shown = group.theta_hat.clip(*YLIM)
-        for xi, t, p in zip(xs, group.theta, shown):
+        gx = xs[group.model].to_numpy()
+        for xi, t, p in zip(gx, group.theta, group.theta_hat.clip(*YLIM)):
             ax.plot([xi, xi], [t, p], ls=":", lw=0.6, color="0.6", zorder=1)
-        ax.plot(xs, group.theta, "o", ms=3, color="black", zorder=3)
-        inside = group.theta_hat.between(*YLIM)
-        ax.plot(xs[inside.to_numpy()], group.theta_hat[inside], "o", ms=3, color=GREEN, zorder=2)
-        for xi, p in zip(xs[~inside.to_numpy()], group.theta_hat[~inside]):
+        ax.plot(xs, truth, "o", ms=3, color="black", zorder=3)
+        inside = group.theta_hat.between(*YLIM).to_numpy()
+        ax.plot(gx[inside], group.theta_hat[inside], "o", ms=3, color=color, zorder=2)
+        for xi, p in zip(gx[~inside], group.theta_hat[~inside]):
             ax.plot(xi, YLIM[0] if p < YLIM[0] else YLIM[1], "v" if p < YLIM[0] else "^", ms=3.5,
-                    mfc="white", mec=GREEN, zorder=2)
-        x += len(group) + 2
+                    mfc="white", mec=color, zorder=2)
+        x += len(truth) + 2
     ax.set_xticks(centres, semesters)
     ax.set_xlim(-1.5, x - 1.5)
     ax.set_ylim(YLIM[0] - 0.3, YLIM[1] + 0.3)

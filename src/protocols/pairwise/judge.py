@@ -128,7 +128,8 @@ class JudgeBT(PairwiseBT):
         for p in log_dir.glob("*.eval"):
             if is_successful_eval(p):  # imported names differ, so they never count
                 done.setdefault(read_header(p).eval.task, set()).update(
-                    str(s.id).rsplit("_", 1)[0] for s in read_eval_log_sample_summaries(str(p)))
+                    str(s.id).rsplit("_", 1)[0] for s in read_eval_log_sample_summaries(str(p))
+                    if not s.error)  # a sample the run tolerated an error on has no verdict: judge it again
         todo = self.tasks(train, test, done)
         if todo:
             if not run_tasks(todo, self.config, log_dir):
