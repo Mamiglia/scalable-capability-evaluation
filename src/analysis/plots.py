@@ -2,9 +2,10 @@
 
 forecast_figure   one panel per domain, semesters along x; within a semester the targets
                   sorted by theta*, black = true theta, orange = forecast, dotted connectors
-bar_figure        six bars (the conditions) at the mean of a per-(domain, semester) metric,
-                  jittered circles for the individual (domain, semester) values, easy-item
-                  prediction as a dashed line
+bar_figure        four bars (the conditions), coloured by method, at the mean of a per-(domain,
+                  semester) metric; one open circle per domain at its pooled value, joined
+                  across conditions by a domain-styled line; easy-item prediction as a dashed
+                  line
 semester_table    semester x condition for one domain, or pooled over the domains that have
                   the semester, with an "all" row
 
@@ -31,40 +32,13 @@ plt.rcParams.update({
     "xtick.major.width": 0.8, "ytick.major.width": 0.8, "axes.spines.top": False, "axes.spines.right": False,
     "svg.fonttype": "none", "savefig.dpi": 300,
 })
-CONDITIONS = ["glm_regex", "embedding", "direct", "direct_ensemble", "pairwise", "pairwise_ensemble"]  # the bars, in this order
+CONDITIONS = ["glm_regex", "embedding", "direct", "pairwise"]  # the bars, in this order
 LABELS = {BASELINE: "easy-item prediction", "glm_regex": "length+regex", "embedding": "embedding",
-          "direct": "direct judge", "direct_ensemble": "direct judges, pooled",
-          "pairwise": "pairwise judge", "pairwise_ensemble": "pairwise judges, pooled"}
-COLORS = dict(zip(CONDITIONS, ["#1baf7a", "#4a3aa7", "#eb6834", "#f4a581", "#2a78d6", "#8fb8e8"]))
+          "direct": "direct judge", "pairwise": "pairwise judge"}
+COLORS = dict(zip(CONDITIONS, ["#1baf7a", "#4a3aa7", "#eb6834", "#2a78d6"]))  # one hue per method
+DOMAIN_STYLES = {"science": "-", "math": "--", "coding": ":", "cyber": "-."}  # line style identifies the domain
 TRUE, PRED = "black", "#eb6834"
 METRIC_LABELS = {"mse": "MSE (θ units)", "delta": "MSE − easy-item MSE", "z": "z of MSE − easy-item MSE (paired bootstrap)"}
-DOMAIN_COLORS = {"science": "#2a78d6", "math": "#eb6834", "coding": "#1baf7a", "cyber": "#eda100"}
-BAR = "#d9d7d0"  # neutral bar; colour is reserved for the domain of a point
-
-
-def swarm_offsets(values: np.ndarray, width: float = 0.3, min_gap: float | None = None) -> np.ndarray:
-    """Deterministic beeswarm x-offsets in [-width, width] for 1-D `values`: points are placed in
-    value order, each at the offset nearest the centre that keeps it at least `min_gap` (in the
-    values' units; default 1/25 of their range) from every already-placed point closer than
-    that vertically. No random jitter, so a figure is reproducible."""
-    values = np.asarray(values, float)
-    n = len(values)
-    if n == 0:
-        return values
-    gap = min_gap if min_gap is not None else max(np.ptp(values), 1e-9) / 25
-    slots = np.linspace(-width, width, 2 * n + 1)
-    slots = slots[np.argsort(np.abs(slots), kind="stable")]  # centre first, then outward
-    offsets = np.zeros(n)
-    placed: list[tuple[float, float]] = []  # (value, offset)
-    for i in np.argsort(values, kind="stable"):
-        for s in slots:
-            if all(abs(values[i] - v) >= gap or abs(s - o) >= width / max(n, 1) * 2 for v, o in placed):
-                offsets[i] = s
-                break
-        else:
-            offsets[i] = slots[-1]
-        placed.append((values[i], offsets[i]))
-    return offsets
 
 
 def ci95(values: np.ndarray) -> float:
@@ -116,97 +90,59 @@ def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, 
     plt.close(fig)
 
 
-def outlier_split(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """(inliers, outliers) of a 1-D array: an outlier lies beyond 3 interquartile ranges from
-    the quartiles (Tukey's far-out fence). With fewer than 4 values nothing is an outlier."""
-    values = np.asarray(values, float)
-    if len(values) < 4:
-        return values, values[:0]
-    q1, q3 = np.percentile(values, [25, 75])
-    fence = 3 * (q3 - q1)
-    far = (values > q3 + fence) | (values < q1 - fence)
-    return values[~far], values[far]
-
-
-def zigzag(ax, y: float, size: float = 0.02) -> None:
-    """A small zigzag across the left spine at axes-fraction height `y`, marking an axis break."""
-    x = np.array([-1, -0.5, 0.5, -0.5, 0.5, 1]) * size
-    yy = y + np.linspace(-1.5, 1.5, len(x)) * size
-    ax.plot(x, yy, color="black", lw=0.8, clip_on=False, transform=ax.transAxes, solid_capstyle="round")
-
-
 def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], path, semester: str | None = None) -> None:
-    """Bars per condition in CONDITIONS (neutral fill) at the mean over (domain, semester) of the
-    metric ("mse", "delta" or "z"), a black line at the mean with a capless 95% t-interval over
-    those points (none below 3 points), the points as a deterministic beeswarm coloured by
-    domain, the easy-item prediction as a dashed grey line (its mean raw MSE, or 0 for delta
-    and z). `semester` restricts to one semester (points are then the domains). Values beyond
-    Tukey's far-out fence go to a short upper panel above a zigzag axis break."""
+    """One bar per condition in CONDITIONS, coloured by method, at the mean over the (domain,
+    semester) tasks of the metric ("mse", "delta" or "z"), with a capless 95% t-interval over
+    those tasks (none below 3); one open circle per domain at the domain's pooled value
+    (semester "all", or the given semester's value), the circles of a domain joined across the
+    conditions by a black line whose style is DOMAIN_STYLES[domain]; the easy-item prediction
+    as a dashed grey line (its mean raw MSE, or 0 for delta and z). A plain single axis: the
+    y-limits are set by the values within Tukey's far-out fence (3 IQR) and anything beyond
+    is not drawn but printed, so it can be marked by hand."""
     assert metric in METRICS, metric
     m = chosen(metrics, variants)
-    m = m[(m.semester != "all") & (m.domain != "all")]
+    m = m[m.domain != "all"]
+    tasks = m[m.semester != "all"]
     if semester:
-        m = m[m.semester == semester]
-    groups = {p: m[m.protocol == p].dropna(subset=[metric]) for p in CONDITIONS}
-    every = np.concatenate([g[metric].to_numpy() for g in groups.values() if len(g)]) if any(len(g) for g in groups.values()) else np.array([])
-    baseline = m[m.protocol == BASELINE].mse.mean() if metric == "mse" else 0.0
-    inliers, outliers = outlier_split(every)
-    if len(outliers):
-        fig, (top, ax) = plt.subplots(2, 1, figsize=(3.4, 2.8), sharex=True, layout="constrained",
-                                      gridspec_kw={"height_ratios": [1, 3]})
-    else:
-        fig, ax = plt.subplots(figsize=(3.4, 2.4), layout="constrained")
-        top = None
-    for i, p in enumerate(CONDITIONS):  # the lower panel draws everything and clips
-        g = groups[p]
-        if g.empty:
+        tasks = tasks[tasks.semester == semester]
+    per_domain = tasks if semester else m[m.semester == "all"]
+    fig, ax = plt.subplots(figsize=(3.2, 2.4), layout="constrained")
+    x = {p: i for i, p in enumerate(CONDITIONS)}
+    drawn = []
+    for p, i in x.items():
+        values = tasks[tasks.protocol == p][metric].dropna().to_numpy()
+        if len(values) == 0:
             continue
-        values = g[metric].to_numpy()
-        ax.bar(i, values.mean(), color=BAR, width=0.72, zorder=1)
+        ax.bar(i, values.mean(), color=COLORS[p], width=0.72, zorder=1)
         ax.hlines(values.mean(), i - 0.36, i + 0.36, color="black", lw=1.0, zorder=4)
         if np.isfinite(half := ci95(values)):
             ax.errorbar(i, values.mean(), yerr=half, color="black", lw=0.8, capsize=0, zorder=4)
-        ax.scatter(i + swarm_offsets(values), values, s=14, c=[DOMAIN_COLORS.get(d, "black") for d in g.domain],
-                   edgecolor="white", linewidth=0.5, zorder=3)
+        drawn += [values.mean()]
+    for d, style in DOMAIN_STYLES.items():
+        g = per_domain[per_domain.domain == d].set_index("protocol")[metric].reindex(CONDITIONS)
+        keep = [p for p in CONDITIONS if np.isfinite(g[p])]
+        if not keep:
+            continue
+        ax.plot([x[p] for p in keep], g[keep], color="black", lw=0.7, ls=style, zorder=3)
+        ax.scatter([x[p] for p in keep], g[keep], s=18, facecolor="white", edgecolor="black", linewidth=0.8, zorder=5)
+        drawn += list(g[keep])
+    baseline = tasks[tasks.protocol == BASELINE].mse.mean() if metric == "mse" else 0.0
     ax.axhline(baseline, color="grey", lw=0.8, ls="--", zorder=0)
-    if top is not None:
-        pad = 0.1 * max(np.ptp(inliers), 1e-9)
-        ax.set_ylim(min(inliers.min(), baseline) - pad, max(inliers.max(), baseline) + pad)
-        span = max(np.ptp(outliers), pad)
-        top.set_ylim(outliers.min() - 0.5 * span, outliers.max() + 0.5 * span)
-        lo, hi = top.get_ylim()
-        for i, p in enumerate(CONDITIONS):  # the upper panel draws only the outlier points and, per condition, a bar/mean line only if its mean is in view
-            g = groups[p]
-            if g.empty:
-                continue
-            values = g[metric].to_numpy()
-            far = np.isin(values, outliers)
-            if far.any():
-                far_values = values[far]
-                top.scatter(i + swarm_offsets(far_values), far_values, s=14,
-                            c=[DOMAIN_COLORS.get(d, "black") for d in g.domain.to_numpy()[far]],
-                            edgecolor="white", linewidth=0.5, zorder=3)
-            if lo <= values.mean() <= hi:
-                top.bar(i, values.mean(), color=BAR, width=0.72, zorder=1)
-                top.hlines(values.mean(), i - 0.36, i + 0.36, color="black", lw=1.0, zorder=4)
-                if np.isfinite(half := ci95(values)):
-                    top.errorbar(i, values.mean(), yerr=half, color="black", lw=0.8, capsize=0, zorder=4)
-        top.axhline(baseline, color="grey", lw=0.8, ls="--", zorder=0)
-        top.spines["bottom"].set_visible(False)
-        top.tick_params(axis="x", bottom=False)
-        zigzag(ax, 1.0)
-        zigzag(top, 0.0)
+    drawn = np.asarray(drawn + [baseline], float)
+    q1, q3 = np.percentile(drawn, [25, 75])
+    inside = drawn[(drawn >= q1 - 3 * (q3 - q1)) & (drawn <= q3 + 3 * (q3 - q1))]
+    if len(inside) < len(drawn):  # off-axis values are left to the user to mark by hand
+        print(f"{path}: off-axis {sorted(set(drawn) - set(inside))}")
+        pad = 0.08 * max(np.ptp(inside), 1e-9)
+        ax.set_ylim(min(inside.min(), 0) - pad, inside.max() + pad)
     ax.set_xticks(range(len(CONDITIONS)), [LABELS[p] for p in CONDITIONS])
     ax.tick_params(axis="x", rotation=90)
-    if top is None:
-        ax.set_ylabel(METRIC_LABELS[metric])
-    else:
-        fig.supylabel(METRIC_LABELS[metric], fontsize=8)
-    domains = [d for d in DOMAIN_COLORS if d in set(m.domain)]
-    handles = [plt.Line2D([], [], marker="o", ms=4, ls="", color=DOMAIN_COLORS[d], markeredgecolor="white", label=d) for d in domains]
-    handles += [plt.Line2D([], [], color="black", lw=1, label="mean ± 95% CI over tasks"),
+    ax.set_ylabel(METRIC_LABELS[metric])
+    domains = [d for d in DOMAIN_STYLES if d in set(per_domain.domain)]
+    handles = [plt.Line2D([], [], color="black", lw=0.7, ls=DOMAIN_STYLES[d], marker="o", ms=4, markerfacecolor="white", label=d) for d in domains]
+    handles += [plt.Line2D([], [], color="black", lw=0.8, label="mean ± 95% CI over tasks"),
                 plt.Line2D([], [], color="grey", lw=0.8, ls="--", label=LABELS[BASELINE])]
-    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, handletextpad=0.4, columnspacing=1.0)
+    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, handlelength=2.2)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 
