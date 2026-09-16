@@ -17,7 +17,7 @@ from configs.domain import DomainBench, DomainConfig
 from configs import DirectJudgeConfig
 from configs.judge import JudgeConfig
 from configs.model import ModelConfig
-from judge.dataset import build_direct_dataset
+from judge.dataset import ENDS_SEPARATOR, build_direct_dataset
 from judge.scorer import direct_judge_scorer
 from judge.task import direct_judge_task
 from protocols.direct_judge import JudgeDirect, from_logs
@@ -76,7 +76,7 @@ def test_dataset_uses_correct_first_attempts_with_options_and_reasoning_control(
     shortened = build_direct_dataset(path, items={"short"}, max_len=5)[0]
     assert shortened.metadata["chars"] == 5 and shortened.metadata["truncated"]
     half = build_direct_dataset(path, items={"short"}, window="keep-1/2")[0]
-    assert half.metadata["chars"] == shown.metadata["chars"] // 2 and not half.metadata["truncated"]
+    assert half.metadata["chars"] == shown.metadata["chars"] // 2 + len(ENDS_SEPARATOR) and not half.metadata["truncated"]
     assert "Private reasoning" not in build_direct_dataset(path, items={"short"}, channels="only-text")[0].input
     assert len(build_direct_dataset(path, items={"wrong"})) == 0
     assert len(build_direct_dataset(path, items=set())) == 0
