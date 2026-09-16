@@ -65,4 +65,25 @@ with tempfile.TemporaryDirectory() as directory:
     assert run.run(condition) == 1
     status = json.loads((run.ROOT / "results" / condition / "status.json").read_text())
     assert status["status"] == "incomplete" and len(status["missing_rating_keys"]) == 2
+
+# A channel condition runs from its own root and checks the channel field on config and tasks.
+with tempfile.TemporaryDirectory() as directory:
+    run.CHANNELS_ROOT = Path(directory)
+    condition = "cyber/mock/s/channels-drop-outputs"
+    inputs = run.CHANNELS_ROOT / "inputs" / condition
+    inputs.mkdir(parents=True)
+    payload["config"]["channels"] = payload["channels"] = "drop-outputs"
+    for record in payload["tasks"]:
+        record["metadata"]["channels"] = "drop-outputs"
+    freeze()
+    run.run_tasks, requests = mock_requests, []
+    assert run.run(condition) == 0 and len(requests) == 2
+    payload["tasks"][0]["metadata"]["channels"] = "only-outputs"
+    freeze()
+    try:
+        run.run(condition)
+    except AssertionError:
+        pass
+    else:
+        raise SystemExit("a task rendered under another channel condition was not refused")
 print("Truncation collection self-check passed.")
