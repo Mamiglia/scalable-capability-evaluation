@@ -5,3 +5,5 @@ include_reasoning: true
 max_length: 100000000
 _kwargs: {fail_on_error: false}
 channels: only-text
+# Judged on 10 train items per global-b quartile (seeded, same for every pair) to cut cost; compare against the baseline on the same items.
+train_per_quartile: 10
