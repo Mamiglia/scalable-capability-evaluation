@@ -3,9 +3,10 @@
 forecast_figure   one panel per domain, semesters along x; within a semester the targets
                   sorted by theta*, black = true theta, orange = forecast, dotted connectors
 bar_figure        four bars (the conditions), coloured by method, at the mean of a per-(domain,
-                  semester) metric; one open circle per domain at its pooled value, joined
-                  across conditions by a domain-styled line; easy-item prediction as a dashed
-                  line
+                  semester) metric; one staggered open circle per domain at its pooled value,
+                  joined across conditions by a solid line in the domain's colour; easy-item
+                  prediction as a dashed line; off-axis values compressed into a band above
+                  the in-range axis
 semester_table    semester x condition for one domain, or pooled over the domains that have
                   the semester, with an "all" row
 
@@ -36,9 +37,36 @@ CONDITIONS = ["glm_regex", "embedding", "direct", "pairwise"]  # the bars, in th
 LABELS = {BASELINE: "easy-item prediction", "glm_regex": "length+regex", "embedding": "embedding",
           "direct": "direct judge", "pairwise": "pairwise judge"}
 COLORS = dict(zip(CONDITIONS, ["#1baf7a", "#4a3aa7", "#eb6834", "#2a78d6"]))  # one hue per method
-DOMAIN_STYLES = {"science": "-", "math": "--", "coding": ":", "cyber": "-."}  # line style identifies the domain
+DOMAIN_COLORS = {"science": "#2a78d6", "math": "#eb6834", "coding": "#1baf7a", "cyber": "#eda100"}
+STAGGER = 0.22  # the four domains' circles sit at -0.22, -0.073, +0.073, +0.22 around the bar centre
 TRUE, PRED = "black", "#eb6834"
 METRIC_LABELS = {"mse": "MSE (θ units)", "delta": "MSE − easy-item MSE", "z": "z of MSE − easy-item MSE (paired bootstrap)"}
+
+
+def compress(values: np.ndarray) -> tuple[np.ndarray, dict[float, float]]:
+    """Map off-axis values into a band above the in-range values, keeping their order.
+
+    values: every y that will be drawn (bar means, domain values, the baseline). Returns
+    (position per value, {true off-axis value: drawn position}). In-range values (within
+    3 IQR of the quartiles) keep their position. Off-axis values are placed above
+    max(in-range) + a gap of 35% of the in-range span, spread over a band of another 35%
+    in rank order (a single off-axis value sits at the band's centre). The dict is empty
+    when nothing is off-axis."""
+    values = np.asarray(values, float)
+    q1, q3 = np.percentile(values, [25, 75])
+    fence = 3 * (q3 - q1)
+    off = (values > q3 + fence) | (values < q1 - fence)
+    if not off.any():
+        return values.copy(), {}
+    inside = values[~off]
+    span = max(np.ptp(inside), 1e-9)
+    top = inside.max() + 0.35 * span
+    distinct = np.unique(values[off])
+    band = np.linspace(top + 0.175 * span, top + 0.35 * span, len(distinct)) if len(distinct) > 1 else np.array([top + 0.26 * span])
+    mapping = dict(zip(distinct.tolist(), band.tolist()))
+    positions = values.copy()
+    positions[off] = [mapping[v] for v in values[off]]
+    return positions, mapping
 
 
 def ci95(values: np.ndarray) -> float:
@@ -94,11 +122,11 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
     """One bar per condition in CONDITIONS, coloured by method, at the mean over the (domain,
     semester) tasks of the metric ("mse", "delta" or "z"), with a capless 95% t-interval over
     those tasks (none below 3); one open circle per domain at the domain's pooled value
-    (semester "all", or the given semester's value), the circles of a domain joined across the
-    conditions by a black line whose style is DOMAIN_STYLES[domain]; the easy-item prediction
-    as a dashed grey line (its mean raw MSE, or 0 for delta and z). A plain single axis: the
-    y-limits are set by the values within Tukey's far-out fence (3 IQR) and anything beyond
-    is not drawn but printed, so it can be marked by hand."""
+    (semester "all", or the given semester's value), the domains staggered across the bar
+    and each domain's circles joined across the conditions by a solid line in its colour; the
+    easy-item prediction as a dashed grey line (its mean raw MSE, or 0 for delta and z).
+    Off-axis values (beyond 3 IQR) are drawn in a compressed band above the in-range values
+    with ticks at their true values (see compress); the break glyph is left to the user."""
     assert metric in METRICS, metric
     m = chosen(metrics, variants)
     m = m[m.domain != "all"]
@@ -106,43 +134,46 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
     if semester:
         tasks = tasks[tasks.semester == semester]
     per_domain = tasks if semester else m[m.semester == "all"]
+    domains = [d for d in DOMAIN_COLORS if d in set(per_domain.domain)]
+    # collect everything to draw first, so the off-axis compression sees every value
+    means, halves = {}, {}
+    for p in CONDITIONS:
+        values = tasks[tasks.protocol == p][metric].dropna().to_numpy()
+        if len(values):
+            means[p], halves[p] = float(values.mean()), ci95(values)
+    points = {d: per_domain[per_domain.domain == d].set_index("protocol")[metric].reindex(CONDITIONS) for d in domains}
+    baseline = float(tasks[tasks.protocol == BASELINE].mse.mean()) if metric == "mse" else 0.0
+    raw = np.array(list(means.values()) + [v for s in points.values() for v in s.dropna()] + [baseline])
+    positions, mapping = compress(raw)
+    place = dict(zip(raw.tolist(), positions.tolist()))
     fig, ax = plt.subplots(figsize=(3.2, 2.4), layout="constrained")
     x = {p: i for i, p in enumerate(CONDITIONS)}
-    drawn = []
-    for p, i in x.items():
-        values = tasks[tasks.protocol == p][metric].dropna().to_numpy()
-        if len(values) == 0:
-            continue
-        ax.bar(i, values.mean(), color=COLORS[p], width=0.72, zorder=1)
-        ax.hlines(values.mean(), i - 0.36, i + 0.36, color="black", lw=1.0, zorder=4)
-        if np.isfinite(half := ci95(values)):
-            ax.errorbar(i, values.mean(), yerr=half, color="black", lw=0.8, capsize=0, zorder=4)
-        drawn += [values.mean()]
-    for d, style in DOMAIN_STYLES.items():
-        g = per_domain[per_domain.domain == d].set_index("protocol")[metric].reindex(CONDITIONS)
-        keep = [p for p in CONDITIONS if np.isfinite(g[p])]
+    for p, mean in means.items():
+        ax.bar(x[p], place[mean], color=COLORS[p], width=0.72, zorder=1)
+        ax.hlines(place[mean], x[p] - 0.36, x[p] + 0.36, color="black", lw=1.0, zorder=4)
+        if np.isfinite(halves[p]) and mean not in mapping:  # an interval around a compressed mean is meaningless
+            ax.errorbar(x[p], mean, yerr=halves[p], color="black", lw=0.8, capsize=0, zorder=4)
+    offsets = np.linspace(-STAGGER, STAGGER, len(domains)) if len(domains) > 1 else np.zeros(1)
+    for d, dx in zip(domains, offsets):
+        s = points[d]
+        keep = [p for p in CONDITIONS if np.isfinite(s[p])]
         if not keep:
             continue
-        ax.plot([x[p] for p in keep], g[keep], color="black", lw=0.7, ls=style, zorder=3)
-        ax.scatter([x[p] for p in keep], g[keep], s=18, facecolor="white", edgecolor="black", linewidth=0.8, zorder=5)
-        drawn += list(g[keep])
-    baseline = tasks[tasks.protocol == BASELINE].mse.mean() if metric == "mse" else 0.0
-    ax.axhline(baseline, color="grey", lw=0.8, ls="--", zorder=0)
-    drawn = np.asarray(drawn + [baseline], float)
-    q1, q3 = np.percentile(drawn, [25, 75])
-    inside = drawn[(drawn >= q1 - 3 * (q3 - q1)) & (drawn <= q3 + 3 * (q3 - q1))]
-    if len(inside) < len(drawn):  # off-axis values are left to the user to mark by hand
-        print(f"{path}: off-axis {sorted(set(drawn) - set(inside))}")
-        pad = 0.08 * max(np.ptp(inside), 1e-9)
-        ax.set_ylim(min(inside.min(), 0) - pad, inside.max() + pad)
+        xs = [x[p] + dx for p in keep]
+        ys = [place[float(s[p])] for p in keep]
+        ax.plot(xs, ys, color=DOMAIN_COLORS[d], lw=0.8, zorder=3)
+        ax.scatter(xs, ys, s=18, facecolor="white", edgecolor=DOMAIN_COLORS[d], linewidth=0.9, zorder=5)
+    ax.axhline(place[baseline], color="grey", lw=0.8, ls="--", zorder=0)
+    if mapping:  # true-value ticks for the compressed band, after the in-range ticks
+        inside = [t for t in ax.get_yticks() if t <= max(v for v in raw if v not in mapping)]
+        ax.set_yticks(inside + list(mapping.values()), [f"{t:g}" for t in inside] + [f"{v:.0f}" for v in mapping])
     ax.set_xticks(range(len(CONDITIONS)), [LABELS[p] for p in CONDITIONS])
     ax.tick_params(axis="x", rotation=90)
     ax.set_ylabel(METRIC_LABELS[metric])
-    domains = [d for d in DOMAIN_STYLES if d in set(per_domain.domain)]
-    handles = [plt.Line2D([], [], color="black", lw=0.7, ls=DOMAIN_STYLES[d], marker="o", ms=4, markerfacecolor="white", label=d) for d in domains]
-    handles += [plt.Line2D([], [], color="black", lw=0.8, label="mean ± 95% CI over tasks"),
+    handles = [plt.Line2D([], [], color=DOMAIN_COLORS[d], lw=0.8, marker="o", ms=4, markerfacecolor="white", label=d) for d in domains]
+    handles += [plt.Line2D([], [], color="black", lw=0.8, label="mean ± 95% CI over domain × semester"),
                 plt.Line2D([], [], color="grey", lw=0.8, ls="--", label=LABELS[BASELINE])]
-    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, handlelength=2.2)
+    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, handlelength=2.0)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 
