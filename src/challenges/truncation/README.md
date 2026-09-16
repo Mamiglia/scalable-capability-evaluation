@@ -58,3 +58,6 @@ share every pair and item with the reasoning-on full-transcript baselines (`logs
 the best pairwise judges by baseline MSE; Qwen3-235B-A22B (cyber 2025-II) and Kimi-K2-Thinking
 (cyber 2026-I), matching the direct truncation judges. Logs and per-mode READMEs with the MSE table
 are in the judging repo under `judge_truncated-<mode>-2000/`.
+
+Position windows and channel ablations of the same baselines (research question 2, where the signal
+sits): `configs/judges/windowed/`, `configs/judges/channels/`, design under `docs/superpowers/specs/`.
