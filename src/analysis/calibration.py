@@ -60,11 +60,11 @@ def ensemble_runs(runs: list[JudgeRun]) -> list[JudgeRun]:
 
 
 def transcript_protocols(dom: DomainConfig, embedding_variants: tuple[str, ...] = ("full", "answer")) -> list[tuple[Protocol, str]]:
-    """(protocol, variant) pairs needing no judge: easy-item prediction, oracle, glm_regex, and one
+    """(protocol, variant) pairs needing no judge: easy-item prediction, oracle, glm_length (3 length features), glm_regex (length + regex), and one
     embedding ridge per variant. Fresh instances per domain for the oracle (reads that domain's
     frozen tables) and the embedding ridge; PROTOCOLS["glm_regex"] is a shared singleton, safe
     because TabularRegression.fit clones the estimator."""
-    out = [(EasyItemPrediction(), "-"), (AccuracyOracle(dom), "-"), (PROTOCOLS["glm_regex"], "-")]
+    out = [(EasyItemPrediction(), "-"), (AccuracyOracle(dom), "-"), (PROTOCOLS["glm_length"], "-"), (PROTOCOLS["glm_regex"], "-")]
     return out + [(EmbeddingRegression(v), v) for v in embedding_variants]
 
 
