@@ -39,7 +39,9 @@ DIRECT_NORMALISATION = "raw"  # or "item_z"
 EMBEDDING_VARIANT = "full"  # or "answer"
 VARIANTS = {"pairwise": PAIRWISE_CONVERSION, "pairwise_ensemble": PAIRWISE_CONVERSION,
             "direct": DIRECT_NORMALISATION, "direct_ensemble": DIRECT_NORMALISATION, "embedding": EMBEDDING_VARIANT}
-(OUT / "tables").mkdir(parents=True, exist_ok=True)
+FIG = OUT / "figures"  # one subfolder per figure family
+for sub in ("tables", "figures/bars", "figures/timelines", "figures/forecasts", "figures/frontier"):
+    (OUT / sub).mkdir(parents=True, exist_ok=True)
 
 # %% loading: semester tasks and the judge runs on disk
 # domains: name -> DomainConfig; tasks: (domain name, semester) -> Task; runs: same key -> [JudgeRun]
@@ -76,17 +78,26 @@ for metric in stats.METRICS:
         table.to_csv(OUT / "tables" / f"{metric}_{domain or 'pooled'}.csv", float_format="%.3f")
 print(plots.semester_table(metrics, "mse", VARIANTS).round(3).to_string())
 
-# %% figures: forecasts of the best condition (all semesters, and the latest), and the bars
+# %% figures: forecasts of the best condition, bars, timelines, frontier; each as svg and png
 pooled = plots.chosen(metrics, VARIANTS)
 pooled = pooled[(pooled.domain == "all") & (pooled.semester == "all") & pooled.protocol.isin(plots.CONDITIONS)]
 best = pooled.sort_values("mse").iloc[0]
 latest = max(sem for _, sem in tasks)
-plots.forecast_figure(forecasts, best.protocol, best.variant, OUT / f"forecasts_{best.protocol}.svg")
-plots.forecast_figure(forecasts, best.protocol, best.variant, OUT / f"forecasts_{best.protocol}_{latest}.svg", semesters=[latest])
-semesters = sorted({sem for _, sem in tasks})
-for metric in stats.METRICS:
-    plots.bar_figure(metrics, metric, VARIANTS, OUT / f"bars_{metric}.svg")
-    for sem in semesters:
-        plots.bar_figure(metrics, metric, VARIANTS, OUT / f"bars_{metric}_{sem}.svg", semester=sem)
+for ext in ("svg", "png"):
+    plots.forecast_figure(forecasts, best.protocol, best.variant, FIG / "forecasts" / f"forecasts_{best.protocol}.{ext}")
+    plots.forecast_figure(forecasts, best.protocol, best.variant, FIG / "forecasts" / f"forecasts_{best.protocol}_{latest}.{ext}", semesters=[latest])
+    for name in DOMAINS:
+        plots.forecast_figure(forecasts[forecasts.domain == name], best.protocol, best.variant, FIG / "forecasts" / f"forecasts_{best.protocol}_{name}.{ext}")
+        plots.task_figure(forecasts, name, latest, [(best.protocol, best.variant)], FIG / "forecasts" / f"task_{latest}_{name}.{ext}")
+        plots.frontier_figure(forecasts, name, VARIANTS, FIG / "frontier" / f"frontier_{name}.{ext}", mse_panel=True)
+        plots.frontier_figure(forecasts, name, VARIANTS, FIG / "frontier" / f"all8_{name}.{ext}", top=8)
+        for metric in ("mse", "delta", "pct"):
+            plots.timeline_figure(metrics, name, VARIANTS, FIG / "timelines" / f"timeline_{metric}_{name}.{ext}",
+                                  scores=scores, metric=metric, forecasts=forecasts)
+    semesters = sorted({sem for _, sem in tasks})
+    for metric in (*stats.METRICS, "pct"):
+        plots.bar_figure(metrics, metric, VARIANTS, FIG / "bars" / f"bars_{metric}.{ext}")
+        for sem in semesters:
+            plots.bar_figure(metrics, metric, VARIANTS, FIG / "bars" / f"bars_{metric}_{sem}.{ext}", semester=sem)
 print("best condition:", best.protocol, best.variant, "pooled mse", round(best.mse, 3))
-print("wrote", sorted(p.name for p in OUT.iterdir()))
+print("wrote", {sub.name: len(list(sub.iterdir())) for sub in FIG.iterdir() if sub.is_dir()})
