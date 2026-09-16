@@ -73,7 +73,7 @@ def main(ROOT, name):
                      "truncated_reference_inputs": summary["truncated_reference_inputs"],
                      "truncated_target_inputs": summary["truncated_target_inputs"],
                      "full_ratings": len(full), "truncated_ratings": len(truncated), "matched_ratings": len(shared),
-                     "full_coverage": len(full) / retained, "truncated_coverage": len(truncated) / retained,
+                     "full_coverage": len(full) / (retained + summary.get("excluded_inputs", 0)), "truncated_coverage": len(truncated) / retained,
                      "full_forecasts": int(pf.notna().sum()), "truncated_forecasts": int(pt.notna().sum()),
                      "full_mse": sf["mse"], "truncated_mse": st["mse"],
                      "matched_full_mse": sfm["mse"], "matched_truncated_mse": stm["mse"],
@@ -84,6 +84,8 @@ def main(ROOT, name):
     out = ROOT / "comparison"
     out.mkdir(exist_ok=True)
     frame = pd.DataFrame(rows).sort_values(["domain", "semester", "judge", "condition"])
+    if name == "channels":  # a channel condition filters the transcript rather than truncating it
+        frame = frame.drop(columns=["truncate", "max_length"]).rename(columns=lambda c: c.replace("truncated", "condition"))
     frame.to_csv(out / f"{name}-comparison.csv", index=False)
     cells = frame.map(lambda v: f"{v:.3f}" if isinstance(v, float) else str(v))
     lines = ["| " + " | ".join(frame.columns) + " |", "|" + "---|" * len(frame.columns)]
