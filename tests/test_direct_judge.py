@@ -33,7 +33,8 @@ def test_direct_config_defaults_and_condition_identity(tmp_path):
                            include_reasoning=True, include_reverse=False)
     assert config.condition_hash != pairwise.condition_hash
     assert replace(config, include_reverse=True).condition_hash == config.condition_hash
-    for change in ({"include_reasoning": False}, {"max_length": 100}, {"temperature": 0.5}):
+    for change in ({"include_reasoning": False}, {"max_length": 100}, {"temperature": 0.5},
+                   {"window": "keep-1/4"}, {"channels": "drop-text"}):
         assert replace(config, **change).condition_hash != config.condition_hash
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("First rating prompt.")

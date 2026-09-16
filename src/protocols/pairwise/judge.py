@@ -77,8 +77,8 @@ class JudgeBT(PairwiseBT):
 
     def log_dir(self, semester: str) -> Path:
         base = self.config.log_dir
-        if self.config.truncation_label:  # e.g. logs/judge_truncated-head-2000
-            base = base.with_name(f"{base.name}_{self.config.truncation_label}")
+        if self.config.condition_label:  # e.g. logs/judge_truncated-head-2000, logs/judge_window-keep-2of10
+            base = base.with_name(f"{base.name}_{self.config.condition_label}")
         return base / self.domain.name / semester / self.config.judge.shortname.lower() / self.config.condition_hash
 
     def tasks(self, train: Cohort, test: Cohort, done: dict[str, set[str]] | None = None) -> list[Task]:

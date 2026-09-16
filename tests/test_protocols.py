@@ -74,7 +74,7 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     monkeypatch.setattr(judge_module, "read_header", lambda path: SimpleNamespace(eval=SimpleNamespace(task=path.stem.replace("_", "/", 1))))
     judged = {"b/a|t": ["0"], "b/b|t": ["0"], "b/a|b": ["0", "1"]}
     monkeypatch.setattr(judge_module, "read_eval_log_sample_summaries",
-                        lambda path: [SimpleNamespace(id=f"{i}_1") for i in judged[Path(path).stem.replace("_", "/", 1)]])
+                        lambda path: [SimpleNamespace(id=f"{i}_1", error=None) for i in judged[Path(path).stem.replace("_", "/", 1)]])
     p.judge(t.references, t.test)
     assert ran == [log_dir]
     # a train item the dir has no verdict on (item 1 of a|b, after a refreeze) is judged on its own
@@ -144,3 +144,26 @@ def test_calibrated_recovers_theta_from_synthetic_verdicts():
     # a small held-out error keeps the estimate; a model without evidence gets the prior mean
     shrunk = calibrated.shrink(theta_hat, sigma2, (0.0, 1.0))
     assert abs(shrunk["t1"] - truth["t1"]) < 0.4 and calibrated.shrink(pd.Series({"x": np.nan}), sigma2, (0.5, 1.0))["x"] == 0.5
+
+
+def test_window_and_channels_are_conditions():
+    from dataclasses import replace
+
+    import pytest
+
+    cfg = {"name": "j", "judge": {"name": "p/j", "slug": "j"}}
+    base = JudgeConfig.from_cli(cfg)
+    assert base.condition_label == ""
+    windowed = JudgeConfig.from_cli(cfg | {"window": "keep-2/10"})
+    assert windowed.condition_hash != base.condition_hash and windowed.condition_label == "window-keep-2of10"
+    channel = JudgeConfig.from_cli(cfg | {"channels": "only-tools"})
+    assert channel.condition_hash not in (base.condition_hash, windowed.condition_hash)
+    assert channel.condition_label == "channels-only-tools"
+    both = JudgeConfig.from_cli(cfg | {"max_length": 2000, "truncate": "tail", "window": "drop-1/4"})
+    assert both.condition_label == "truncated-tail-2000_window-drop-1of4"
+    for bad in ("keep-2", "keep-0/4", "keep-5/4", "middle-1/4"):
+        with pytest.raises(ValueError):
+            replace(base, window=bad)
+    for bad in ("tools", "only-images", "keep-tools"):
+        with pytest.raises(ValueError):
+            replace(base, channels=bad)

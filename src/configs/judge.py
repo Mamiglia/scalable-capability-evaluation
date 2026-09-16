@@ -9,6 +9,26 @@ from configs.model import ModelConfig
 
 
 FULL_LENGTH = 262144  # the untruncated default; a smaller max_length is a truncation condition
+CHANNELS = ("reasoning", "text", "tools")  # what a rendered transcript is made of: CoT blocks, assistant prose, tool calls with their outputs
+
+
+def parse_window(spec: str) -> tuple[str, int, int]:
+    """("keep"|"drop", k, n) of a window spec "keep-k/n" / "drop-k/n": the k-th n-th of a transcript by characters."""
+    mode, _, fraction = spec.partition("-")
+    k, _, n = fraction.partition("/")
+    if mode not in ("keep", "drop") or not (k.isdigit() and n.isdigit()) or not 1 <= int(k) <= int(n):
+        raise ValueError(f"window must be keep-k/n or drop-k/n with 1 <= k <= n, got {spec!r}")
+    return mode, int(k), int(n)
+
+
+def parse_channels(spec: str) -> frozenset[str]:
+    """The channels a spec shows: all of CHANNELS for "", one for "only-<c>", all but one for "drop-<c>"."""
+    if not spec:
+        return frozenset(CHANNELS)
+    mode, _, channel = spec.partition("-")
+    if mode not in ("only", "drop") or channel not in CHANNELS:
+        raise ValueError(f"channels must be only-<c> or drop-<c> with c in {CHANNELS}, got {spec!r}")
+    return frozenset([channel]) if mode == "only" else frozenset(CHANNELS) - {channel}
 
 
 @dataclass(kw_only=True)
@@ -20,6 +40,8 @@ class JudgeConfig(DraccusConfig):
     include_reverse: bool = True  # judge every pair in both shown orders (position bias)
     max_length: int = FULL_LENGTH  # chars kept per transcript; two must fit the judge's context with its output
     truncate: str = "head"  # which max_length chars to keep when a transcript is longer: head (prefix), tail (suffix) or ends (both halves, "..." between)
+    window: str = ""  # a fraction of each transcript by characters, keep-k/n (show only the k-th n-th) or drop-k/n (hide it); applied before max_length
+    channels: str = ""  # only-<c> shows one channel of the transcript, drop-<c> hides one: reasoning, text or tools (calls with their outputs)
     temperature: float = 0.0
     cache: bool = True  # inspect generate cache, never expires: a repeated pair is free
     log_dir: Path = Path("logs/judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/ syncs to the HF judging repo)
@@ -36,6 +58,9 @@ class JudgeConfig(DraccusConfig):
             self.judge = ModelConfig.from_cli(self.judge)
         if self.truncate not in ("head", "tail", "ends"):
             raise ValueError(f"truncate must be head, tail or ends, got {self.truncate!r}")
+        if self.window:
+            parse_window(self.window)
+        parse_channels(self.channels)
 
     @property
     def condition_hash(self) -> str:
@@ -45,12 +70,25 @@ class JudgeConfig(DraccusConfig):
             condition += (int(self.train_per_quartile),)
         if self.truncate != "head":  # likewise: head truncation is the historical behaviour
             condition += (self.truncate,)
+        condition += self._partial_view()
         return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
 
+    def _partial_view(self) -> tuple:
+        """Hash entries of a window or channel condition; empty for the full transcript, so older hashes stand."""
+        return (("window", self.window) if self.window else ()) + (("channels", self.channels) if self.channels else ())
+
     @property
-    def truncation_label(self) -> str:
-        """Readable log-directory suffix of a truncation condition, e.g. truncated-head-4000; empty when untruncated."""
-        return f"truncated-{self.truncate}-{self.max_length}" if self.max_length < FULL_LENGTH else ""
+    def condition_label(self) -> str:
+        """Readable log-directory suffix of a partial-transcript condition, e.g. truncated-head-4000,
+        window-keep-2of10, channels-only-tools (joined with "_" when combined); empty for full transcripts."""
+        parts = []
+        if self.max_length < FULL_LENGTH:
+            parts.append(f"truncated-{self.truncate}-{self.max_length}")
+        if self.window:
+            parts.append(f"window-{self.window.replace('/', 'of')}")
+        if self.channels:
+            parts.append(f"channels-{self.channels}")
+        return "_".join(parts)
 
 
 @dataclass(kw_only=True)
@@ -69,4 +107,5 @@ class DirectJudgeConfig(JudgeConfig):
                      int(self.max_length), float(self.temperature))
         if self.truncate != "head":
             condition += (self.truncate,)
+        condition += self._partial_view()
         return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
