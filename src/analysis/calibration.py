@@ -13,7 +13,7 @@ import pandas as pd
 
 from analysis import judges
 from analysis.baselines import AccuracyOracle, EasyItemPrediction
-from analysis.embeddings import EmbeddingRegression
+from protocols.embeddings import EmbeddingRegression
 from analysis.loading import JudgeRun
 from capability.evaluate import forecast
 from capability.task import Task
