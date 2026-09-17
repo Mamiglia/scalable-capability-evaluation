@@ -1,0 +1,9 @@
+# Reasoning-on reference-as-judge, gpt-oss-120b (a 2026-I reference, not top-3) on the 2026-I task of every domain:
+# the subjects' reasoning traces are shown, nothing is truncated, and a pair too long for the judge's 131k
+# context is left unscored (fail_on_error off). Output capped: the endpoint refuses prompt + max_tokens > context.
+name: gpt-oss-120b
+judge: configs/models/openai/gpt-oss-120b.yml
+include_reasoning: true
+max_length: 100000000
+_kwargs: {fail_on_error: false, max_tokens: 32768}
+train_per_quartile: 0  # full train set
