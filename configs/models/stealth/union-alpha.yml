@@ -1,0 +1,11 @@
+# OpenRouter stealth model (anonymous frontier preview, free, single "stealth" endpoint, 262k context,
+# 131k output). No reasoning parameter is exposed; tools are. Identity unknown until de-stealthed.
+name: stealth/union-alpha
+release_date: '2026-09-16'
+model_args:
+  provider:
+    only:
+    - stealth
+    allow_fallbacks: false
+generate_args:
+  max_tokens: 128000
