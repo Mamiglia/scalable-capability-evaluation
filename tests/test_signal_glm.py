@@ -1,0 +1,70 @@
+"""Signal GLM on synthetic squared errors with a known protocol effect."""
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from analysis.challenges import signal_glm
+
+
+def synthetic(ratio: float = 0.5, n: int = 200, seed: int = 0) -> pd.DataFrame:
+    """Baseline squared errors ~ Gamma(shape 2, mean 1) in every domain and semester; protocol
+    "direct" has mean `ratio`; "pairwise" is missing from cyber. Semesters shift every mean by
+    a common factor so the blocking factor has something to absorb."""
+    rng = np.random.default_rng(seed)
+    out = []
+    for domain in signal_glm.DOMAINS:
+        for semester, shift in zip(signal_glm.SEMESTERS, (1.0, 1.5)):
+            for protocol, mean in ((signal_glm.BASELINE, 1.0), ("direct", ratio), ("pairwise", 1.0)):
+                if protocol == "pairwise" and domain == "cyber":
+                    continue
+                out.append(pd.DataFrame({"y": rng.gamma(2.0, shift * mean / 2.0, n), "protocol": protocol, "domain": domain,
+                                         "semester": semester, "task": f"{domain} {semester}", "model": np.arange(n)}))
+    return pd.concat(out, ignore_index=True)
+
+
+def test_rows_one_per_target_and_clipped():
+    f = pd.DataFrame([
+        dict(domain="math", semester="2026-I", protocol="easy_items", variant="-", judge="-", condition="-", judge_loo_mse=np.nan, model="m", theta_hat=1.0, theta=1.0),
+        dict(domain="math", semester="2026-I", protocol="glm_regex", variant="-", judge="-", condition="-", judge_loo_mse=np.nan, model="m", theta_hat=2.0, theta=1.0),
+        dict(domain="math", semester="2026-I", protocol="accuracy_hard", variant="-", judge="-", condition="-", judge_loo_mse=np.nan, model="m", theta_hat=2.0, theta=1.0),
+    ])
+    t = signal_glm.rows(f, {})
+    assert list(t.protocol) == ["easy_items", "glm_regex"]  # the oracle is not a protocol
+    assert t.y.tolist() == [signal_glm.FLOOR, 1.0] and t.task.iloc[0] == "math 2026-I"
+    assert signal_glm.rows(f.assign(semester="2025-I"), {}).empty  # outside the balanced semesters
+
+
+def test_flat_glm_recovers_ratio_and_marks_missing_cells():
+    flat = signal_glm.flat_glm(synthetic()).set_index(["protocol", "domain"])
+    pooled = flat.loc[("direct", signal_glm.POOLED)]
+    assert pooled.flat_lo < 0.5 < pooled.flat_hi and abs(pooled.flat_ratio - 0.5) < 0.1
+    assert flat.loc[("pairwise", "science")].flat_lo < 1 < flat.loc[("pairwise", "science")].flat_hi
+    assert np.isnan(flat.loc[("pairwise", "cyber")].flat_ratio)
+
+
+def test_ratio_table_reads_posterior_arrays():
+    coords = {"protocol": ["easy_items", "direct"], "domain": ["science", "math"]}
+    posterior = {"protocol_effects": np.tile([[0.0, np.log(0.5)]], (2, 3, 1)),  # chains x draws x P
+                 "interaction": np.tile([[[0.0, 0.0], [0.0, np.log(2.0)]]], (2, 3, 1, 1)),
+                 "sigma_protocol": np.tile([[0.0, 0.3]], (2, 3, 1))}
+    table = signal_glm.ratio_table(posterior, coords)
+    t = table.set_index("domain")
+    np.testing.assert_allclose(t.loc[["science", "math", "all"], "ratio"], [0.5, 1.0, 0.5])
+    assert t.loc["all", "sigma_protocol"] == pytest.approx(0.3) and t.loc["all", "sigma_hi"] == pytest.approx(0.3)
+    wide = signal_glm.wide_table(table)
+    assert list(wide.index) == ["easy_items", "direct"] and wide.loc["easy_items", "math"] == 1.0
+    assert np.isnan(wide.loc["easy_items", "math_lo"]) and wide.loc["direct", "math"] == pytest.approx(1.0)
+
+
+def test_hibayes_model_traces_with_expected_shapes():
+    import jax.numpy as jnp
+    import numpyro
+    from numpyro import handlers
+    sys_path_model = __import__("importlib").import_module("scripts.analyses.signal_glm.model")
+    features = {"obs": jnp.ones(6), "protocol_index": jnp.array([0, 1, 0, 1, 0, 1]), "num_protocol": 2,
+                "domain_index": jnp.array([0, 0, 1, 1, 2, 2]), "num_domain": 3}
+    trace = handlers.trace(handlers.seed(sys_path_model.signal_gamma_model(), 0)).get_trace(features)
+    assert trace["interaction"]["value"].shape == (2, 3) and trace["protocol_effects"]["value"].shape == (2,)
+    assert float(trace["interaction"]["value"][0].sum()) == 0.0  # the baseline row is pinned
+    assert trace["obs"]["fn"].__class__.__name__ == "Gamma"
