@@ -15,3 +15,21 @@ Project overview and methodology: `README.md`. Data contracts: `data/CONTRACT.md
   holds only frozen inputs, raw logs, results and audits.
 - Do not launch paid collection on a handoff alone: propose the condition set (limits, judges,
   domains) and wait for the decision.
+
+## Figure colour palette
+
+Protocols, with the names the paper uses (use these names in figures, tables and prose; the
+code keys are in brackets). Length alone (`glm_length`) is a diagnostic, not a paper protocol:
+leave it out of paper figures.
+
+- Deterministic features (`glm_regex`): `#eb6834`
+- Embedding (`embedding`): `#4a3aa7`
+- Absolute scoring (`direct`): `#1baf7a`
+- Pairwise judge (`pairwise`): `#2a78d6`
+- Length (`glm_length`, diagnostic only): `#f1a48a`
+
+Shades of Pairwise judge (ex): `#6aa1e2`, `#2260ab`
+Triadic combinations for Pairwise judge: `#d62a78`, `#78d62a`
+Extra, for a tenuous colour: `#f8cbbc`
+
+Domains (marker shape): SCIENCE circle, MATH square, CODING triangle, CYBER diamond.

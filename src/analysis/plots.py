@@ -34,8 +34,9 @@ plt.rcParams.update({
     "svg.fonttype": "none", "savefig.dpi": 300,
 })
 CONDITIONS = ["glm_length", "glm_regex", "embedding", "direct", "pairwise"]  # the bars, in this order
-LABELS = {BASELINE: "Prediction from saturated items", "glm_length": "Length", "glm_regex": "Length +\nprose features",
-          "embedding": "Embedding", "direct": "Direct scoring", "pairwise": "Pairwise judge"}
+# Protocol names as the paper uses them (CLAUDE.md, figure colour palette); Length alone is a diagnostic, not a paper protocol.
+LABELS = {BASELINE: "Prediction from saturated items", "glm_length": "Length", "glm_regex": "Deterministic features",
+          "embedding": "Embedding", "direct": "Absolute scoring", "pairwise": "Pairwise judge"}
 DOMAIN_LABELS = {"science": "Science", "math": "Math", "coding": "Coding", "cyber": "Cyber"}
 # regressions in greens, light to dark (length, length + prose, embedding); judges in blues (direct
 # light, pairwise dark); domains in warm hues, so the two encodings never share a colour
