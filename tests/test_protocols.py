@@ -54,7 +54,7 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     t.references.__dict__["transcripts"] = {"a": {("b", "0"): 1, ("b", "1"): 1}, "b": {("b", "0"): 1, ("b", "1"): 1}, "c": {}}
     t.test.__dict__["transcripts"] = {"t": {("b", "0"): 1}, "u": {}}
     built = []
-    monkeypatch.setattr(judge_module, "judge_task", lambda *a, **k: built.append(k) or SimpleNamespace(name=k["task_name"]))
+    monkeypatch.setattr(judge_module, "judge_task", lambda *a, **k: built.append(k) or SimpleNamespace(name=k["task_name"], version=0))
     tasks = p.tasks(t.references, t.test)
     # 2 refs x 1 target on item 0, then the reference pair a|b on both items; no t|u, no c
     assert [x.name for x in tasks] == ["b/a|t", "b/b|t", "b/a|b"]
@@ -90,9 +90,18 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     errored.add(("b/a|t", "0_2"))
     built.clear()
     monkeypatch.setattr(judge_module, "judge_task", lambda *a, **k: built.append(k) or SimpleNamespace(
-        name=k["task_name"], dataset=MemoryDataset([Sample(id=f"{i}_{o}", input="x") for i in sorted(k["items"]) for o in "12"])))
+        name=k["task_name"], version=7, dataset=MemoryDataset([Sample(id=f"{i}_{o}", input="x") for i in sorted(k["items"]) for o in "12"])))
     todo = p.tasks(t.references, t.test, p.judged_samples(log_dir))
     assert [(x.name, [s.id for s in x.dataset]) for x in todo] == [("b/a|t", ["0_2"])]
+    # the retry errored again in a second finished log: the next retry is a new task identity, not skipped as finished
+    assert todo[0].version == "7-1"
+    (log_dir / "b_a|t.retry.eval").touch()
+    monkeypatch.setattr(judge_module, "read_header", lambda path: SimpleNamespace(eval=SimpleNamespace(task=path.name.split(".")[0].replace("_", "/", 1))))
+    monkeypatch.setattr(judge_module, "read_eval_log_sample_summaries",
+                        lambda path: [SimpleNamespace(id=f"{i}_{o}", error="boom" if (task, f"{i}_{o}") in errored else None)
+                                      for task in [Path(path).name.split(".")[0].replace("_", "/", 1)] for i in judged[task] for o in "12"])
+    todo = p.tasks(t.references, t.test, p.judged_samples(log_dir))
+    assert [(x.name, [s.id for s in x.dataset], x.version) for x in todo] == [("b/a|t", ["0_2"], "7-2")]
 
 
 def test_tabular_regression(monkeypatch):

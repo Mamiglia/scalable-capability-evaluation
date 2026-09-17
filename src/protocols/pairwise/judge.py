@@ -81,10 +81,11 @@ class JudgeBT(PairwiseBT):
             base = base.with_name(f"{base.name}_{self.config.condition_label}")
         return base / self.domain.name / semester / self.config.judge.shortname.lower() / self.config.condition_hash
 
-    def tasks(self, train: Cohort, test: Cohort, done: dict[str, set[str]] | None = None) -> list[Task]:
+    def tasks(self, train: Cohort, test: Cohort, done: dict[str, list[set[str]]] | None = None) -> list[Task]:
         """One judging task per <bench, reference, target> and per <bench, reference, reference> pair, on the train
         items both got right. Reference–reference verdicts do not calibrate pinned BT. `done` maps a task name to
-        the sample ids ("<item>_<shown order>") that already have a verdict: those samples are not judged again."""
+        the sample ids ("<item>_<shown order>") with a verdict in each of its finished logs: those samples are not
+        judged again."""
         tasks = []
         # Bench entries sharing a task name (hle.yml / hle_gold.yml: same items under two hashes)
         # are one bench: the frozen path_<bench> already points at whichever hash has the log.
@@ -100,7 +101,8 @@ class JudgeBT(PairwiseBT):
             for major, minor, cohort in pairs:
                 items = {item for b, item in train.transcripts[major] if b == name}
                 items &= {item for b, item in cohort.transcripts[minor] if b == name} & keep
-                judged = (done or {}).get(f"{name}/{major}|{minor}", set())
+                logs = (done or {}).get(f"{name}/{major}|{minor}", [])
+                judged = set().union(*logs)
                 items = {item for item in items if not all(f"{item}_{order}" in judged for order in orders)}
                 if not items:
                     continue
@@ -120,18 +122,22 @@ class JudgeBT(PairwiseBT):
                 if task is not None and judged & {f"{item}_{order}" for item in items for order in orders}:
                     # one shown order of an item already has a verdict: judge only the order without one
                     task.dataset = task.dataset.filter(lambda sample, judged=judged: sample.id not in judged)
+                if task is not None and logs:
+                    # eval_set skips a task whose identity matches a finished log, and an earlier retry of the same
+                    # samples that errored again has the same identity: the finished-log count keeps each retry new
+                    task.version = f"{task.version}-{len(logs)}"
                 if task is not None:
                     tasks.append(task)
         return tasks
 
-    def judged_samples(self, log_dir: Path) -> dict[str, set[str]]:
-        """Task name -> the sample ids ("<item>_<shown order>") with a verdict in the run dir's successful logs. A
+    def judged_samples(self, log_dir: Path) -> dict[str, list[set[str]]]:
+        """Task name -> per successful log of the run dir, the sample ids ("<item>_<shown order>") with a verdict. A
         sample the run tolerated an error on has no verdict, so it is left out and judged again."""
-        judged: dict[str, set[str]] = {}
+        judged: dict[str, list[set[str]]] = {}
         for p in log_dir.glob("*.eval"):
             if is_successful_eval(p):  # imported names differ, so they never count
-                judged.setdefault(read_header(p).eval.task, set()).update(
-                    str(s.id) for s in read_eval_log_sample_summaries(str(p)) if not s.error)
+                judged.setdefault(read_header(p).eval.task, []).append(
+                    {str(s.id) for s in read_eval_log_sample_summaries(str(p)) if not s.error})
         return judged
 
     def judge(self, train: Cohort, test: Cohort) -> Path:
