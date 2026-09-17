@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from analysis import judges
+from analysis.stats import condition_rank
 from analysis.baselines import AccuracyOracle, EasyItemPrediction
 from protocols.embeddings import EmbeddingRegression
 from analysis.loading import JudgeRun
@@ -25,18 +26,17 @@ COLUMNS = ["domain", "semester", "protocol", "variant", "judge", "condition", "j
            "model", "theta_hat", "theta", "missing"]
 
 ENSEMBLE = "ensemble"  # the judge label of a pooled run
-CORE = ("reasoning-shown", "reasoning-hidden")
 
 
 def core_runs(runs: list[JudgeRun]) -> list[JudgeRun]:
-    """One run per (protocol, judge): its reasoning-shown run where judged, else its
-    reasoning-hidden run; smaller-train-set runs ("-<k>pq") are never core."""
+    """One run per (protocol, judge): the closest it has to reasoning-shown on the full train set — else its
+    smaller-train-set shown run ("-<k>pq"), else its reasoning-hidden run (`analysis.stats.condition_rank`)."""
     out: dict[tuple[str, str], JudgeRun] = {}
     for run in runs:
-        if run.condition not in CORE:
+        if condition_rank(run.condition) > 2:
             continue
         key = (run.protocol, run.judge)
-        if key not in out or run.condition == "reasoning-shown":
+        if key not in out or condition_rank(run.condition) < condition_rank(out[key].condition):
             out[key] = run
     return list(out.values())
 

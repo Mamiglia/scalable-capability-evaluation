@@ -110,11 +110,23 @@ def test_scores_pool_and_summary():
     assert r.mse[("direct", stats.BEST)] == 1.0 and r.mse[("direct", stats.MEAN)] == 0.5
 
 
-def test_core_condition_falls_back_to_hidden_reasoning():
+def test_core_condition_prefers_a_smaller_train_set_over_hiding_the_reasoning():
     f = toy_forecasts()
     shown = stats.core_condition(f)
     assert set(shown[shown.protocol == "direct"].condition) == {"reasoning-shown"}
-    hidden = stats.core_condition(f[f.condition != "reasoning-shown"])
+    # where no judge has a full-train shown run, the cell falls to the smaller-train-set shown run, not the hidden one
+    smaller = f[f.condition != "reasoning-shown"].assign(
+        condition=lambda d: d.condition.where(d.judge != "strong", "reasoning-shown-10pq"))
+    picked = stats.core_condition(smaller)
+    picked = picked[picked.protocol == "direct"]
+    assert set(picked.condition) == {"reasoning-shown-10pq"} and set(picked.judge) == {"strong"}
+    # a cell keeps one condition for every judge: the weak judge, shown only on the full train set, sets it
+    both = f.assign(condition=lambda d: d.condition.where(d.judge != "strong", "reasoning-shown-10pq"))
+    one = stats.core_condition(both)
+    one = one[one.protocol == "direct"]
+    assert set(one.condition) == {"reasoning-shown"} and set(one.judge) == {"weak"}
+    # only where nothing shown exists does the hidden run stand in
+    hidden = stats.core_condition(f[f.condition == "reasoning-hidden"])
     assert set(hidden[hidden.protocol == "direct"].condition) == {"reasoning-hidden"}
 
 
@@ -145,9 +157,9 @@ def test_ensemble_runs_pool_the_core_condition_of_every_judge():
             run("pairwise", "j2", "reasoning-hidden", 4, 2), run("pairwise", "j3", "reasoning-shown-10pq", 7),
             run("direct", "j1", "reasoning-shown", 5)]
     pooled = calibration.ensemble_runs(runs)
-    # pairwise: j1's shown run and j2's hidden run pooled; the 10pq run is never core; direct has one judge only
-    assert [(r.protocol, r.judge, r.condition, len(r.table), r.missing) for r in pooled] == [("pairwise", "ensemble", "core", 7, 3)]
-    assert sorted(pooled[0].table.judge.unique()) == ["j1", "j2"]
+    # pairwise: j1's shown run, j2's hidden run and j3's 10pq shown run (its only one) pooled; direct has one judge
+    assert [(r.protocol, r.judge, r.condition, len(r.table), r.missing) for r in pooled] == [("pairwise", "ensemble", "core", 14, 3)]
+    assert sorted(pooled[0].table.judge.unique()) == ["j1", "j2", "j3"]
 
 
 from analysis import loading

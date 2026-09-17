@@ -7,6 +7,8 @@ tables use: raw MSE, delta from easy-item prediction, and the paired-bootstrap z
 import numpy as np
 import pandas as pd
 
+from configs.logs import logger
+
 KEYS = ["domain", "protocol", "variant", "judge", "condition"]
 BASELINE, ORACLE = "easy_items", "accuracy_hard"
 JUDGED = ("pairwise", "direct")
@@ -25,17 +27,33 @@ def mse_row(g: pd.DataFrame, seed: int = 0, draws: int = 2000) -> dict:
     return dict(n=len(err), mse=float(err.mean()), lo=float(np.percentile(boot, 2.5)), hi=float(np.percentile(boot, 97.5)))
 
 
+def condition_rank(condition: str) -> int:
+    """How far a judge run is from the core condition: 0 reasoning-shown on the full train set, 1 reasoning-shown
+    on a smaller train set ("-<k>pq"), 2 reasoning-hidden, 3 not a core candidate (a challenge condition)."""
+    if condition == "reasoning-shown":
+        return 0
+    if condition.startswith("reasoning-shown-"):
+        return 1
+    return 2 if condition == "reasoning-hidden" else 3
+
+
 def core_condition(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """The judge rows of the core condition: reasoning-shown where a (domain, semester,
-    protocol, variant, judge) has it, otherwise reasoning-hidden (semesters whose subjects
-    have no reasoning were judged hidden only). Smaller-train-set variants ("-<k>pq") are
-    never core. Transcript-protocol rows pass through unchanged."""
+    """The judge rows of the core condition, chosen per cell (domain, semester, protocol, variant), not per judge:
+    the best condition any judge of the cell has (see `condition_rank`) — reasoning shown on the full train set,
+    else reasoning shown on a smaller one, else reasoning-hidden (semesters whose subjects have no reasoning were
+    judged hidden only) — and only the judges that have it. One condition per cell is what makes "best judge on
+    references" a comparison between judges rather than between item sets, and hiding the reasoning is a condition
+    of the experiment, never a stand-in for a shown run. A cell that resolves below full-train shown is logged.
+    Transcript-protocol rows pass through unchanged."""
     judged = forecasts[forecasts.protocol.isin(JUDGED)]
-    key = ["domain", "semester", "protocol", "variant", "judge"]
-    shown = judged[judged.condition == "reasoning-shown"]
-    has_shown = shown.set_index(key).index.unique()
-    hidden = judged[(judged.condition == "reasoning-hidden") & ~judged.set_index(key).index.isin(has_shown)]
-    return pd.concat([forecasts[~forecasts.protocol.isin(JUDGED)], shown, hidden], ignore_index=True)
+    cell = ["domain", "semester", "protocol", "variant"]
+    rank = judged.condition.map(condition_rank).rename("condition_rank")
+    candidates = judged[rank < 3].assign(condition_rank=rank[rank < 3])
+    core = candidates[candidates.condition_rank == candidates.groupby(cell).condition_rank.transform("min")]
+    for row in core[core.condition_rank > 0].drop_duplicates(cell).itertuples():
+        logger.warning("%s %s %s/%s: no judge has a full-train reasoning-shown run, scoring the %s runs",
+                       row.domain, row.semester, row.protocol, row.variant, row.condition)
+    return pd.concat([forecasts[~forecasts.protocol.isin(JUDGED)], core.drop(columns="condition_rank")], ignore_index=True)
 
 
 def judge_summaries(forecasts: pd.DataFrame) -> pd.DataFrame:

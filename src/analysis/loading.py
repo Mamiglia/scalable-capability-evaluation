@@ -67,12 +67,15 @@ def tasks(dom: DomainConfig, semesters: list[str] | None = None) -> list[Task]:
 
 
 def fetched(run_dir: Path) -> bool:
-    """True when every .eval in the directory is a real log; False (with a warning) when
-    some are still git-lfs pointer stubs, which means `git -C logs lfs pull` is needed."""
+    """True when every .eval in the directory is a real log. Raises when some are still git-lfs
+    pointer stubs: a skipped run would silently fall back to a worse condition (this happened
+    with the 2026-I math and science reasoning-shown runs), so the caller must pull first."""
     stubs = [p for p in run_dir.glob("*.eval") if not zipfile.is_zipfile(p)]
     if stubs:
-        logger.warning("skip %s: %d unfetched lfs pointer(s), run `git -C logs lfs pull`", run_dir, len(stubs))
-    return not stubs
+        rel = run_dir.relative_to(LOGS) if run_dir.is_relative_to(LOGS) else run_dir
+        raise RuntimeError(f"{run_dir}: {len(stubs)} unfetched lfs pointer(s); run "
+                           f"`git -C logs lfs pull --include=\"{rel}/**\"` (scoped: a bare pull fetches everything)")
+    return True
 
 
 def pairwise_configs() -> dict[tuple[str, str], tuple[Path, str]]:
