@@ -38,21 +38,20 @@ def condition_rank(condition: str) -> int:
 
 
 def core_condition(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """The judge rows of the core condition, chosen per cell (domain, semester, protocol, variant), not per judge:
-    the best condition any judge of the cell has (see `condition_rank`) — reasoning shown on the full train set,
-    else reasoning shown on a smaller one, else reasoning-hidden (semesters whose subjects have no reasoning were
-    judged hidden only) — and only the judges that have it. One condition per cell is what makes "best judge on
-    references" a comparison between judges rather than between item sets, and hiding the reasoning is a condition
-    of the experiment, never a stand-in for a shown run. A cell that resolves below full-train shown is logged.
-    Transcript-protocol rows pass through unchanged."""
+    """The judge rows of the core condition, chosen per judge within a cell (domain, semester,
+    protocol, variant): each judge's closest run to reasoning shown on the full train set (see
+    `condition_rank`) — else its reasoning-shown run on a smaller train set, else its
+    reasoning-hidden run (semesters whose subjects have no reasoning were judged hidden only).
+    Every judge stays in the cell, so "best judge on references" compares all of them; a judge
+    scored below full-train shown is logged. Transcript-protocol rows pass through unchanged."""
     judged = forecasts[forecasts.protocol.isin(JUDGED)]
-    cell = ["domain", "semester", "protocol", "variant"]
+    key = ["domain", "semester", "protocol", "variant", "judge"]
     rank = judged.condition.map(condition_rank).rename("condition_rank")
     candidates = judged[rank < 3].assign(condition_rank=rank[rank < 3])
-    core = candidates[candidates.condition_rank == candidates.groupby(cell).condition_rank.transform("min")]
-    for row in core[core.condition_rank > 0].drop_duplicates(cell).itertuples():
-        logger.warning("%s %s %s/%s: no judge has a full-train reasoning-shown run, scoring the %s runs",
-                       row.domain, row.semester, row.protocol, row.variant, row.condition)
+    core = candidates[candidates.condition_rank == candidates.groupby(key).condition_rank.transform("min")]
+    for row in core[core.condition_rank > 0].drop_duplicates(key).itertuples():
+        logger.warning("%s %s %s/%s %s: no full-train reasoning-shown run, scoring its %s run",
+                       row.domain, row.semester, row.protocol, row.variant, row.judge, row.condition)
     return pd.concat([forecasts[~forecasts.protocol.isin(JUDGED)], core.drop(columns="condition_rank")], ignore_index=True)
 
 
