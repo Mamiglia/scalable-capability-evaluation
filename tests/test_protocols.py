@@ -73,8 +73,10 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
         (log_dir / f"{name}.eval").touch()
     monkeypatch.setattr(judge_module, "read_header", lambda path: SimpleNamespace(eval=SimpleNamespace(task=path.stem.replace("_", "/", 1))))
     judged = {"b/a|t": ["0"], "b/b|t": ["0"], "b/a|b": ["0", "1"]}
+    errored = set()  # (task, sample id) the run tolerated an error on
     monkeypatch.setattr(judge_module, "read_eval_log_sample_summaries",
-                        lambda path: [SimpleNamespace(id=f"{i}_1", error=None) for i in judged[Path(path).stem.replace("_", "/", 1)]])
+                        lambda path: [SimpleNamespace(id=f"{i}_{o}", error="boom" if (task, f"{i}_{o}") in errored else None)
+                                      for task in [Path(path).stem.replace("_", "/", 1)] for i in judged[task] for o in "12"])
     p.judge(t.references, t.test)
     assert ran == [log_dir]
     # a train item the dir has no verdict on (item 1 of a|b, after a refreeze) is judged on its own
@@ -82,6 +84,15 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     built.clear()
     p.judge(t.references, t.test)
     assert ran == [log_dir, log_dir] and [(k["task_name"], k["items"]) for k in built] == [("b/a|b", {"1"})]
+    # one shown order of a judged item errored: that order alone is judged again
+    from inspect_ai.dataset import MemoryDataset, Sample
+    judged["b/a|b"] = ["0", "1"]
+    errored.add(("b/a|t", "0_2"))
+    built.clear()
+    monkeypatch.setattr(judge_module, "judge_task", lambda *a, **k: built.append(k) or SimpleNamespace(
+        name=k["task_name"], dataset=MemoryDataset([Sample(id=f"{i}_{o}", input="x") for i in sorted(k["items"]) for o in "12"])))
+    todo = p.tasks(t.references, t.test, p.judged_samples(log_dir))
+    assert [(x.name, [s.id for s in x.dataset]) for x in todo] == [("b/a|t", ["0_2"])]
 
 
 def test_tabular_regression(monkeypatch):

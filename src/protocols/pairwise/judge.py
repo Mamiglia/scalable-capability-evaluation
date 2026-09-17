@@ -83,7 +83,8 @@ class JudgeBT(PairwiseBT):
 
     def tasks(self, train: Cohort, test: Cohort, done: dict[str, set[str]] | None = None) -> list[Task]:
         """One judging task per <bench, reference, target> and per <bench, reference, reference> pair, on the train
-        items both got right. Reference–reference verdicts do not calibrate pinned BT."""
+        items both got right. Reference–reference verdicts do not calibrate pinned BT. `done` maps a task name to
+        the sample ids ("<item>_<shown order>") that already have a verdict: those samples are not judged again."""
         tasks = []
         # Bench entries sharing a task name (hle.yml / hle_gold.yml: same items under two hashes)
         # are one bench: the frozen path_<bench> already points at whichever hash has the log.
@@ -94,11 +95,13 @@ class JudgeBT(PairwiseBT):
         pairs += [(a, b, train) for i, a in enumerate(references) for b in references[i + 1:]]
         excluded = set(self.config.exclude_models) | set(self.domain.exclude_models)
         pairs = [p for p in pairs if not {p[0], p[1]} & excluded]
+        orders = ("1", "2") if self.config.include_reverse else ("1",)
         for name, bench in benches.items():
             for major, minor, cohort in pairs:
                 items = {item for b, item in train.transcripts[major] if b == name}
                 items &= {item for b, item in cohort.transcripts[minor] if b == name} & keep
-                items -= (done or {}).get(f"{name}/{major}|{minor}", set())
+                judged = (done or {}).get(f"{name}/{major}|{minor}", set())
+                items = {item for item in items if not all(f"{item}_{order}" in judged for order in orders)}
                 if not items:
                     continue
                 task = judge_task(
@@ -114,23 +117,31 @@ class JudgeBT(PairwiseBT):
                     metadata={"domain": self.domain.name, "bench": name, "major": major, "minor": minor,
                               "semester": test.semester},
                 )
+                if task is not None and judged & {f"{item}_{order}" for item in items for order in orders}:
+                    # one shown order of an item already has a verdict: judge only the order without one
+                    task.dataset = task.dataset.filter(lambda sample, judged=judged: sample.id not in judged)
                 if task is not None:
                     tasks.append(task)
         return tasks
 
-    def judge(self, train: Cohort, test: Cohort) -> Path:
-        """The run dir for this task, judging whatever (pair, item) is not judged in it yet."""
-        log_dir = self.log_dir(test.semester)
-        # Resume at item level: only the items of a pair without a verdict in the dir are judged, into
-        # a further log of the same task name (from_logs pools them). So a finished pair is never
-        # re-judged after an eval_set kwarg tweak, and a refrozen train set only adds its new items.
-        done: dict[str, set[str]] = {}
+    def judged_samples(self, log_dir: Path) -> dict[str, set[str]]:
+        """Task name -> the sample ids ("<item>_<shown order>") with a verdict in the run dir's successful logs. A
+        sample the run tolerated an error on has no verdict, so it is left out and judged again."""
+        judged: dict[str, set[str]] = {}
         for p in log_dir.glob("*.eval"):
             if is_successful_eval(p):  # imported names differ, so they never count
-                done.setdefault(read_header(p).eval.task, set()).update(
-                    str(s.id).rsplit("_", 1)[0] for s in read_eval_log_sample_summaries(str(p))
-                    if not s.error)  # a sample the run tolerated an error on has no verdict: judge it again
-        todo = self.tasks(train, test, done)
+                judged.setdefault(read_header(p).eval.task, set()).update(
+                    str(s.id) for s in read_eval_log_sample_summaries(str(p)) if not s.error)
+        return judged
+
+    def judge(self, train: Cohort, test: Cohort) -> Path:
+        """The run dir for this task, judging whatever (pair, item, shown order) is not judged in it yet."""
+        log_dir = self.log_dir(test.semester)
+        # Resume at sample level: only the shown orders of a pair's items without a verdict in the dir are judged,
+        # into a further log of the same task name (from_logs pools them). So a finished pair is never re-judged
+        # after an eval_set kwarg tweak, a refrozen train set only adds its new items, and an order that errored
+        # is judged again on its own.
+        todo = self.tasks(train, test, self.judged_samples(log_dir))
         if todo:
             if not run_tasks(todo, self.config, log_dir):
                 raise RuntimeError(f"judge run failed in {log_dir}")
