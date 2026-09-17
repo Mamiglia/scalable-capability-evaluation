@@ -110,10 +110,27 @@ gpt-5): summaries only, so they pair only in the no-reasoning judging arm.
 Anchors: opus-4.7 terminal 795K in / 16K out per item; gpt-5 terminal 420K in (88% cached), swe 300K in;
 output assumed 3× with thinking on.
 
-## Deferred
+## Integration (2026-09-18)
 
-Entering judging: the three models are on no semester roster. Planned route: a derived meta dir
-(`data/meta/coding_frontier/`, coding's frozen tables + the three as extra 2026-I targets, θ* from
-`freeze.local_fit` with a, b pinned on the collected HARD items, old targets' role blanked) and a domain
-yml listing both hashes of each bench. The frozen coding meta stays untouched (a refreeze would reshuffle
-the train set).
+`integrate.py --write` derives `data/meta/coding_frontier/` from `data/meta/coding/` (frozen tables untouched):
+the four models become extra **2026-I targets** with θ* from `reference.freeze.local_fit` on their scored 2026-I HARD
+responses (a, b, guess pinned to the global fit; unscored/refused samples excluded), the original 2026-I targets'
+role blanked, `responses.csv` extended. `configs/domain/coding_frontier.yml` lists both hashes of each bench.
+
+| model | scored / HARD responses | θ* (2026-I refs span -1.22 .. 0.72) |
+| --- | --- | --- |
+| claude-fable-5 | 105 / 73 | 2.61 ± 0.17 |
+| gpt-5.6-sol | 120 / 86 | 2.33 ± 0.15 |
+| claude-opus-4.8 | 122 / 87 | 2.29 ± 0.16 |
+| union-alpha | 108 / 74 | 2.19 ± 0.16 |
+
+```bash
+PYTHONPATH=src .venv/bin/python src/challenges/frontier/integrate.py --write      # rebuild the derived meta
+uv run evaluate configs/domain/coding_frontier.yml --semester 2026-I --protocol chars mean_ref   # smoke: n=4
+uv run evaluate configs/domain/coding_frontier.yml --semester 2026-I --judge configs/judges/reasoning/<stem>.yml
+```
+
+Smoke (n = 4 targets, MSE in θ units): chars 7.14, mean_ref 5.39, mean_frontier 2.94 — every baseline sits far
+below the frontier, which is the point of the exercise. Judge runs land under `logs/judge/coding_frontier/2026-I/`;
+they pair the 4 targets against the 8 references on the train items each target answered correctly (no
+agent_bench_os for them). Always pass `--semester 2026-I`: the 2025-II columns are coding's, unchanged.
