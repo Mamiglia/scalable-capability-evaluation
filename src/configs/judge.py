@@ -1,6 +1,7 @@
 """An LLM judge and its pairwise or direct judging condition."""
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -9,6 +10,9 @@ from configs.model import ModelConfig
 
 
 FULL_LENGTH = 262144  # the untruncated default; a smaller max_length is a truncation condition
+# head/tail/ends keep max_length chars of a longer transcript; thirds-<kept> shows only the named equal character
+# thirds of every transcript ("..." where a third is dropped), max_length ignored (src/challenges/thirds)
+TRUNCATE_MODES = re.compile(r"head|tail|ends|thirds-(1|2|3|12|13|23)")
 
 
 @dataclass(kw_only=True)
@@ -19,7 +23,7 @@ class JudgeConfig(DraccusConfig):
     include_reasoning: bool = False  # show the models' reasoning blocks to the judge
     include_reverse: bool = True  # judge every pair in both shown orders (position bias)
     max_length: int = FULL_LENGTH  # chars kept per transcript; two must fit the judge's context with its output
-    truncate: str = "head"  # which max_length chars to keep when a transcript is longer: head (prefix), tail (suffix) or ends (both halves, "..." between)
+    truncate: str = "head"  # head (prefix), tail (suffix), ends (both halves, "..." between) of max_length chars, or thirds-<kept> (TRUNCATE_MODES)
     temperature: float = 0.0
     cache: bool = True  # inspect generate cache, never expires: a repeated pair is free
     log_dir: Path = Path("logs/judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/ syncs to the HF judging repo)
@@ -34,8 +38,8 @@ class JudgeConfig(DraccusConfig):
     def __post_init__(self):
         if isinstance(self.judge, (str, Path)):
             self.judge = ModelConfig.from_cli(self.judge)
-        if self.truncate not in ("head", "tail", "ends"):
-            raise ValueError(f"truncate must be head, tail or ends, got {self.truncate!r}")
+        if not TRUNCATE_MODES.fullmatch(self.truncate):
+            raise ValueError(f"truncate must match {TRUNCATE_MODES.pattern}, got {self.truncate!r}")
 
     @property
     def condition_hash(self) -> str:
