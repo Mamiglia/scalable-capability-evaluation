@@ -45,8 +45,8 @@ challenge or appendix material, not core conditions.
 ### Judges
 
 Judges are the semester's top-3 references. The core condition is subject reasoning shown
-where it was judged, else reasoning hidden (2024 subjects have no reasoning; a pairwise run on
-a smaller train set, `-<k>pq`, is never core). Judge protocols are summarised two ways, both
+where it was judged, else a reasoning-shown run on a smaller train set (`-<k>pq`), else reasoning
+hidden (2024 subjects have no reasoning). Judge protocols are summarised two ways, both
 computable without target labels:
 
 - **best judge on references**: the judge whose leave-one-out error on the references is

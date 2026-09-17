@@ -104,7 +104,7 @@ hierarchical ones in `ratios.png` (open markers).
 - LOO, m2 (protocol × domain) vs m1 (additive): m2 ahead by 4.2 elpd, difference SE 3.4, stacking
   weights 0.87 / 0.13. Weak evidence for domain dependence on the 16 targets; on 2026-I alone m2
   wins by 15.4 (SE 4.2). Both LOO runs carry the arviz warning for the bad Pareto-k rows.
-- Diagnostics (`signal_glm/diagnostics.csv`, m2): 0 divergences, max r_hat 1.01, min bulk ESS 923,
+- Diagnostics (`signal_glm/diagnostics.csv`, m2): 0 divergences, max r_hat 1.006, min bulk ESS 923,
   min tail ESS 1524, Pareto-k > 0.7 on 8 of 384 rows (2 above 1, the near-zero errors),
   Bayesian R² on the log scale 0.35 (0.31–0.40). m1: R² 0.32.
 - Posterior predictive: `figures/signal_glm/predictive.png` (density per protocol, log scale,
@@ -171,9 +171,10 @@ Outputs:
   (`fig2_signal_box`): mean score as a filled circle, 95% t-interval box, per-model points, axis
   −50 to 100 with lower points clipped, stars from the t-test. Also `figure1_{mse,delta,ratio,score}`,
   `figure1_score_no_self_judging`, and `_2026-I` variants of each.
-- `analysis/results/figures/signal_glm/` — `ratios`, `ratios_table`, `posteriors`, `contrasts`,
-  `predictive`, `predictive_additive`, `fit`, `fit_additive`. (`figure1_score.*` in this directory
-  is a stale 14:17 copy; delete it.)
+- `analysis/results/figures/signal_glm/` — `ratios`, `ratios_table`, `posteriors` (error-ratio scale),
+  `posteriors_score` (prediction-score scale, above 0 = better), `contrasts`, `fit_quality` (the three
+  rows below in one figure, summary numbers in the title), `convergence` (traces, r_hat/ESS, Pareto-k),
+  `predictive`, `predictive_additive`, `fit`, `fit_additive`.
 - `analysis/results/signal_score_tests{,_no_self_judging,_2026-I,_2026-I_no_self_judging}.csv`,
   `signal_glm{,_2026-I,_all_judges}.csv`, `_wide.csv`, `_contrasts.csv`,
   `signal_glm*/{diagnostics,loo_compare,per_model,fit_coverage}.csv`.
@@ -190,6 +191,8 @@ It reads `forecasts.csv`; rerun `scripts/analyses/results.py` first only if fore
 4. Score scaled to 0–100 in code, tables and figures; the test table renamed from
    `signal_wilcoxon*.csv` to `signal_score_tests*.csv`.
 5. Added: no-self-judging test, 2026-I-only fit, fit figure with 95% coverage, box figure.
+6. Added `posteriors_score` and `convergence` figures; the posterior figure's domain panel now shows
+   all four domains against the grand mean (it had still labelled science as the reference).
 
 ## Open items
 

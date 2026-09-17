@@ -93,10 +93,11 @@ for name, fit in (("fit", fitted), ("fit_additive", additive)):  # observed vs p
 contrasts = signal_glm.contrast_table(fitted.inference_data.posterior, fitted.coords)
 contrasts.to_csv(RESULTS / f"{TAG}_contrasts.csv", index=False, float_format="%.4f")
 print(contrasts.round(3).to_string(index=False))
-fig = signal_glm.contrast_figure(contrasts)
-for ext in ("svg", "png"):
-    fig.savefig(FIG / f"contrasts.{ext}", bbox_inches="tight")
-plt.close(fig)
+for name, scale in (("contrasts", "ratio"), ("contrasts_score", "score")):
+    fig = signal_glm.contrast_figure(contrasts, scale)
+    for ext in ("svg", "png"):
+        fig.savefig(FIG / f"{name}.{ext}", bbox_inches="tight")
+    plt.close(fig)
 
 # %% ratio table: hierarchical next to the flat cross-check
 ratios = signal_glm.ratio_table(fitted.inference_data.posterior, fitted.coords)
@@ -106,8 +107,11 @@ signal_glm.wide_table(ratios).to_csv(RESULTS / f"{TAG}_wide.csv")  # protocol x 
 print(ratios.round(3).to_string(index=False))
 
 # %% figures: ratios with intervals (hierarchical filled, flat open); posterior densities
-for name, fig in (("ratios", signal_glm.ratio_figure(ratios)), ("ratios_table", signal_glm.table_figure(ratios)),
-                  ("posteriors", signal_glm.posterior_figure(fitted.inference_data.posterior, fitted.coords))):
+for name, fig in (("ratios", signal_glm.ratio_figure(ratios)), ("ratios_score", signal_glm.ratio_figure(ratios, "score")), ("ratios_table", signal_glm.table_figure(ratios)),
+                  ("posteriors", signal_glm.posterior_figure(fitted.inference_data.posterior, fitted.coords)),
+                  ("posteriors_score", signal_glm.posterior_figure(fitted.inference_data.posterior, fitted.coords, scale="score")),
+                  ("convergence", signal_glm.convergence_figure(fitted.inference_data, fitted.coords, table)),
+                  ("fit_quality", signal_glm.fit_quality_figure(fitted.inference_data, fitted.features, fitted.coords, table))):
     for ext in ("svg", "png"):
         fig.savefig(FIG / f"{name}.{ext}", bbox_inches="tight")
 

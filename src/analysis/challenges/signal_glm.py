@@ -32,6 +32,7 @@ COLORS = {"glm_length": "#f1a48a", "glm_regex": "#eb6834", "embedding": "#4a3aa7
 DOMAIN_COLORS = {"science": "#cc79a7", "math": "#d55e00", "coding": "#6a3d9a", "cyber": "#c9a800"}
 
 PROTOCOLS = [BASELINE, *CONDITIONS]  # the baseline first: it is the reference level everywhere
+PAPER_PROTOCOLS = [p for p in CONDITIONS if p != "glm_length"]  # Length alone is a diagnostic, not a paper protocol: results figures leave it out
 DOMAINS = ["science", "math", "coding", "cyber"]
 SEMESTERS = ("2025-II", "2026-I")  # the semesters every domain has: a balanced design needs no semester term
 POOLED = "all"
@@ -197,37 +198,51 @@ def table_figure(table: pd.DataFrame) -> plt.Figure:
     return fig
 
 
-def ratio_figure(table: pd.DataFrame) -> plt.Figure:
-    """Error ratios on a log axis: one panel per domain plus the pooled panel, one point per
-    protocol with its 95% interval (filled = hierarchical, open = flat cross-check when the
-    table has flat_ratio), dashed line at 1. Ratios below 1 beat the saturated-item prediction."""
+def ratio_figure(table: pd.DataFrame, scale: str = "ratio") -> plt.Figure:
+    """One panel per domain plus the pooled panel, one point per protocol with its 95% interval
+    (filled = hierarchical, open = flat cross-check when the table has flat_ratio). scale
+    "ratio": error ratio on a log axis, dashed line at 1, below 1 beats the saturated-item
+    prediction. scale "score": prediction score 100 * (1 - ratio), linear axis clipped at -200,
+    line at 0, above 0 beats it."""
+    assert scale in ("ratio", "score"), scale
+    tf = (lambda v: 100 * (1 - v)) if scale == "score" else (lambda v: v)
     panels = [d for d in [*DOMAINS, POOLED] if (table.domain == d).any()]
     fig, axes = plt.subplots(1, len(panels), figsize=(1.1 * len(panels) + 0.6, 2.0), sharey=True)
-    protocols = [p for p in PROTOCOLS[1:] if (table.protocol == p).any()]
+    protocols = [p for p in PAPER_PROTOCOLS if (table.protocol == p).any()]
     x = np.arange(len(protocols))
     for ax, domain in zip(np.atleast_1d(axes), panels):
         sub = table[table.domain == domain].set_index("protocol").reindex(protocols)
         for i, p in enumerate(protocols):
             r = sub.loc[p]
-            ax.errorbar(i - 0.12, r.ratio, yerr=[[r.ratio - r.lo], [r.hi - r.ratio]], fmt="o", ms=3.5, lw=0.8,
-                        color=COLORS[p], capsize=0)
+            mid, lo, hi = sorted([tf(r.ratio), tf(r.lo), tf(r.hi)])[1], min(tf(r.lo), tf(r.hi)), max(tf(r.lo), tf(r.hi))
+            ax.errorbar(i - 0.12, mid, yerr=[[mid - lo], [hi - mid]], fmt="o", ms=3.5, lw=0.8, color=COLORS[p], capsize=0)
             if "flat_ratio" in sub and np.isfinite(r.flat_ratio):
-                ax.errorbar(i + 0.12, r.flat_ratio, yerr=[[r.flat_ratio - r.flat_lo], [r.flat_hi - r.flat_ratio]], fmt="o",
-                            ms=3.5, lw=0.8, mfc="white", color=COLORS[p], capsize=0)
-        ax.axhline(1, ls="--", lw=0.6, color="0.4")
-        ax.set_yscale("log")
+                fmid, flo, fhi = tf(r.flat_ratio), min(tf(r.flat_lo), tf(r.flat_hi)), max(tf(r.flat_lo), tf(r.flat_hi))
+                ax.errorbar(i + 0.12, fmid, yerr=[[fmid - flo], [fhi - fmid]], fmt="o", ms=3.5, lw=0.8, mfc="white", color=COLORS[p], capsize=0)
+        ax.axhline(tf(1), ls="--", lw=0.6, color="0.4")
+        if scale == "ratio":
+            ax.set_yscale("log")
+        else:
+            ax.set_ylim(-150, 100)
+            ax.set_yticks([-100, -50, 0, 50, 100])
         ax.set_xticks(x, [LABELS[p] for p in protocols], rotation=60, ha="right")
         ax.set_xlim(-0.6, len(protocols) - 0.4)
         ax.set_title(DOMAIN_LABELS.get(domain, "Pooled"), fontsize=8)
-    np.atleast_1d(axes)[0].set_ylabel("MSE ratio to prediction\nfrom saturated items")
+    np.atleast_1d(axes)[0].set_ylabel("MSE ratio to prediction\nfrom saturated items" if scale == "ratio" else "Prediction score (%)")
+    if "flat_ratio" in table:
+        handles = [plt.Line2D([], [], marker="o", ms=3.5, lw=0.8, color="0.3", label="Hierarchical fit (partial pooling), 95% posterior interval"),
+                   plt.Line2D([], [], marker="o", ms=3.5, lw=0.8, color="0.3", mfc="white", label="Maximum-likelihood fit (no pooling), 95% Wald interval")]
+        fig.legend(handles=handles, loc="outside upper center", ncol=2, frameon=False, handlelength=1.5, fontsize=6)
     fig.tight_layout()
     return fig
 
 
-def posterior_figure(posterior, coords: dict) -> plt.Figure:
-    """Posterior densities on the ratio scale (log x, dashed line at 1). Top left: the pooled
-    protocol effects exp(alpha), one curve per protocol. Top right: the domain effects
-    exp(gamma), the baseline's error relative to science, one curve per domain. Bottom: the
+def posterior_figure(posterior, coords: dict, scale: str = "ratio") -> plt.Figure:
+    """Posterior densities of the protocol effects. scale "ratio": error ratio exp(alpha), log x,
+    dashed line at 1, below 1 beats the baseline. scale "score": prediction score
+    100 * (1 - exp(alpha)), linear x, line at 0, above 0 beats the baseline. Top left: the pooled
+    protocol effects, one curve per protocol. Top right: the domain effects exp(gamma), the
+    baseline's error relative to the grand mean over domains (always a ratio), one curve per domain. Bottom: the
     per-domain protocol effects exp(alpha + delta), one small panel per protocol with one curve
     per domain, so "below 1 in every curve" = beats the baseline in every domain and the spread
     of the curves = the (protocol | domain) term. Protocol hue is used only in the top-left
@@ -237,35 +252,43 @@ def posterior_figure(posterior, coords: dict) -> plt.Figure:
     alpha = np.asarray(posterior["protocol_effects"]); alpha = alpha.reshape(-1, alpha.shape[-1])
     gamma = np.asarray(posterior["domain_effects"]); gamma = gamma.reshape(-1, gamma.shape[-1])
     delta = np.asarray(posterior["interaction"]); delta = delta.reshape(-1, *delta.shape[-2:])
-    protocols = [p for p in PROTOCOLS[1:] if p in coords["protocol"]]
+    assert scale in ("ratio", "score"), scale
+    protocols = [p for p in PAPER_PROTOCOLS if p in coords["protocol"]]
     domains = list(coords["domain"])
+    to_score = lambda x: 100 * (1 - np.exp(x))  # the log effect to the prediction score
 
-    def density(ax, draws: np.ndarray, color: str, label: str | None = None, row: int = 0) -> None:
-        """One curve, peak scaled to 1, with its 95% interval as a bar (median dot) above the
-        curves; `row` stacks the bars of one panel."""
-        grid = np.linspace(draws.min(), draws.max(), 200)
-        y = gaussian_kde(draws)(grid)
-        y = y / y.max()
-        ax.fill_between(np.exp(grid), y, color=color, alpha=0.2, lw=0)
-        ax.plot(np.exp(grid), y, color=color, lw=1, label=label)
-        lo, mid, hi = np.exp(np.percentile(draws, [2.5, 50, 97.5]))
-        level = 1.12 + 0.1 * row
-        ax.plot([lo, hi], [level, level], color=color, lw=1, solid_capstyle="butt")
-        ax.plot(mid, level, "o", ms=2.5, color=color)
+    bars: dict = {}  # axis -> [(lo, mid, hi, color, row)], drawn above the curves once the panel's height is known
+
+    def density(ax, draws: np.ndarray, color: str, label: str | None = None, row: int = 0, tf=np.exp) -> None:
+        """One proper density (unit area on the plotted axis: in log x for the ratio scale, in
+        score for the score scale), so a tighter posterior is a taller curve; its 95% interval
+        and median are queued for a bar above the curves."""
+        if tf is np.exp:  # log axis: the density of the log effect, drawn at exp(grid)
+            grid = np.linspace(draws.min(), draws.max(), 200)
+            x, y = np.exp(grid), gaussian_kde(draws)(grid)
+        else:
+            values = tf(draws)
+            x = np.linspace(values.min(), values.max(), 200)
+            y = gaussian_kde(values)(x)
+        ax.fill_between(x, y, color=color, alpha=0.2, lw=0)
+        ax.plot(x, y, color=color, lw=1, label=label)
+        lo, mid, hi = sorted(tf(np.percentile(draws, [2.5, 50, 97.5])))
+        bars.setdefault(ax, []).append((lo, mid, hi, color, row))
 
     fig = plt.figure(figsize=(5.5, 3.6))
     gs = fig.add_gridspec(2, len(protocols), height_ratios=[1.3, 1], hspace=0.9, wspace=0.35)
-    top_l = fig.add_subplot(gs[0, : len(protocols) // 2 + 1])
-    top_r = fig.add_subplot(gs[0, len(protocols) // 2 + 1 :])
+    top = gs[0, :].subgridspec(1, 2, width_ratios=[1.7, 1], wspace=0.3)  # the protocol panel holds more curves than the domain panel
+    top_l = fig.add_subplot(top[0])
+    top_r = fig.add_subplot(top[1])
+    tf = to_score if scale == "score" else np.exp
     for i, p in enumerate(protocols):
-        density(top_l, alpha[:, coords["protocol"].index(p)], COLORS[p], LABELS[p], row=i)
-    for i, d in enumerate(d for d in domains if d != "science"):
+        density(top_l, alpha[:, coords["protocol"].index(p)], COLORS[p], LABELS[p], row=i, tf=tf)
+    for i, d in enumerate(domains):  # sum-to-zero: every domain is a departure from the grand mean
         density(top_r, gamma[:, domains.index(d)], DOMAIN_COLORS[d], DOMAIN_LABELS[d], row=i)
-    for d in domains:
-        if d == "science":
-            top_r.plot([], [], color=DOMAIN_COLORS[d], lw=1, label=f"{DOMAIN_LABELS[d]} (reference)")  # pinned at 1; appears below
-    top_l.set_xlabel("MSE ratio to saturated-item prediction")
-    top_r.set_xlabel("Baseline MSE ratio to science")
+    top_l.set_xlabel("Prediction score (%)" if scale == "score" else "MSE ratio to saturated-item prediction")
+    if scale == "score":
+        top_l.set_xlim(-150, 100)  # the heavy-tailed protocols' left tails run past -200
+    top_r.set_xlabel("Baseline MSE ratio to grand mean")
     top_l.legend(frameon=False, loc="lower left", bbox_to_anchor=(0, 1.02), ncol=2, columnspacing=0.8, handlelength=1.2)
     top_r.legend(frameon=False, loc="lower right", bbox_to_anchor=(1, 1.02), ncol=2, columnspacing=0.8, handlelength=1.2)
     bottom = []
@@ -274,21 +297,29 @@ def posterior_figure(posterior, coords: dict) -> plt.Figure:
         bottom.append(ax)
         for j, d in enumerate(domains):
             k = coords["protocol"].index(p)
-            density(ax, alpha[:, k] + delta[:, k, domains.index(d)], DOMAIN_COLORS[d], row=j)
+            density(ax, alpha[:, k] + delta[:, k, domains.index(d)], DOMAIN_COLORS[d], row=j, tf=tf)
         ax.text(0.02, 1.02, LABELS[p], transform=ax.transAxes, fontsize=7, color="0.35", va="bottom")
-        ax.set_xlabel("MSE ratio to saturated-item prediction, per domain" if i == len(protocols) // 2 else "")
-        ax.set_xlim(0.02, 5)
+        ax.set_xlabel(("Prediction score (%), per domain" if scale == "score" else "MSE ratio to saturated-item prediction, per domain") if i == len(protocols) // 2 else "")
+        ax.set_xlim((-200, 100) if scale == "score" else (0.02, 5))
         if i:
             ax.tick_params(labelleft=False)
     from matplotlib.ticker import NullLocator
-    for ax, ticks in ((top_l, [0.1, 0.3, 1, 3]), (top_r, [1, 2, 4, 8]), *((ax, [0.1, 1, 3]) for ax in bottom)):
-        ax.set_xscale("log")
+    score_axes = [top_l, *bottom] if scale == "score" else []
+    for ax, ticks in ((top_l, [-100, -50, 0, 50, 100] if scale == "score" else [0.1, 0.3, 1, 3]), (top_r, [0.5, 1, 2]), *((ax, [-100, 0, 100] if scale == "score" else [0.1, 1, 3]) for ax in bottom)):
+        if ax not in score_axes:
+            ax.set_xscale("log")
+            ax.xaxis.set_minor_locator(NullLocator())  # log minor ticks clutter panels this small
         ax.set_xticks(ticks, [f"{t:g}" for t in ticks])
-        ax.xaxis.set_minor_locator(NullLocator())  # log minor ticks clutter panels this small
         ax.spines["bottom"].set_bounds(ticks[0], ticks[-1])
-        ax.axvline(1, ls="--", lw=0.8, color="0.5")
+        ax.axvline(0 if ax in score_axes else 1, ls="--", lw=0.8, color="0.5")
         ax.set_yticks([])
         ax.spines["left"].set_visible(False)
+    for ax, items in bars.items():
+        top = max(line.get_ydata().max() for line in ax.get_lines() if len(line.get_xdata()) > 2)
+        for lo, mid, hi, color, row in items:
+            level = top * (1.12 + 0.1 * row)
+            ax.plot([lo, hi], [level, level], color=color, lw=1, solid_capstyle="butt")
+            ax.plot(mid, level, "o", ms=2.5, color=color)
     top_l.set_ylabel("Posterior density", labelpad=2)
     bottom[0].set_ylabel("Posterior density", labelpad=2)
     return fig
@@ -331,7 +362,7 @@ def model_bar_figure(pooled: pd.DataFrame, tests: pd.DataFrame, metric: str = "m
     "score": prediction score per model (`score`, 0 to 100), line at 0, axis -100 to 100 with
     lower values (points, bars, intervals) clipped to -100."""
     assert metric in ("mse", "delta", "ratio", "score"), metric
-    protocols = [p for p in PROTOCOLS[1:] if p != "glm_length" and pooled[p].notna().any()]  # Length alone is not a paper protocol
+    protocols = [p for p in PAPER_PROTOCOLS if pooled[p].notna().any()]
     values = {p: pooled[p].dropna() for p in protocols}
     if metric == "ratio":
         values = {p: np.log(v / pooled.loc[v.index, BASELINE]) for p, v in values.items()}
@@ -400,7 +431,7 @@ def model_violin_figure(pooled: pd.DataFrame, tests: pd.DataFrame) -> plt.Figure
     """Prediction score per model (`score`) as one violin per protocol
     in its colour, the same points, line at 0, stars and axis (-50 to 100, lower values clipped to
     -50) as model_bar_figure("score"); a black tick at the median."""
-    protocols = [p for p in PROTOCOLS[1:] if p != "glm_length" and pooled[p].notna().any()]
+    protocols = [p for p in PAPER_PROTOCOLS if pooled[p].notna().any()]
     values = {p: score(pooled[p].dropna(), pooled.loc[pooled[p].notna(), BASELINE]).clip(lower=-50) for p in protocols}
     rng = np.random.default_rng(0)
     fig, ax = plt.subplots(figsize=(2.7, 2.4), layout="constrained")
@@ -433,7 +464,7 @@ def model_box_figure(pooled: pd.DataFrame, tests: pd.DataFrame) -> plt.Figure:
     points in the protocol's colour (translucent, jittered); line at 0, stars and axis (-50 to
     100, lower points clipped to -50) as model_violin_figure. The mean and interval use the
     unclipped scores."""
-    protocols = [p for p in PROTOCOLS[1:] if p != "glm_length" and pooled[p].notna().any()]
+    protocols = [p for p in PAPER_PROTOCOLS if pooled[p].notna().any()]
     values = {p: score(pooled[p].dropna(), pooled.loc[pooled[p].notna(), BASELINE]) for p in protocols}
     rng = np.random.default_rng(0)
     fig, ax = plt.subplots(figsize=(2.7, 2.4), layout="constrained")
@@ -480,27 +511,34 @@ def contrast_table(posterior, coords: dict, against: str = "pairwise") -> pd.Dat
     return pd.DataFrame(out)
 
 
-def contrast_figure(table: pd.DataFrame) -> plt.Figure:
-    """One row per protocol: the pooled ratio of `against` to it (black, filled, thick
-    interval) and the four per-domain ratios (domain colours, open, thin), log x, line at 1.
-    Below 1 = `against` has the smaller error."""
-    protocols = [p for p in PROTOCOLS[1:] if (table.protocol == p).any()]
+def contrast_figure(table: pd.DataFrame, scale: str = "ratio") -> plt.Figure:
+    """One row per protocol: the pooled contrast of `against` to it (black, filled, thick
+    interval) and the four per-domain contrasts (domain colours, open, thin). scale "ratio":
+    error ratio, log x, line at 1, below 1 = `against` has the smaller error. scale "score":
+    100 * (1 - ratio), linear x, line at 0, above 0 = `against` has the smaller error."""
+    assert scale in ("ratio", "score"), scale
+    tf = (lambda x: 100 * (1 - x)) if scale == "score" else (lambda x: x)
+    protocols = [p for p in PAPER_PROTOCOLS if (table.protocol == p).any()]
     fig, ax = plt.subplots(figsize=(2.6, 0.35 * len(protocols) + 0.9), layout="constrained")
     for i, p in enumerate(protocols):
         sub = table[table.protocol == p].set_index("domain")
         for j, d in enumerate([d for d in DOMAINS if d in sub.index]):
             r = sub.loc[d]; y = i + 0.3 - 0.15 * j
-            ax.plot([r.lo, r.hi], [y, y], color=DOMAIN_COLORS[d], lw=0.6, zorder=2)
-            ax.plot(r.ratio, y, "o", ms=2.5, mfc="white", mec=DOMAIN_COLORS[d], mew=0.6, zorder=3)
+            ax.plot([tf(r.lo), tf(r.hi)], [y, y], color=DOMAIN_COLORS[d], lw=0.6, zorder=2)
+            ax.plot(tf(r.ratio), y, "o", ms=2.5, mfc="white", mec=DOMAIN_COLORS[d], mew=0.6, zorder=3)
         r = sub.loc[POOLED]
-        ax.plot([r.lo, r.hi], [i - 0.35, i - 0.35], color="black", lw=1.0, zorder=4)
-        ax.plot(r.ratio, i - 0.35, "o", ms=3.5, color="black", zorder=5)
-    ax.axvline(1, ls="--", lw=0.8, color="grey", zorder=0)
-    ax.set_xscale("log")
+        ax.plot([tf(r.lo), tf(r.hi)], [i - 0.35, i - 0.35], color="black", lw=1.0, zorder=4)
+        ax.plot(tf(r.ratio), i - 0.35, "o", ms=3.5, color="black", zorder=5)
+    ax.axvline(tf(1), ls="--", lw=0.8, color="grey", zorder=0)
+    if scale == "ratio":
+        ax.set_xscale("log")
+    else:
+        ax.set_xlim(-200, 100)
+        ax.set_xticks([-200, -100, 0, 100])
     ax.set_yticks(range(len(protocols)), [LABELS[p] for p in protocols])
     ax.set_ylim(len(protocols) - 0.4, -0.7)
     against = table.against.iloc[0]
-    ax.set_xlabel(f"Error ratio, {LABELS[against]} vs protocol")
+    ax.set_xlabel(f"Error ratio, {LABELS[against]} vs protocol" if scale == "ratio" else f"Error reduction (%), {LABELS[against]} vs protocol")
     handles = [plt.Line2D([], [], color="black", marker="o", ms=3.5, lw=1.0, label="Pooled")] + \
               [plt.Line2D([], [], color=DOMAIN_COLORS[d], marker="o", mfc="white", ms=2.5, lw=0.6, label=DOMAIN_LABELS[d]) for d in DOMAINS]
     fig.legend(handles=handles, loc="outside upper center", ncol=3, frameon=False, handlelength=1.5)
@@ -520,7 +558,7 @@ def diagnostics(idata, features: dict) -> dict:
     """Fit and convergence summary of one model: divergences, max r_hat and min ESS over the
     free parameters, LOO (elpd, se, p_loo) with Pareto-k counts, and the Bayesian R^2 on the
     log scale (posterior median of var(log mu) / (var(log mu) + var(log y - log mu)))."""
-    summ = az.summary(idata, var_names=["~cell_z", "~judge_z", "~interaction_z"], filter_vars="like")
+    summ = az.summary(idata, var_names=["~cell_z", "~judge_z", "~interaction_z"], filter_vars="like", round_to="none")
     loo = az.loo(idata, pointwise=True)
     k = np.asarray(loo.pareto_k)
     y = np.log(np.asarray(idata.observed_data["obs"]))
@@ -533,12 +571,78 @@ def diagnostics(idata, features: dict) -> dict:
                 r2_log=float(np.median(r2)), r2_log_lo=float(np.percentile(r2, 2.5)), r2_log_hi=float(np.percentile(r2, 97.5)))
 
 
+def convergence_figure(idata, coords: dict, table: pd.DataFrame, fig=None) -> plt.Figure:
+    """Sampler and LOO diagnostics of one fit in three panels. Left: trace of each free protocol
+    effect (log scale), the four chains overlaid, protocol colours. Middle: r_hat (x) and bulk ESS
+    (marker size) of every free parameter summarised by az.summary, one strip per parameter
+    family, dashed line at r_hat 1.01. Right: Pareto-k per observation from PSIS-LOO, coloured by
+    protocol (from `table`, the rows in observation order), dashed lines at 0.7 (unreliable) and
+    1 (very unreliable)."""
+    protocols = coords["protocol"]
+    post = idata.posterior
+    fig = fig or plt.figure(figsize=(6.5, 1.8), layout="constrained")
+    axes = fig.subplots(1, 3, width_ratios=[1.4, 1, 1.2])
+    alpha = np.asarray(post["protocol_effects"])  # chains x draws x protocols
+    for k, p in enumerate(protocols):
+        if p == BASELINE:
+            continue
+        for chain in range(alpha.shape[0]):
+            axes[0].plot(alpha[chain, :, k], color=COLORS[p], lw=0.3, alpha=0.6)
+    axes[0].legend(handles=[plt.Line2D([], [], color=COLORS[p], lw=1.5, label=LABELS[p]) for p in protocols if p != BASELINE],
+                   frameon=False, fontsize=5, loc="lower left", handlelength=1, handletextpad=0.4, ncol=2, columnspacing=0.6)
+    axes[0].set_xlabel("draw"); axes[0].set_ylabel("protocol effect (log)")
+    axes[0].set_xticks([0, alpha.shape[1]])
+    summ = az.summary(idata, var_names=["~cell_z", "~judge_z", "~interaction_z"], filter_vars="like", round_to="none").dropna(subset=["r_hat"])
+    family = summ.index.str.replace(r"\[.*", "", regex=True)
+    families = [f for f in dict.fromkeys(family) if not f.endswith("_free")]  # the deterministic versions carry the same draws
+    rng = np.random.default_rng(0)
+    for i, fam in enumerate(families):
+        rows = summ[family == fam]
+        axes[1].scatter(rows.r_hat, i + rng.uniform(-0.2, 0.2, len(rows)), s=np.clip(rows.ess_bulk / 100, 2, 30), color="0.3", alpha=0.6, linewidth=0)
+    axes[1].axvline(1.01, ls="--", lw=0.8, color="0.5")
+    axes[1].set_yticks(range(len(families)), families, fontsize=6)
+    axes[1].set_xlabel("r_hat (marker size: bulk ESS)")
+    axes[1].set_xlim(0.995, max(1.015, float(summ.r_hat.max()) + 0.003))
+    k = np.asarray(az.loo(idata, pointwise=True).pareto_k)
+    assert len(table) == k.size, (len(table), k.size)
+    for p in protocols:
+        rows = np.flatnonzero((table.protocol == p).to_numpy())
+        axes[2].scatter(rows, k[rows], s=3, color=COLORS.get(p, "black"), linewidth=0, label=LABELS.get(p, "Saturated items"))
+    for level in (0.7, 1.0):
+        axes[2].axhline(level, ls="--", lw=0.8, color="0.5")
+    axes[2].set_xlabel("observation"); axes[2].set_ylabel("Pareto-k")
+    axes[2].set_ylim(top=max(1.3, float(k.max()) + 0.1) + 0.5)  # room for the legend above the lines
+    axes[2].legend(frameon=False, fontsize=5, ncol=2, loc="upper left", handletextpad=0.2, columnspacing=0.6, markerscale=1.5)
+    return fig
+
+
+def fit_quality_figure(idata, features: dict, coords: dict, table: pd.DataFrame) -> plt.Figure:
+    """The fit and convergence evidence in one figure, three rows: posterior predictive densities
+    per protocol (predictive_figure), observed against predicted with 95% predictive intervals
+    (fit_figure), and the sampler diagnostics (convergence_figure), with the scalar summary
+    (divergences, max r_hat, min ESS, Bayesian R^2, Pareto-k counts) from `diagnostics` as the
+    title line. Panel letters a to c."""
+    d = diagnostics(idata, features)
+    fig = plt.figure(figsize=(6.5, 5.6), layout="constrained")
+    rows = fig.subfigures(3, 1, height_ratios=[1, 1.1, 1.3], hspace=0.06)
+    predictive_figure(idata, table, fig=rows[0])
+    fit_figure(idata, features, table, fig=rows[1])
+    convergence_figure(idata, coords, table, fig=rows[2])
+    for row, letter in zip(rows, "abc"):
+        row.text(0.0, 1.0, letter, fontsize=9, fontweight="bold", va="top", ha="left")
+    fig.suptitle(f"divergences {d['divergences']}, max r_hat {d['r_hat_max']:.3f}, min bulk ESS {d['ess_bulk_min']:.0f}, "
+                 f"min tail ESS {d['ess_tail_min']:.0f}, Bayesian R² (log) {d['r2_log']:.2f} [{d['r2_log_lo']:.2f}, {d['r2_log_hi']:.2f}], "
+                 f"Pareto-k > 0.7: {d['pareto_k_bad'] + d['pareto_k_very_bad']} of {d['n']} (> 1: {d['pareto_k_very_bad']})",
+                 fontsize=6.5, color="0.3")
+    return fig
+
+
 def loo_compare(idatas: dict) -> pd.DataFrame:
     """arviz.compare over the named fits (elpd_loo, elpd_diff, weight, se, dse, warning)."""
     return az.compare(idatas, ic="loo", scale="log")
 
 
-def predictive_figure(idata, table: pd.DataFrame, draws: int = 40, seed: int = 0) -> plt.Figure:
+def predictive_figure(idata, table: pd.DataFrame, draws: int = 40, seed: int = 0, fig=None) -> plt.Figure:
     """Posterior predictive check on the log scale, one small panel per protocol: the observed
     log squared errors' density (black) over `draws` posterior predictive densities (thin grey)."""
     from scipy.stats import gaussian_kde
@@ -547,7 +651,8 @@ def predictive_figure(idata, table: pd.DataFrame, draws: int = 40, seed: int = 0
     pp = np.log(np.asarray(idata.posterior_predictive["obs"]).reshape(-1, obs.size))
     pick = np.random.default_rng(seed).choice(pp.shape[0], draws, replace=False)
     protocols = [p for p in PROTOCOLS if (table.protocol == p).any()]
-    fig, axes = plt.subplots(1, len(protocols), figsize=(1.0 * len(protocols) + 0.5, 1.5), sharex=True, sharey=True, layout="constrained")
+    fig = fig or plt.figure(figsize=(1.0 * len(protocols) + 0.5, 1.5), layout="constrained")
+    axes = fig.subplots(1, len(protocols), sharex=True, sharey=True)
     grid = np.linspace(-10, 6, 200)
     for ax, p in zip(axes, protocols):
         rows = (table.protocol == p).to_numpy()
@@ -557,11 +662,11 @@ def predictive_figure(idata, table: pd.DataFrame, draws: int = 40, seed: int = 0
         ax.set_title(LABELS.get(p, "Saturated items"), fontsize=7, color="0.3", loc="left")
         ax.set_yticks([])
         ax.spines["left"].set_visible(False)
-    axes[0].set_xlabel("log squared error")
+    axes[0].set_xlabel("log squared error (lower = better forecast)")
     return fig
 
 
-def fit_figure(idata, features: dict, table: pd.DataFrame) -> tuple[plt.Figure, pd.DataFrame]:
+def fit_figure(idata, features: dict, table: pd.DataFrame, fig=None) -> tuple[plt.Figure, pd.DataFrame]:
     """Observed against predicted per row, on the log scale, one panel per protocol: the
     posterior median of log mu on x, the observed log squared error on y, a thin vertical line
     per row for the 95% posterior predictive interval, and the identity line. Returns the figure
@@ -571,7 +676,8 @@ def fit_figure(idata, features: dict, table: pd.DataFrame) -> tuple[plt.Figure, 
     pp = np.log(np.asarray(idata.posterior_predictive["obs"]).reshape(-1, obs.size))
     lo, hi = np.percentile(pp, [2.5, 97.5], axis=0)
     protocols = [p for p in PROTOCOLS if (table.protocol == p).any()]
-    fig, axes = plt.subplots(1, len(protocols), figsize=(1.0 * len(protocols) + 0.5, 1.6), sharex=True, sharey=True, layout="constrained")
+    fig = fig or plt.figure(figsize=(1.0 * len(protocols) + 0.5, 1.6), layout="constrained")
+    axes = fig.subplots(1, len(protocols), sharex=True, sharey=True)
     lim = (-14, 5)
     coverage = []
     for ax, p in zip(axes, protocols):
@@ -585,5 +691,5 @@ def fit_figure(idata, features: dict, table: pd.DataFrame) -> tuple[plt.Figure, 
         ax.spines["left"].set_bounds(-10, 5); ax.spines["bottom"].set_bounds(-10, 5)
         inside = ((obs[r] >= lo[r]) & (obs[r] <= hi[r])).mean()
         coverage.append(dict(protocol=p, n=int(r.sum()), coverage95=inside, r2_log=np.corrcoef(mu[r], obs[r])[0, 1] ** 2))
-    axes[0].set_xlabel("predicted log error"); axes[0].set_ylabel("observed")
+    axes[0].set_xlabel("model-expected log squared error"); axes[0].set_ylabel("actual log squared error")
     return fig, pd.DataFrame(coverage)
