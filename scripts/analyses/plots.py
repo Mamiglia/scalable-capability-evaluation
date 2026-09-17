@@ -23,7 +23,8 @@ HEAT = LinearSegmentedColormap.from_list("heat", ["#2a78d6", "#f6f4ee", "#e34948
 COL, WIDE = 3.5, 7.0
 
 plt.rcParams.update({
-    "font.family": "sans-serif", "font.sans-serif": ["Arial"],
+    # Arimo/Liberation Sans are metric-compatible Arial stand-ins on Linux.
+    "font.family": "sans-serif", "font.sans-serif": ["Arial", "Arimo", "Liberation Sans"],
     "font.size": 8, "axes.labelsize": 8, "legend.fontsize": 8,
     "xtick.labelsize": 8, "ytick.labelsize": 8,
     "figure.facecolor": SURFACE, "axes.facecolor": SURFACE,

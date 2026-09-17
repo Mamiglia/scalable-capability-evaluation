@@ -1,8 +1,11 @@
-"""Figures of a frozen domain: theta by semester, item difficulty per bench, accuracy heatmap.
+"""Figures of a frozen domain: theta by semester and by release date, item difficulty per bench, theta-vs-b map per
+semester, accuracy heatmap.
 
     uv run python scripts/analyses/domain_figures.py science
+    uv run python scripts/analyses/domain_figures.py science math coding cyber   # + joined analysis/{accuracy,theta_release}
 
-Reads data/meta/<domain>/{models,items,responses}.csv, writes analysis/<domain>/{theta,difficulty,accuracy}.{png,svg}.
+Reads data/meta/<domain>/{models,items,responses}.csv (release dates: configs/models/*/*.yml), writes
+analysis/<domain>/{theta,theta_release,difficulty,wright,accuracy}.{png,svg}.
 """
 
 import sys
@@ -11,14 +14,18 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import yaml
 
 plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,
                      "ytick.labelsize": 7, "svg.fonttype": "none"})
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#4a3aa7", "#7f7f7f"]  # 7: math has 7 benches
 GREY = "#9a9a9a"
+SEMESTERS = ["2023", "2024-I", "2024-II", "2025-I", "2025-II", "2026-I"]
+SEMESTER_COLOR = dict(zip(SEMESTERS, PALETTE))  # one colour per semester, the same in every domain
 
 
 def offset(ax, x=True, y=True):
@@ -39,7 +46,7 @@ def save(fig, stub: Path):
 
 def theta_figure(models: pd.DataFrame, semesters: list[str], out: Path):
     """a: global theta of every model by semester (roster coloured, others grey). b: local theta* vs global."""
-    color = dict(zip(semesters, PALETTE))
+    color = SEMESTER_COLOR
     fig, (a, b) = plt.subplots(1, 2, figsize=(3.6, 2.1), gridspec_kw={"width_ratios": [1.3, 1]})
     rng = np.random.default_rng(0)
     for i, semester in enumerate(semesters):
@@ -93,43 +100,150 @@ def difficulty_figure(items: pd.DataFrame, out: Path):
     save(fig, out / "difficulty")
 
 
-def accuracy_figure(models: pd.DataFrame, responses: pd.DataFrame, out: Path):
-    """Roster models (rows, by global theta) x bench: mean accuracy over every repeat. Blank = never run."""
-    roster = models[models.semester.notna()].sort_values("global_theta", ascending=False)
-    acc = responses[responses.model.isin(roster.index)].groupby(["model", "bench"]).correct.mean().unstack()
-    acc = acc.loc[roster.index]
-    # the row labels (model + semester) take ~1.9in, the cells 0.3in per bench, the colorbar 0.6in
-    label_w, cell_w, cbar_w = 1.9, 0.3 * acc.shape[1], 0.6
-    width = label_w + cell_w + cbar_w
-    fig = plt.figure(figsize=(width, 0.085 * len(acc) + 0.55))
-    ax = fig.add_axes([label_w / width, 0.1, cell_w / width, 0.88])
-    im = ax.imshow(acc.to_numpy(float), aspect="auto", cmap="Blues", vmin=0, vmax=1)
-    ax.set_xticks(range(acc.shape[1]), acc.columns, rotation=90, ha="center")
-    ax.set_yticks(range(len(acc)), [f"{m}  ({s})" for m, s in zip(acc.index, roster.semester)], fontsize=5)
-    ax.tick_params(length=0)
-    for i, row in enumerate(acc.to_numpy(float)):
-        for j, v in enumerate(row):
-            if not np.isnan(v):
-                ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=4.5, color="white" if v > 0.6 else "black")
-    cbar = fig.colorbar(im, cax=fig.add_axes([(label_w + cell_w + 0.1) / width, 0.1, 0.02, 0.3]), ticks=[0, 0.5, 1])
+def wright_figure(models: pd.DataFrame, items: pd.DataFrame, out: Path):
+    """Person-item map per semester task: roster global theta (left strip) against EASY/HARD item difficulty b."""
+    tasks = [c.removesuffix("_role") for c in models.columns if c.endswith("_role")]
+    roles = {"target": ("o", "k"), "reference": ("s", "white"), "historical": ("^", "white")}
+    sets = {"easy": PALETTE[0], "hard": PALETTE[1]}
+    rostered = models[models[[f"{t}_role" for t in tasks]].notna().any(axis=1)]
+    lo = np.floor(min(items.b.min(), rostered.global_theta.min()))
+    hi = np.ceil(max(items.b.max(), rostered.global_theta.max()))
+    edges = np.linspace(lo, hi, int(2 * (hi - lo)) + 1)  # half-logit bins
+    top = max(np.histogram(items.b[items[f"{t}_set"] == s], edges)[0].max() for t in tasks for s in sets)
+    top = int(np.ceil(top / 10) * 10)
+    fig, axes = plt.subplots(1, len(tasks), figsize=(0.8 * len(tasks) + 0.5, 1.9), sharey=True, squeeze=False)
+    rng = np.random.default_rng(0)
+    for ax, task in zip(axes[0], tasks):
+        for name, c in sets.items():
+            ax.hist(items.b[items[f"{task}_set"] == name], bins=edges, orientation="horizontal", histtype="stepfilled",
+                    lw=1, ec=c, fc=c + "33", label=name.upper())
+        for role, (marker, mfc) in roles.items():
+            rows = models[models[f"{task}_role"] == role]
+            if len(rows):
+                x = -top * rng.uniform(0.12, 0.48, len(rows))  # models sit in a strip left of the item counts
+                ax.errorbar(x, rows.global_theta, yerr=rows.global_theta_sd, fmt=marker, ms=3, lw=0.6, capsize=0,
+                            color="k", mfc=mfc, mew=0.6, label=role)
+        ax.axvline(0, color=GREY, lw=0.8, zorder=3)
+        ax.set_title(task, loc="left", fontsize=7, color=GREY)
+        ax.set_xlim(-0.6 * top, top), ax.set_xticks([0, top]), ax.set_xlabel("Items")
+        ax.set_ylim(lo, hi), ax.set_yticks([lo, 0, hi])
+        offset(ax)
+    axes[0, 0].set_ylabel("θ, b (logit)")
+    rows = 1 if len(tasks) > 2 else 2  # a narrow figure stacks the legend instead of widening
+    handles = {l: h for ax in axes[0] for h, l in zip(*ax.get_legend_handles_labels())}
+    fig.legend(handles.values(), handles.keys(), loc="lower center", ncol=-(-len(handles) // rows), frameon=False,
+               handletextpad=0.3, columnspacing=0.8, borderaxespad=0)
+    fig.tight_layout(w_pad=0.6, rect=(0, 0.08 * rows + 0.02, 1, 1))
+    save(fig, out / "wright")
+
+
+def release_dates() -> pd.Series:
+    """Model short name -> release date, from the `name` / `release_date` fields of configs/models/*/*.yml."""
+    configs = [yaml.safe_load(p.read_text()) or {} for p in Path("configs/models").glob("*/*.yml")]
+    raw = {c["name"].split("/")[-1].lower(): c.get("release_date") for c in configs if "name" in c}
+    # a few configs hold "2023-02" or a range "2024-04-23/2024-05-21": take the first date
+    return pd.to_datetime(pd.Series(raw, dtype=str).str.split("/").str[0], format="mixed")
+
+
+def release_figure(domains: dict[str, pd.DataFrame], out: Path):
+    """Global theta against release date, one panel per domain: roster coloured by semester, unrostered models grey."""
+    dates = release_dates()
+    fig, axes = plt.subplots(1, len(domains), figsize=(1.75 * len(domains) + 0.4, 2.1), sharex=True, squeeze=False)
+    for ax, (domain, models) in zip(axes[0], domains.items()):
+        groups = [(None, GREY, models[models.semester.isna()])]
+        groups += [(s, SEMESTER_COLOR[s], models[models.semester == s]) for s in SEMESTERS]
+        for label, c, rows in groups:
+            if len(rows):
+                ax.errorbar(dates.reindex(rows.index), rows.global_theta, yerr=rows.global_theta_sd, fmt="o", ms=3,
+                            lw=0.8, capsize=0, color=c, label=label or "no semester", zorder=2 if label else 1)
+        lo, hi = min(-3, np.floor(models.global_theta.min())), max(3, np.ceil(models.global_theta.max()))
+        ax.set_ylim(lo, hi), ax.set_yticks([lo, 0, hi])
+        ax.xaxis.set_major_locator(mdates.YearLocator()), ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+        ax.set_xlabel("Release date")
+        if len(domains) > 1:
+            ax.set_title(domain, loc="left", fontsize=7, color=GREY)
+        offset(ax)
+    shown = dates.reindex(pd.concat(list(domains.values())).index)  # shared x: whole years over every panel, so even a
+    axes[0, 0].set_xlim(pd.Timestamp(shown.min().year, 1, 1), pd.Timestamp(shown.max().year + 1, 1, 1))  # short roster spans two ticks
+    axes[0, 0].set_ylabel("Global θ")
+    handles = {l: h for ax in axes[0] for h, l in zip(*ax.get_legend_handles_labels())}
+    order = [l for l in SEMESTERS + ["no semester"] if l in handles]
+    ncol = len(order) if len(domains) > 1 else 2  # a narrow figure stacks the legend instead of widening
+    rows = -(-len(order) // ncol)
+    fig.legend([handles[l] for l in order], order, loc="lower center", ncol=ncol, frameon=False,
+               handletextpad=0.2, columnspacing=0.8, borderaxespad=0)
+    fig.tight_layout(w_pad=1.0, rect=(0, 0.07 * rows + 0.02, 1, 1))
+    save(fig, out / "theta_release")
+
+
+def accuracy_figure(domains: dict[str, tuple[pd.DataFrame, pd.DataFrame]], out: Path):
+    """Roster models (rows, by global theta, labels coloured by semester) x bench: mean accuracy over every repeat.
+    Blank = never run. Domains are laid out two per row."""
+    panels = []
+    for domain, (models, responses) in domains.items():
+        roster = models[models.semester.notna()].sort_values("global_theta", ascending=False)
+        acc = responses[responses.model.isin(roster.index)].groupby(["model", "bench"]).correct.mean().unstack()
+        panels.append((domain, roster, acc.loc[roster.index]))
+    # inches: row labels 1.7, cells 0.3 per bench and 0.085 per model, bench labels 1.0 under each panel
+    label_w, cell, row_h, foot, head = 1.7, 0.3, 0.085, 1.0, 0.25
+    ncols = min(2, len(panels))
+    grid = [panels[i:i + ncols] for i in range(0, len(panels), ncols)]
+    col_w = [label_w + cell * max(r[j][2].shape[1] for r in grid if j < len(r)) for j in range(ncols)]
+    row_hs = [head + row_h * max(len(p[2]) for p in r) + foot for r in grid]
+    width, height = sum(col_w) + 0.7, sum(row_hs)
+    fig = plt.figure(figsize=(width, height))
+    top = height
+    for r, h in zip(grid, row_hs):
+        left = 0.0
+        for (domain, roster, acc), w in zip(r, col_w):
+            ax = fig.add_axes([(left + label_w) / width, (top - head - row_h * len(acc)) / height,
+                               cell * acc.shape[1] / width, row_h * len(acc) / height])
+            im = ax.imshow(acc.to_numpy(float), aspect="auto", cmap="Blues", vmin=0, vmax=1)
+            ax.set_xticks(range(acc.shape[1]), acc.columns, rotation=90, ha="center")
+            ax.set_yticks(range(len(acc)), acc.index, fontsize=5)
+            for label, semester in zip(ax.get_yticklabels(), roster.semester):
+                label.set_color(SEMESTER_COLOR[semester])
+            ax.tick_params(length=0)
+            if len(panels) > 1:
+                ax.set_title(domain, loc="left", fontsize=7, color=GREY)
+            for i, row in enumerate(acc.to_numpy(float)):
+                for j, v in enumerate(row):
+                    if not np.isnan(v):
+                        ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=4.5, color="white" if v > 0.6 else "black")
+            left += w
+        top -= h
+    cbar = fig.colorbar(im, cax=fig.add_axes([(width - 0.55) / width, (height - head - 1.0) / height, 0.12 / width, 1.0 / height]),
+                        ticks=[0, 0.5, 1])
     cbar.set_label("Accuracy")
     cbar.outline.set_visible(False)
+    used = [s for s in SEMESTERS if any(s in set(p[1].semester) for p in panels)]
+    fig.legend([plt.Line2D([], [], marker="s", ls="", ms=4, color=SEMESTER_COLOR[s]) for s in used], used, frameon=False,
+               loc="upper left", bbox_to_anchor=((width - 0.7) / width, (height - head - 1.2) / height), handletextpad=0.2,
+               borderaxespad=0, fontsize=6)
     save(fig, out / "accuracy")
 
 
-def main(domain: str) -> int:
-    root = Path("data/meta") / domain
-    models = pd.read_csv(root / "models.csv", index_col="model")
-    items = pd.read_csv(root / "items.csv", dtype={"item": str})
-    responses = pd.read_csv(root / "responses.csv", dtype={"item": str})
-    semesters = [s for s in ["2023", "2024-I", "2024-II", "2025-I", "2025-II", "2026-I"] if s in set(models.semester.dropna())]
-    out = Path("analysis") / domain
-    out.mkdir(parents=True, exist_ok=True)
-    theta_figure(models, semesters, out)
-    difficulty_figure(items, out)
-    accuracy_figure(models, responses, out)
+def main(domains: list[str]) -> int:
+    loaded = {}
+    for domain in domains:
+        root = Path("data/meta") / domain
+        models = pd.read_csv(root / "models.csv", index_col="model")
+        items = pd.read_csv(root / "items.csv", dtype={"item": str})
+        responses = pd.read_csv(root / "responses.csv", dtype={"item": str})
+        semesters = [s for s in SEMESTERS if s in set(models.semester.dropna())]
+        out = Path("analysis") / domain
+        out.mkdir(parents=True, exist_ok=True)
+        theta_figure(models, semesters, out)
+        release_figure({domain: models}, out)
+        difficulty_figure(items, out)
+        wright_figure(models, items, out)
+        accuracy_figure({domain: (models, responses)}, out)
+        loaded[domain] = (models, responses)
+    if len(loaded) > 1:  # joined across domains
+        release_figure({d: m for d, (m, _) in loaded.items()}, Path("analysis"))
+        accuracy_figure(loaded, Path("analysis"))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1]))
+    raise SystemExit(main(sys.argv[1:]))

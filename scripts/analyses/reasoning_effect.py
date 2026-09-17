@@ -26,6 +26,7 @@ from capability.evaluate import score
 from capability.task import Task
 from configs.domain import DomainConfig
 from configs.logs import logger
+from palette import DOMAIN  # domain markers, scripts/analyses/palette.py
 from protocols import PROTOCOLS
 from protocols.pairwise import from_logs
 from protocols.pairwise.linear import JudgeLinear
@@ -37,7 +38,7 @@ OUT = Path("analysis/judge/reasoning_effect")
 COLOR = {"science": "#2a78d6", "math": "#eb6834", "coding": "#1baf7a", "cyber": "#4a3aa7"}
 SHOWN, HIDDEN = ["24d6cc32", "66c170cd"], ["9c1d3abb", "7ea04f2b"]
 TOP = 3  # frontier = the top-3 targets by theta*
-YMAX = 200  # % of ref-mean; larger values are drawn as an arrow at the edge
+SEMESTERS = 2  # the figure keeps only the last N semesters
 
 
 def verdicts(run: Path) -> pd.DataFrame:
@@ -79,39 +80,44 @@ def compute() -> pd.DataFrame:
 
 
 def plot(df: pd.DataFrame) -> None:
-    plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,
-                         "ytick.labelsize": 7, "svg.fonttype": "none"})
-    df = df[df.targets == "all"]
-    fig, axes = plt.subplots(1, 4, figsize=(3.6, 1.7), sharey=True, gridspec_kw={"wspace": 0.15},
-                             width_ratios=[df.domain.eq(d).sum() for d in COLOR])
-    for ax, (name, color) in zip(axes, COLOR.items()):
-        d = df[df.domain == name].sort_values("semester").reset_index(drop=True)
-        for x, r in d.iterrows():
-            y = 100 * pd.Series({"shown": r.shown, "hidden": r.hidden}) / r.baseline
-            clipped = y.clip(upper=YMAX)
-            if abs(clipped.shown - clipped.hidden) > 2:  # arrow from shown to hidden: up = hiding hurts
+    """One panel, x = the last SEMESTERS semesters of every domain, y = prediction score (100 - MSE as % of the
+    ref-mean baseline, 100 = perfect, 0 = no better than the reference mean). Scores below 0 sit on the floor
+    as a caret with their value."""
+    plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 8, "xtick.labelsize": 8,
+                         "ytick.labelsize": 8, "svg.fonttype": "none"})
+    df = df[(df.targets == "all") & df.semester.isin(sorted(df.semester.unique())[-SEMESTERS:])]
+    fig, ax = plt.subplots(figsize=(3.6, 2.0))
+    x, ticks = 0.0, []
+    for name, color in COLOR.items():
+        d = df[df.domain == name].sort_values("semester")
+        marker = "P" if name == "coding" else DOMAIN[name.upper()]  # not the palette "^": it reads as an arrowhead here
+        for _, r in d.iterrows():
+            y = 100 - 100 * pd.Series({"shown": r.shown, "hidden": r.hidden}) / r.baseline
+            clipped = y.clip(lower=0)
+            if abs(clipped.shown - clipped.hidden) > 2:  # arrow from shown to hidden: down = hiding hurts
                 ax.annotate("", (x, clipped.hidden), (x, clipped.shown), zorder=1,
                             arrowprops=dict(arrowstyle="-|>,head_length=0.25,head_width=0.12", color=color, lw=1, shrinkA=2, shrinkB=2.5))
-            for k, mfc in (("shown", color), ("hidden", "white")):
-                ax.plot(x, clipped[k], "^" if y[k] > YMAX else "o", mfc=mfc, mec=color, ms=4, zorder=3, clip_on=False)
-                if y[k] > YMAX:
-                    ax.text(x, YMAX * 1.06, f"{y[k]:.0f}", ha="center", va="bottom", fontsize=4, color=color)
-        ax.axhline(100, color="#9a9a9a", lw=0.8, ls="--", zorder=0)
-        ax.set_xticks(range(len(d)), d.semester)
-        ax.set_xlim(-0.6, len(d) - 0.4)
-        ax.text(0, 1.04, name, transform=ax.transAxes, fontsize=7, color=color)
-        for side in ("top", "right"):
-            ax.spines[side].set_visible(False)
-        for side in ("left", "bottom"):
-            ax.spines[side].set_position(("outward", 4))
-        ax.tick_params(axis="x", length=0, labelsize=5, labelrotation=90)
-    axes[0].set_ylim(0, YMAX)
-    axes[0].set_yticks([0, 50, 100, 150, 200])
-    axes[0].set_ylabel("MSE (% ref-mean)")
-    handles = [plt.Line2D([], [], marker="o", color="black", ls="", ms=4, label="Shown"),
-               plt.Line2D([], [], marker="o", mfc="white", mec="black", ls="", ms=4, label="Hidden"),
-               plt.Line2D([], [], color="#9a9a9a", lw=0.8, ls="--", label="Ref. mean")]
-    fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, 0.98),
+            for k, mfc, dx in (("shown", color, -0.16), ("hidden", "white", 0.16)):
+                ax.plot(x, clipped[k], "v" if y[k] < 0 else marker, mfc=mfc, mec=color, ms=5, zorder=3, clip_on=False)
+                if y[k] < 0:  # off-scale: the value beside the floor caret, shown left / hidden right
+                    ax.text(x + dx, 2, f"{y[k]:.0f}", ha="right" if dx < 0 else "left", va="bottom", fontsize=6, color=color)
+            ticks.append((x, r.semester))
+            x += 1
+        ax.text(x - len(d) / 2 - 0.5, 104, name, ha="center", fontsize=8, color=color)
+        x += 0.7  # gap between domains
+    ax.set_xticks([t[0] for t in ticks], [t[1] for t in ticks])
+    ax.set_xlim(-0.6, x - 1.1)
+    ax.set_ylim(0, 100)
+    ax.set_yticks([0, 50, 100])
+    ax.set_ylabel("Prediction score")
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_position(("outward", 4))
+    ax.tick_params(axis="x", length=0, labelsize=7, labelrotation=90)
+    handles = [plt.Line2D([], [], marker="o", color="black", ls="", ms=5, label="Reasoning shown"),
+               plt.Line2D([], [], marker="o", mfc="white", mec="black", ls="", ms=5, label="Hidden")]
+    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.02),
                handletextpad=0.3, columnspacing=1.0)
     fig.savefig(OUT.with_suffix(".png"), dpi=300, bbox_inches="tight")
     fig.savefig(OUT.with_suffix(".svg"), bbox_inches="tight")
