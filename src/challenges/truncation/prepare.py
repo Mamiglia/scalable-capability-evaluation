@@ -45,9 +45,12 @@ CAMPAIGNS = {
     # coding: the published refit = SWE/Terminal campaign (staged at e3d86809, filtered to the latest train
     # set) + AgentBench OS add-on (staged at c199498b), calibrated on the add-on's (latest) tables.
     "coding": ["direct-judging-coding-agentbench", "direct-judging-coding"],
+    "math": ["direct-judging-math"],
+    "science": ["direct-judging-science"],
 }
 SUBSET_DIR = {"direct-judging-cyber": "input-subsets", "direct-judging-coding": "input-subsets",
-              "direct-judging-coding-agentbench": "hf-snapshot"}
+              "direct-judging-coding-agentbench": "hf-snapshot", "direct-judging-math": "input-subsets",
+              "direct-judging-science": "input-subsets"}
 
 
 def stage_source(domain_name):
