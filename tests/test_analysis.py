@@ -120,11 +120,11 @@ def test_core_condition_prefers_a_smaller_train_set_over_hiding_the_reasoning():
     picked = stats.core_condition(smaller)
     picked = picked[picked.protocol == "direct"]
     assert set(picked.condition) == {"reasoning-shown-10pq"} and set(picked.judge) == {"strong"}
-    # a cell keeps one condition for every judge: the weak judge, shown only on the full train set, sets it
+    # each judge keeps its own closest run: strong on its smaller-train shown run, weak on the full one, both stay
     both = f.assign(condition=lambda d: d.condition.where(d.judge != "strong", "reasoning-shown-10pq"))
-    one = stats.core_condition(both)
-    one = one[one.protocol == "direct"]
-    assert set(one.condition) == {"reasoning-shown"} and set(one.judge) == {"weak"}
+    each = stats.core_condition(both)
+    each = each[each.protocol == "direct"].drop_duplicates(["judge", "condition"]).set_index("judge").condition
+    assert each.to_dict() == {"strong": "reasoning-shown-10pq", "weak": "reasoning-shown"}
     # only where nothing shown exists does the hidden run stand in
     hidden = stats.core_condition(f[f.condition == "reasoning-hidden"])
     assert set(hidden[hidden.protocol == "direct"].condition) == {"reasoning-hidden"}
