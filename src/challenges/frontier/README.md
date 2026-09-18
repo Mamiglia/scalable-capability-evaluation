@@ -194,3 +194,28 @@ the no-information forecast is the reference mean). +1 bit = squared error halve
 
 Every matchup variant beats the baseline on every target (weakest on Opus 4.8, ≈1 bit); length is worse than the
 baseline on five of six; the top-3 reference mean is a flat ≈1 bit because it sits 0.6 θ above the reference mean.
+
+### Four-protocol figure (2026-09-18, the version to cite)
+
+`plot_scores.py` now shows only: pairwise judge (`judgelin`, kimi-k2-thinking, reasoning hidden), absolute judge
+(`direct_judge`, kimi-k2-thinking, `configs/judges/direct/kimi-k2-thinking.yml`, condition f8860e9c: 54 logs, 1,218
+ratings, 1 unrated, pushed to LASR-G5/judging), embeddings (`embedding`, Qwen3-Embedding-8B ridge) and deterministic
+features (`ridge`). Prediction scores in bits:
+
+| protocol | Fable 5 | GPT-5.6 Sol | Opus 4.8 | Union Alpha | Opus 4.7 | Gemini 3.5 Flash | mean | MSE |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Absolute judge | 3.86 | 6.28 | 2.63 | 6.19 | 4.44 | 2.64 | **4.34** | 0.35 |
+| Pairwise judge | 2.50 | 4.29 | 0.84 | 5.77 | 1.94 | 4.13 | 3.24 | 0.94 |
+| Deterministic features | 0.05 | 1.98 | 0.10 | 1.76 | 0.19 | 2.98 | 1.18 | 2.99 |
+| Embeddings | 2.53 | 1.15 | 1.61 | 0.71 | 1.18 | −0.43 | 1.13 | 2.32 |
+
+Embeddings overshoot every target (θ̂ 3.5-3.9 vs θ* 1.8-2.6): the ridge extrapolates far outside the references' range.
+
+Embedding vectors for the 8 frontier logs were computed locally (not on the HF cache's H100s): `scripts/embeddings/embed.py`
+from `origin/methodology`, patched for the two Quadro P6000s — a separate venv with torch cu126 (the shared venv's cu130
+build has no Pascal kernels), fp16 instead of bf16 (`EMBED_DTYPE`), one unpadded sequence per batch with no attention
+mask (`--tokens-per-batch 1`) and `EMBED_NO_GQA_SDPA=1` (SDPA's grouped-query path needs the flash kernel; without it
+the math kernel materialises the 8192² attention matrix and OOMs 24 GB), `EMBED_TRAIN_ONLY=1 --variant full` (only what
+the protocol reads: train items, reasoning-included text). Same model revision and 8192-token chunking as the cache;
+fp16 vs bf16 is the one numerical difference. These files are partial (train items only): local cache, **not** pushed to
+LASR-G5/transcript-embeddings; the patched script is left untracked so the `methodology` branch merges cleanly.
