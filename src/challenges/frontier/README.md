@@ -175,3 +175,22 @@ gpt-5.6-sol 3.48 / 2.34, union-alpha 2.80 / 2.19. The judge underrates every Ant
 gpt-5.6-sol and union-alpha; the within-group ordering is largely wrong (Spearman on 6 points is not worth quoting), the
 level is not — every length baseline sits 2-3 θ below the group. 177 logs, 5,886 verdicts, 0 errors, ~$32
 (`logs/judge/coding_frontier/2026-I/kimi-k2-thinking/9c1d3abb/`, pushed to LASR-G5/judging).
+
+### Prediction scores (the reported metric from 2026-09-18)
+
+Per target m and protocol P: S_m(P) = −log2(e_m(P) / e_m(base)), e_m = (θ̂_m − θ*_m)², base = the constant forecast
+at the references' mean θ* (`mean_ref`; with saturated items accuracy carries no information, so under squared error
+the no-information forecast is the reference mean). +1 bit = squared error halved. `plot_scores.py` →
+`analysis/frontier/prediction_scores.{csv,png,svg}` (gitignored outputs; rerun to regenerate).
+
+| protocol | Fable 5 | GPT-5.6 Sol | Opus 4.8 | Union Alpha | Opus 4.7 | Gemini 3.5 Flash | mean |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Matchup linear | 2.50 | 4.29 | 0.84 | 5.77 | 1.94 | 4.13 | **3.24** |
+| Matchup BT | 2.78 | 2.01 | 1.55 | 3.62 | 2.31 | 5.74 | 3.00 |
+| Matchup calibrated | 1.63 | 5.41 | 1.25 | 4.06 | 1.68 | 2.91 | 2.82 |
+| Ridge features | 0.05 | 1.98 | 0.10 | 1.76 | 0.19 | 2.98 | 1.18 |
+| Top-3 ref. mean | 0.78 | 0.89 | 0.91 | 0.96 | 1.00 | 1.24 | 0.96 |
+| Length (chars) | −0.50 | −0.22 | −0.56 | −0.28 | −0.59 | 0.01 | −0.36 |
+
+Every matchup variant beats the baseline on every target (weakest on Opus 4.8, ≈1 bit); length is worse than the
+baseline on five of six; the top-3 reference mean is a flat ≈1 bit because it sits 0.6 θ above the reference mean.
