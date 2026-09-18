@@ -3,8 +3,9 @@
     PYTHONPATH=src .venv/bin/python src/challenges/frontier/integrate.py [--write]
 
 The frozen coding tables stay untouched (a refreeze would reshuffle the train set). Here:
-- models.csv  = coding's rows, the original 2026-I targets' role blanked, plus one row per frontier
-                model: paths to its subset logs, `2026-I_role = target`, theta* from
+- models.csv  = coding's rows, the original 2026-I targets' role blanked, unrostered coding models named
+                by --extra (default claude-opus-4.7, gemini-3.5-flash) made targets on their full-bench
+                logs (theta* from coding's own responses), plus one row per frontier model: paths to its subset logs, `2026-I_role = target`, theta* from
                 `reference.freeze.local_fit` on the 2026-I HARD items it answered (a, b, guess pinned
                 to the global fit, so theta* lands on the same scale as everyone else's).
 - items.csv   = coding's (same train set, same HARD set).
@@ -61,6 +62,8 @@ def main() -> int:
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--warmup", type=int, default=1000)
     ap.add_argument("--samples", type=int, default=1000)
+    ap.add_argument("--extra", nargs="*", default=["claude-opus-4.7", "gemini-3.5-flash"],
+                    help="unrostered coding models (full-bench logs) to add as targets too, theta* from coding's responses")
     args = ap.parse_args()
 
     models = pd.read_csv(SOURCE / "models.csv", index_col="model")
@@ -75,13 +78,19 @@ def main() -> int:
     print("frontier models:", {m: sorted(l) for m, l in logs.items()})
     print("scored responses per model:", new.groupby("model").size().to_dict(), "| on HARD:", n_hard.to_dict())
 
-    theta = local_fit(new, hard, sorted(logs), warmup=args.warmup, samples=args.samples, seed=settings.get("seed", 0))
+    extra = [m for m in args.extra if m in models.index and pd.isna(models.loc[m, f"{SEMESTER}_theta"])]
+    fit_input = pd.concat([new, responses[responses.model.isin(extra)]], ignore_index=True)
+    theta = local_fit(fit_input, hard, sorted(logs) + extra, warmup=args.warmup, samples=args.samples,
+                      seed=settings.get("seed", 0))
     refs = models[models[f"{SEMESTER}_role"] == "reference"][f"{SEMESTER}_theta"]
     print(f"\n{SEMESTER} theta* (references span {refs.min():.2f} .. {refs.max():.2f}):")
     print(theta.round(3).to_string())
 
     out_models = models.copy()
     out_models.loc[out_models[f"{SEMESTER}_role"] == "target", f"{SEMESTER}_role"] = ""
+    for m in extra:  # unrostered coding models -> targets, on their full-bench logs already in the table
+        out_models.loc[m, [f"{SEMESTER}_role", f"{SEMESTER}_theta", f"{SEMESTER}_theta_sd"]] = \
+            ["target", theta.loc[m, "theta"], theta.loc[m, "theta_sd"]]
     for m, l in logs.items():
         row = {c: "" if c.endswith("_role") else float("nan") for c in models.columns}
         row.update({f"path_{b}": str(p.relative_to("data")) for b, p in l.items()})
@@ -91,7 +100,7 @@ def main() -> int:
     out_responses = pd.concat([responses, new[["bench", "item", "model", "repeat", "correct"]]], ignore_index=True)
     settings = {**settings, "domain": "coding_frontier", "derived_from": "coding",
                 "derived_at": datetime.date.today().isoformat(),
-                "frontier_targets": sorted(logs), "frontier_hashes": SUBSETS,
+                "frontier_targets": sorted(logs), "extra_targets": extra, "frontier_hashes": SUBSETS,
                 "note": "coding's frozen tables + frontier models as extra 2026-I targets (theta* = local_fit on "
                         "their scored 2026-I HARD responses); original 2026-I targets' role blanked; unscored "
                         "(refused) samples excluded from responses.csv"}
