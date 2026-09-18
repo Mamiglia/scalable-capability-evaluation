@@ -115,31 +115,33 @@ for name, fig in (("ratios", signal_glm.ratio_figure(ratios)), ("ratios_score", 
     for ext in ("svg", "png"):
         fig.savefig(FIG / f"{name}.{ext}", bbox_inches="tight")
 
-# %% figure one: target models pooled over domains, Wilcoxon against the saturated-item prediction
+# %% figure one: prediction score per (target model, domain), averaged over domains per model; t-test over models
 if JUDGES != "best":
     raise SystemExit("figure one and its tests take one forecast per target: done")
 pooled = signal_glm.per_model(table)
-tests = signal_glm.model_tests(pooled)
+scores = signal_glm.model_scores(table)
+tests = signal_glm.model_tests(scores)
 pooled.to_csv(OUT / "per_model.csv", float_format="%.4f")
+scores.to_csv(OUT / "per_model_scores.csv", float_format="%.4f")
 tests.to_csv(RESULTS / f"{TAG.replace("signal_glm", "signal_score_tests")}.csv", index=False, float_format="%.4g")  # best judge only: one row per target
 print(tests.round(4).to_string(index=False))
 suffix = TAG.removeprefix("signal_glm")  # "" or "_<semesters>", like the other bar figures
-for metric in ("mse", "delta", "ratio", "score"):
+for metric in ("mse", "delta", "ratio"):
     fig = signal_glm.model_bar_figure(pooled, tests, metric)
     for ext in ("svg", "png"):
         fig.savefig(RESULTS / "figures" / "bars" / f"figure1_{metric}{suffix}.{ext}", bbox_inches="tight")
     plt.close(fig)
-fig = signal_glm.model_box_figure(pooled, tests)  # the score as mean, 95% interval box and points
+fig = signal_glm.model_box_figure(scores, tests)  # the score as mean, 95% interval box and points
 for ext in ("svg", "png"):
     fig.savefig(RESULTS / "figures" / "bars" / f"figure1_score_box{suffix}.{ext}", bbox_inches="tight")
 plt.close(fig)
 
 # %% figure one without self-judging: each target judged by the best judge from another developer family
-no_self = signal_glm.per_model(signal_glm.rows(forecasts, VARIANTS, semesters=SEMESTERS, judges="best_other_family"))
+no_self = signal_glm.model_scores(signal_glm.rows(forecasts, VARIANTS, semesters=SEMESTERS, judges="best_other_family"))
 no_self_tests = signal_glm.model_tests(no_self)
 no_self_tests.to_csv(RESULTS / f"{TAG.replace("signal_glm", "signal_score_tests")}_no_self_judging.csv", index=False, float_format="%.4g")
 print(no_self_tests.round(4).to_string(index=False))
-fig = signal_glm.model_bar_figure(no_self, no_self_tests, "score")
+fig = signal_glm.model_box_figure(no_self, no_self_tests)
 for ext in ("svg", "png"):
     fig.savefig(RESULTS / "figures" / "bars" / f"figure1_score_no_self_judging{suffix}.{ext}", bbox_inches="tight")
 plt.close(fig)

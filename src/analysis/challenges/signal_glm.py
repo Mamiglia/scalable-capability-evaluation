@@ -40,8 +40,12 @@ FLOOR = 1e-6  # a Gamma outcome must be positive; an exact hit is clipped here
 
 
 def score(errors, baseline):
-    """Prediction score, 100 * (1 - error / the saturated-item prediction's error): 0 is the baseline, 100 is perfect."""
-    return 100 * (1 - errors / baseline)
+    """Prediction score per model, -log2(error / the model's own saturated-item error): the number
+    of halvings of the error. 0 is the baseline, 1 half its error, 2 a quarter, -1 twice it.
+    Symmetric in the ratio (twice as good and twice as bad are equidistant from 0), so a model
+    the baseline happens to predict almost exactly cannot dominate the mean, unlike
+    100 * (1 - error / baseline) (gpt-oss-20b: -114%); the same scale as the hierarchical GLM."""
+    return -np.log2(errors / baseline)
 
 
 def rows(forecasts: pd.DataFrame, variants: dict[str, str], semesters: tuple[str, ...] = SEMESTERS,
@@ -202,10 +206,10 @@ def ratio_figure(table: pd.DataFrame, scale: str = "ratio") -> plt.Figure:
     """One panel per domain plus the pooled panel, one point per protocol with its 95% interval
     (filled = hierarchical, open = flat cross-check when the table has flat_ratio). scale
     "ratio": error ratio on a log axis, dashed line at 1, below 1 beats the saturated-item
-    prediction. scale "score": prediction score 100 * (1 - ratio), linear axis clipped at -200,
-    line at 0, above 0 beats it."""
+    prediction. scale "score": prediction score -log2(ratio), halvings of the error as `score`,
+    linear axis, line at 0, above 0 beats it."""
     assert scale in ("ratio", "score"), scale
-    tf = (lambda v: 100 * (1 - v)) if scale == "score" else (lambda v: v)
+    tf = (lambda v: -np.log2(v)) if scale == "score" else (lambda v: v)
     panels = [d for d in [*DOMAINS, POOLED] if (table.domain == d).any()]
     fig, axes = plt.subplots(1, len(panels), figsize=(1.1 * len(panels) + 0.6, 2.0), sharey=True)
     protocols = [p for p in PAPER_PROTOCOLS if (table.protocol == p).any()]
@@ -222,13 +226,10 @@ def ratio_figure(table: pd.DataFrame, scale: str = "ratio") -> plt.Figure:
         ax.axhline(tf(1), ls="--", lw=0.6, color="0.4")
         if scale == "ratio":
             ax.set_yscale("log")
-        else:
-            ax.set_ylim(-150, 100)
-            ax.set_yticks([-100, -50, 0, 50, 100])
         ax.set_xticks(x, [LABELS[p] for p in protocols], rotation=60, ha="right")
         ax.set_xlim(-0.6, len(protocols) - 0.4)
         ax.set_title(DOMAIN_LABELS.get(domain, "Pooled"), fontsize=8)
-    np.atleast_1d(axes)[0].set_ylabel("MSE ratio to prediction\nfrom saturated items" if scale == "ratio" else "Prediction score (%)")
+    np.atleast_1d(axes)[0].set_ylabel("MSE ratio to prediction\nfrom saturated items" if scale == "ratio" else "Prediction score\n(halvings of error)")
     if "flat_ratio" in table:
         handles = [plt.Line2D([], [], marker="o", ms=3.5, lw=0.8, color="0.3", label="Hierarchical fit (partial pooling), 95% posterior interval"),
                    plt.Line2D([], [], marker="o", ms=3.5, lw=0.8, color="0.3", mfc="white", label="Maximum-likelihood fit (no pooling), 95% Wald interval")]
@@ -240,7 +241,7 @@ def ratio_figure(table: pd.DataFrame, scale: str = "ratio") -> plt.Figure:
 def posterior_figure(posterior, coords: dict, scale: str = "ratio") -> plt.Figure:
     """Posterior densities of the protocol effects. scale "ratio": error ratio exp(alpha), log x,
     dashed line at 1, below 1 beats the baseline. scale "score": prediction score
-    100 * (1 - exp(alpha)), linear x, line at 0, above 0 beats the baseline. Top left: the pooled
+    -log2(exp(alpha)), halvings of the error as `score`, linear x, line at 0, above 0 beats the baseline. Top left: the pooled
     protocol effects, one curve per protocol. Top right: the domain effects exp(gamma), the
     baseline's error relative to the grand mean over domains (always a ratio), one curve per domain. Bottom: the
     per-domain protocol effects exp(alpha + delta), one small panel per protocol with one curve
@@ -255,7 +256,7 @@ def posterior_figure(posterior, coords: dict, scale: str = "ratio") -> plt.Figur
     assert scale in ("ratio", "score"), scale
     protocols = [p for p in PAPER_PROTOCOLS if p in coords["protocol"]]
     domains = list(coords["domain"])
-    to_score = lambda x: 100 * (1 - np.exp(x))  # the log effect to the prediction score
+    to_score = lambda x: -x / np.log(2)  # the log effect to the prediction score, halvings of the error
 
     bars: dict = {}  # axis -> [(lo, mid, hi, color, row)], drawn above the curves once the panel's height is known
 
@@ -285,9 +286,7 @@ def posterior_figure(posterior, coords: dict, scale: str = "ratio") -> plt.Figur
         density(top_l, alpha[:, coords["protocol"].index(p)], COLORS[p], LABELS[p], row=i, tf=tf)
     for i, d in enumerate(domains):  # sum-to-zero: every domain is a departure from the grand mean
         density(top_r, gamma[:, domains.index(d)], DOMAIN_COLORS[d], DOMAIN_LABELS[d], row=i)
-    top_l.set_xlabel("Prediction score (%)" if scale == "score" else "MSE ratio to saturated-item prediction")
-    if scale == "score":
-        top_l.set_xlim(-150, 100)  # the heavy-tailed protocols' left tails run past -200
+    top_l.set_xlabel("Prediction score (halvings of error)" if scale == "score" else "MSE ratio to saturated-item prediction")
     top_r.set_xlabel("Baseline MSE ratio to grand mean")
     top_l.legend(frameon=False, loc="lower left", bbox_to_anchor=(0, 1.02), ncol=2, columnspacing=0.8, handlelength=1.2)
     top_r.legend(frameon=False, loc="lower right", bbox_to_anchor=(1, 1.02), ncol=2, columnspacing=0.8, handlelength=1.2)
@@ -299,16 +298,20 @@ def posterior_figure(posterior, coords: dict, scale: str = "ratio") -> plt.Figur
             k = coords["protocol"].index(p)
             density(ax, alpha[:, k] + delta[:, k, domains.index(d)], DOMAIN_COLORS[d], row=j, tf=tf)
         ax.text(0.02, 1.02, LABELS[p], transform=ax.transAxes, fontsize=7, color="0.35", va="bottom")
-        ax.set_xlabel(("Prediction score (%), per domain" if scale == "score" else "MSE ratio to saturated-item prediction, per domain") if i == len(protocols) // 2 else "")
-        ax.set_xlim((-200, 100) if scale == "score" else (0.02, 5))
+        ax.set_xlabel(("Prediction score (halvings of error), per domain" if scale == "score" else "MSE ratio to saturated-item prediction, per domain") if i == len(protocols) // 2 else "")
+        if scale == "ratio":
+            ax.set_xlim(0.02, 5)
         if i:
             ax.tick_params(labelleft=False)
     from matplotlib.ticker import NullLocator
     score_axes = [top_l, *bottom] if scale == "score" else []
-    for ax, ticks in ((top_l, [-100, -50, 0, 50, 100] if scale == "score" else [0.1, 0.3, 1, 3]), (top_r, [0.5, 1, 2]), *((ax, [-100, 0, 100] if scale == "score" else [0.1, 1, 3]) for ax in bottom)):
+    for ax, ticks in ((top_l, None if scale == "score" else [0.1, 0.3, 1, 3]), (top_r, [0.5, 1, 2]), *((ax, None if scale == "score" else [0.1, 1, 3]) for ax in bottom)):
         if ax not in score_axes:
             ax.set_xscale("log")
             ax.xaxis.set_minor_locator(NullLocator())  # log minor ticks clutter panels this small
+        if ticks is None:  # halvings: whole numbers over the drawn range
+            lo, hi = ax.get_xlim()
+            ticks = list(np.arange(np.ceil(lo), np.floor(hi) + 1))
         ax.set_xticks(ticks, [f"{t:g}" for t in ticks])
         ax.spines["bottom"].set_bounds(ticks[0], ticks[-1])
         ax.axvline(0 if ax in score_axes else 1, ls="--", lw=0.8, color="0.5")
@@ -334,17 +337,53 @@ def per_model(table: pd.DataFrame) -> pd.DataFrame:
     return wide.T.groupby(level="protocol").mean().T.where(complete).reindex(columns=PROTOCOLS)
 
 
-def model_tests(pooled: pd.DataFrame) -> pd.DataFrame:
-    """One-sample t-test of each protocol's per-model prediction scores (`score` of the pooled
-    squared errors) against 0: protocol, n, p, mean score, median
-    ratio. The paper's test; the t-interval box of model_box_figure is its dual."""
+def model_scores(table: pd.DataFrame) -> pd.DataFrame:
+    """Prediction score per target model: `score` of the model's squared error pooled over its
+    domains (`per_model`) against the saturated-item prediction's pooled the same way. Pooling
+    first keeps one lucky near-exact cell from dominating a model (scored per domain, an error of
+    0.0000 against a baseline of 2 is 17 halvings). One row per model, one column per protocol
+    in PROTOCOLS (the baseline's column is 0); NaN where a model lacks the protocol in any domain."""
+    pooled = per_model(table)
+    return pd.concat({p: score(pooled[p], pooled[BASELINE]) for p in pooled.columns}, axis=1).reindex(columns=PROTOCOLS)
+
+
+def model_tests(scores: pd.DataFrame, test: str = "t") -> pd.DataFrame:
+    """Test of each protocol's per-model prediction scores (`model_scores`) against 0:
+    protocol, n, p, mean score, median score. test "t": one-sample t-test (dual of the mean's
+    t-interval in model_box_figure); "wilcoxon": signed-rank test (dual of the median's
+    Hodges-Lehmann interval)."""
+    assert test in ("t", "wilcoxon"), test
     out = []
     for p in PROTOCOLS[1:]:
-        pair = pooled[[p, BASELINE]].dropna()
-        s = score(pair[p], pair[BASELINE])
-        pval = float(scipy_stats.ttest_1samp(s, 0).pvalue) if len(pair) >= 3 else np.nan
-        out.append(dict(protocol=p, n=len(pair), p=pval, mean_score=float(s.mean()), median_ratio=float((pair[p] / pair[BASELINE]).median())))
+        s = scores[p].dropna()
+        if len(s) < 3:
+            pval = np.nan
+        else:
+            pval = float(scipy_stats.ttest_1samp(s, 0).pvalue if test == "t" else scipy_stats.wilcoxon(s).pvalue)
+        out.append(dict(protocol=p, n=len(s), p=pval, mean_score=float(s.mean()), median_score=float(s.median())))
     return pd.DataFrame(out)
+
+
+def score_axis(values: np.ndarray) -> tuple[float, float]:
+    """Axis limits for prediction scores: the data's range rounded out to whole halvings, always including 0."""
+    lo, hi = np.nanmin(values), np.nanmax(values)
+    return float(min(0, np.floor(lo))), float(max(0, np.ceil(hi)))
+
+
+def hodges_lehmann_interval(values: np.ndarray, alpha: float = 0.05) -> tuple[float, float]:
+    """The exact (1 - alpha) Hodges-Lehmann interval of one sample: order statistics of the
+    Walsh averages (v_i + v_j) / 2 at the critical value of the signed-rank statistic's exact
+    null distribution, so 0 lies outside it exactly when the two-sided Wilcoxon signed-rank
+    test of `values` against 0 rejects at `alpha`."""
+    v = np.asarray(values, float)
+    n = len(v)
+    walsh = np.sort([(v[i] + v[j]) / 2 for i in range(n) for j in range(i, n)])
+    dist = np.zeros(n * (n + 1) // 2 + 1)
+    dist[0] = 1
+    for r in range(1, n + 1):  # each rank r is in T+ with probability 1/2
+        dist = (dist + np.roll(dist, r)) / 2
+    c = int(np.max(np.where(np.cumsum(dist) <= alpha / 2)[0]))
+    return float(walsh[c]), float(walsh[len(walsh) - c - 1])
 
 
 def stars(pval: float) -> str:
@@ -359,8 +398,8 @@ def model_bar_figure(pooled: pd.DataFrame, tests: pd.DataFrame, metric: str = "m
     user's). metric "delta": each model's error minus its saturated-item error, same drawing
     with the line at 0. metric "ratio": each model's error divided by its saturated-item error,
     log axis, bars from 1 to the geometric mean with the t-interval of the log ratios. metric
-    "score": prediction score per model (`score`, 0 to 100), line at 0, axis -100 to 100 with
-    lower values (points, bars, intervals) clipped to -100."""
+    "score": prediction score per model (`score`, halvings of the error), line at 0, axis over
+    the data in whole halvings."""
     assert metric in ("mse", "delta", "ratio", "score"), metric
     protocols = [p for p in PAPER_PROTOCOLS if pooled[p].notna().any()]
     values = {p: pooled[p].dropna() for p in protocols}
@@ -378,7 +417,7 @@ def model_bar_figure(pooled: pd.DataFrame, tests: pd.DataFrame, metric: str = "m
     if metric != "ratio":
         raw = np.array(list(means.values()) + [v for s in values.values() for v in s] + [baseline])
         if metric == "score":
-            positions, mapping, extent = np.clip(raw, -100, 100), {}, None
+            positions, mapping, extent = raw.copy(), {}, None
         else:
             _, first = compress(raw)
             extent = np.array([means[p] + halves[p] for p in means if means[p] not in first])
@@ -394,7 +433,7 @@ def model_bar_figure(pooled: pd.DataFrame, tests: pd.DataFrame, metric: str = "m
             if mean not in mapping:
                 cap = break_edges(raw, mapping, extent)[0]
                 lo, hi = mean - halves[p], mean + halves[p]
-                ax.plot([i, i], [max(lo, -100) if metric == "score" else lo, min(hi, cap)], color="black", lw=0.8, zorder=4)
+                ax.plot([i, i], [lo, min(hi, cap)], color="black", lw=0.8, zorder=4)
             ys = [place[float(v)] for v in values[p]]
         else:
             ax.bar(i, np.exp(mean) - 1, bottom=1, color=COLORS[p], width=0.72, zorder=1)
@@ -414,9 +453,10 @@ def model_bar_figure(pooled: pd.DataFrame, tests: pd.DataFrame, metric: str = "m
         ax.set_ylabel({"mse": "Prediction error\n(squared error, θ)", "delta": "Δ prediction error vs\nsaturated-item prediction",
                        "score": "Prediction score (%)"}[metric])
         if metric == "score":
-            ax.set_ylim(-100, 100)
-            ax.set_yticks([-100, -50, 0, 50, 100])
-            ax.spines["left"].set_bounds(-100, 100)
+            lo, hi = score_axis(raw)
+            ax.set_ylim(lo, hi)
+            ax.set_yticks(np.arange(lo, hi + 1, 1))
+            ax.spines["left"].set_bounds(lo, hi)
     else:
         ax.axhline(1, color="grey", lw=0.8, ls="--", zorder=0)
         ax.set_yscale("log")
@@ -457,32 +497,38 @@ def model_violin_figure(pooled: pd.DataFrame, tests: pd.DataFrame) -> plt.Figure
     return fig
 
 
-def model_box_figure(pooled: pd.DataFrame, tests: pd.DataFrame) -> plt.Figure:
-    """Prediction score per protocol as a mean-and-interval box: a large filled circle at the
-    mean over models, a translucent box spanning the 95% t-interval of the mean (the interval
-    dual to model_tests' one-sample t-test of the scores against 0), the per-model
+def model_box_figure(scores: pd.DataFrame, tests: pd.DataFrame, statistic: str = "mean") -> plt.Figure:
+    """Prediction score per protocol as a centre-and-interval box. statistic "mean": a large
+    filled circle at the mean over models, a translucent box spanning the 95% t-interval of the
+    mean (dual to model_tests' t-test); "median": circle at the median, box the Hodges-Lehmann
+    95% interval (dual to model_tests' Wilcoxon test; pass tests made with test="wilcoxon"). The per-model
     points in the protocol's colour (translucent, jittered); line at 0, stars and axis (-50 to
-    100, lower points clipped to -50) as model_violin_figure. The mean and interval use the
-    unclipped scores."""
-    protocols = [p for p in PAPER_PROTOCOLS if pooled[p].notna().any()]
-    values = {p: score(pooled[p].dropna(), pooled.loc[pooled[p].notna(), BASELINE]) for p in protocols}
+    100, points beyond it drawn on its edges) as model_violin_figure. The centre and interval
+    use the unclipped scores."""
+    protocols = [p for p in PAPER_PROTOCOLS if scores[p].notna().any()]
+    values = {p: scores[p].dropna() for p in protocols}
     rng = np.random.default_rng(0)
+    bottom, top = score_axis(np.concatenate([v.to_numpy() for v in values.values()]))
     fig, ax = plt.subplots(figsize=(2.7, 2.4), layout="constrained")
     for i, p in enumerate(protocols):
         v = values[p].to_numpy()
-        mean, half = float(v.mean()), ci95(v)
-        ax.add_patch(plt.Rectangle((i - 0.3, mean - half), 0.6, 2 * half, facecolor=COLORS[p], edgecolor="none", alpha=0.35, zorder=1))
-        ax.scatter(i + rng.uniform(-0.15, 0.15, len(v)), np.clip(v, -50, None), s=7, color=COLORS[p], alpha=0.5, linewidth=0, zorder=3, clip_on=False)
-        ax.scatter([i], [mean], s=28, color=COLORS[p], linewidth=0, zorder=5)
+        if statistic == "mean":
+            centre, half = float(v.mean()), ci95(v)
+            lo, hi = centre - half, centre + half
+        else:
+            centre, (lo, hi) = float(np.median(v)), hodges_lehmann_interval(v)
+        ax.add_patch(plt.Rectangle((i - 0.3, lo), 0.6, hi - lo, facecolor=COLORS[p], edgecolor="none", alpha=0.35, zorder=1))
+        ax.scatter(i + rng.uniform(-0.15, 0.15, len(v)), v, s=7, color=COLORS[p], alpha=0.5, linewidth=0, zorder=3)
+        ax.scatter([i], [centre], s=28, color=COLORS[p], linewidth=0, zorder=5)
         star = stars(float(tests.set_index("protocol").loc[p, "p"]))
         if star:
-            ax.text(i, 100, star, ha="center", va="bottom", fontsize=7, zorder=10)
+            ax.text(i, top, star, ha="center", va="bottom", fontsize=7, zorder=10)
     ax.axhline(0, color="grey", lw=0.8, ls="--", zorder=0)
     ax.set_xlim(-0.6, len(protocols) - 0.4)
-    ax.set_ylim(-50, 100)
-    ax.set_yticks([-50, 0, 50, 100])
-    ax.spines["left"].set_bounds(-50, 100)
-    ax.set_ylabel("Prediction score (%)")
+    ax.set_ylim(bottom, top)
+    ax.set_yticks(np.arange(bottom, top + 1, 1))
+    ax.spines["left"].set_bounds(bottom, top)
+    ax.set_ylabel("Prediction score\n(halvings of error)")
     ax.set_xticks(range(len(protocols)), [LABELS[p] for p in protocols])
     ax.tick_params(axis="x", rotation=90)
     fix_axes_height(fig, ax)
@@ -515,9 +561,10 @@ def contrast_figure(table: pd.DataFrame, scale: str = "ratio") -> plt.Figure:
     """One row per protocol: the pooled contrast of `against` to it (black, filled, thick
     interval) and the four per-domain contrasts (domain colours, open, thin). scale "ratio":
     error ratio, log x, line at 1, below 1 = `against` has the smaller error. scale "score":
-    100 * (1 - ratio), linear x, line at 0, above 0 = `against` has the smaller error."""
+    -log2(ratio), halvings of the error as `score`, linear x, line at 0, above 0 = `against` has
+    the smaller error."""
     assert scale in ("ratio", "score"), scale
-    tf = (lambda x: 100 * (1 - x)) if scale == "score" else (lambda x: x)
+    tf = (lambda x: -np.log2(x)) if scale == "score" else (lambda x: x)
     protocols = [p for p in PAPER_PROTOCOLS if (table.protocol == p).any()]
     fig, ax = plt.subplots(figsize=(2.6, 0.35 * len(protocols) + 0.9), layout="constrained")
     for i, p in enumerate(protocols):
@@ -532,13 +579,10 @@ def contrast_figure(table: pd.DataFrame, scale: str = "ratio") -> plt.Figure:
     ax.axvline(tf(1), ls="--", lw=0.8, color="grey", zorder=0)
     if scale == "ratio":
         ax.set_xscale("log")
-    else:
-        ax.set_xlim(-200, 100)
-        ax.set_xticks([-200, -100, 0, 100])
     ax.set_yticks(range(len(protocols)), [LABELS[p] for p in protocols])
     ax.set_ylim(len(protocols) - 0.4, -0.7)
     against = table.against.iloc[0]
-    ax.set_xlabel(f"Error ratio, {LABELS[against]} vs protocol" if scale == "ratio" else f"Error reduction (%), {LABELS[against]} vs protocol")
+    ax.set_xlabel(f"Error ratio, {LABELS[against]} vs protocol" if scale == "ratio" else f"Halvings of error, {LABELS[against]} vs protocol")
     handles = [plt.Line2D([], [], color="black", marker="o", ms=3.5, lw=1.0, label="Pooled")] + \
               [plt.Line2D([], [], color=DOMAIN_COLORS[d], marker="o", mfc="white", ms=2.5, lw=0.6, label=DOMAIN_LABELS[d]) for d in DOMAINS]
     fig.legend(handles=handles, loc="outside upper center", ncol=3, frameon=False, handlelength=1.5)
