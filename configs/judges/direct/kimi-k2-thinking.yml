@@ -1,0 +1,6 @@
+# Direct (absolute) rating, reasoning visible: one 1-10 rating per correct train transcript, the repo default
+# prompt (assets/system_prompt/direct.txt, the same text coding's 2026-09-14 direct run used). A transcript
+# too long for the judge's context is left unrated (fail_on_error off) instead of failing the task.
+name: kimi-k2-thinking
+judge: configs/models/moonshotai/kimi-k2-thinking.yml
+_kwargs: {fail_on_error: false}

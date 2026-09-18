@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, "scripts/analyses")
-from palette import MATCHUP, PROTOCOL  # noqa: E402
+from palette import PROTOCOL  # noqa: E402
 from plots import INK2, MUTED, save, style  # noqa: E402
 
 import matplotlib.pyplot as plt  # noqa: E402
@@ -26,12 +26,10 @@ OUT = Path("analysis/frontier/prediction_scores")
 BASE = "mean_ref"
 # protocol file stem -> (label, colour, marker); order = legend order
 SHOW = {
-    "judge_kimi-k2-thinking": ("Matchup BT", PROTOCOL["LLM Matchup"], "o"),
-    "judgecal_kimi-k2-thinking": ("Matchup calibrated", MATCHUP["Mixed"], "s"),
-    "judgelin_kimi-k2-thinking": ("Matchup linear", MATCHUP["Ref pairs"], "D"),
-    "ridge": ("Ridge features", PROTOCOL["Length+regex"], "^"),
-    "chars": ("Length", PROTOCOL["Length"], "v"),
-    "mean_frontier": ("Top-3 ref. mean", MUTED, "x"),
+    "judgelin_kimi-k2-thinking": ("Pairwise judge", PROTOCOL["LLM Matchup"], "o"),
+    "direct_judge_kimi-k2-thinking": ("Absolute judge", PROTOCOL["LLM Rater"], "s"),
+    "embedding": ("Embeddings", PROTOCOL["Embedding"], "D"),
+    "ridge": ("Deterministic features", PROTOCOL["Length+regex"], "^"),
 }
 SHORT = {"claude-fable-5": "Fable 5", "gpt-5.6-sol": "GPT-5.6 Sol", "claude-opus-4.8": "Opus 4.8",
          "union-alpha": "Union Alpha", "claude-opus-4.7": "Opus 4.7", "gemini-3.5-flash": "Gemini 3.5 Flash"}
@@ -56,19 +54,18 @@ def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     table.round(4).to_csv(OUT.with_suffix(".csv"), index=False)
     order = table.drop_duplicates("model").sort_values("theta", ascending=False).model.tolist()
-    labels = [SHORT.get(m, m) for m in order] + ["Mean"]
+    labels = [SHORT.get(m, m) for m in order]
     x = np.arange(len(labels))
     n = len(SHOW)
-    dodge = np.linspace(-0.3, 0.3, n)
+    dodge = np.linspace(-0.24, 0.24, n)
 
-    fig, ax = plt.subplots(figsize=(2.1, 2.3), layout="constrained")
+    fig, ax = plt.subplots(figsize=(1.9, 2.2), layout="constrained")
     ax.axhline(0, color=MUTED, lw=0.8, ls="--", zorder=1)
     for k, (stem, (label, color, marker)) in enumerate(SHOW.items()):
-        t = table[table.protocol == label].set_index("model").loc[order]
-        ys = list(t.score) + [t.score.mean()]
-        ax.plot(x + dodge[k], ys, marker, color=color, ms=3, mec=color, mew=0.8, ls="", label=label, zorder=3,
-                mfc=color if marker != "x" else color)
-    ax.axvline(len(order) - 0.5, color=MUTED, lw=0.6, ls=":", zorder=1)
+        t = table[table.protocol == label].set_index("model").reindex(order)  # NaN where a protocol lacks the target
+        ax.plot(x + dodge[k], t.score, marker, color=color, ms=3, mec=color, mew=0.8, ls="", label=label, zorder=3)
+        if t.score.isna().any():
+            print(f"{label}: no forecast for {t.index[t.score.isna()].tolist()}")
     style(ax)
     for sp in ("left", "bottom"):
         ax.spines[sp].set_position(("outward", 5))
@@ -86,6 +83,7 @@ def main() -> int:
     save(fig, str(OUT))
     print(table.pivot(index="model", columns="protocol", values="score").loc[order].round(2).to_string())
     print("\nmean over targets:", table.groupby("protocol").score.mean().round(2).sort_values(ascending=False).to_dict())
+    print("mse over targets:", table.groupby("protocol").e.mean().round(3).to_dict())
     print("wrote", OUT.with_suffix(".png"))
     return 0
 
