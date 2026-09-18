@@ -123,6 +123,8 @@ role blanked, `responses.csv` extended. `configs/domain/coding_frontier.yml` lis
 | gpt-5.6-sol | 120 / 86 | 2.33 ± 0.15 |
 | claude-opus-4.8 | 122 / 87 | 2.29 ± 0.16 |
 | union-alpha | 108 / 74 | 2.19 ± 0.16 |
+| claude-opus-4.7 (`--extra`, full-bench logs, coding's responses) | — / 87 | 2.11 ± 0.12 |
+| gemini-3.5-flash (`--extra`) | — / 87 | 1.77 ± 0.12 |
 
 ```bash
 PYTHONPATH=src .venv/bin/python src/challenges/frontier/integrate.py --write      # rebuild the derived meta
@@ -134,3 +136,42 @@ Smoke (n = 4 targets, MSE in θ units): chars 7.14, mean_ref 5.39, mean_frontier
 below the frontier, which is the point of the exercise. Judge runs land under `logs/judge/coding_frontier/2026-I/`;
 they pair the 4 targets against the 8 references on the train items each target answered correctly (no
 agent_bench_os for them). Always pass `--semester 2026-I`: the 2025-II columns are coding's, unchanged.
+
+## Judging (prepared 2026-09-18)
+
+`judge.sh` judges the targets one at a time, in the given order, with one judge config (the others go into
+`exclude_models`, not part of the condition hash, so all passes share one run dir). Use the **reasoning-hidden**
+kimi config `configs/judges/hidden/kimi-k2-thinking.yml` (condition 9c1d3abb: reasoning not shown, full train set,
+no truncation): the frontier transcripts carry summaries or no reasoning, so the reasoning-on condition would pair
+none of them, and coding's 2026-I run under 9c1d3abb already holds the 28 reference-reference pairs, which inspect's
+generate cache re-serves for free. gpt-5.5 / 5.4 / 5.3 are skipped: their only coding transcripts are the Epoch
+SWE-bench import (a different scaffold, outside the fit).
+
+2026-09-18: `stealth/union-alpha` was de-stealthed mid-day (it was Unbiased's Pareto, `unbiased/pareto`, $2.5/$7.5 per
+M); the slug now 404s. A judge run started with it errored on every sample (fail_on_error off) and was discarded; the
+kimi run started by mistake before it was discarded too. `configs/judges/hidden/union-alpha.yml` is therefore dead.
+
+```bash
+setsid -f bash -c 'src/challenges/frontier/judge.sh configs/judges/hidden/kimi-k2-thinking.yml \
+  claude-fable-5 gpt-5.6-sol claude-opus-4.8 gemini-3.5-flash claude-opus-4.7 union-alpha > artifacts/frontier/judge.log 2>&1'
+```
+
+Check the OpenRouter key limit AND the account credit balance first (`/api/v1/auth/key`, `/api/v1/credits`): with
+`fail_on_error: false` an exhausted balance turns every verdict into a silent errored sample.
+
+### Results 2026-09-18 (kimi-k2-thinking, reasoning hidden, n = 6 targets, MSE in θ² against the local-fit θ*)
+
+| protocol | MSE |
+| --- | --- |
+| judge_kimi-k2-thinking (pinned BT) | **0.88** |
+| judgelin_kimi-k2-thinking | 0.94 |
+| judgecal_kimi-k2-thinking | 1.07 |
+| mean_frontier | 2.53 |
+| mean_ref | 4.81 |
+| chars | 6.34 |
+
+Per target (θ̂ pinned BT / θ*): opus-4.7 1.18 / 2.11, gemini-3.5-flash 1.54 / 1.77, fable-5 1.63 / 2.61, opus-4.8 0.97 / 2.28,
+gpt-5.6-sol 3.48 / 2.34, union-alpha 2.80 / 2.19. The judge underrates every Anthropic transcript by 1-1.3 θ and overrates
+gpt-5.6-sol and union-alpha; the within-group ordering is largely wrong (Spearman on 6 points is not worth quoting), the
+level is not — every length baseline sits 2-3 θ below the group. 177 logs, 5,886 verdicts, 0 errors, ~$32
+(`logs/judge/coding_frontier/2026-I/kimi-k2-thinking/9c1d3abb/`, pushed to LASR-G5/judging).
