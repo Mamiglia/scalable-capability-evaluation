@@ -36,7 +36,11 @@ SHOW = {
     "ridge": ("Deterministic features", PROTOCOL["Length+regex"]),
 }
 SHORT = {"claude-fable-5": "Fable 5", "gpt-5.6-sol": "GPT-5.6 Sol", "claude-opus-4.8": "Opus 4.8",
-         "claude-opus-4.7": "Opus 4.7", "gemini-3.5-flash": "Gemini 3.5 Flash"}  # union-alpha left out (user, 2026-09-19)
+         "claude-opus-4.7": "Opus 4.7", "gemini-3.5-flash": "Gemini 3.5 Flash",
+         # Epoch AI SWE-bench import: swe_bench_mini only, Epoch's scaffold (integrate.py EPOCH); "*" marks them
+         "gpt-5.5-pre-release_xhigh": "GPT-5.5*", "gpt-5.4-2026-03-05_high": "GPT-5.4*", "gpt-5.3-codex_high": "GPT-5.3 Codex*",
+         "gpt-5.2-2025-12-11_high": "GPT-5.2*", "gpt-5.1-2025-11-13_high": "GPT-5.1*", "gpt-5": "GPT-5"}
+# union-alpha left out (user, 2026-09-19)
 
 
 def existing_direct() -> pd.DataFrame:
@@ -81,9 +85,9 @@ def main() -> int:
     order = table.drop_duplicates("model").sort_values("theta", ascending=False).model.tolist()
     labels = [SHORT[m] for m in order] + ["Open models"]
     x = np.arange(len(labels))
-    dodge = np.linspace(-0.24, 0.24, len(SHOW))
+    dodge = np.linspace(-0.12, 0.12, len(SHOW))  # small: the user wants the points of a model close together
 
-    fig, ax = plt.subplots(figsize=(1.9, 2.1), layout="constrained")
+    fig, ax = plt.subplots(figsize=(1.2 + 0.17 * len(labels), 2.1), layout="constrained")
     ax.axhline(0, color=MUTED, lw=0.8, ls="--", zorder=1)
     for k, (stem, (label, color)) in enumerate(SHOW.items()):
         t = table[table.protocol == label].set_index("model").reindex(order)
@@ -97,8 +101,9 @@ def main() -> int:
     for sp in ("left", "bottom"):
         ax.spines[sp].set_position(("outward", 5))
     ax.set_xticks(x, labels, rotation=90, ha="center")
-    ax.set_ylim(-2, 8)
-    ax.set_yticks([-2, 0, 2, 4, 6, 8])
+    lo, hi = 4 * np.floor(table.score.min() / 4), 4 * np.ceil(table.score.max() / 4)  # sparse ticks, nothing clipped
+    ax.set_ylim(lo, hi)
+    ax.set_yticks(np.arange(lo, hi + 1, 4))
     ax.set_ylabel("Prediction score")
     leg = fig.legend(loc="outside lower center", ncol=2, frameon=False, columnspacing=0.8, handlelength=1.0,
                      handletextpad=0.4, labelspacing=0.3, fontsize=6.5)

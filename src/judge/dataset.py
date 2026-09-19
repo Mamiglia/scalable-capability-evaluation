@@ -144,14 +144,18 @@ def responses_to_sample(
         truncate: a TRUNCATE_MODES cut; thirds modes also add THIRDS_NOTE to the prompt.
     """
     assert first.id == second.id, "Sample IDs must match for comparison."
-    assert first.question == second.question, "Sample inputs must match for comparison."
+    # Same item under two scaffolds (the Epoch SWE-bench import omits our "Please solve..." line): one prompt is a
+    # suffix of the other. Show the longer one in both orders so the pair's two samples share a question.
+    question = max(first.question, second.question, key=len)
+    assert question.endswith(first.question) and question.endswith(second.question), \
+        "Sample inputs must match for comparison."
 
     text_1, text_2 = cut(first.text, max_len, truncate), cut(second.text, max_len, truncate)
 
     return Sample(
         id=f"{first.id}_{target}",
         input=format_str.format(
-            question=first.question,
+            question=question,
             options_1=format_options(first.options, 1),
             options_2=format_options(second.options, 2),
             transcript_1=text_1,

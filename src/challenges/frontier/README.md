@@ -219,3 +219,20 @@ the math kernel materialises the 8192² attention matrix and OOMs 24 GB), `EMBED
 the protocol reads: train items, reasoning-included text). Same model revision and 8192-token chunking as the cache;
 fp16 vs bf16 is the one numerical difference. These files are partial (train items only): local cache, **not** pushed to
 LASR-G5/transcript-embeddings; the patched script is left untracked so the `methodology` branch merges cleanly.
+
+### GPT-5.x added (2026-09-19)
+
+`integrate.py` now also makes targets of GPT-5.1 to 5.5 from the Epoch AI SWE-bench import (`EPOCH`: `swe_bench_mini/6d369262`,
+SWE-bench only, Epoch's scaffold, θ* from 23 HARD items, sd 0.25-0.32) and of our own-scaffold `gpt-5` (`--extra`). θ*: 5.4
+1.48, 5.3-codex 1.29, 5.5 1.19, 5.1 0.85, gpt-5 0.83, 5.2 0.75. Judged with the same kimi conditions (40 pairwise logs + direct
+ratings, ~$21; 12 samples of `django__django-12708` exceed the judge's context and stay unscored). Pairing imported logs
+needed two changes in `src/judge/`: a task-name alias (`swe_bench_verified` = `swe_bench_verified_mini`) and accepting a
+prompt that differs only by our "Please solve the following coding issue" prefix (the longer prompt is shown).
+
+Prediction scores (pairwise / absolute / embeddings / features): GPT-5.5* 4.03 / 0.85 / −2.85 / 2.80; GPT-5.4* 0.17 / 6.88 /
+−1.76 / 4.96; GPT-5.3 Codex* 1.84 / 1.91 / −2.46 / 6.86; GPT-5.2* 1.87 / −1.82 / −4.59 / 0.15; GPT-5.1* −0.69 / −1.35 /
+−4.15 / −1.54; GPT-5 3.07 / 0.60 / −3.58 / 14.32. These targets sit close to the references (baseline error small), so
+scores swing widely; 14.32 is a near-exact hit inflated by the log. Embeddings forecast θ ≈ 3.5 for every closed model
+and go strongly negative here; the pairwise judge is positive on 10 of 11 targets. The figure (`plot_scores.py`): colour
+only, no grid, Union Alpha omitted, right-hand group = the same protocols on the 8 open-weight 2026-I targets (mean, 95% CI
+over targets; absolute judge read from the existing coding run `logs/direct/coding/2026-I/kimi-k2-thinking/1a2c14b2`).

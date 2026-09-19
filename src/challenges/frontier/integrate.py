@@ -34,6 +34,11 @@ SOURCE = Path("data/meta/coding")
 OUT = Path("data/meta/coding_frontier")
 SEMESTER = "2026-I"
 SUBSETS = {"terminal_bench_2_1": "0af2ba2c", "swe_bench_mini": "2d1e487f"}
+# GPT-5.x from the Epoch AI SWE-bench import (collection_runs.md 2026-09-16): swe_bench_mini only, 46 of the 50 items
+# (23 of the 27 HARD), Epoch's bash scaffold rather than ours -- theta* rests on those 23 items and on item
+# parameters fitted under our scaffold. Partial by design (user, 2026-09-19).
+EPOCH = ("swe_bench_mini", "6d369262", ["gpt-5.1-2025-11-13_high", "gpt-5.2-2025-12-11_high", "gpt-5.3-codex_high",
+                                        "gpt-5.4-2026-03-05_high", "gpt-5.5-pre-release_xhigh"])
 
 
 def frontier_logs() -> dict[str, dict[str, Path]]:
@@ -44,6 +49,10 @@ def frontier_logs() -> dict[str, dict[str, Path]]:
             path = Path(p)
             if is_successful_eval(path):
                 found.setdefault(path.parts[3], {})[bench] = path
+    bench, h, models = EPOCH
+    for model in models:
+        (path,) = [Path(p) for p in glob.glob(f"data/{bench}/{h}/{model}/0/*.eval") if is_successful_eval(Path(p))]
+        found[model] = {bench: path}
     return found
 
 
@@ -62,7 +71,7 @@ def main() -> int:
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--warmup", type=int, default=1000)
     ap.add_argument("--samples", type=int, default=1000)
-    ap.add_argument("--extra", nargs="*", default=["claude-opus-4.7", "gemini-3.5-flash"],
+    ap.add_argument("--extra", nargs="*", default=["claude-opus-4.7", "gemini-3.5-flash", "gpt-5"],
                     help="unrostered coding models (full-bench logs) to add as targets too, theta* from coding's responses")
     args = ap.parse_args()
 
@@ -100,7 +109,7 @@ def main() -> int:
     out_responses = pd.concat([responses, new[["bench", "item", "model", "repeat", "correct"]]], ignore_index=True)
     settings = {**settings, "domain": "coding_frontier", "derived_from": "coding",
                 "derived_at": datetime.date.today().isoformat(),
-                "frontier_targets": sorted(logs), "extra_targets": extra, "frontier_hashes": SUBSETS,
+                "frontier_targets": sorted(logs), "extra_targets": extra, "epoch_import_targets": EPOCH[2], "frontier_hashes": SUBSETS,
                 "note": "coding's frozen tables + frontier models as extra 2026-I targets (theta* = local_fit on "
                         "their scored 2026-I HARD responses); original 2026-I targets' role blanked; unscored "
                         "(refused) samples excluded from responses.csv"}
