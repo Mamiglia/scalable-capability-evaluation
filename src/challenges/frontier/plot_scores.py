@@ -80,6 +80,55 @@ def scores(meta: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+OPEN_SHORT = {"nvidia-nemotron-3-ultra-550b-a55b-bf16": "Nemotron 3 Ultra", "gemma-4-31b-it": "Gemma 4 31B",
+              "qwen3.6-27b": "Qwen3.6 27B", "kimi-k2.5": "Kimi K2.5", "qwen3.5-397b-a17b": "Qwen3.5 397B",
+              "kimi-k2.6": "Kimi K2.6", "glm-5.2": "GLM-5.2", "glm-5.1": "GLM-5.1"}
+
+
+def spread(ys: np.ndarray, gap: float) -> np.ndarray:
+    """Label heights: the sorted values pushed apart to at least `gap`, centred on where they started."""
+    order = np.argsort(ys)
+    out = ys[order].astype(float).copy()
+    for i in range(1, len(out)):
+        out[i] = max(out[i], out[i - 1] + gap)
+    out += (ys[order].mean() - out.mean())
+    placed = np.empty_like(out)
+    placed[order] = out
+    return placed
+
+
+def pairwise_boxes(table: pd.DataFrame, reference: pd.DataFrame) -> None:
+    """Pairwise judge only: closed vs open models as two boxplots, every model a labelled dot."""
+    label, color = SHOW["judgelin_kimi-k2-thinking"]
+    names = {m: l for rows in VENDORS.values() for m, l in rows}
+    groups = [("Closed models", table[table.protocol == label].assign(name=lambda d: d.model.map(names))),
+              ("Open models", reference[reference.protocol == label].assign(name=lambda d: d.model.map(OPEN_SHORT)))]
+    lo = 2 * np.floor(min(g.score.min() for _, g in groups) / 2)
+    hi = 2 * np.ceil(max(g.score.max() for _, g in groups) / 2)
+    fig, ax = plt.subplots(figsize=(2.7, 2.3), layout="constrained")
+    ax.axhline(0, color=MUTED, lw=0.8, ls="--", zorder=1)
+    for x, (_, g) in enumerate(groups):
+        ax.boxplot(g.score, positions=[x], widths=0.22, showfliers=False, showcaps=False, patch_artist=True,
+                   boxprops=dict(facecolor="#ecebe6", edgecolor=MUTED, lw=0.8), medianprops=dict(color=INK2, lw=1),
+                   whiskerprops=dict(color=MUTED, lw=0.8), zorder=2)
+        ax.plot(np.full(len(g), x), g.score, "o", color=color, ms=2.8, mec="none", zorder=3)
+        for y, y_text, name in zip(g.score, spread(g.score.to_numpy(), 0.062 * (hi - lo)), g.name):
+            ax.plot([x + 0.03, x + 0.17, x + 0.2], [y, y_text, y_text], color="#c9c8c1", lw=0.5, zorder=2)
+            ax.text(x + 0.22, y_text, name, fontsize=5.5, color=INK2, va="center", ha="left", zorder=4,
+                    bbox=dict(facecolor="white", edgecolor="none", pad=0.4))  # keeps the zero line off the text
+    style(ax)
+    ax.grid(False)
+    for sp in ("left", "bottom"):
+        ax.spines[sp].set_position(("outward", 5))
+    ax.set_xticks(range(len(groups)), [name for name, _ in groups])
+    ax.set_xlim(-0.35, len(groups) - 0.1)
+    ax.set_ylim(lo, hi)
+    ax.set_yticks(np.arange(lo, hi + 1, 2))
+    ax.set_ylabel("Prediction score")
+    save(fig, str(OUT.with_name("pairwise_boxplot")))
+    print("wrote", OUT.with_name("pairwise_boxplot.png"))
+
+
 def main() -> int:
     table = scores(META)
     shown = [m for rows in VENDORS.values() for m, _ in rows]
@@ -88,17 +137,16 @@ def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     pd.concat([table.assign(group="frontier"), reference.assign(group="open")]).round(4).to_csv(OUT.with_suffix(".csv"), index=False)
 
-    # rows top to bottom: a grey header per vendor, its models, then the open-weight reference
+    # rows top to bottom: models in vendor order (a gap between vendors, no vendor names), then the open-weight reference
     rows, y = [], 0.0
-    for vendor, models in VENDORS.items():
-        rows.append((y, vendor, None)); y += 0.8
+    for models in VENDORS.values():
         for model, label in models:
             rows.append((y, label, model)); y += 1
         y += 0.5
-    rows.append((y, "Open-weight", None)); y += 0.8
-    rows.append((y, "Mean of 8 targets", "open"))
+    rows.append((y, "Open models (mean)", "open"))
+    lane = np.linspace(-0.27, 0.27, len(SHOW))  # one fixed lane per protocol inside a row, so dots never cover each other
 
-    fig, ax = plt.subplots(figsize=(2.5, 0.135 * len(rows) + 0.75), layout="constrained")
+    fig, ax = plt.subplots(figsize=(2.3, 0.175 * len(rows) + 0.75), layout="constrained")
     ax.axvline(0, color=MUTED, lw=0.8, ls="--", zorder=1)
     clip = lambda v: float(np.clip(v, *XLIM))
     for k, (stem, (label, color)) in enumerate(SHOW.items()):
@@ -109,27 +157,19 @@ def main() -> int:
             if model == "open":
                 r = reference[reference.protocol == label].score  # mean, t-based 95% CI over the open targets
                 half = stats.t.ppf(0.975, len(r) - 1) * r.std(ddof=1) / np.sqrt(len(r))
-                ax.errorbar(r.mean(), ypos, xerr=half, fmt="o", color=color, ms=3.2, mec="none", lw=1, capsize=0, zorder=3)
+                ax.errorbar(r.mean(), ypos + lane[k], xerr=half, fmt="o", color=color, ms=2.8, mec="none", lw=1, capsize=0, zorder=3)
                 continue
             v = t.get(model, np.nan)
             if np.isnan(v):
                 continue
             inside = XLIM[0] <= v <= XLIM[1]
-            ax.plot(clip(v), ypos, "o" if inside else (">" if v > 0 else "<"), color=color, ms=3.2 if inside else 3.6,
+            ax.plot(clip(v), ypos + lane[k], "o" if inside else (">" if v > 0 else "<"), color=color, ms=2.8 if inside else 3.2,
                     mec="none", zorder=3, clip_on=False, label=label if model == shown[0] else None)
-    for ypos, _, model in rows:  # faint connector: ties a row's four dots together now that there is no grid
-        if model and model != "open":
-            v = table[table.model == model].score.dropna()
-            ax.plot([clip(v.min()), clip(v.max())], [ypos, ypos], color="#d9d8d2", lw=0.8, zorder=2, solid_capstyle="round")
-
     style(ax)
     ax.grid(False)
     ax.spines["left"].set_visible(False)
     ax.spines["bottom"].set_position(("outward", 5))
     ax.set_yticks([r[0] for r in rows], [r[1] for r in rows])
-    for tick, (_, _, model) in zip(ax.get_yticklabels(), rows):
-        if model is None:  # vendor header
-            tick.set_color(MUTED); tick.set_fontsize(6.5); tick.set_fontstyle("italic")
     ax.tick_params(axis="y", length=0)
     ax.set_ylim(rows[-1][0] + 0.7, -0.6)
     ax.set_xlim(*XLIM)
@@ -140,6 +180,7 @@ def main() -> int:
     for t in leg.get_texts():
         t.set_color(INK2)
     save(fig, str(OUT))
+    pairwise_boxes(table, reference)
     print(table.pivot(index="model", columns="protocol", values="score").loc[shown].round(2).to_string())
     print("wrote", OUT.with_suffix(".png"))
     return 0
