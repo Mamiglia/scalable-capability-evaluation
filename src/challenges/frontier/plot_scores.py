@@ -35,12 +35,16 @@ SHOW = {
     "embedding": ("Embeddings", PROTOCOL["Embedding"]),
     "ridge": ("Deterministic features", PROTOCOL["Length+regex"]),
 }
-SHORT = {"claude-fable-5": "Fable 5", "gpt-5.6-sol": "GPT-5.6 Sol", "claude-opus-4.8": "Opus 4.8",
-         "claude-opus-4.7": "Opus 4.7", "gemini-3.5-flash": "Gemini 3.5 Flash",
-         # Epoch AI SWE-bench import: swe_bench_mini only, Epoch's scaffold (integrate.py EPOCH); "*" marks them
-         "gpt-5.5-pre-release_xhigh": "GPT-5.5*", "gpt-5.4-2026-03-05_high": "GPT-5.4*", "gpt-5.3-codex_high": "GPT-5.3 Codex*",
-         "gpt-5.2-2025-12-11_high": "GPT-5.2*", "gpt-5.1-2025-11-13_high": "GPT-5.1*", "gpt-5": "GPT-5"}
-# union-alpha left out (user, 2026-09-19)
+# vendor -> [(data-dir name, label)], newest first. "*" = Epoch AI SWE-bench import: swe_bench_mini only, Epoch's scaffold
+# (integrate.py EPOCH). union-alpha left out (user, 2026-09-19).
+VENDORS = {
+    "Anthropic": [("claude-fable-5", "Fable 5"), ("claude-opus-4.8", "Opus 4.8"), ("claude-opus-4.7", "Opus 4.7")],
+    "OpenAI": [("gpt-5.6-sol", "GPT-5.6 Sol"), ("gpt-5.5-pre-release_xhigh", "GPT-5.5*"), ("gpt-5.4-2026-03-05_high", "GPT-5.4*"),
+               ("gpt-5.3-codex_high", "GPT-5.3 Codex*"), ("gpt-5.2-2025-12-11_high", "GPT-5.2*"),
+               ("gpt-5.1-2025-11-13_high", "GPT-5.1*"), ("gpt-5", "GPT-5")],
+    "Google": [("gemini-3.5-flash", "Gemini 3.5 Flash")],
+}
+XLIM = (-8, 8)  # scores beyond are drawn as a caret at the edge (a near-exact hit sends -log2 to +14)
 
 
 def existing_direct() -> pd.DataFrame:
@@ -78,41 +82,65 @@ def scores(meta: Path) -> pd.DataFrame:
 
 def main() -> int:
     table = scores(META)
-    table = table[table.model.isin(SHORT)]
+    shown = [m for rows in VENDORS.values() for m, _ in rows]
+    table = table[table.model.isin(shown)]
     reference = scores(OPEN)  # 8 open-weight 2026-I targets
     OUT.parent.mkdir(parents=True, exist_ok=True)
     pd.concat([table.assign(group="frontier"), reference.assign(group="open")]).round(4).to_csv(OUT.with_suffix(".csv"), index=False)
-    order = table.drop_duplicates("model").sort_values("theta", ascending=False).model.tolist()
-    labels = [SHORT[m] for m in order] + ["Open models"]
-    x = np.arange(len(labels))
-    dodge = np.linspace(-0.12, 0.12, len(SHOW))  # small: the user wants the points of a model close together
 
-    fig, ax = plt.subplots(figsize=(1.2 + 0.17 * len(labels), 2.1), layout="constrained")
-    ax.axhline(0, color=MUTED, lw=0.8, ls="--", zorder=1)
+    # rows top to bottom: a grey header per vendor, its models, then the open-weight reference
+    rows, y = [], 0.0
+    for vendor, models in VENDORS.items():
+        rows.append((y, vendor, None)); y += 0.8
+        for model, label in models:
+            rows.append((y, label, model)); y += 1
+        y += 0.5
+    rows.append((y, "Open-weight", None)); y += 0.8
+    rows.append((y, "Mean of 8 targets", "open"))
+
+    fig, ax = plt.subplots(figsize=(2.5, 0.135 * len(rows) + 0.75), layout="constrained")
+    ax.axvline(0, color=MUTED, lw=0.8, ls="--", zorder=1)
+    clip = lambda v: float(np.clip(v, *XLIM))
     for k, (stem, (label, color)) in enumerate(SHOW.items()):
-        t = table[table.protocol == label].set_index("model").reindex(order)
-        ax.plot(x[:-1] + dodge[k], t.score, "o", color=color, ms=3.2, mec="none", ls="", label=label, zorder=3)
-        r = reference[reference.protocol == label].score  # mean and t-based 95% CI over the open targets
-        half = stats.t.ppf(0.975, len(r) - 1) * r.std(ddof=1) / np.sqrt(len(r))
-        ax.errorbar(x[-1] + dodge[k], r.mean(), yerr=half, fmt="o", color=color, ms=3.2, mec="none", lw=1, capsize=0, zorder=3)
-    ax.axvline(len(order) - 0.5, color=MUTED, lw=0.6, ls=":", zorder=1)
+        t = table[table.protocol == label].set_index("model").score
+        for ypos, _, model in rows:
+            if model is None:
+                continue
+            if model == "open":
+                r = reference[reference.protocol == label].score  # mean, t-based 95% CI over the open targets
+                half = stats.t.ppf(0.975, len(r) - 1) * r.std(ddof=1) / np.sqrt(len(r))
+                ax.errorbar(r.mean(), ypos, xerr=half, fmt="o", color=color, ms=3.2, mec="none", lw=1, capsize=0, zorder=3)
+                continue
+            v = t.get(model, np.nan)
+            if np.isnan(v):
+                continue
+            inside = XLIM[0] <= v <= XLIM[1]
+            ax.plot(clip(v), ypos, "o" if inside else (">" if v > 0 else "<"), color=color, ms=3.2 if inside else 3.6,
+                    mec="none", zorder=3, clip_on=False, label=label if model == shown[0] else None)
+    for ypos, _, model in rows:  # faint connector: ties a row's four dots together now that there is no grid
+        if model and model != "open":
+            v = table[table.model == model].score.dropna()
+            ax.plot([clip(v.min()), clip(v.max())], [ypos, ypos], color="#d9d8d2", lw=0.8, zorder=2, solid_capstyle="round")
+
     style(ax)
     ax.grid(False)
-    for sp in ("left", "bottom"):
-        ax.spines[sp].set_position(("outward", 5))
-    ax.set_xticks(x, labels, rotation=90, ha="center")
-    lo, hi = 4 * np.floor(table.score.min() / 4), 4 * np.ceil(table.score.max() / 4)  # sparse ticks, nothing clipped
-    ax.set_ylim(lo, hi)
-    ax.set_yticks(np.arange(lo, hi + 1, 4))
-    ax.set_ylabel("Prediction score")
+    ax.spines["left"].set_visible(False)
+    ax.spines["bottom"].set_position(("outward", 5))
+    ax.set_yticks([r[0] for r in rows], [r[1] for r in rows])
+    for tick, (_, _, model) in zip(ax.get_yticklabels(), rows):
+        if model is None:  # vendor header
+            tick.set_color(MUTED); tick.set_fontsize(6.5); tick.set_fontstyle("italic")
+    ax.tick_params(axis="y", length=0)
+    ax.set_ylim(rows[-1][0] + 0.7, -0.6)
+    ax.set_xlim(*XLIM)
+    ax.set_xticks([-8, -4, 0, 4, 8])
+    ax.set_xlabel("Prediction score")
     leg = fig.legend(loc="outside lower center", ncol=2, frameon=False, columnspacing=0.8, handlelength=1.0,
                      handletextpad=0.4, labelspacing=0.3, fontsize=6.5)
     for t in leg.get_texts():
         t.set_color(INK2)
     save(fig, str(OUT))
-    print(table.pivot(index="model", columns="protocol", values="score").loc[order].round(2).to_string())
-    print("\nfrontier mean:", table.groupby("protocol").score.mean().round(2).to_dict())
-    print(f"open models (n={reference.model.nunique()}) mean:", reference.groupby("protocol").score.mean().round(2).to_dict())
+    print(table.pivot(index="model", columns="protocol", values="score").loc[shown].round(2).to_string())
     print("wrote", OUT.with_suffix(".png"))
     return 0
 
