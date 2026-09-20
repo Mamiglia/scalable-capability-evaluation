@@ -85,53 +85,51 @@ OPEN_SHORT = {"nvidia-nemotron-3-ultra-550b-a55b-bf16": "Nemotron 3 Ultra", "gem
               "kimi-k2.6": "Kimi K2.6", "glm-5.2": "GLM-5.2", "glm-5.1": "GLM-5.1"}
 
 
-def spread(ys: np.ndarray, gap: float) -> np.ndarray:
-    """Label heights: the sorted values pushed apart to at least `gap`, centred on where they started."""
-    order = np.argsort(ys)
-    out = ys[order].astype(float).copy()
-    for i in range(1, len(out)):
-        out[i] = max(out[i], out[i - 1] + gap)
-    out += (ys[order].mean() - out.mean())
-    placed = np.empty_like(out)
-    placed[order] = out
-    return placed
-
-
 def pairwise_boxes(table: pd.DataFrame, reference: pd.DataFrame) -> None:
-    """Pairwise judge only: closed vs open models as two boxplots, every model a labelled dot."""
+    """Pairwise judge only: closed vs open models as two horizontal boxplots; every model a dot on the box's line,
+    named right above it (names stack upward where scores are close, a thin tick joins name and dot)."""
     label, color = SHOW["judgelin_kimi-k2-thinking"]
     names = {m: l for rows in VENDORS.values() for m, l in rows}
-    groups = [("Closed models", table[table.protocol == label].assign(name=lambda d: d.model.map(names))),
-              ("Open models", reference[reference.protocol == label].assign(name=lambda d: d.model.map(OPEN_SHORT)))]
+    groups = [("Open models", reference[reference.protocol == label].assign(name=lambda d: d.model.map(OPEN_SHORT))),
+              ("Closed models", table[table.protocol == label].assign(name=lambda d: d.model.map(names)))]
     lo = 2 * np.floor(min(g.score.min() for _, g in groups) / 2)
     hi = 2 * np.ceil(max(g.score.max() for _, g in groups) / 2)
-    xs = [0.0, 2.6]
-    fig, ax = plt.subplots(figsize=(3.0, 2.2), layout="constrained")
-    ax.axhline(0, color=MUTED, lw=0.6, ls="--", zorder=1)
-    for x, (_, g) in zip(xs, groups):
-        ax.boxplot(g.score, positions=[x], widths=0.28, showfliers=False, showcaps=False,
+    rows = [0.0, 1.9]  # y of each group's box line; the name stack sits above it
+    step, base = 0.27, 0.3
+    fig, ax = plt.subplots(figsize=(3.3, 2.0))
+    fig.subplots_adjust(left=0.21, right=0.99, top=0.99, bottom=0.2)
+    fig.set_layout_engine("none")  # freeze the axes geometry: name widths are measured in it, and save() must not re-layout
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(-0.45, rows[-1] + base + 3 * step + 0.2)
+    fig.canvas.draw()
+    to_data = ax.transData.inverted()
+    ax.axvline(0, color=MUTED, lw=0.6, ls="--", zorder=1)
+    for y0, (_, g) in zip(rows, groups):
+        ax.boxplot(g.score, positions=[y0], vert=False, widths=0.32, showfliers=False, showcaps=False,
                    boxprops=dict(color=MUTED, lw=0.7), medianprops=dict(color=INK2, lw=1),
                    whiskerprops=dict(color=MUTED, lw=0.7), zorder=2)
-        ax.plot(np.full(len(g), x), g.score, "o", color=color, ms=2.8, mec="none", zorder=3)
-        # labels alternate right / left of the box by rank, each side spread just enough not to collide
-        g = g.sort_values("score", ascending=False).reset_index(drop=True)
-        for side, sign in ((0, 1), (1, -1)):
-            part = g.iloc[side::2]
-            for y, y_text, name in zip(part.score, spread(part.score.to_numpy(), 0.075 * (hi - lo)), part.name):
-                if abs(y_text - y) > 0.12:
-                    ax.plot([x + sign * 0.17, x + sign * 0.22], [y, y_text], color="#cfceC7", lw=0.5, zorder=2)
-                ax.text(x + sign * 0.24, y_text, name, fontsize=5.5, color=INK2, va="center",
-                        ha="left" if sign > 0 else "right", zorder=4, bbox=dict(facecolor="white", edgecolor="none", pad=0.15))
+        ax.plot(g.score, np.full(len(g), y0), "o", color=color, ms=2.8, mec="none", zorder=3)
+        right = []  # per stack level: right edge (data x) of the last name placed
+        for x, name in sorted(zip(g.score, g.name)):
+            t = ax.text(x, 0, name, fontsize=5.5, color=INK2, ha="center", va="bottom", zorder=4)
+            bb = t.get_window_extent(fig.canvas.get_renderer()).transformed(to_data)
+            half = (bb.x1 - bb.x0) / 2 + 0.1
+            level = next((k for k, r in enumerate(right) if x - half > r), len(right))
+            if level == len(right):
+                right.append(x + half)
+            else:
+                right[level] = x + half
+            y = y0 + base + level * step
+            t.set_position((x, y))
+            ax.plot([x, x], [y0 + 0.07, y - 0.03], color="#cfceC7", lw=0.5, zorder=2)
     style(ax)
     ax.grid(False)
-    for sp in ("left", "bottom"):
-        ax.spines[sp].set_position(("outward", 5))
-    ax.set_xticks(xs, [name for name, _ in groups])
-    ax.tick_params(axis="x", length=0)
-    ax.set_xlim(xs[0] - 1.15, xs[1] + 0.95)
-    ax.set_ylim(lo, hi)
-    ax.set_yticks(np.arange(lo, hi + 1, 2))
-    ax.set_ylabel("Prediction score")
+    ax.spines["left"].set_visible(False)
+    ax.spines["bottom"].set_position(("outward", 5))
+    ax.set_yticks(rows, [name for name, _ in groups])
+    ax.tick_params(axis="y", length=0)
+    ax.set_xticks(np.arange(lo, hi + 1, 2))
+    ax.set_xlabel("Prediction score")
     save(fig, str(OUT.with_name("pairwise_boxplot")))
     print("wrote", OUT.with_name("pairwise_boxplot.png"))
 
