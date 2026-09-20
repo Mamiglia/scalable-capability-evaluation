@@ -105,23 +105,30 @@ def pairwise_boxes(table: pd.DataFrame, reference: pd.DataFrame) -> None:
               ("Open models", reference[reference.protocol == label].assign(name=lambda d: d.model.map(OPEN_SHORT)))]
     lo = 2 * np.floor(min(g.score.min() for _, g in groups) / 2)
     hi = 2 * np.ceil(max(g.score.max() for _, g in groups) / 2)
-    fig, ax = plt.subplots(figsize=(2.7, 2.3), layout="constrained")
-    ax.axhline(0, color=MUTED, lw=0.8, ls="--", zorder=1)
-    for x, (_, g) in enumerate(groups):
-        ax.boxplot(g.score, positions=[x], widths=0.22, showfliers=False, showcaps=False, patch_artist=True,
-                   boxprops=dict(facecolor="#ecebe6", edgecolor=MUTED, lw=0.8), medianprops=dict(color=INK2, lw=1),
-                   whiskerprops=dict(color=MUTED, lw=0.8), zorder=2)
+    xs = [0.0, 2.6]
+    fig, ax = plt.subplots(figsize=(3.0, 2.2), layout="constrained")
+    ax.axhline(0, color=MUTED, lw=0.6, ls="--", zorder=1)
+    for x, (_, g) in zip(xs, groups):
+        ax.boxplot(g.score, positions=[x], widths=0.28, showfliers=False, showcaps=False,
+                   boxprops=dict(color=MUTED, lw=0.7), medianprops=dict(color=INK2, lw=1),
+                   whiskerprops=dict(color=MUTED, lw=0.7), zorder=2)
         ax.plot(np.full(len(g), x), g.score, "o", color=color, ms=2.8, mec="none", zorder=3)
-        for y, y_text, name in zip(g.score, spread(g.score.to_numpy(), 0.062 * (hi - lo)), g.name):
-            ax.plot([x + 0.03, x + 0.17, x + 0.2], [y, y_text, y_text], color="#c9c8c1", lw=0.5, zorder=2)
-            ax.text(x + 0.22, y_text, name, fontsize=5.5, color=INK2, va="center", ha="left", zorder=4,
-                    bbox=dict(facecolor="white", edgecolor="none", pad=0.4))  # keeps the zero line off the text
+        # labels alternate right / left of the box by rank, each side spread just enough not to collide
+        g = g.sort_values("score", ascending=False).reset_index(drop=True)
+        for side, sign in ((0, 1), (1, -1)):
+            part = g.iloc[side::2]
+            for y, y_text, name in zip(part.score, spread(part.score.to_numpy(), 0.075 * (hi - lo)), part.name):
+                if abs(y_text - y) > 0.12:
+                    ax.plot([x + sign * 0.17, x + sign * 0.22], [y, y_text], color="#cfceC7", lw=0.5, zorder=2)
+                ax.text(x + sign * 0.24, y_text, name, fontsize=5.5, color=INK2, va="center",
+                        ha="left" if sign > 0 else "right", zorder=4, bbox=dict(facecolor="white", edgecolor="none", pad=0.15))
     style(ax)
     ax.grid(False)
     for sp in ("left", "bottom"):
         ax.spines[sp].set_position(("outward", 5))
-    ax.set_xticks(range(len(groups)), [name for name, _ in groups])
-    ax.set_xlim(-0.35, len(groups) - 0.1)
+    ax.set_xticks(xs, [name for name, _ in groups])
+    ax.tick_params(axis="x", length=0)
+    ax.set_xlim(xs[0] - 1.15, xs[1] + 0.95)
     ax.set_ylim(lo, hi)
     ax.set_yticks(np.arange(lo, hi + 1, 2))
     ax.set_ylabel("Prediction score")
