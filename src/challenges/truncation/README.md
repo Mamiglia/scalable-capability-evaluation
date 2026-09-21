@@ -28,7 +28,7 @@ cyber and coding baselines. `artifacts/.../superseded-char-limits/` keeps an ear
 
 ## Baselines
 
-- cyber: `artifacts/direct-judging-cyber/` (`LASR-G5/benchmarks@29a4ee20`), 102583f8 logs.
+- cyber: `artifacts/direct-judging-cyber/` (`generality-labs/benchmarks@29a4ee20`), 102583f8 logs.
 - coding: the published latest refit = SWE-bench mini / Terminal-Bench 2.1 campaign
   (`artifacts/direct-judging-coding/`, staged at `e3d86809`, filtered to the latest train set) plus
   the AgentBench OS add-on (`artifacts/direct-judging-coding-agentbench/`, `c199498b`), calibrated on

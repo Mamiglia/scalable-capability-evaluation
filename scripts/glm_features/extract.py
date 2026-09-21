@@ -2,7 +2,7 @@
 
     uv run python scripts/glm_features/extract.py [bench ...] [--data data] [--out glm_features]
 
-glm_features/ is a clone of https://huggingface.co/datasets/LASR-G5/glm_features and mirrors
+glm_features/ is a clone of https://huggingface.co/datasets/generality-labs/glm_features and mirrors
 data/'s layout: <bench>/<task_args_hash>/<model>/<repeat>/<eval id>.csv, one row per sample
 and reasoning view (visible: text + raw CoT; hidden: text only). Values are per-transcript
 rates; averaging over a model's selected items happens at fit time. Only successful full-run

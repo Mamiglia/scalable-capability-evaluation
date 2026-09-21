@@ -5,8 +5,8 @@
 Judge = the top reference of each semester (data/meta/<domain>/fit.yml `top[0]`), subjects' reasoning shown.
 Pairwise: JudgeLinear on logs/judge/<domain>/<sem>/<judge>/{24d6cc32,66c170cd,7ea04f2b} (first that exists; 2024
 semesters have no reasoning models, so the reasoning-off run is the same condition). Direct: DirectRegression on
-logs/direct/<domain>/<sem>/<judge>/. Length+prose: PROTOCOLS["glm_regex"] (glm_features/, LASR-G5/glm_features).
-Embedding: PROTOCOLS["embedding"] (embeddings/, LASR-G5/transcript-embeddings). Every protocol fits on all the
+logs/direct/<domain>/<sem>/<judge>/. Length+prose: PROTOCOLS["glm_regex"] (glm_features/, generality-labs/glm_features).
+Embedding: PROTOCOLS["embedding"] (embeddings/, generality-labs/transcript-embeddings). Every protocol fits on all the
 references; "frontier" only restricts the targets scored. MSE as % of the mean_ref baseline on the same targets.
 Writes analysis/judge/protocol_compare.{csv,png,svg}.
 """

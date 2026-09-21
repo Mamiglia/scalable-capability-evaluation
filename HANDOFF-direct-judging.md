@@ -97,7 +97,7 @@ Runner and preparation script copies are saved in each campaign's `handoff-scrip
 
 ## Science sources and roster
 
-HF source: `LASR-G5/benchmarks` at `6620467bb4391ff8f0ab3b2672ad65597a7d2295`.
+HF source: `generality-labs/benchmarks` at `6620467bb4391ff8f0ab3b2672ad65597a7d2295`.
 
 - Frozen science models/items/fit are byte-identical to the pilot's. Repaired Gemma-4-31B GPQA source changed, so affected judgments were recollected.
 - 6,960 unique selected first-attempt source records, 7,478 correct semester uses. Only 52.44 MB fetched as ranges versus 926.2 MB full logs; local subsets approximately 31.58 MB.
@@ -118,7 +118,7 @@ Wizard config: public `alpindale/WizardLM-2-8x22B`, `vllm/vllm-openai:v0.28.0`, 
 
 ## Maths sources and roster
 
-HF source: `LASR-G5/benchmarks` at `7352568520df9ea565e9e1c85d9af14889813c88`, including repaired Gemma AIME24/25 logs from 2026-09-14.
+HF source: `generality-labs/benchmarks` at `7352568520df9ea565e9e1c85d9af14889813c88`, including repaired Gemma AIME24/25 logs from 2026-09-14.
 
 - All 95 selected Gemma records across six benchmarks have reasoning; repaired AIME24 9/9 and AIME25 7/7 verified typed reasoning.
 - 4,751 unique correct first-attempt records, 6,098 semester uses. 74.67 MB range transfer versus 916.31 MB full logs; approximately 44.74 MB local subsets.
@@ -154,7 +154,7 @@ Inspect's default retry cleanup deleted the earlier cancelled 21-sample DeepSeek
 - `task.references` means previous semester, `task.historical` older models with finite current HARD theta, `task.train` their union. Generic supervised protocols now use train; pairwise overrides references. Frozen science currently has eight references and zero historical models in every semester, so its current harness still trains on references only.
 - Interpreter was synced to the dependency declarations and overrides on remote main using `uv sync --inexact --no-dev`; main has no lockfile. Python 3.14.6, Inspect AI 0.3.263. Full inventory in science `environment.json`.
 - 34 focused tests passed after direct PR merge. Broader run: 113 passed, seven failed, one collection error: Linux `prctl` on macOS (six), changed GPQA shuffle default (one), and upstream HLE removed import (collection). Frozen-table collection does not import the problematic response-loading path.
-- `LASR-G5/benchmarks` and `LASR-G5/judging` are separate HF repositories. `data/` pins benchmarks; local `logs/` is an ignored independent judging checkout. Intended direct publication prefix: `judge/direct/<domain>/<semester>/<judge>/<condition>/*.eval` in `LASR-G5/judging`. Publish via git only and advance any parent pin after pushing. **Nothing from these campaigns is published yet.**
+- `generality-labs/benchmarks` and `generality-labs/judging` are separate HF repositories. `data/` pins benchmarks; local `logs/` is an ignored independent judging checkout. Intended direct publication prefix: `judge/direct/<domain>/<semester>/<judge>/<condition>/*.eval` in `generality-labs/judging`. Publish via git only and advance any parent pin after pushing. **Nothing from these campaigns is published yet.**
 
 ## Earlier diagnostics
 

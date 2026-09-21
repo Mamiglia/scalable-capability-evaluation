@@ -174,7 +174,7 @@ Per target (θ̂ pinned BT / θ*): opus-4.7 1.18 / 2.11, gemini-3.5-flash 1.54 /
 gpt-5.6-sol 3.48 / 2.34, union-alpha 2.80 / 2.19. The judge underrates every Anthropic transcript by 1-1.3 θ and overrates
 gpt-5.6-sol and union-alpha; the within-group ordering is largely wrong (Spearman on 6 points is not worth quoting), the
 level is not — every length baseline sits 2-3 θ below the group. 177 logs, 5,886 verdicts, 0 errors, ~$32
-(`logs/judge/coding_frontier/2026-I/kimi-k2-thinking/9c1d3abb/`, pushed to LASR-G5/judging).
+(`logs/judge/coding_frontier/2026-I/kimi-k2-thinking/9c1d3abb/`, pushed to generality-labs/judging).
 
 ### Prediction scores (the reported metric from 2026-09-18)
 
@@ -199,7 +199,7 @@ baseline on five of six; the top-3 reference mean is a flat ≈1 bit because it 
 
 `plot_scores.py` now shows only: pairwise judge (`judgelin`, kimi-k2-thinking, reasoning hidden), absolute judge
 (`direct_judge`, kimi-k2-thinking, `configs/judges/direct/kimi-k2-thinking.yml`, condition f8860e9c: 54 logs, 1,218
-ratings, 1 unrated, pushed to LASR-G5/judging), embeddings (`embedding`, Qwen3-Embedding-8B ridge) and deterministic
+ratings, 1 unrated, pushed to generality-labs/judging), embeddings (`embedding`, Qwen3-Embedding-8B ridge) and deterministic
 features (`ridge`). Prediction scores in bits:
 
 | protocol | Fable 5 | GPT-5.6 Sol | Opus 4.8 | Union Alpha | Opus 4.7 | Gemini 3.5 Flash | mean | MSE |
@@ -218,7 +218,7 @@ mask (`--tokens-per-batch 1`) and `EMBED_NO_GQA_SDPA=1` (SDPA's grouped-query pa
 the math kernel materialises the 8192² attention matrix and OOMs 24 GB), `EMBED_TRAIN_ONLY=1 --variant full` (only what
 the protocol reads: train items, reasoning-included text). Same model revision and 8192-token chunking as the cache;
 fp16 vs bf16 is the one numerical difference. These files are partial (train items only): local cache, **not** pushed to
-LASR-G5/transcript-embeddings; the patched script is left untracked so the `methodology` branch merges cleanly.
+generality-labs/transcript-embeddings; the patched script is left untracked so the `methodology` branch merges cleanly.
 
 ### GPT-5.x added (2026-09-19)
 
