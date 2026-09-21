@@ -1,7 +1,7 @@
 """Which transcript channels carry the capability signal: pairwise judging (linear conversion), one panel per domain.
 
-Prediction score = 1 - summed squared error / summed squared error of easy-item prediction over a domain's target
-models. On one axis per domain, above zero: the prediction score with only that channel shown (singular
+Prediction score = -log2(summed squared error / summed squared error of easy-item prediction) over a domain's target
+models, in bits: 0 is easy-item prediction, +1 is half its error, -1 twice it. On one axis per domain, above zero: the prediction score with only that channel shown (singular
 contribution); below zero: the reduction in prediction score when that channel is removed from the full transcript
 (unique contribution), drawn downward. Dashed line: the full transcript. Every run is cut to the frozen 10 train items
 per quartile of its semester (40 items).
@@ -11,10 +11,11 @@ per quartile of its semester (40 items).
     (configs/judges/channels/<judge>-only-reasoning.yml), with each semester's best pairwise judge with reasoning shown
     by reference leave-one-out MSE. The hidden run is also "only messages"; it is not drawn twice.
 Dot = estimate, shaded box = 95% percentile interval over 2,000 bootstrap resamples of the targets (resampled within
-semester; paired for reductions). Marks: paired t-tests of per-target squared error, uncorrected
-(*** p<.001, ** p<.01, * p<.05, n.s.): above a singular estimate, the channel alone vs easy-item prediction; below a
-unique estimate, the transcript without the channel vs the full transcript. The boxes are bootstrap intervals because
-the prediction score is a ratio of summed errors, not a mean over targets, so it has no t interval.
+semester; paired for reductions). Marks: two-sided bootstrap tests of the plotted estimate itself, from the same
+resamples as its box, uncorrected (*** p<.001, ** p<.01, * p<.05, n.s.): above a singular estimate, the channel alone
+vs easy-item prediction; below a unique estimate, the transcript without the channel vs the full transcript. The p is
+twice the share of resamples on the far side of zero, so a mark and its box can never disagree; 1/2,000 is the
+smallest p the resamples can resolve.
 channel_shares: one pie per domain, the share of characters the models themselves wrote (role prefixes removed) in
 each channel, over the correct first-attempt transcripts of the references and targets on the same items and
 semesters, read from SMALL_JUDGE_DATA (default /Volumes/T7/small-judge-remote/data).
@@ -28,7 +29,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import ttest_rel
 
 from analysis import judges, loading
 from analysis.challenges.signal_glm import DOMAIN_COLORS
@@ -42,23 +42,24 @@ OUT = Path("analysis/results/figures/channels")
 DATA = Path(os.environ.get("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data"))
 # channel label -> (only-run, removed-run)
 CHANNELS = {"CoT": ("only-reasoning", "drop-reasoning"), "Messages": ("only-text", "drop-text"),
-            "Tool\ncalls": ("only-calls", "drop-calls"), "Tool\noutputs": ("only-outputs", "drop-outputs"),
-            "Tool calls\n+ outputs": ("only-tools", "drop-tools")}
+            "Tool calls": ("only-calls", "drop-calls"), "Tool outputs": ("only-outputs", "drop-outputs"),
+            "Tools": ("only-tools", "drop-tools")}
+# the figure keeps the tool calls and their outputs together; the csv still carries them apart
+DRAWN = ("CoT", "Messages", "Tools")
 # domain -> semester -> (judge, {run: log dir hash}); None = the channel runs of configs/judges/channels/
 RUNS = {"coding": {"2026-I": None}, "cyber": {"2026-I": None},
         "math": {"2025-II": ("deepseek-r1-0528", {"full": "24d6cc32", "drop-reasoning": "7ea04f2b"}),
                  "2026-I": ("glm-4.7", {"full": "66c170cd", "drop-reasoning": "7ea04f2b"})},
         "science": {"2025-II": ("minimax-m1", {"full": "24d6cc32", "drop-reasoning": "7ea04f2b"}),
                     "2026-I": ("minimax-m2", {"full": "66c170cd", "drop-reasoning": "7ea04f2b"})}}
-PIE_CHANNELS = {"CoT": "only-reasoning", "Messages": "only-text", "Tool calls": "only-calls", "Tool outputs": "only-outputs"}
-PIE_COLORS = {"CoT": "#4a3aa7", "Messages": "#eda100", "Tool calls": "#1baf7a", "Tool outputs": "#e87ba4"}
+PIE_CHANNELS = {"CoT": "only-reasoning", "Messages": "only-text", "Tools": "only-tools"}
+PIE_COLORS = {"CoT": "#4a3aa7", "Messages": "#eda100", "Tools": "#1baf7a"}
 DRAWS, SEED, WIDTH = 2000, 0, 0.5
 # COLOR_BY: "domain" (signal_glm DOMAIN_COLORS, one hue per panel) or "channel" (the pie chart's hues, shared
 # across panels; the combined tools column takes a darker shade of the tool-calls green)
 COLOR_BY = os.environ.get("CHANNEL_FIGURE_COLOR_BY", "domain")
-CHANNEL_COLORS = {"CoT": PIE_COLORS["CoT"], "Messages": PIE_COLORS["Messages"], "Tool\ncalls": PIE_COLORS["Tool calls"],
-                  "Tool\noutputs": PIE_COLORS["Tool outputs"], "Tool calls\n+ outputs": "#0f7a55",
-                  "Full\ntranscript": "0.35"}
+CHANNEL_COLORS = {"CoT": PIE_COLORS["CoT"], "Messages": PIE_COLORS["Messages"], "Tools": PIE_COLORS["Tools"],
+                  "Tool calls": "#7fd0b2", "Tool outputs": "#e87ba4", "Full transcript": "0.35"}
 
 plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
                      "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "axes.linewidth": 0.8,
@@ -87,13 +88,21 @@ def runs_for(domain, semester, keep):
     return runs
 
 
+def bootstrap_p(draws):
+    """Two-sided p of the plotted estimate from the resamples its box is drawn from: twice the share of them on the
+    far side of zero. Testing the estimate itself keeps the mark and the box from ever contradicting each other; the
+    smallest p DRAWS resamples can resolve is 1/DRAWS."""
+    draws = np.asarray(draws, dtype=float)
+    return float(min(1.0, max(1 / DRAWS, 2 * min(np.mean(draws <= 0), np.mean(draws >= 0)))))
+
+
 def stars(p):
     return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
 
 
 def domain_stats(domain):
     """Per channel: singular (score alone) and unique (reduction without it) estimates, intervals and tests."""
-    errors, cohorts = {}, {}  # (semester, run) -> squared error per target
+    errors, cohorts, models = {}, {}, {}  # (semester, run) -> squared error per target; semester -> targets
     for semester in RUNS[domain]:
         (task,) = loading.tasks(loading.domain(domain), [semester])
         refs, targets, truth = task.references.theta, list(task.test.models.index), task.truth
@@ -103,6 +112,7 @@ def domain_stats(domain):
             theta = judges.pairwise_theta(verdicts, refs, targets, "linear", None).reindex(truth.index)
             errors[semester, name] = ((theta - truth) ** 2).to_numpy()
         errors[semester, "easy"] = ((refs.mean() - truth) ** 2).to_numpy()
+        models[semester] = list(truth.index)
     semesters = list(RUNS[domain])
     names = [n for s, n in errors if s == semesters[0] and all((t, n) in errors for t in semesters)]
     pooled = {n: np.concatenate([errors[s, n] for s in semesters]) for n in names}
@@ -110,7 +120,7 @@ def domain_stats(domain):
 
     def score(pick):
         sse = {n: np.concatenate([errors[s, n][pick[s]] for s in semesters]).sum() for n in names}
-        return {n: 1 - sse[n] / sse["easy"] for n in names if n != "easy"}
+        return {n: -np.log2(sse[n] / sse["easy"]) for n in names if n != "easy"}
 
     rng = np.random.default_rng(SEED)
     point = score({s: np.arange(size[s]) for s in semesters})
@@ -118,18 +128,19 @@ def domain_stats(domain):
     rows = []
     for label, (only, removed) in CHANNELS.items():
         if only in point:
+            alone = [d[only] for d in draws]
             rows.append({"channel": label, "measure": "singular", "run": only, "estimate": point[only],
-                         "lo": np.percentile([d[only] for d in draws], 2.5), "hi": np.percentile([d[only] for d in draws], 97.5),
-                         "p": ttest_rel(pooled[only], pooled["easy"]).pvalue})
+                         "lo": np.percentile(alone, 2.5), "hi": np.percentile(alone, 97.5), "p": bootstrap_p(alone)})
         if removed in point:
             drops = [d["full"] - d[removed] for d in draws]
             rows.append({"channel": label, "measure": "unique", "run": removed, "estimate": point["full"] - point[removed],
-                         "lo": np.percentile(drops, 2.5), "hi": np.percentile(drops, 97.5),
-                         "p": ttest_rel(pooled[removed], pooled["full"]).pvalue})
+                         "lo": np.percentile(drops, 2.5), "hi": np.percentile(drops, 97.5), "p": bootstrap_p(drops)})
     table = pd.DataFrame(rows).assign(domain=domain, targets=len(pooled["easy"]), semesters=", ".join(semesters))
     full = {"domain": domain, "full_prediction_score": point["full"],
             "lo": np.percentile([d["full"] for d in draws], 2.5), "hi": np.percentile([d["full"] for d in draws], 97.5)}
-    return table, full, cohorts
+    long = pd.DataFrame([{"domain": domain, "semester": s, "condition": n, "model": m, "err": e}
+                         for (s, n), errs in errors.items() for m, e in zip(models[s], errs)])
+    return table, full, cohorts, long
 
 
 def channel_shares(cohorts):
@@ -150,76 +161,82 @@ def channel_shares(cohorts):
 
 
 OUT.mkdir(parents=True, exist_ok=True)
-stats, fulls, shares = [], [], {}
+stats, fulls, shares, errors = [], [], {}, []
 for domain in RUNS:
-    table, full, cohorts = domain_stats(domain)
+    table, full, cohorts, long = domain_stats(domain)
     stats.append(table)
     fulls.append(full)
+    errors.append(long)
     shares[domain] = channel_shares(cohorts)
+errors = pd.concat(errors, ignore_index=True)
+errors.to_csv(OUT / "channel_errors.csv", index=False)  # every target's squared error, so figures redraw without the logs
 stats, fulls = pd.concat(stats, ignore_index=True), pd.DataFrame(fulls).set_index("domain")
 stats.assign(channel=stats.channel.str.replace("\n", " ")).to_csv(OUT / "channel_contributions.csv", index=False)
 fulls.to_csv(OUT / "channel_contributions_full_transcript.csv")
 print(stats.assign(channel=stats.channel.str.replace("\n", " ")).drop(columns="run").round(3).to_string(index=False))
 print(fulls.round(3).to_string())
 
-# the figure reads on a 0-100 scale; the csvs keep the raw fractions
-stats[["estimate", "lo", "hi"]] *= 100
-fulls[["full_prediction_score", "lo", "hi"]] *= 100
-
 def draw(stats, fulls, name, color_by):
-    """One panel per domain, widths by channel count; the full transcript first, then per channel the singular
-    estimate above zero and the unique reduction below. `color_by`: "domain" (one hue per panel) or "channel"
-    (the pie chart's hues, shared across panels). Values arrive on the 0-100 scale."""
+    """One panel per domain, the channels as rows: to the right of zero the prediction score with only that channel
+    (scale on top), to the left the reduction when it is removed (scale on the bottom). Rows are shared by every
+    panel, so a channel sits at the same height throughout and a domain without tool calls leaves those rows empty.
+    `color_by`: "domain" (one hue per panel) or "channel" (the pie chart's hues). Values are in bits."""
     stats = stats.assign(channel=stats.channel.str.replace("\n", " "))
-    channels = {c.replace("\n", " "): c for c in CHANNELS}
     colors = {k.replace("\n", " "): v for k, v in CHANNEL_COLORS.items()}
+    rows = ["Full transcript"] + list(DRAWN)
     domains = [d for d in RUNS if d in set(stats.domain)]
-    groups = {d: ["Full transcript"] + [c for c in channels if c in set(stats.loc[stats.domain == d, "channel"])] for d in domains}
-    # one y scale for every panel, deep enough for the largest reduction interval
-    low = float(np.floor(min(0, -stats.loc[stats.measure == "unique", "hi"].max(),
-                             stats.loc[stats.measure == "singular", "lo"].min()) / 50) * 50)
-    ticks = np.arange(low, 101, 50)
-    fig, axes = plt.subplots(1, len(domains), figsize=(4.3, 1.8), sharey=True,
-                             gridspec_kw={"width_ratios": [len(g) + 0.6 for g in groups.values()], "wspace": 0.12})
-    for ax, domain in zip(np.atleast_1d(axes), domains):
-        part, x = stats[stats.domain == domain], np.arange(len(groups[domain]))
+    left = float(np.floor(min(0, -stats.loc[stats.measure == "unique", "hi"].max())))
+    right = float(np.ceil(max(stats.loc[stats.measure == "singular", "hi"].max(), fulls.hi.max())))
+    fig, axes = plt.subplots(1, len(domains), figsize=(5.2, 2.1), sharey=True, sharex=True,
+                             gridspec_kw={"wspace": 0.1})
+    axes = np.atleast_1d(axes)
+    for ax, domain in zip(axes, domains):
+        part = stats[stats.domain == domain]
         color = colors["Full transcript"] if color_by == "channel" else DOMAIN_COLORS[domain]
         full = fulls.loc[domain]
-        ax.axhline(full.full_prediction_score, color="0.5", lw=0.8, ls="--", zorder=0)
-        ax.axhline(0, color="black", lw=0.8, zorder=0)
-        ax.add_patch(plt.Rectangle((x[0] - WIDTH / 2, full.lo), WIDTH, full.hi - full.lo, color=color, alpha=0.3, linewidth=0, zorder=1))
-        ax.plot(x[0], full.full_prediction_score, "o", ms=4, mfc=color, mec="black", mew=0.4, zorder=2)
-        for position, label in zip(x[1:], groups[domain][1:]):
+        ax.set_axisbelow(True)
+        ax.yaxis.grid(True, color="0.92", lw=0.5)  # one rule per channel row, to carry the eye across panels
+        ax.axvline(full.full_prediction_score, color="0.5", lw=0.8, ls="--", zorder=0)
+        ax.axvline(0, color="black", lw=0.8, zorder=0)
+        ax.add_patch(plt.Rectangle((full.lo, -WIDTH / 2), full.hi - full.lo, WIDTH, color=color, alpha=0.3,
+                                   linewidth=0, zorder=1))
+        ax.plot(full.full_prediction_score, 0, "o", ms=4, mfc=color, mec="black", mew=0.4, zorder=2)
+        for label in rows[1:]:
             if color_by == "channel":
                 color = colors[label]
+            position = rows.index(label)
             for measure, sign, alpha, face in (("singular", 1, 0.3, color), ("unique", -1, 0.6, "white")):
                 row = part[(part.channel == label) & (part.measure == measure)]
                 if row.empty:
                     continue
                 row = row.iloc[0]
                 lo, hi = sorted((sign * row.lo, sign * row.hi))
-                ax.add_patch(plt.Rectangle((position - WIDTH / 2, lo), WIDTH, hi - lo, color=color, alpha=alpha, linewidth=0, zorder=1))
-                ax.plot(position, sign * row.estimate, "o", ms=4, mfc=face, mec="black", mew=0.4, zorder=2)
-                # singular marks in one row above the panel, clear of the full-transcript line; unique marks under their box
-                ax.text(position, 106 if sign > 0 else lo - 4, stars(row.p), ha="center",
-                        va="bottom" if sign > 0 else "top", fontsize=6.5)
-        ax.set_ylim(low - 20, 122)
-        ax.set_yticks(ticks, [f"{abs(v):g}" for v in ticks])  # below zero the axis reads as a reduction
-        ax.spines["left"].set_bounds(low, 100)
-        ax.spines["bottom"].set_visible(False)
-        if ax is not np.atleast_1d(axes)[0]:  # one shared scale: the ticks are drawn once, on the left
-            ax.spines["left"].set_visible(False)
-            ax.tick_params(axis="y", length=0, labelleft=False)
-        ax.set_xlim(-0.5, len(x) - 0.5)
-        ax.set_xticks(x, groups[domain], rotation=90)
-        ax.tick_params(axis="x", length=0)
-        ax.set_title(domain.capitalize(), loc="left", fontsize=7, color="0.4", pad=6)
-    np.atleast_1d(axes)[0].set_ylabel("Reduction (%)        Prediction score (%)", labelpad=2)
+                ax.add_patch(plt.Rectangle((lo, position - WIDTH / 2), hi - lo, WIDTH, color=color, alpha=alpha,
+                                           linewidth=0, zorder=1))
+                ax.plot(sign * row.estimate, position, "o", ms=4, mfc=face, mec="black", mew=0.4, zorder=2)
+                # one column of marks per side, pinned just inside the panel edges, rather than hugging each estimate
+                ax.text(0.98 if sign > 0 else 0.02, position, stars(row.p), va="center",
+                        ha="right" if sign > 0 else "left", fontsize=6.5, transform=ax.get_yaxis_transform())
+        ax.set_xlim(left - 1.1, right + 1.1)
+        ax.set_ylim(len(rows) - 0.4, -0.7)  # the full transcript on top, channels under it
+        ax.set_xticks(np.arange(left, 0.01, 2), [f"{abs(v):g}" for v in np.arange(left, 0.01, 2)])
+        ax.spines["bottom"].set_bounds(left, 0)
+        ax.spines["left"].set_visible(False)
+        ax.tick_params(axis="y", length=0)
+        top = ax.secondary_xaxis("top")
+        top.set_xticks(np.arange(0, right + 0.01, 2))
+        top.spines["top"].set_bounds(0, right)
+        top.tick_params(labelsize=7, width=0.8)
+        ax.set_title(domain.capitalize(), loc="left", fontsize=7, color="0.4", pad=14)
+    axes[0].set_yticks(range(len(rows)), rows)
+    fig.supxlabel("Reduction (bits)", fontsize=8, y=-0.02)
+    fig.text(0.5, 1.12, "Prediction score (bits)", ha="center", fontsize=8)
     handles = [plt.Line2D([], [], marker="o", ls="none", ms=4, mfc="0.6", mec="black", mew=0.4),
                plt.Line2D([], [], marker="o", ls="none", ms=4, mfc="white", mec="black", mew=0.4),
                plt.Line2D([], [], color="0.5", lw=0.8, ls="--")]
-    fig.legend(handles, ["Only this channel (above 0)", "Without this channel (below 0)", "Full transcript"], frameon=False, ncol=3,
-               loc="lower center", bbox_to_anchor=(0.5, 0.98), handlelength=1.2, columnspacing=1.2, borderaxespad=0)
+    fig.legend(handles, ["Only this channel (right)", "Without this channel (left)", "Full transcript"],
+               frameon=False, ncol=3, loc="lower center", bbox_to_anchor=(0.5, 1.18), handlelength=1.2,
+               columnspacing=1.2, borderaxespad=0)
     for suffix in (".png", ".svg"):
         fig.savefig(OUT / f"{name}{suffix}", dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -229,29 +246,52 @@ def draw(stats, fulls, name, color_by):
 draw(stats, fulls, "channel_contributions", COLOR_BY)
 draw(stats, fulls, "channel_contributions_by_domain" if COLOR_BY == "channel" else "channel_contributions_by_channel",
      "domain" if COLOR_BY == "channel" else "channel")
-# the embedding protocol under the same conditions (scratchpad embedding_channels.py writes these tables)
-embedding = OUT / "embedding_channel_contributions.csv"
-if embedding.exists():
-    e_stats = pd.read_csv(embedding)
-    e_fulls = pd.read_csv(OUT / "embedding_channel_contributions_full_transcript.csv").set_index("domain")
-    e_stats[["estimate", "lo", "hi"]] *= 100
-    e_fulls[["full_prediction_score", "lo", "hi"]] *= 100
-    e_stats = e_stats.rename(columns={"wilcoxon_p": "p"})
-    draw(e_stats, e_fulls, "embedding_channel_contributions", COLOR_BY)
+# the same measures for the other protocols, from the tables their runners write next to these
+for prefix in ("embedding", "direct"):
+    table = OUT / f"{prefix}_channel_contributions.csv"
+    if not table.exists():
+        continue
+    other = pd.read_csv(table).rename(columns={"wilcoxon_p": "p"})
+    other_fulls = pd.read_csv(OUT / f"{prefix}_channel_contributions_full_transcript.csv").set_index("domain")
+    draw(other, other_fulls, f"{prefix}_channel_contributions", COLOR_BY)
 
+# the share of model-written characters per channel, one pie per domain
 frame = pd.DataFrame(shares).T
 share = frame.div(frame.sum(axis=1), axis=0)
 share.to_csv(OUT / "channel_shares.csv")
 print((share * 100).round(1).to_string())
-fig, axes = plt.subplots(1, len(share), figsize=(4.4, 1.5))
-for ax, domain in zip(axes, share.index):
+fig, axes = plt.subplots(1, len(share), figsize=(3.8, 1.4))
+for ax, domain in zip(np.atleast_1d(axes), share.index):
     values = share.loc[domain]
     ax.pie(values, colors=[PIE_COLORS[c] for c in values.index], startangle=90, counterclock=False,
            wedgeprops={"linewidth": 0.5, "edgecolor": "white"},
-           autopct=lambda pct: f"{pct:.0f}%" if pct >= 10 else "", pctdistance=0.6, textprops={"fontsize": 7, "color": "white"})
+           autopct=lambda pct: f"{pct:.0f}%" if pct >= 10 else "", pctdistance=0.6,
+           textprops={"fontsize": 7, "color": "white"})
     ax.set_title(domain.capitalize(), fontsize=7, color="0.4", pad=2)
 fig.legend([plt.Rectangle((0, 0), 1, 1, color=PIE_COLORS[c]) for c in PIE_COLORS], list(PIE_COLORS), frameon=False,
            ncol=len(PIE_COLORS), loc="lower center", bbox_to_anchor=(0.5, -0.08), handlelength=1, columnspacing=1)
 for suffix in (".png", ".svg"):
     fig.savefig(OUT / f"channel_shares{suffix}", dpi=300, bbox_inches="tight")
-print(OUT)
+print(OUT / "channel_shares.png")
+
+# the two-row figure: total signal above unique signal in each domain, in both metrics. Maths and science
+# have no tool calls, and their hidden-reasoning run is not drawn a second time as "only messages".
+from analysis.challenges import contributions  # noqa: E402
+
+SPLIT_PARTS = {"Reasoning": ("only-reasoning", "drop-reasoning"), "Messages": ("only-text", "drop-text"),
+               "Tools": ("only-tools", "drop-tools")}
+SPLIT_COLOURS = {"Reasoning": PIE_COLORS["CoT"], "Messages": PIE_COLORS["Messages"], "Tools": PIE_COLORS["Tools"]}
+DOMAIN_TITLES = {"coding": "Coding", "cyber": "Cyber", "math": "Maths", "science": "Science"}
+for metric in ("score", "error"):
+    rows, full_rows = [], {}
+    for domain, part in errors.groupby("domain"):
+        table, full = contributions.part_stats(part, SPLIT_PARTS, metric)
+        rows.append(table.assign(domain=domain))
+        full_rows[domain] = full
+    split, split_fulls = pd.concat(rows, ignore_index=True), pd.DataFrame(full_rows).T
+    split.to_csv(OUT / f"channel_contributions_split_{metric}.csv", index=False)
+    fig = contributions.figure(split, split_fulls, list(SPLIT_PARTS), metric, SPLIT_COLOURS, DOMAIN_TITLES)
+    for suffix in (".png", ".svg"):
+        fig.savefig(OUT / f"channel_contributions_split_{metric}{suffix}", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(OUT / f"channel_contributions_split_{metric}.png")
