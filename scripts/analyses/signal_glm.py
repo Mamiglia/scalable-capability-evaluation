@@ -22,6 +22,7 @@ ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)
 
+from analysis.challenges import likelihood_ratio as lr  # noqa: E402
 from analysis.challenges import signal_glm  # noqa: E402
 
 RESULTS = Path("analysis/results")
@@ -88,6 +89,11 @@ for name, fit in (("fit", fitted), ("fit_additive", additive)):  # observed vs p
     plt.close(fig)
     coverage.to_csv(OUT / f"{name}_coverage.csv", index=False, float_format="%.3f")
     print(name); print(coverage.round(3).to_string(index=False))
+fig, appendix_fit = signal_glm.appendix_fit_figure(fitted.inference_data, fitted.features, table)
+for ext in ("svg", "png"):
+    fig.savefig(FIG / f"appendix_fit.{ext}", bbox_inches="tight", dpi=300)
+plt.close(fig)
+appendix_fit.to_csv(OUT / "appendix_fit.csv", index=False, float_format="%.3f")
 
 # %% contrasts: Pairwise judge against every other protocol, pooled and per domain
 contrasts = signal_glm.contrast_table(fitted.inference_data.posterior, fitted.coords)
@@ -103,11 +109,16 @@ for name, scale in (("contrasts", "ratio"), ("contrasts_score", "score")):
 ratios = signal_glm.ratio_table(fitted.inference_data.posterior, fitted.coords)
 ratios = ratios.merge(signal_glm.flat_glm(table), on=["protocol", "domain"], how="left")
 ratios.to_csv(RESULTS / f"{TAG}.csv", index=False)
+errors = signal_glm.error_table(fitted.inference_data.posterior, fitted.coords)  # expected squared error, baseline included
+errors.to_csv(RESULTS / f"{TAG}_expected_error.csv", index=False, float_format="%.4f")
 signal_glm.wide_table(ratios).to_csv(RESULTS / f"{TAG}_wide.csv")  # protocol x domain, baseline row included
 print(ratios.round(3).to_string(index=False))
 
 # %% figures: ratios with intervals (hierarchical filled, flat open); posterior densities
 for name, fig in (("ratios", signal_glm.ratio_figure(ratios)), ("ratios_score", signal_glm.ratio_figure(ratios, "score")), ("ratios_table", signal_glm.table_figure(ratios)),
+                  ("appendix_effects", signal_glm.appendix_effect_figure(ratios)),
+                  ("appendix_errors", signal_glm.appendix_error_figure(errors)),
+                  ("appendix_contrasts", signal_glm.appendix_contrast_figure(contrasts, ratios)),
                   ("posteriors", signal_glm.posterior_figure(fitted.inference_data.posterior, fitted.coords)),
                   ("posteriors_score", signal_glm.posterior_figure(fitted.inference_data.posterior, fitted.coords, scale="score")),
                   ("convergence", signal_glm.convergence_figure(fitted.inference_data, fitted.coords, table)),
@@ -120,11 +131,25 @@ if JUDGES != "best":
     raise SystemExit("figure one and its tests take one forecast per target: done")
 pooled = signal_glm.per_model(table)
 scores = signal_glm.model_scores(table)
-tests = signal_glm.model_tests(scores)
+# stars: the log likelihood ratio against the references' distribution, a target model pooled over its domains
+llr = pd.read_csv(RESULTS / "likelihood_ratio.csv")
+llr = llr[llr.semester.isin(SEMESTERS)]
+
+
+def llr_tests(judges: pd.DataFrame) -> pd.DataFrame:
+    """Both shapes' tests, the chosen judges' rows (scripts/analyses/likelihood_ratio.py)."""
+    picked = lr.select(llr, judges)
+    return pd.concat([lr.pooled_tests(picked[picked["shape"] == shape], unit=("semester", "model")).assign(shape=shape)
+                      for shape in lr.SHAPES], ignore_index=True)
+
+
+both = llr_tests(lr.chosen_judges(forecasts, VARIANTS))
+tests = both[both["shape"] == lr.SHAPE]
 pooled.to_csv(OUT / "per_model.csv", float_format="%.4f")
 scores.to_csv(OUT / "per_model_scores.csv", float_format="%.4f")
-tests.to_csv(RESULTS / f"{TAG.replace("signal_glm", "signal_score_tests")}.csv", index=False, float_format="%.4g")  # best judge only: one row per target
-print(tests.round(4).to_string(index=False))
+both.to_csv(RESULTS / f"{TAG.replace("signal_glm", "signal_llr_tests")}.csv", index=False, float_format="%.4g")
+print(both.pivot_table(index="protocol", columns="shape", values=["llr", "p"]).round(4).to_string())
+print(scores.mean(numeric_only=True).round(3).to_string())  # the mean prediction scores the figure draws
 suffix = TAG.removeprefix("signal_glm")  # "" or "_<semesters>", like the other bar figures
 for metric in ("mse", "delta", "ratio"):
     fig = signal_glm.model_bar_figure(pooled, tests, metric)
@@ -138,9 +163,10 @@ plt.close(fig)
 
 # %% figure one without self-judging: each target judged by the best judge from another developer family
 no_self = signal_glm.model_scores(signal_glm.rows(forecasts, VARIANTS, semesters=SEMESTERS, judges="best_other_family"))
-no_self_tests = signal_glm.model_tests(no_self)
-no_self_tests.to_csv(RESULTS / f"{TAG.replace("signal_glm", "signal_score_tests")}_no_self_judging.csv", index=False, float_format="%.4g")
-print(no_self_tests.round(4).to_string(index=False))
+no_self_both = llr_tests(lr.chosen_judges(forecasts, VARIANTS, other_family=True))
+no_self_tests = no_self_both[no_self_both["shape"] == lr.SHAPE]
+no_self_both.to_csv(RESULTS / f"{TAG.replace("signal_glm", "signal_llr_tests")}_no_self_judging.csv", index=False, float_format="%.4g")
+print(no_self_both.pivot_table(index="protocol", columns="shape", values=["llr", "p"]).round(4).to_string())
 fig = signal_glm.model_box_figure(no_self, no_self_tests)
 for ext in ("svg", "png"):
     fig.savefig(RESULTS / "figures" / "bars" / f"figure1_score_no_self_judging{suffix}.{ext}", bbox_inches="tight")

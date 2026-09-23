@@ -11,11 +11,10 @@ per quartile of its semester (40 items).
     (configs/judges/channels/<judge>-only-reasoning.yml), with each semester's best pairwise judge with reasoning shown
     by reference leave-one-out MSE. The hidden run is also "only messages"; it is not drawn twice.
 Dot = estimate, shaded box = 95% percentile interval over 2,000 bootstrap resamples of the targets (resampled within
-semester; paired for reductions). Marks: two-sided bootstrap tests of the plotted estimate itself, from the same
-resamples as its box, uncorrected (*** p<.001, ** p<.01, * p<.05, n.s.): above a singular estimate, the channel alone
-vs easy-item prediction; below a unique estimate, the transcript without the channel vs the full transcript. The p is
-twice the share of resamples on the far side of zero, so a mark and its box can never disagree; 1/2,000 is the
-smallest p the resamples can resolve.
+semester; paired for reductions). 
+Marks: one-sided log likelihood ratio tests (src/analysis/challenges/likelihood_ratio.py), uncorrected (*** p<.001,
+** p<.01, * p<.05, n.s.): above a singular estimate, the channel alone against the references' distribution; below a
+unique estimate, the full transcript against the transcript without the channel.
 channel_shares: one pie per domain, the share of characters the models themselves wrote (role prefixes removed) in
 each channel, over the correct first-attempt transcripts of the references and targets on the same items and
 semesters, read from SMALL_JUDGE_DATA (default /Volumes/T7/small-judge-remote/data).
@@ -31,6 +30,8 @@ import numpy as np
 import pandas as pd
 
 from analysis import judges, loading
+from analysis.challenges import contributions
+from analysis.challenges import likelihood_ratio as lr
 from analysis.challenges.signal_glm import DOMAIN_COLORS
 from configs.domain import DomainConfig
 from configs.judge import JudgeConfig
@@ -88,21 +89,13 @@ def runs_for(domain, semester, keep):
     return runs
 
 
-def bootstrap_p(draws):
-    """Two-sided p of the plotted estimate from the resamples its box is drawn from: twice the share of them on the
-    far side of zero. Testing the estimate itself keeps the mark and the box from ever contradicting each other; the
-    smallest p DRAWS resamples can resolve is 1/DRAWS."""
-    draws = np.asarray(draws, dtype=float)
-    return float(min(1.0, max(1 / DRAWS, 2 * min(np.mean(draws <= 0), np.mean(draws >= 0)))))
-
-
 def stars(p):
     return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
 
 
 def domain_stats(domain):
     """Per channel: singular (score alone) and unique (reduction without it) estimates, intervals and tests."""
-    errors, cohorts, models = {}, {}, {}  # (semester, run) -> squared error per target; semester -> targets
+    errors, cohorts, models, llrs = {}, {}, {}, []  # (semester, run) -> squared error per target; semester -> targets
     for semester in RUNS[domain]:
         (task,) = loading.tasks(loading.domain(domain), [semester])
         refs, targets, truth = task.references.theta, list(task.test.models.index), task.truth
@@ -111,10 +104,13 @@ def domain_stats(domain):
         for name, verdicts in runs_for(domain, semester, keep).items():
             theta = judges.pairwise_theta(verdicts, refs, targets, "linear", None).reindex(truth.index)
             errors[semester, name] = ((theta - truth) ** 2).to_numpy()
+            llrs.append(lr.task_llr(lr.judge_rule(verdicts, "pairwise", "linear"), refs, truth)
+                        .pipe(lambda d: d[d["shape"] == lr.SHAPE]).assign(domain=domain, semester=semester, condition=name))
         errors[semester, "easy"] = ((refs.mean() - truth) ** 2).to_numpy()
         models[semester] = list(truth.index)
     semesters = list(RUNS[domain])
     names = [n for s, n in errors if s == semesters[0] and all((t, n) in errors for t in semesters)]
+    llr = pd.concat(llrs, ignore_index=True).query("condition in @names")
     pooled = {n: np.concatenate([errors[s, n] for s in semesters]) for n in names}
     size = {s: len(errors[s, "easy"]) for s in semesters}
 
@@ -130,17 +126,19 @@ def domain_stats(domain):
         if only in point:
             alone = [d[only] for d in draws]
             rows.append({"channel": label, "measure": "singular", "run": only, "estimate": point[only],
-                         "lo": np.percentile(alone, 2.5), "hi": np.percentile(alone, 97.5), "p": bootstrap_p(alone)})
+                         "lo": np.percentile(alone, 2.5), "hi": np.percentile(alone, 97.5),
+                         "p": contributions.llr_p(llr, only)})
         if removed in point:
             drops = [d["full"] - d[removed] for d in draws]
             rows.append({"channel": label, "measure": "unique", "run": removed, "estimate": point["full"] - point[removed],
-                         "lo": np.percentile(drops, 2.5), "hi": np.percentile(drops, 97.5), "p": bootstrap_p(drops)})
+                         "lo": np.percentile(drops, 2.5), "hi": np.percentile(drops, 97.5),
+                         "p": contributions.llr_p(llr, "full", against=removed)})
     table = pd.DataFrame(rows).assign(domain=domain, targets=len(pooled["easy"]), semesters=", ".join(semesters))
     full = {"domain": domain, "full_prediction_score": point["full"],
             "lo": np.percentile([d["full"] for d in draws], 2.5), "hi": np.percentile([d["full"] for d in draws], 97.5)}
     long = pd.DataFrame([{"domain": domain, "semester": s, "condition": n, "model": m, "err": e}
                          for (s, n), errs in errors.items() for m, e in zip(models[s], errs)])
-    return table, full, cohorts, long
+    return table, full, cohorts, long, llr
 
 
 def channel_shares(cohorts):
@@ -161,14 +159,16 @@ def channel_shares(cohorts):
 
 
 OUT.mkdir(parents=True, exist_ok=True)
-stats, fulls, shares, errors = [], [], {}, []
+stats, fulls, shares, errors, llrs = [], [], {}, [], []
 for domain in RUNS:
-    table, full, cohorts, long = domain_stats(domain)
+    table, full, cohorts, long, llr = domain_stats(domain)
     stats.append(table)
     fulls.append(full)
     errors.append(long)
+    llrs.append(llr)
     shares[domain] = channel_shares(cohorts)
-errors = pd.concat(errors, ignore_index=True)
+errors, llrs = pd.concat(errors, ignore_index=True), pd.concat(llrs, ignore_index=True)
+llrs.to_csv(OUT / "channel_llr.csv", index=False)  # every target's log likelihood ratio per run and dropped reference
 errors.to_csv(OUT / "channel_errors.csv", index=False)  # every target's squared error, so figures redraw without the logs
 stats, fulls = pd.concat(stats, ignore_index=True), pd.DataFrame(fulls).set_index("domain")
 stats.assign(channel=stats.channel.str.replace("\n", " ")).to_csv(OUT / "channel_contributions.csv", index=False)
@@ -251,7 +251,8 @@ for prefix in ("embedding", "direct"):
     table = OUT / f"{prefix}_channel_contributions.csv"
     if not table.exists():
         continue
-    other = pd.read_csv(table).rename(columns={"wilcoxon_p": "p"})
+    # their runners label the combined tools channel "Tool calls + outputs"; the figure's row is "Tools"
+    other = pd.read_csv(table).rename(columns={"wilcoxon_p": "p"}).replace({"channel": {"Tool calls + outputs": "Tools"}})
     other_fulls = pd.read_csv(OUT / f"{prefix}_channel_contributions_full_transcript.csv").set_index("domain")
     draw(other, other_fulls, f"{prefix}_channel_contributions", COLOR_BY)
 
@@ -274,24 +275,14 @@ for suffix in (".png", ".svg"):
     fig.savefig(OUT / f"channel_shares{suffix}", dpi=300, bbox_inches="tight")
 print(OUT / "channel_shares.png")
 
-# the two-row figure: total signal above unique signal in each domain, in both metrics. Maths and science
+# the manuscript figures, as change in squared error from the full transcript: each channel kept alone, then each channel removed. Maths and science
 # have no tool calls, and their hidden-reasoning run is not drawn a second time as "only messages".
-from analysis.challenges import contributions  # noqa: E402
-
 SPLIT_PARTS = {"Reasoning": ("only-reasoning", "drop-reasoning"), "Messages": ("only-text", "drop-text"),
                "Tools": ("only-tools", "drop-tools")}
 SPLIT_COLOURS = {"Reasoning": PIE_COLORS["CoT"], "Messages": PIE_COLORS["Messages"], "Tools": PIE_COLORS["Tools"]}
-DOMAIN_TITLES = {"coding": "Coding", "cyber": "Cyber", "math": "Maths", "science": "Science"}
-for metric in ("score", "error"):
-    rows, full_rows = [], {}
-    for domain, part in errors.groupby("domain"):
-        table, full = contributions.part_stats(part, SPLIT_PARTS, metric)
-        rows.append(table.assign(domain=domain))
-        full_rows[domain] = full
-    split, split_fulls = pd.concat(rows, ignore_index=True), pd.DataFrame(full_rows).T
-    split.to_csv(OUT / f"channel_contributions_split_{metric}.csv", index=False)
-    fig = contributions.figure(split, split_fulls, list(SPLIT_PARTS), metric, SPLIT_COLOURS, DOMAIN_TITLES)
-    for suffix in (".png", ".svg"):
-        fig.savefig(OUT / f"channel_contributions_split_{metric}{suffix}", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    print(OUT / f"channel_contributions_split_{metric}.png")
+contributions.save_figures(
+    errors, SPLIT_PARTS, SPLIT_COLOURS, OUT, "channel_contributions", final="transcript_channels",
+    caption="Pairwise judge on transcript channels (reasoning, messages, tool calls with their outputs), 40 train "
+            "items per semester. Coding and Cyber: 2026-I, Kimi-K2-Thinking. Maths and Science: 2025-II and 2026-I "
+            "pooled, each semester's best pairwise judge with reasoning shown; they have no tool calls, so only "
+            "reasoning is ablated, and the transcript without reasoning is the reasoning-hidden run.")

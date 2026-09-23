@@ -2,6 +2,13 @@
 
 Project overview and methodology: `README.md`. Data contracts: `data/CONTRACT.md`, `logs/CONTRACT.md`.
 
+## Data location
+
+All project data lives in the Hugging Face org **generality-labs** (https://huggingface.co/generality-labs),
+migrated from LASR-G5 in September 2026: `generality-labs/benchmarks` (data/), `generality-labs/judging`
+(logs/), `generality-labs/glm_features` (glm_features/). Any `LASR-G5/...` URL in code or docs is stale;
+use the generality-labs one.
+
 ## Rules
 
 - **Every judging protocol uses the frozen stratified train set, at most 100 items per task.** The

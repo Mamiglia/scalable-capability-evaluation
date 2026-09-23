@@ -1,7 +1,8 @@
 """Benchmark-free protocols: a Protocol maps a semester Task (capability.task) to theta-hat of its targets.
 
-fit sees train (references + historical models with task-specific theta*), predict sees targets
-with theta NaN. PairwiseBT overrides this routing to use only the previous-semester references.
+fit sees the previous semester's references only (never the historical models, so every protocol
+learns from the same labelled models as the judges and the saturated-item prediction), predict sees
+targets with theta NaN.
 To add one: subclass Protocol, give it a `name`, and add an instance to PROTOCOLS below;
 `uv run evaluate` picks it up. Protocols that need arguments (JudgeBT needs a judge's logs)
 are constructed by the CLI instead.
@@ -23,7 +24,7 @@ class Protocol:
         raise NotImplementedError
 
     def __call__(self, task: Task) -> pd.Series:
-        self.fit(task.train)
+        self.fit(task.references)
         return self.predict(task.test)
 
 

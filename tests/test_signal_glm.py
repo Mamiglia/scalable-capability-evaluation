@@ -68,3 +68,62 @@ def test_hibayes_model_traces_with_expected_shapes():
     assert trace["interaction"]["value"].shape == (2, 3) and trace["protocol_effects"]["value"].shape == (2,)
     assert float(trace["interaction"]["value"][0].sum()) == 0.0  # the baseline row is pinned
     assert trace["obs"]["fn"].__class__.__name__ == "Gamma"
+
+
+def test_appendix_figures_report_mse_without_score_transform():
+    domains = [*signal_glm.DOMAINS, signal_glm.POOLED]
+    protocols = signal_glm.PAPER_PROTOCOLS
+    effects = pd.DataFrame([
+        dict(protocol=protocol, domain=domain, ratio=0.5, lo=0.25, hi=0.9,
+             sigma_protocol=0.4 if domain == signal_glm.POOLED else np.nan,
+             sigma_lo=0.1 if domain == signal_glm.POOLED else np.nan,
+             sigma_hi=0.8 if domain == signal_glm.POOLED else np.nan)
+        for protocol in protocols for domain in domains
+    ])
+    contrasts = pd.DataFrame([
+        dict(against="pairwise", protocol=protocol, domain=domain,
+             ratio=0.5, lo=0.25, hi=0.9)
+        for protocol in protocols if protocol != "pairwise" for domain in domains
+    ])
+
+    effects_fig = signal_glm.appendix_effect_figure(effects)
+    contrast_fig = signal_glm.appendix_contrast_figure(contrasts, effects)
+    assert effects_fig.axes[0].get_xscale() == "log"
+    assert effects_fig.axes[0].get_xlabel() == "MSE ratio to baseline"
+    assert contrast_fig.axes[0].get_xscale() == "log"
+    assert contrast_fig.axes[0].get_xlabel() == "Pairwise / comparator MSE"
+    assert contrast_fig.axes[1].get_xlabel() == "Between-domain SD (log MSE)"
+    np.testing.assert_allclose(effects_fig.axes[0].get_xticks(), [0.05, 0.25, 1, 4])
+    np.testing.assert_allclose(contrast_fig.axes[0].get_xticks(), [0.05, 0.25, 1, 4])
+    assert any("\n" in t.get_text() for t in contrast_fig.axes[0].get_yticklabels())
+    text = " ".join(t.get_text() for fig in (effects_fig, contrast_fig) for ax in fig.axes
+                    for t in [*ax.texts, ax.xaxis.label, ax.yaxis.label])
+    assert "score" not in text.lower() and "halving" not in text.lower()
+
+
+def test_appendix_fit_figure_reports_squared_error_and_coverage():
+    from types import SimpleNamespace
+
+    n = 4
+    table = pd.DataFrame({"protocol": [signal_glm.BASELINE] * 2 + ["pairwise"] * 2})
+    features = {
+        "protocol_index": np.array([0, 0, 1, 1]), "domain_index": np.zeros(n, dtype=int),
+        "model_domain_index": np.arange(n), "protocol_judge_index": np.zeros(n, dtype=int),
+    }
+    posterior = {
+        "intercept": np.zeros((1, 3)), "protocol_effects": np.zeros((1, 3, 2)),
+        "domain_effects": np.zeros((1, 3, 1)), "interaction": np.zeros((1, 3, 2, 1)),
+        "cell_effects": np.tile(np.log([0.2, 0.8, 0.1, 0.4]), (1, 3, 1)),
+        "judge_effects": np.zeros((1, 3, 1)),
+    }
+    idata = SimpleNamespace(
+        observed_data={"obs": np.array([0.2, 0.8, 0.1, 0.4])}, posterior=posterior,
+        posterior_predictive={"obs": np.tile(np.array([0.2, 0.8, 0.1, 0.4]), (1, 3, 1))},
+    )
+
+    fig, fit = signal_glm.appendix_fit_figure(idata, features, table)
+    assert fig.axes[0].get_xscale() == fig.axes[0].get_yscale() == "log"
+    assert {"protocol", "coverage95", "r2_log"}.issubset(fit.columns)
+    text = " ".join(t.get_text() for ax in fig.axes for t in [*ax.texts, ax.xaxis.label, ax.yaxis.label])
+    assert "squared error" in text.lower()
+    assert "score" not in text.lower() and "halving" not in text.lower()

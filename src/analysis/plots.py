@@ -31,13 +31,13 @@ plt.rcParams.update({
     "font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
     "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "axes.linewidth": 0.8,
     "xtick.major.width": 0.8, "ytick.major.width": 0.8, "axes.spines.top": False, "axes.spines.right": False,
-    "svg.fonttype": "none", "savefig.dpi": 300,
+    "svg.fonttype": "none", "pdf.fonttype": 42, "savefig.dpi": 300,
 })
 CONDITIONS = ["glm_length", "glm_regex", "embedding", "direct", "pairwise"]  # the bars, in this order
 # Protocol names as the paper uses them (CLAUDE.md, figure colour palette); Length alone is a diagnostic, not a paper protocol.
 LABELS = {BASELINE: "Prediction from saturated items", "glm_length": "Length", "glm_regex": "Deterministic features",
           "embedding": "Embedding", "direct": "Absolute scoring", "pairwise": "Pairwise judge"}
-DOMAIN_LABELS = {"science": "Science", "math": "Math", "coding": "Coding", "cyber": "Cyber"}
+DOMAIN_LABELS = {"science": "Science", "math": "Maths", "coding": "Coding", "cyber": "Cyber"}
 # regressions in greens, light to dark (length, length + prose, embedding); judges in blues (direct
 # light, pairwise dark); domains in warm hues, so the two encodings never share a colour
 COLORS = dict(zip(CONDITIONS, ["#b8e0c2", "#3f9c73", "#0d4a30", "#9dc6e6", "#1f4c85"]))  # muted, print-like; wider steps for visibility
@@ -47,7 +47,7 @@ COLORS.update({"direct_ensemble": "#c9d9ec", "pairwise_ensemble": "#7a93b8"})
 DOMAIN_COLORS = {"science": "#b4485a", "math": "#e0955a", "coding": "#a97aa8", "cyber": "#cdb04c"}
 STAGGER = 0.05  # the four domains' circles sit within ±0.05 of the bar centre
 TRUE, PRED = "black", "#eb6834"
-METRIC_LABELS = {"mse": "Prediction Error\n(MSE θ)", "delta": "MSE − saturated-item MSE", "z": "z of MSE − saturated-item MSE",
+METRIC_LABELS = {"mse": "Squared error", "delta": "MSE − saturated-item MSE", "z": "z of MSE − saturated-item MSE",
                  "pct": "Relative MSE (%)"}
 
 
@@ -107,6 +107,20 @@ def break_edges(raw: np.ndarray, mapping: dict[float, float], extent: np.ndarray
     lo = max([v for v in raw if v not in mapping] + ([float(np.nanmax(extent))] if extent is not None and len(extent) else []))
     hi = min(mapping.values())
     return lo + 0.05 * (hi - lo), hi - 0.25 * (hi - lo)
+
+
+def unclip_markers(fig):
+    """Every marker drawn in full: scatter points and marker lines are never clipped by the axes, so a point
+    on an axis limit is not cut in half. Lines, bands and boxes stay clipped. Returns the figure."""
+    from matplotlib.collections import PathCollection
+    for ax in fig.axes:
+        for c in ax.collections:
+            if isinstance(c, PathCollection):
+                c.set_clip_on(False)
+        for line in ax.lines:
+            if line.get_marker() not in (None, "None", "", " "):
+                line.set_clip_on(False)
+    return fig
 
 
 def ci95(values: np.ndarray) -> float:
@@ -170,15 +184,17 @@ def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, 
     plt.close(fig)
 
 
-def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], path, semester: str | None = None) -> None:
+def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], path, semester: str | None = None,
+               llr: pd.DataFrame | None = None) -> None:
     """One bar per condition in CONDITIONS, coloured by method, at the mean over the (domain,
     semester) tasks of the metric ("mse", "delta" or "z"), with a capless 95% t-interval over
     those tasks (none below 3); one open circle per domain at the domain's pooled value
     (semester "all", or the given semester's value), the domains staggered across the bar
     and each domain's circles joined across the conditions by a solid line in its colour; the
     prediction from saturated items as a dashed grey line (its mean raw MSE, or 0 for delta and z); stars
-    above a bar give the paired t-test over tasks of MSE minus saturated-item MSE (*, **, *** for
-    p below .05, .01, .001). Off-axis values (beyond 3 IQR) are drawn in a compressed band above the in-range values
+    above a bar, given `llr` (likelihood_ratio rows, one shape and judge per target), are the one-sided
+    log likelihood ratio test against the references' distribution with each task as the unit
+    (*, **, *** for p below .05, .01, .001; a protocol without log LRs gets none). Off-axis values (beyond 3 IQR) are drawn in a compressed band above the in-range values
     with ticks at their true values (see compress); the break glyph is left to the user."""
     assert metric in (*METRICS, "pct"), metric
     m = chosen(with_pct(metrics), variants)
@@ -221,12 +237,14 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
         ax.plot(xs, ys, color=DOMAIN_COLORS[d], lw=0.8, zorder=3)
         ax.scatter(xs, ys, s=18, facecolor=DOMAIN_COLORS[d], edgecolor="black", linewidth=0.4, zorder=5)
     ax.axhline(place[baseline], color="grey", lw=0.8, ls="--", zorder=0)
-    # significance against the prediction from saturated items: paired t-test over the tasks of MSE - saturated-item MSE
+    # significance: the log likelihood ratio against the references' distribution, one unit per task
+    from analysis.challenges import likelihood_ratio as lr
+    shown = llr.merge(tasks[["domain", "semester"]].drop_duplicates()) if llr is not None else pd.DataFrame(columns=["protocol"])
     for p, mean in means.items():
-        deltas = tasks[tasks.protocol == p].delta.dropna().to_numpy()
-        if len(deltas) < 3:
+        rows = shown[shown.protocol == p]
+        if rows.empty:
             continue
-        pval = float(scipy_stats.ttest_1samp(deltas, 0.0).pvalue)
+        pval = float(lr.unit_test(rows, unit=("domain", "semester"))["p"])
         stars = "***" if pval < 0.001 else "**" if pval < 0.01 else "*" if pval < 0.05 else ""
         if not stars:
             continue
@@ -323,7 +341,7 @@ TIMELINE = ["glm_regex", "embedding", "direct", "pairwise"]  # the four main app
 
 def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str], path, scores: pd.DataFrame | None = None,
                     metric: str = "mse", forecasts: pd.DataFrame | None = None, band: bool = False, shade: bool = False,
-                    cut: float | None = None) -> None:
+                    cut: float | None = None, llr: pd.DataFrame | None = None) -> None:
     """One domain's tasks over time: x = semester, y = the task's `metric` ("mse"; "delta": MSE minus
     the saturated-item MSE, baseline at 0; "pct": MSE as a percentage of the saturated-item MSE, baseline
     at 100), one line with filled
@@ -333,9 +351,9 @@ def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str]
     output) each point carries a capless error bar: the task's percentile-bootstrap 95%
     interval of the MSE over its 8 targets (lo, hi); for "delta" and "pct" with `forecasts` it is
     instead the 95% t-interval of the paired difference of squared errors over the task's
-    targets, so a bar clear of the baseline agrees with the star. With `forecasts` a star
-    above a point gives the paired t-test over the task's 8 targets of the condition's squared
-    errors against the prediction from saturated items's (*, **, *** for p below .05, .01, .001). Far-high
+    targets. With `llr` (likelihood_ratio rows, one shape and judge per target) a star above a
+    point gives the one-sided log likelihood ratio test of the task's targets against the
+    references' distribution (*, **, *** for p below .05, .01, .001). Far-high
     values (beyond Tukey's far-out fence) are cut off by default: the axis spans the in-range
     values and their error bars and the outliers run off the top (printed); with `band=True`
     they are drawn in a compressed band above a break strip instead (the bar plots' convention).
@@ -369,6 +387,10 @@ def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str]
     base = series[BASELINE]
     ax.plot([x[s] for s in semesters], [place[float(v)] for v in base], color="grey", lw=0.8, ls="--", zorder=4)  # on top: a fit that collapses to the intercept sits exactly on it
     offsets = dict(zip(TIMELINE, np.linspace(-0.09, 0.09, len(TIMELINE))))  # slight x offset per approach
+    task_p = None
+    if llr is not None:
+        from analysis.challenges import likelihood_ratio as lr
+        task_p = lr.task_tests(llr[llr.domain == domain]).set_index(["protocol", "semester"]).p
     errors = None
     if forecasts is not None:  # per-target squared errors, paired with the prediction from saturated items's on the same targets
         f = one_per_target(forecasts)
@@ -423,12 +445,11 @@ def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str]
             ax.scatter(np.array(xs)[above], np.full(above.sum(), cut), s=22, marker="^", facecolor=COLORS[p], edgecolor="none", zorder=6, clip_on=False)
         else:
             ax.scatter(xs, ys, s=16, facecolor=COLORS[p], edgecolor="none", zorder=3)
-        if errors is not None:
+        if task_p is not None:
             for xi, sem, v, yi in zip(xs, s.index, s, ys):
-                e = errors[(errors.protocol == p) & (errors.semester == sem)].dropna(subset=["err", "base"])
-                if len(e) < 3:
+                pval = float(task_p.get((p, sem), np.nan))
+                if not np.isfinite(pval):
                     continue
-                pval = float(scipy_stats.ttest_rel(e.err, e.base).pvalue)
                 stars = "***" if pval < 0.001 else "**" if pval < 0.01 else "*" if pval < 0.05 else ""
                 if stars:
                     top = yi if float(v) in mapping or sc is None else max(yi, min(sc.hi.get((p, sem), yi), cap))

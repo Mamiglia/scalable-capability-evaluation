@@ -2,8 +2,8 @@
 
 Implemented to roughly match structure of ../pairwise.
 
-A subclass supplies direct scores on correct train transcripts. fit keeps task.train
-(references + historical models) and predict obtains judgments for training models and
+A subclass supplies direct scores on correct train transcripts. fit keeps the references
+and predict obtains judgments for training models and
 targets on demand. Only training theta* enters calibration; target theta is never read.
 """
 
