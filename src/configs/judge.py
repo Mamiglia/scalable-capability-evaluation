@@ -1,6 +1,7 @@
 """An LLM judge and its pairwise or direct judging condition."""
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -9,6 +10,9 @@ from configs.model import ModelConfig
 
 
 FULL_LENGTH = 262144  # the untruncated default; a smaller max_length is a truncation condition
+# head/tail/ends keep max_length chars of a longer transcript; thirds-<kept> shows only the named equal character
+# thirds of every transcript ("..." where a third is dropped), max_length ignored (src/challenges/thirds on main)
+TRUNCATE_MODES = re.compile(r"head|tail|ends|thirds-(1|2|3|12|13|23)")
 CHANNELS = ("reasoning", "text", "calls", "outputs")  # what a rendered transcript is made of: CoT blocks, assistant prose, tool calls, tool outputs
 CHANNEL_GROUPS = {"tools": ("calls", "outputs")}  # a spec name standing for several channels
 

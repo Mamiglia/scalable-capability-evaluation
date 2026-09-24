@@ -7,10 +7,9 @@ prediction) over a domain's target models, in bits: 0 is easy-item prediction, +
 On one axis per domain, above zero: the score with only that third shown (singular contribution); below zero: the
 reduction in score when that third is removed and the other two are shown (unique contribution), drawn downward.
 Dashed line: the full transcript.
-Each condition is scored on the (bench, item, left, right) rows judged in all seven conditions of its cell, since a
-third too short to judge drops that pair from that run only.
-  coding (2025-II MiniMax-M1, 2026-I MiniMax-M2), cyber (2025-II DeepSeek-R1), math and science (2026-I
-  Kimi-K2-Thinking, 40 items): the top reference judge of each cell, its full-transcript baseline as "full".
+Only the removal runs are read (RUNS). Each condition is scored on the (bench, item, left, right) rows judged in all
+four conditions of its cell, since a third too short to judge drops that pair from that run only. Judges: the best
+reference judge of each cell (RUNS), its full-transcript run as "full".
 Dot = estimate, shaded box = 95% percentile interval over 2,000 bootstrap resamples of the targets (resampled within
 semester; paired for reductions). 
 Marks: one-sided log likelihood ratio tests (src/analysis/challenges/likelihood_ratio.py), uncorrected (*** p<.001,
@@ -38,14 +37,18 @@ WHOLE_TRAIN = {"1": "66f9615b", "2": "574946b9", "3": "e4d05a32", "12": "b8f67d2
 FORTY_ITEMS = {"1": "8311027f", "2": "f2b0de83", "3": "04e3f7ec", "12": "e5f74d2a", "13": "4e2e8bc9", "23": "03c21282"}
 # position label -> (kept alone, kept when it is removed)
 POSITIONS = {"First third": ("1", "23"), "Middle third": ("2", "13"), "Last third": ("3", "12")}
-# domain -> semester -> (judge, full-transcript hash, thirds hashes); cells whose six thirds runs are complete
-RUNS = {"coding": {"2025-II": ("minimax-m1", "24d6cc32", WHOLE_TRAIN), "2026-I": ("minimax-m2", "24d6cc32", WHOLE_TRAIN)},
-        "cyber": {"2025-II": ("deepseek-r1-0528", "24d6cc32", WHOLE_TRAIN)},
-        "math": {"2026-I": ("kimi-k2-thinking", "66c170cd", FORTY_ITEMS)},
-        "science": {"2026-I": ("kimi-k2-thinking", "66c170cd", FORTY_ITEMS)}}
-ROWS = ["Full transcript", *POSITIONS]
+# the removal runs only (the paper reports no third kept alone), so kept-alone runs do not shrink the common pairs
+REMOVED = ("12", "13", "23")
+WHOLE_REMOVED = {k: WHOLE_TRAIN[k] for k in REMOVED}
+FORTY_REMOVED = {k: FORTY_ITEMS[k] for k in REMOVED}
+# domain -> semester -> (judge, full-transcript hash, thirds hashes): the best judge on references (lowest leave-one-out
+# error, linear conversion) of each cell; Science 2026-I MiniMax-M2 was judged on thirds with 40 train items only
+RUNS = {"coding": {"2025-II": ("minimax-m1", "24d6cc32", WHOLE_REMOVED), "2026-I": ("kimi-k2-thinking", "24d6cc32", WHOLE_REMOVED)},
+        "cyber": {"2025-II": ("deepseek-r1-0528", "24d6cc32", WHOLE_REMOVED), "2026-I": ("kimi-k2-thinking", "24d6cc32", WHOLE_REMOVED)},
+        "math": {"2025-II": ("deepseek-r1-0528", "24d6cc32", WHOLE_REMOVED), "2026-I": ("kimi-k2-thinking", "24d6cc32", WHOLE_REMOVED)},
+        "science": {"2025-II": ("minimax-m1", "24d6cc32", WHOLE_REMOVED), "2026-I": ("minimax-m2", "66c170cd", FORTY_REMOVED)}}
 KEY = ["bench", "item", "model_left", "model_right"]
-DRAWS, SEED, WIDTH = 2000, 0, 0.5
+DRAWS, SEED = 2000, 0
 
 plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
                      "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "axes.linewidth": 0.8,
@@ -53,8 +56,8 @@ plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], 
                      "axes.spines.right": False, "svg.fonttype": "none"})
 
 
-def runs_for(domain, semester):
-    """Condition -> verdicts, every condition cut to the rows judged in all of them."""
+def runs_for(domain, semester, keep):
+    """Condition -> verdicts on the `keep` items, every condition cut to the rows judged in all of them."""
     judge, full, hashes = RUNS[domain][semester]
     dirs = {"full": full} | hashes
     runs = {}
@@ -62,7 +65,9 @@ def runs_for(domain, semester):
         path = Path(f"logs/judge/{domain}/{semester}/{judge}/{digest}")
         if not any(path.glob("*.eval")):
             raise FileNotFoundError(f"{domain} {semester} {name}: no logs in {path}")
-        runs[name] = from_logs(path).sort_values("imported", kind="stable").drop_duplicates(KEY, keep="first")
+        verdicts = from_logs(path)
+        verdicts = verdicts[verdicts.item.astype(str).isin(keep)]
+        runs[name] = verdicts.sort_values("imported", kind="stable").drop_duplicates(KEY, keep="first")
     common = runs["full"][KEY].drop_duplicates()
     for verdicts in runs.values():
         common = common.merge(verdicts[KEY].drop_duplicates())
@@ -79,7 +84,8 @@ def domain_stats(domain):
     for semester in RUNS[domain]:
         (task,) = loading.tasks(loading.domain(domain), [semester])
         refs, targets, truth = task.references.theta, list(task.test.models.index), task.truth
-        runs, common = runs_for(domain, semester)
+        keep = contributions.removal_items(task)
+        runs, common = runs_for(domain, semester, keep)
         coverage.append({"domain": domain, "semester": semester, "judge": RUNS[domain][semester][0],
                          "targets": len(truth), "common_pairs": common})
         for name, verdicts in runs.items():
@@ -104,10 +110,11 @@ def domain_stats(domain):
     draws = [score({s: rng.integers(0, size[s], size[s]) for s in semesters}) for _ in range(DRAWS)]
     rows = []
     for label, (alone, without) in POSITIONS.items():
-        only = [d[alone] for d in draws]
-        rows.append({"position": label, "measure": "singular", "run": f"thirds-{alone}", "estimate": point[alone],
-                     "lo": np.percentile(only, 2.5), "hi": np.percentile(only, 97.5),
-                     "p": contributions.llr_p(llr, alone)})
+        if alone in point:  # the kept-alone runs are not read (REMOVED)
+            only = [d[alone] for d in draws]
+            rows.append({"position": label, "measure": "singular", "run": f"thirds-{alone}", "estimate": point[alone],
+                         "lo": np.percentile(only, 2.5), "hi": np.percentile(only, 97.5),
+                         "p": contributions.llr_p(llr, alone)})
         drops = [d["full"] - d[without] for d in draws]
         rows.append({"position": label, "measure": "unique", "run": f"thirds-{without}",
                      "estimate": point["full"] - point[without],
@@ -119,66 +126,6 @@ def domain_stats(domain):
     long = pd.DataFrame([{"domain": domain, "semester": s, "condition": n, "model": m, "err": e}
                          for (s, n), errs in errors.items() for m, e in zip(models[s], errs)])
     return table, full, pd.DataFrame(coverage), long, llr
-
-
-def draw(stats, fulls, name):
-    """One panel per domain, the thirds as rows: to the right of zero the prediction score with only that third
-    (scale on top), to the left the reduction when it is removed (scale on the bottom). Values are in bits."""
-    domains = [d for d in RUNS if d in set(stats.domain)]
-    left = float(np.floor(min(0, -stats.loc[stats.measure == "unique", "hi"].max())))
-    right = float(np.ceil(max(stats.loc[stats.measure == "singular", "hi"].max(), fulls.hi.max())))
-    fig, axes = plt.subplots(1, len(domains), figsize=(5.2, 2.1), sharey=True, sharex=True,
-                             gridspec_kw={"wspace": 0.1})
-    axes = np.atleast_1d(axes)
-    for ax, domain in zip(axes, domains):
-        part = stats[stats.domain == domain]
-        color = DOMAIN_COLORS[domain]
-        full = fulls.loc[domain]
-        ax.set_axisbelow(True)
-        ax.yaxis.grid(True, color="0.92", lw=0.5)  # one rule per row, to carry the eye across panels
-        ax.axvline(full.full_prediction_score, color="0.5", lw=0.8, ls="--", zorder=0)
-        ax.axvline(0, color="black", lw=0.8, zorder=0)
-        ax.add_patch(plt.Rectangle((full.lo, -WIDTH / 2), full.hi - full.lo, WIDTH, color=color, alpha=0.3,
-                                   linewidth=0, zorder=1))
-        ax.plot(full.full_prediction_score, 0, "o", ms=4, mfc=color, mec="black", mew=0.4, zorder=2)
-        for label in ROWS[1:]:
-            position = ROWS.index(label)
-            for measure, sign, alpha, face in (("singular", 1, 0.3, color), ("unique", -1, 0.6, "white")):
-                row = part[(part.position == label) & (part.measure == measure)]
-                if row.empty:
-                    continue
-                row = row.iloc[0]
-                lo, hi = sorted((sign * row.lo, sign * row.hi))
-                ax.add_patch(plt.Rectangle((lo, position - WIDTH / 2), hi - lo, WIDTH, color=color, alpha=alpha,
-                                           linewidth=0, zorder=1))
-                ax.plot(sign * row.estimate, position, "o", ms=4, mfc=face, mec="black", mew=0.4, zorder=2)
-                # one column of marks per side, pinned just inside the panel edges, rather than hugging each estimate
-                ax.text(0.98 if sign > 0 else 0.02, position, stars(row.p), va="center",
-                        ha="right" if sign > 0 else "left", fontsize=6.5, transform=ax.get_yaxis_transform())
-        ax.set_xlim(left - 1.1, right + 1.1)
-        ax.set_ylim(len(ROWS) - 0.4, -0.7)  # the full transcript on top, the thirds under it
-        ax.set_xticks(np.arange(left, 0.01, 2), [f"{abs(v):g}" for v in np.arange(left, 0.01, 2)])
-        ax.spines["bottom"].set_bounds(left, 0)
-        ax.spines["left"].set_visible(False)
-        ax.tick_params(axis="y", length=0)
-        top = ax.secondary_xaxis("top")
-        top.set_xticks(np.arange(0, right + 0.01, 2))
-        top.spines["top"].set_bounds(0, right)
-        top.tick_params(labelsize=7, width=0.8)
-        ax.set_title(domain.capitalize(), loc="left", fontsize=7, color="0.4", pad=14)
-    axes[0].set_yticks(range(len(ROWS)), ROWS)
-    fig.supxlabel("Reduction (bits)", fontsize=8, y=-0.02)
-    fig.text(0.5, 1.12, "Prediction score (bits)", ha="center", fontsize=8)
-    handles = [plt.Line2D([], [], marker="o", ls="none", ms=4, mfc="0.6", mec="black", mew=0.4),
-               plt.Line2D([], [], marker="o", ls="none", ms=4, mfc="white", mec="black", mew=0.4),
-               plt.Line2D([], [], color="0.5", lw=0.8, ls="--")]
-    fig.legend(handles, ["Only this third (right)", "Without this third (left)", "Full transcript"],
-               frameon=False, ncol=3, loc="lower center", bbox_to_anchor=(0.5, 1.18), handlelength=1.2,
-               columnspacing=1.2, borderaxespad=0)
-    for suffix in (".png", ".svg"):
-        fig.savefig(OUT / f"{name}{suffix}", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    print(OUT / f"{name}.png")
 
 
 if __name__ == "__main__":  # importable, so a side analysis can redraw these estimates without recomputing them
@@ -202,13 +149,14 @@ if __name__ == "__main__":  # importable, so a side analysis can redraw these es
     print(stats.drop(columns="run").round(3).to_string(index=False))
     print(fulls.round(3).to_string())
     print(coverage.to_string(index=False))
-    draw(stats, fulls, "position_contributions")
-
-    # the manuscript figures, as change in squared error from the full transcript: each third kept alone, then each third removed
+    # the manuscript figure, as change in squared error from the full transcript: each third removed
     contributions.save_figures(
         errors, POSITIONS, DOMAIN_COLORS, OUT, "position_contributions", final="transcript_thirds",
+        measures=("without",), baseline=True,
         caption="Pairwise judge on transcript thirds. Every rendered transcript (reasoning shown) is cut into three "
-                "equal character spans and the judge sees one third alone, or the other two with that third replaced "
-                "by \"...\". Judges, the top reference judge of each cell: Coding 2025-II MiniMax-M1 and 2026-I "
-                "MiniMax-M2, Cyber 2025-II DeepSeek-R1 (full train set), Maths and Science 2026-I Kimi-K2-Thinking "
-                "(40 train items). Every condition is scored on the pairs judged in all seven conditions of its cell.")
+                "equal character spans and the judge sees the other two with one third replaced by \"...\". Judges, "
+                "the best reference judge of each cell: Coding 2025-II MiniMax-M1 and 2026-I Kimi-K2-Thinking, Cyber "
+                "2025-II DeepSeek-R1 and 2026-I Kimi-K2-Thinking, Maths 2025-II DeepSeek-R1 and 2026-I "
+                "Kimi-K2-Thinking, Science 2025-II MiniMax-M1 and 2026-I MiniMax-M2, each on the same 40 train items "
+                "(10 per difficulty quartile). Every condition is scored on the pairs judged in all four conditions of its cell. Grey point: "
+                "easy-item prediction's mean change in squared error from the full transcript, for scale (untested).")

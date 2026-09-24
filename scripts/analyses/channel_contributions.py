@@ -5,11 +5,13 @@ models, in bits: 0 is easy-item prediction, +1 is half its error, -1 twice it. O
 contribution); below zero: the reduction in prediction score when that channel is removed from the full transcript
 (unique contribution), drawn downward. Dashed line: the full transcript. Every run is cut to the frozen 10 train items
 per quartile of its semester (40 items).
-  coding, cyber (2026-I, 8 targets): Kimi-K2-Thinking channel runs (configs/judges/channels/); full transcript =
-    24d6cc32 on the same items. 2025-II was skipped (the judges' providers throttled it to about a day of collection).
+  coding, cyber (2025-II and 2026-I pooled, 16 targets): channel runs of each semester's best pairwise judge
+    (configs/judges/channels/): Kimi-K2-Thinking on both in 2026-I, MiniMax-M1 coding and DeepSeek-R1-0528 cyber in
+    2025-II; full transcript = 24d6cc32 on the same items.
   math, science (2025-II and 2026-I pooled, 16 targets): no tool calls, so the only comparison is reasoning shown vs reasoning hidden (= without CoT) and CoT only
     (configs/judges/channels/<judge>-only-reasoning.yml), with each semester's best pairwise judge with reasoning shown
-    by reference leave-one-out MSE. The hidden run is also "only messages"; it is not drawn twice.
+    by reference leave-one-out MSE. The hidden run is also "only messages", and the CoT-only run also "without
+    messages".
 Dot = estimate, shaded box = 95% percentile interval over 2,000 bootstrap resamples of the targets (resampled within
 semester; paired for reductions). 
 Marks: one-sided log likelihood ratio tests (src/analysis/challenges/likelihood_ratio.py), uncorrected (*** p<.001,
@@ -47,12 +49,13 @@ CHANNELS = {"CoT": ("only-reasoning", "drop-reasoning"), "Messages": ("only-text
             "Tools": ("only-tools", "drop-tools")}
 # the figure keeps the tool calls and their outputs together; the csv still carries them apart
 DRAWN = ("CoT", "Messages", "Tools")
-# domain -> semester -> (judge, {run: log dir hash}); None = the channel runs of configs/judges/channels/
-RUNS = {"coding": {"2026-I": None}, "cyber": {"2026-I": None},
+# domain -> semester -> (judge, {run: log dir hash}), or a judge name = its channel runs of configs/judges/channels/
+RUNS = {"coding": {"2025-II": "minimax-m1", "2026-I": "kimi-k2-thinking"},
+        "cyber": {"2025-II": "deepseek-r1-0528", "2026-I": "kimi-k2-thinking"},
         "math": {"2025-II": ("deepseek-r1-0528", {"full": "24d6cc32", "drop-reasoning": "7ea04f2b"}),
-                 "2026-I": ("glm-4.7", {"full": "66c170cd", "drop-reasoning": "7ea04f2b"})},
+                 "2026-I": ("kimi-k2-thinking", {"full": "24d6cc32", "drop-reasoning": "7ea04f2b"})},
         "science": {"2025-II": ("minimax-m1", {"full": "24d6cc32", "drop-reasoning": "7ea04f2b"}),
-                    "2026-I": ("minimax-m2", {"full": "66c170cd", "drop-reasoning": "7ea04f2b"})}}
+                    "2026-I": ("minimax-m2", {"full": "24d6cc32", "drop-reasoning": "7ea04f2b"})}}
 PIE_CHANNELS = {"CoT": "only-reasoning", "Messages": "only-text", "Tools": "only-tools"}
 PIE_COLORS = {"CoT": "#4a3aa7", "Messages": "#eda100", "Tools": "#1baf7a"}
 DRAWS, SEED, WIDTH = 2000, 0, 0.5
@@ -71,18 +74,19 @@ plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], 
 def runs_for(domain, semester, keep):
     """Run name -> verdicts on the semester's 40 items."""
     spec = RUNS[domain][semester]
-    if spec is not None:
+    if not isinstance(spec, str):
         judge, hashes = spec
         runs = {name: (v := from_logs(f"logs/judge/{domain}/{semester}/{judge}/{h}"))[v.item.isin(keep)] for name, h in hashes.items()}
         config = JudgeConfig.from_cli(f"configs/judges/channels/{judge}-only-reasoning.yml")  # CoT only, if collected
         run_dir = JudgeBT(config, DomainConfig.from_cli(f"configs/domain/{domain}.yml")).log_dir(semester)
         if run_dir.exists():
-            runs["only-reasoning"] = from_logs(run_dir)
+            # no tool calls: the reasoning alone is also the transcript without messages
+            runs["only-reasoning"] = runs["drop-text"] = from_logs(run_dir)
         return runs
-    base = from_logs(f"logs/judge/{domain}/{semester}/kimi-k2-thinking/24d6cc32")
+    base = from_logs(f"logs/judge/{domain}/{semester}/{spec}/24d6cc32")
     runs = {"full": base[base.item.isin(keep)]}
     for run in (run for pair in CHANNELS.values() for run in pair):
-        config = JudgeConfig.from_cli(f"configs/judges/channels/kimi-k2-thinking-{run}.yml")
+        config = JudgeConfig.from_cli(f"configs/judges/channels/{spec}-{run}.yml")
         run_dir = JudgeBT(config, DomainConfig.from_cli(f"configs/domain/{domain}.yml")).log_dir(semester)
         if run_dir.exists():
             runs[run] = from_logs(run_dir)
@@ -283,6 +287,6 @@ SPLIT_COLOURS = {"Reasoning": PIE_COLORS["CoT"], "Messages": PIE_COLORS["Message
 contributions.save_figures(
     errors, SPLIT_PARTS, SPLIT_COLOURS, OUT, "channel_contributions", final="transcript_channels",
     caption="Pairwise judge on transcript channels (reasoning, messages, tool calls with their outputs), 40 train "
-            "items per semester. Coding and Cyber: 2026-I, Kimi-K2-Thinking. Maths and Science: 2025-II and 2026-I "
-            "pooled, each semester's best pairwise judge with reasoning shown; they have no tool calls, so only "
-            "reasoning is ablated, and the transcript without reasoning is the reasoning-hidden run.")
+            "items per semester, 2025-II and 2026-I pooled, each semester's best pairwise judge with reasoning shown. "
+            "Maths and Science have no tool calls: the transcript without reasoning is the reasoning-hidden run, and the "
+            "transcript without messages is the reasoning alone.")

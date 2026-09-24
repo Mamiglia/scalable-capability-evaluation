@@ -10,7 +10,7 @@ from pathlib import Path
 
 from inspect_ai.dataset import MemoryDataset, Sample
 
-from configs.judge import parse_window
+from configs.judge import TRUNCATE_MODES, parse_window
 from configs.logs import logger
 from evals.transcripts import Transcript, read_header, read_transcripts
 
@@ -22,14 +22,24 @@ MIN_RESPONSE_CHARS = 20
 ROLE_PREFIX = re.compile(r"^\[[^\]\n]+\]: ", re.M)  # "[Assistant]: ", "[User]: ", "[Tool Output (f)]: " (evals.sample)
 
 
-ENDS_SEPARATOR = "\n...\n"  # marks the elided middle of a transcript cut to its two ends
+ENDS_SEPARATOR = "\n...\n"  # marks an elided piece of a transcript (ends, thirds)
 
 
 def cut(text: str, max_len: int, truncate: str = "head") -> str:
     """The max_len characters a judge sees of a longer transcript: its prefix (head), suffix (tail),
-    or first and last max_len/2 with ENDS_SEPARATOR between (ends). Shorter transcripts are unchanged."""
-    if truncate not in ("head", "tail", "ends"):
-        raise ValueError(f"truncate must be head, tail or ends, got {truncate!r}")
+    or first and last max_len/2 with ENDS_SEPARATOR between (ends). Shorter transcripts are unchanged.
+    thirds-<kept> ignores max_len: the text is split into three equal character spans and only the named
+    ones are shown, each run of dropped spans replaced by one ENDS_SEPARATOR (as on main)."""
+    if not TRUNCATE_MODES.fullmatch(truncate):
+        raise ValueError(f"truncate must match {TRUNCATE_MODES.pattern}, got {truncate!r}")
+    if truncate.startswith("thirds-"):
+        n, out, gap = len(text), "", False
+        for i, span in enumerate((text[:n // 3], text[n // 3:2 * n // 3], text[2 * n // 3:])):
+            if str(i + 1) in truncate[7:]:
+                out, gap = out + span, False
+            elif not gap:
+                out, gap = out + ENDS_SEPARATOR, True
+        return out
     if len(text) <= max_len:
         return text
     if truncate == "ends":

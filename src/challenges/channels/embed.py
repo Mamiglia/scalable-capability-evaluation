@@ -1,13 +1,15 @@
 """Embed channel-filtered transcripts with Qwen3-Embedding-8B, as the embedding protocol reads them.
 
-    uv run python src/challenges/channels/embed.py plan --out jobs.json            # laptop: which logs, items, variants
+    uv run python src/challenges/channels/embed.py plan --out jobs.json [--thirds] # laptop: which logs, items, variants
     python src/challenges/channels/embed.py run jobs.json --out DIR --shard k/n      # GPU: download and embed
     python src/challenges/channels/embed.py check DIR REFERENCE_DIR                 # compare a "full" re-embedding
 
 The embedder is Tommy's scripts/embeddings/embed.py (methodology branch, 68d6db0), unchanged in its settings:
 extract_transcript text, tokenised without truncation, 8,192-token chunks with 256 overlap (at most 16), each chunk
 ending in <|endoftext|>, last-token pooled, L2-normalised, token-weighted mean, float16. A variant
-"channels-<spec>" renders the transcript with JudgeConfig.channels = <spec> (reasoning shown); "full" is the existing
+"channels-<spec>" renders the transcript with JudgeConfig.channels = <spec> (reasoning shown); "thirds-<kept>" renders it
+as "full" does and cuts it with judge.dataset.cut(truncate="thirds-<kept>"), the cut of the pairwise thirds runs (plan
+--thirds for the removal variants); "full" is the existing
 variant, re-embedded only to check that this runner reproduces the published vectors. Output:
 <out>/<log path without .eval>.<variant>.npz with the arrays analysis.embeddings reads. Samples: the frozen train items
 of the semesters the plan covers, first attempts only.
@@ -29,22 +31,24 @@ sys.path.insert(0, str(ROOT / "src"))
 
 MODEL = "Qwen/Qwen3-Embedding-8B"
 REVISION = "1d8ad4ca9b3dd8059ad90a75d4983776a23d44af"
-DATA_REPO = "LASR-G5/benchmarks"
+DATA_REPO = "generality-labs/benchmarks"
 SPECS = ["drop-reasoning", "drop-text", "drop-calls", "drop-outputs", "drop-tools",
          "only-reasoning", "only-text", "only-calls", "only-outputs", "only-tools"]
 # domain -> (semesters, channel specs to embed)
 PLAN = {"coding": (["2025-II", "2026-I"], SPECS), "cyber": (["2025-II", "2026-I"], SPECS),
         "math": (["2025-II", "2026-I"], ["only-reasoning"]), "science": (["2025-II", "2026-I"], ["only-reasoning"])}
+THIRDS = ["thirds-23", "thirds-13", "thirds-12"]  # each third removed; the kept-alone thirds are not embedded
+THIRDS_PLAN = {domain: (["2025-II", "2026-I"], THIRDS) for domain in PLAN}
 
 
-def plan(out: Path) -> None:
+def plan(out: Path, thirds: bool = False) -> None:
     """One job per collection log the planned cohorts read: its train items and the variants to embed."""
     import pandas as pd
 
     from analysis import loading
 
     jobs: dict[str, dict] = {}
-    for domain, (semesters, specs) in PLAN.items():
+    for domain, (semesters, specs) in (THIRDS_PLAN if thirds else PLAN).items():
         for semester in semesters:
             (task,) = loading.tasks(loading.domain(domain), [semester])
             models = pd.concat([task.train.models, task.test.models])
@@ -52,7 +56,7 @@ def plan(out: Path) -> None:
                 for path in models[f"path_{bench}"].dropna().astype(str):
                     job = jobs.setdefault(path, {"log": path, "items": set(), "variants": set()})
                     job["items"] |= set(map(str, items))
-                    job["variants"] |= {f"channels-{spec}" for spec in specs}
+                    job["variants"] |= {spec if thirds else f"channels-{spec}" for spec in specs}
     rows = [{"log": j["log"], "items": sorted(j["items"]), "variants": sorted(j["variants"])} for j in jobs.values()]
     out.write_text(json.dumps(rows, indent=1))
     print(f"{len(rows)} logs, {sum(len(r['items']) * len(r['variants']) for r in rows)} item x variant embeddings (upper bound)")
@@ -132,10 +136,20 @@ def samples(log: Path, items: set[str]):
                 yield sample
 
 
+def render(sample, variant: str) -> str:
+    """The text embedded for `variant`: "full", "channels-<spec>" or "thirds-<kept>" (module docstring)."""
+    from evals.sample import extract_transcript
+    from judge.dataset import cut
+
+    if variant.startswith("thirds-"):
+        return cut(extract_transcript(sample, include_reasoning=True, channels=""), 0, variant)
+    return extract_transcript(sample, include_reasoning=True, channels="" if variant == "full" else variant.removeprefix("channels-"))
+
+
 def run(jobs_path: Path, out: Path, shard: str, variants: list[str] | None, limit_samples: int, revision: str) -> None:
     from huggingface_hub import hf_hub_download
 
-    from evals.sample import extract_score, extract_transcript
+    from evals.sample import extract_score
 
     k, n = map(int, shard.split("/"))
     jobs = json.loads(jobs_path.read_text())[k::n]
@@ -151,8 +165,7 @@ def run(jobs_path: Path, out: Path, shard: str, variants: list[str] | None, limi
         log = Path(hf_hub_download(DATA_REPO, job["log"], repo_type="dataset", revision=revision))
         rows = []
         for sample in samples(log, set(job["items"])):
-            texts = {v: extract_transcript(sample, include_reasoning=True, channels="" if v == "full" else v.removeprefix("channels-"))
-                     for v in targets}
+            texts = {v: render(sample, v) for v in targets}
             rows.append((str(sample.id), int(getattr(sample, "epoch", 1) or 1), bool(extract_score(sample)), texts))
             if limit_samples and len(rows) >= limit_samples:
                 break
@@ -191,14 +204,14 @@ def check(new_root: Path, reference_root: Path) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("plan"); p.add_argument("--out", type=Path, required=True)
+    p = sub.add_parser("plan"); p.add_argument("--out", type=Path, required=True); p.add_argument("--thirds", action="store_true")
     r = sub.add_parser("run"); r.add_argument("jobs", type=Path); r.add_argument("--out", type=Path, required=True)
     r.add_argument("--shard", default="0/1"); r.add_argument("--variants", nargs="*"); r.add_argument("--limit-samples", type=int, default=0)
-    r.add_argument("--revision", required=True, help="LASR-G5/benchmarks revision the frozen tables point at (git -C data rev-parse HEAD)")
+    r.add_argument("--revision", required=True, help="generality-labs/benchmarks revision the frozen tables point at (git -C data rev-parse HEAD)")
     c = sub.add_parser("check"); c.add_argument("new", type=Path); c.add_argument("reference", type=Path)
     args = parser.parse_args()
     if args.command == "plan":
-        plan(args.out)
+        plan(args.out, args.thirds)
     elif args.command == "run":
         run(args.jobs, args.out, args.shard, args.variants, args.limit_samples, args.revision)
     else:

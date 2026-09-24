@@ -12,6 +12,7 @@ of it against 0 (the same test: an interval excluding 0 is p < .05), the targets
 pooled.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -21,6 +22,20 @@ from scipy import stats as scipy_stats
 
 from analysis.challenges import likelihood_ratio as lr
 from analysis.plots import unclip_markers
+
+PER_QUARTILE = 10  # every removal analysis uses the 40-item subset the pairwise removal runs judged
+
+
+def removal_items(task) -> set[str]:
+    """The task's 40 removal-analysis train items: stratified_items(seed 0), 10 per difficulty quartile."""
+    from protocols.pairwise.judge import stratified_items
+    return set(map(str, stratified_items(task.references.items, PER_QUARTILE)))
+
+
+def on_items(cohort, keep: set[str]):
+    """`cohort` restricted to the train items in `keep`."""
+    return replace(cohort, items=cohort.items[cohort.items.item.astype(str).isin(keep)])
+
 
 DOMAIN_TITLES = {"coding": "Coding", "cyber": "Cyber", "math": "Maths", "science": "Science"}
 FINAL = Path.home() / "Documents/AIS/LASR/manuscript/final_figs"  # the manuscript's final figures
@@ -77,7 +92,7 @@ def part_stats(errors: pd.DataFrame, parts: dict[str, tuple[str, str]]) -> tuple
 
 
 def draw_row(axes, stats: pd.DataFrame, parts: list[str], measure: str, colours: dict[str, str],
-             titles: bool = True) -> None:
+             titles: bool = True, alpha: float | None = None, baselines: pd.DataFrame | None = None) -> None:
     """One panel per domain of `stats` into `axes` (one per domain, in DOMAIN_TITLES order), one row
     per part kept alone (`measure` "only") or removed ("without"). Dot = mean change in squared error
     from the full transcript, box = 95% t-interval of the paired change; the dashed line at 0
@@ -85,11 +100,15 @@ def draw_row(axes, stats: pd.DataFrame, parts: list[str], measure: str, colours:
     saturated-item prediction, which the marks do not test. `stats`: domain, part, measure, estimate,
     lo, hi, p. `colours`: part -> colour, or domain -> colour when every part of a domain shares one.
     Every panel shares one axis, from the first tick under the lowest interval to the first tick past
-    the widest."""
+    the widest. `baselines` (baseline_stats) adds a last row, easy-item prediction's change from the full
+    transcript as a grey point, for scale; no interval, no test mark."""
     domains = [d for d in DOMAIN_TITLES if d in set(stats.domain)]
     rows = [f"{measure.capitalize()} {p[0].lower()}{p[1:]}" for p in parts]
     width = 0.5
     picked = stats[stats.measure == measure]
+    if baselines is not None:
+        rows.append("Easy-item prediction")
+        picked = pd.concat([picked, baselines])
     low, high = min(0.0, float(picked.lo.min())), max(0.0, float(picked.hi.max()))  # one axis for every panel
     for step in (m * 10.0 ** e for e in range(-2, 2) for m in (1, 2, 5)):  # the finest nice step with at most 5 ticks
         if np.ceil(high / step) - np.floor(low / step) <= 4:
@@ -108,11 +127,14 @@ def draw_row(axes, stats: pd.DataFrame, parts: list[str], measure: str, colours:
                 drawn.append((y, colours.get(label, colours.get(domain, "0.55")), pick.iloc[0]))
         for y, colour, row in drawn:
             ax.add_patch(plt.Rectangle((row.lo, y - width / 2), row.hi - row.lo, width, color=colour,
-                                       alpha=0.6 if measure == "without" else 0.35, linewidth=0, zorder=1))
+                                       alpha=alpha or (0.6 if measure == "without" else 0.35), linewidth=0, zorder=1))
             ax.plot(row.estimate, y, "o", ms=3.5, mfc="white" if measure == "without" else colour, mec="black", mew=0.4, zorder=2)
         edge = max(r.hi for _, _, r in drawn) + gap  # the marks start just past the panel's widest box
         for y, _, row in drawn:
             ax.text(edge, y, stars(row.p), ha="left", va="center", fontsize=6)
+        if baselines is not None and not (row := baselines[baselines.domain == domain]).empty:
+            row, y = row.iloc[0], len(parts)
+            ax.plot(row.estimate, y, "o", ms=3.5, mfc="0.6", mec="black", mew=0.4, zorder=2)
         reach = max(reach, edge + text)
         ax.set_xticks(ticks, [f"{t:g}" for t in ticks])
         ax.spines["bottom"].set_bounds(ticks[0], ticks[-1])
@@ -126,27 +148,42 @@ def draw_row(axes, stats: pd.DataFrame, parts: list[str], measure: str, colours:
     axes[0].set_yticks(range(len(rows)), rows)
 
 
-def figure(stats: pd.DataFrame, parts: list[str], measure: str, colours: dict[str, str]) -> plt.Figure:
+def figure(stats: pd.DataFrame, parts: list[str], measure: str, colours: dict[str, str],
+           baselines: pd.DataFrame | None = None) -> plt.Figure:
     """draw_row on its own figure, 5.2 in wide, with the shared x label."""
     domains = [d for d in DOMAIN_TITLES if d in set(stats.domain)]
-    fig, axes = plt.subplots(1, len(domains), figsize=(5.2, 1.3), sharey=True, gridspec_kw={"wspace": 0.08})
-    draw_row(np.atleast_1d(axes), stats, parts, measure, colours)
-    fig.supxlabel("Δ squared error vs full transcript", fontsize=8, y=-0.12)
+    fig, axes = plt.subplots(1, len(domains), figsize=(5.2, 1.3 + 0.3 * (baselines is not None)), sharey=True,
+                             gridspec_kw={"wspace": 0.08})
+    draw_row(np.atleast_1d(axes), stats, parts, measure, colours, baselines=baselines)
+    fig.supxlabel("Δ Squared error vs full transcript", fontsize=8, y=-0.12)
     return unclip_markers(fig)
 
 
-def grid(stats: dict[str, pd.DataFrame], parts: list[str], measure: str, colours: dict[str, str]) -> plt.Figure:
+def grid(stats: dict[str, pd.DataFrame], parts: list[str], measure: str, colours: dict[str, str],
+         alpha: float | None = None) -> plt.Figure:
     """One draw_row per protocol (`stats`: label -> its stats table), stacked, domain titles on the
     top row only, each row's protocol label to the left of its condition labels, its own x axis."""
     domains = [d for d in DOMAIN_TITLES if d in set(pd.concat(stats.values()).domain)]
     fig, axes = plt.subplots(len(stats), len(domains), figsize=(5.2, 1.3 * len(stats)), sharey="row", squeeze=False,
                              gridspec_kw={"wspace": 0.08, "hspace": 0.55})
     for i, (label, table) in enumerate(stats.items()):
-        draw_row(axes[i], table, parts, measure, colours, titles=i == 0)
+        draw_row(axes[i], table, parts, measure, colours, titles=i == 0, alpha=alpha)
         axes[i, 0].annotate(label, xy=(0, 0.5), xycoords="axes fraction", xytext=(-92, 0), textcoords="offset points",
                             rotation=90, ha="center", va="center", fontsize=7, fontweight="bold")
-    fig.supxlabel("Δ squared error vs full transcript", fontsize=8, y=-0.12 / len(stats))
+    fig.supxlabel("Δ Squared error vs full transcript", fontsize=8, y=-0.12 / len(stats))
     return unclip_markers(fig)
+
+
+def baseline_stats(errors: pd.DataFrame) -> pd.DataFrame:
+    """Per domain, easy-item prediction's mean change in squared error from the full transcript, semesters pooled:
+    domain, estimate (lo = hi = estimate: a point only, since the paper tests the baseline with the LLR, not this)."""
+    rows = []
+    for domain, part in errors.groupby("domain"):
+        wide = {s: g.pivot_table(index="model", columns="condition", values="err") for s, g in part.groupby("semester")}
+        diff = np.concatenate([(w["easy"] - w["full"]).to_numpy(float) for w in wide.values()])
+        mean = float(diff[np.isfinite(diff)].mean())
+        rows.append(dict(domain=domain, estimate=mean, lo=mean, hi=mean))
+    return pd.DataFrame(rows)
 
 
 def domain_stats(errors: pd.DataFrame, parts: dict[str, tuple[str, str]]) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -188,21 +225,25 @@ def save(fig: plt.Figure, out: Path, name: str, final: str | None) -> None:
 
 
 def save_figures(errors: pd.DataFrame, parts: dict[str, tuple[str, str]], colours: dict[str, str],
-                 out: Path, name: str, final: str | None = None, caption: str = "") -> None:
+                 out: Path, name: str, final: str | None = None, caption: str = "",
+                 measures: tuple[str, ...] = ("only", "without"), baseline: bool = False) -> None:
     """part_stats for every domain of `errors`, written to <name>_delta_squared_error.csv, and
     the "only" and "without" figures to <name>_only and <name>_without (.png, .svg) under `out`. With
-    `final`, also into FINAL as <final>_kept_alone and <final>_removed, each with a .txt caption."""
+    `final`, also into FINAL as <final>_kept_alone and <final>_removed, each with a .txt caption.
+    `measures` limits the figures, e.g. to ("without",) when no part was run alone; `baseline` adds the
+    easy-item prediction point (baseline_stats) for scale."""
     stats, fulls = domain_stats(errors, parts)
     stats.to_csv(out / f"{name}_delta_squared_error.csv", index=False)
     targets = errors[errors.condition == "full"].groupby("domain").size()
-    for measure in ("only", "without"):
-        save(figure(stats, list(parts), measure, colours), out, f"{name}_{measure}", final and f"{final}_{FINAL_NAMES[measure]}")
+    for measure in measures:
+        save(figure(stats, list(parts), measure, colours, baseline_stats(errors) if baseline else None), out, f"{name}_{measure}", final and f"{final}_{FINAL_NAMES[measure]}")
         if final:
             (FINAL / f"{final}_{FINAL_NAMES[measure]}.txt").write_text("\n".join(caption_lines(stats, fulls, targets, measure, caption)) + "\n")
 
 
 def save_grid(errors: pd.DataFrame, protocols: dict[str, str], parts: dict[str, tuple[str, str]],
-              colours: dict[str, str], out: Path, name: str, final: str | None = None, caption: str = "") -> None:
+              colours: dict[str, str], out: Path, name: str, final: str | None = None, caption: str = "",
+              alpha: float | None = None) -> None:
     """save_figures for several protocols at once (`errors` carries a protocol column; `protocols`:
     key -> row label), one grid figure per measure with a row of panels per protocol."""
     stats, fulls, targets = {}, {}, {}
@@ -212,7 +253,7 @@ def save_grid(errors: pd.DataFrame, protocols: dict[str, str], parts: dict[str, 
         targets[label] = e[e.condition == "full"].groupby("domain").size()
     pd.concat(stats, names=["protocol"]).reset_index(level=0).to_csv(out / f"{name}_delta_squared_error.csv", index=False)
     for measure in ("only", "without"):
-        save(grid(stats, list(parts), measure, colours), out, f"{name}_{measure}", final and f"{final}_{FINAL_NAMES[measure]}")
+        save(grid(stats, list(parts), measure, colours, alpha), out, f"{name}_{measure}", final and f"{final}_{FINAL_NAMES[measure]}")
         if final:
             lines = [caption]
             for label in protocols.values():

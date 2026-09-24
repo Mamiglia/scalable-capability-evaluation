@@ -2,9 +2,9 @@
 pairwise channel figures (scripts/analyses/channel_contributions.py), one row of domain panels per protocol.
 
 Both protocols are refitted per condition on the references' channel-filtered transcripts and predict the targets'
-θ*; 2025-II and 2026-I pooled (16 targets per domain), the full train set. Conditions, as for the pairwise judge:
+θ*; 2025-II and 2026-I pooled (16 targets per domain), the 40 train items of the pairwise removal runs. Conditions, as for the pairwise judge:
 each channel (reasoning, messages, tool calls with their outputs) kept alone and removed; Maths and Science have
-no tool calls, so only reasoning is ablated.
+no tool calls, so reasoning is kept alone and removed and messages removed (= the reasoning alone).
   Embedding: Qwen3-Embedding-8B vectors of the transcript rendered with only / without the channel
     (src/challenges/channels/embed.py, LASR-G5/transcript-embeddings variants channels-<spec>; "answer" is the
     transcript without reasoning for Maths and Science), ridge as in the main analysis.
@@ -58,12 +58,14 @@ plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], 
 
 
 def conditions(domain: str) -> list[str]:
-    parts = list(PARTS.values()) if domain in TOOL_DOMAINS else [PARTS["Reasoning"]]
-    return ["full", *(run for pair in parts for run in pair)]
+    if domain not in TOOL_DOMAINS:  # no tool calls: without messages is the reasoning alone
+        return ["full", *PARTS["Reasoning"], "drop-text"]
+    return ["full", *(run for pair in PARTS.values() for run in pair)]
 
 
 def embedding_rows(domain: str, condition: str, cohort: Cohort) -> pd.DataFrame:
-    variant = {"full": "full", "drop-reasoning": "channels-drop-reasoning" if domain in TOOL_DOMAINS else "answer"}
+    variant = {"full": "full", "drop-reasoning": "channels-drop-reasoning" if domain in TOOL_DOMAINS else "answer",
+               "drop-text": "channels-drop-text" if domain in TOOL_DOMAINS else "channels-only-reasoning"}
     return embeddings.EmbeddingRegression(variant.get(condition, f"channels-{condition}")).get_features(cohort)
 
 
@@ -110,13 +112,15 @@ def compute() -> tuple[pd.DataFrame, pd.DataFrame]:
         for semester in SEMESTERS:
             (task,) = loading.tasks(loading.domain(domain), [semester])
             refs, targets, truth = task.references.theta, list(task.test.models.index), task.truth
+            keep = contributions.removal_items(task)
+            cohorts = [contributions.on_items(c, keep) for c in (task.references, task.test)]
             for protocol in PROTOCOLS:
                 for condition in conditions(domain):
                     if protocol == "embedding":
-                        x = pd.concat([embedding_rows(domain, condition, c) for c in (task.references, task.test)])
+                        x = pd.concat([embedding_rows(domain, condition, c) for c in cohorts])
                         estimator = RidgeCV(alphas=embeddings.ALPHAS)
                     else:
-                        x = pd.concat([feature_rows(condition, c, reasoning_only) for c in (task.references, task.test)])
+                        x = pd.concat([feature_rows(condition, c, reasoning_only) for c in cohorts])
                         estimator = make_pipeline(StandardScaler(), RidgeCV(alphas=FEATURE_ALPHAS))
                     rule = lr.feature_rule(estimator, x)
                     theta = rule(refs, targets).reindex(truth.index)
@@ -144,7 +148,8 @@ if __name__ == "__main__":
         errors, PROTOCOLS, PARTS, COLOURS, OUT, "other_protocol_channels", final="transcript_channels_other_protocols",
         caption="Transcript channels (reasoning, messages, tool calls with their outputs) for the Deterministic features and "
                 "Embedding protocols, refitted on the references' channel-filtered transcripts; 2025-II and 2026-I pooled "
-                "(16 targets per domain), full train set. Maths and Science have no tool calls, so only reasoning is "
-                "ablated. Embedding: vectors of the transcript rendered with only or without the channel. Deterministic "
+                "(16 targets per domain), the same 40 train items (10 per difficulty quartile) as the pairwise removal runs. Maths and Science have no tool calls: without messages is the "
+                "reasoning alone. Embedding: vectors of the transcript rendered with only or without the channel. Deterministic "
                 "features: the 13 features computed on the channel's text (the tool-call count is 0 without tools and the "
-                "only feature with tools alone).")
+                "only feature with tools alone).",
+        alpha=1)  # solid bars, as the main channel figure (fig 5)
