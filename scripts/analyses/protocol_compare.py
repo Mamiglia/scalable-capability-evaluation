@@ -75,7 +75,7 @@ def compute() -> pd.DataFrame:
                 forecasts["pairwise"] = pairwise(task, pair_run)
             direct_dir = Path("logs/direct", name, sem, judge)
             if direct_dir.exists():
-                forecasts["direct"] = direct(task, next(direct_dir.iterdir()))
+                forecasts["direct"] = direct(task, max(direct_dir.iterdir(), key=lambda r: max(f.name for f in r.glob("*.eval"))))  # newest = the current prompt hash (coding keeps a stale 1a2c14b2)
             for k in SERIES:
                 if k not in forecasts:
                     print("missing", k, name, sem, judge, file=sys.stderr)
