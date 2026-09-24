@@ -11,8 +11,8 @@ MSE as % of the ALL-reference mean_ref baseline, so scores are comparable across
 Band = 2.5-97.5 percentile over subsets (which references were kept). What was removed is read off the subsets: the
 number of frontier references (fit.yml `top`) removed at k = 4 and 6 (`_frontier` figure), and the subsets of each k split by the
 mean theta* of the references they keep: top third = keep stronger, bottom third = keep weaker (`_ends` figure, median
-and 2.5-97.5 percentile band over the subsets of that third, i.e. over which models were removed), plus the Spearman rho between the removed references' mean
-theta* and the score. Writes analysis/judge/reference_count_effect{,_frontier,_ends}.{png,svg} and the .csv.
+and 2.5-97.5 percentile band over the subsets of that third, i.e. over which models were removed; squared error, not score), plus the Spearman rho between the removed references' mean
+theta* and the score. Writes analysis/judge/reference_count_effect{,_frontier,_ends}.{png,svg,pdf} and the .csv.
 """
 
 import sys
@@ -125,7 +125,7 @@ def main() -> int:
         df, some, ends = (d[d.semester.isin(last)] for d in (df, some, ends))
     shared = dict(tag=tag, xlabel="Reference models", xticks=(2, 4, 6, 8))
     plot(df, x="k", out=OUT, **shared)
-    plot(ends.assign(row="Keep " + ends.keep), x="k", out=OUT.with_name(OUT.name + "_ends"), **shared)
+    plot(ends.assign(row="Keep " + ends.keep), x="k", out=OUT.with_name(OUT.name + "_ends"), mse=True, **shared)  # squared error, as the paper
     plot(some.sort_values("k", ascending=False, kind="stable").assign(row=lambda d: d.k.astype(str) + " kept"), tag=tag, x="frontier_removed",
          xlabel="Frontier references removed", xticks=(0, 1, 2, 3), out=OUT.with_name(OUT.name + "_frontier"))
     return 0

@@ -2,7 +2,7 @@
 
     uv run python scripts/analyses/item_count_effect.py [--recompute] [--last K] [--direct | --both]
     # --last K: only the last K semesters (files tagged _lastK); --direct: direct judging by the top-1 judge (files tagged _direct);
-    # --both: the top-1 judge, a Pairwise row and a Direct row, from the two cached tables (files tagged _both)
+    # --both: the top-1 judge, a Pairwise row and an Absolute (direct) row, squared error, from the two cached tables (files tagged _both)
 
 Judges = the top-3 references of each semester (data/meta/<domain>/fit.yml `top`, one figure row per rank), subjects' reasoning shown
 (logs/judge/<domain>/<sem>/<judge>/{24d6cc32,66c170cd}, first that exists). For n in 3, 6, 10, 20, ... up to the
@@ -109,11 +109,12 @@ def compute_direct() -> pd.DataFrame:
 
 
 def plot(df: pd.DataFrame, key: str = "linear", tag: str = "", x: str = "n", xlabel: str = "Judged items",
-         xticks: tuple = (XMIN, 50, 100), out: Path = OUT) -> None:
+         xticks: tuple = (XMIN, 50, 100), out: Path = OUT, mse: bool = False) -> None:
     """Rows = judge rank among the references, one panel per semester, one line per domain (colour + palette marker): the task's median prediction score over draws,
     with the 2.5-97.5 percentile band over draws.
 
-    A line stops at the task's number of judged items; scores below 0 sit on the floor."""
+    A line stops at the task's number of judged items; scores below 0 sit on the floor. mse: plot the squared error (theta^2,
+    log axis) instead, with the reference-mean baseline of each task as a dashed line in the domain's colour."""
     plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,
                          "ytick.labelsize": 7, "svg.fonttype": "none"})
     df = df[df[x] >= xticks[0]]  # the axis starts at its first tick (items: fewer than XMIN is mostly draw noise)
@@ -122,15 +123,19 @@ def plot(df: pd.DataFrame, key: str = "linear", tag: str = "", x: str = "n", xla
     semesters, ranks = sorted(df.semester.unique()), list(dict.fromkeys(df.sort_values("judge_rank", kind="stable").row))
     fig, axes = plt.subplots(len(ranks), len(semesters), figsize=(0.3 + 1.2 * len(semesters), 0.3 + 1.1 * len(ranks)),
                              sharex=True, sharey=True, squeeze=False, gridspec_kw={"wspace": 0.4, "hspace": 0.35})
-    draws = (100 - 100 * df[key] / df.baseline).groupby([df.row, df.semester, df.domain, df[x]])
+    draws = (df[key] if mse else 100 - 100 * df[key] / df.baseline).groupby([df.row, df.semester, df.domain, df[x]])
+    floor = (1e-9, np.inf) if mse else (0, 100)
     score, lo, hi = draws.median(), draws.quantile(0.025), draws.quantile(0.975)  # band: which items were judged
     for row, rank in zip(axes, ranks):
         for ax, sem in zip(row, semesters):
             for name, marker in DOMAIN.items():
                 cell = (rank, sem, name.lower())
                 if cell in score.index.droplevel(x):
-                    y = score[cell].clip(lower=0)
-                    ax.fill_between(y.index, lo[cell].clip(0, 100), hi[cell].clip(0, 100), color=COLOR[name.lower()], alpha=0.15, lw=0)
+                    y = score[cell].clip(*floor)
+                    ax.fill_between(y.index, lo[cell].clip(*floor), hi[cell].clip(*floor), color=COLOR[name.lower()], alpha=0.15, lw=0)
+                    if mse:
+                        base = df[(df.row == rank) & (df.semester == sem) & (df.domain == name.lower())].baseline.iloc[0]
+                        ax.plot(xticks[::len(xticks) - 1], [base] * 2, color=COLOR[name.lower()], lw=0.7, ls="--", alpha=0.7)
                     ax.plot(y.index, y, color=COLOR[name.lower()], lw=1, marker=marker, ms=2.5, mfc="white", mew=0.7, clip_on=False)
             if rank == ranks[0]:
                 ax.text(0, 1.04, sem, transform=ax.transAxes, fontsize=7, color="#9a9a9a")
@@ -139,26 +144,33 @@ def plot(df: pd.DataFrame, key: str = "linear", tag: str = "", x: str = "n", xla
             for side in ("left", "bottom"):
                 ax.spines[side].set_position(("outward", 4))
         row[0].set_ylabel(rank)
-    fig.supylabel("Prediction score", fontsize=8, x=0.125 - 0.7 / fig.get_figwidth())  # left of the row labels, whatever the column count
+    fig.supylabel("Squared error (θ²)" if mse else "Prediction score", fontsize=8, x=0.125 - 0.7 / fig.get_figwidth())  # left of the row labels, whatever the column count
     ax = axes[0, 0]
     ax.set_xlim(xticks[0], xticks[-1]), ax.set_xticks(xticks)
-    ax.set_ylim(0, 100), ax.set_yticks([0, 50, 100])
+    if mse:
+        ax.set_yscale("log"), ax.set_ylim(0.02, 6), ax.set_yticks([0.1, 1]), ax.set_yticklabels(["0.1", "1"])
+        ax.yaxis.set_minor_locator(plt.NullLocator())
+    else:
+        ax.set_ylim(0, 100), ax.set_yticks([0, 50, 100])
     fig.supxlabel(xlabel, fontsize=8, y=0.11 - 0.45 / fig.get_figheight())  # just under the tick labels, whatever the row count
     handles = [plt.Line2D([], [], color=COLOR[name.lower()], lw=1, marker=marker, ms=2.5, mfc="white", mew=0.7, label=name.capitalize())
                for name, marker in DOMAIN.items() if name.lower() in set(df.domain)]
-    fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False, bbox_to_anchor=(0.5, 0.9 + 0.1 / len(ranks)),
+    if mse:
+        handles.append(plt.Line2D([], [], color="#9a9a9a", lw=0.7, ls="--", label="Baseline"))
+    fig.legend(handles=handles, loc="lower center", ncol=len(handles), frameon=False, bbox_to_anchor=(0.5, 0.9 + 0.1 / len(ranks)),
                handletextpad=0.3, columnspacing=0.8, handlelength=1.4)
     out = out.with_name(out.name + tag)
     fig.savefig(out.with_suffix(".png"), dpi=300, bbox_inches="tight")
     fig.savefig(out.with_suffix(".svg"), bbox_inches="tight")
+    fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight")
 
 
 def main() -> int:
     if "--both" in sys.argv:  # the top-1 judge under both protocols, one row each, from the two cached tables
         pair, rate = pd.read_csv(OUT.with_suffix(".csv")), pd.read_csv(OUT.with_name(OUT.name + "_direct").with_suffix(".csv"))
         df = pd.concat([pair[pair.judge_rank == 1].assign(row="Pairwise", mse=lambda d: d.linear),
-                        rate.assign(row="Direct", mse=lambda d: d.direct)])
-        plot(df, key="mse", out=OUT.with_name(OUT.name + "_both"))
+                        rate.assign(row="Absolute", mse=lambda d: d.direct)])
+        plot(df, key="mse", out=OUT.with_name(OUT.name + "_both"), mse=True)
         return 0
     direct = "--direct" in sys.argv  # direct judging (top-1 judge) instead of pairwise (top-3 judges)
     key, out = ("direct", OUT.with_name(OUT.name + "_direct")) if direct else ("linear", OUT)
