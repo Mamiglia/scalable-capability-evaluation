@@ -83,6 +83,6 @@ def test_verdicts_from_logs(monkeypatch, tmp_path):
     monkeypatch.setattr(judge_module, "read_eval_log_sample_summaries", lambda *a, **k: summaries)
     table = judge_module.from_logs(tmp_path)
     assert table.to_dict("records") == [
-        dict(bench="gpqa", judge="judge", item="q1", model_left="big", model_right="small", pick_left=1.0, semester="s", imported=False),
-        dict(bench="gpqa", judge="judge", item="q1", model_left="small", model_right="big", pick_left=1.0, semester="s", imported=False),
+        dict(bench="gpqa", judge="judge", item="q1", model_left="big", model_right="small", pick_left=1.0, semester="s", imported=False, chars_left=900, chars_right=900),
+        dict(bench="gpqa", judge="judge", item="q1", model_left="small", model_right="big", pick_left=1.0, semester="s", imported=False, chars_left=900, chars_right=900),
     ]
