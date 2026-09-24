@@ -5,7 +5,8 @@
 Verdicts of the baseline dir and of every thirds dir present are restricted to the (bench, item, left, right)
 rows judged in all of them, then scored as pinned Bradley-Terry (`bt`) and JudgeLinear (`linear`) MSE vs theta*
 on all targets and on the frontier (top-3 targets by theta*), next to the mean_ref baseline. Writes
-analysis/judge/thirds.{csv,png,svg}: MSE as % of mean_ref, one panel per domain, x = kept thirds.
+analysis/judge/thirds.{csv,png,svg}: MSE as % of mean_ref, one panel per domain, x = kept thirds. The csv holds
+both the RUNS (top reference) and the LOO judges (runs.py); the figure shows the LOO judges.
 """
 import functools
 import logging
@@ -21,7 +22,7 @@ import pandas as pd
 
 from capability.evaluate import score
 from capability.task import Task
-from challenges.thirds.runs import KEPT, RUNS, harnesses
+from challenges.thirds.runs import KEPT, LOO, RUNS, harnesses
 from configs.logs import logger
 from protocols import PROTOCOLS
 from protocols.pairwise import from_logs
@@ -52,8 +53,8 @@ def forecast(cls, task: Task, v: pd.DataFrame) -> pd.Series:
 
 def compute() -> pd.DataFrame:
     rows = []
-    for (domain, semester), stem in RUNS.items():
-        dom, runs = harnesses(domain, semester)
+    for (domain, semester), stem in sorted({*RUNS.items(), *LOO.items()}):
+        dom, runs = harnesses(domain, semester, stem)
         dirs = {c: h.log_dir(semester) for c, h in runs.items()}
         vs = {c: verdicts(d) for c, d in dirs.items() if any(d.glob("*.eval"))}
         if "full" not in vs or len(vs) == 1:
@@ -76,6 +77,7 @@ def plot(df: pd.DataFrame, metric: str = "linear") -> None:
     plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,
                          "ytick.labelsize": 7, "svg.fonttype": "none"})
     df = df[df.targets == "all"]
+    df = df[[LOO[d, s] == j for d, s, j in zip(df.domain, df.semester, df.judge)]]
     fig, axes = plt.subplots(1, 4, figsize=(3.6, 1.5), sharey=True, gridspec_kw={"wspace": 0.15})
     for ax, (name, color) in zip(axes, COLOR.items()):
         d = df[df.domain == name]

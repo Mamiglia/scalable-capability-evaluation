@@ -13,10 +13,16 @@ RUNS = {("science", "2025-II"): "minimax-m1", ("coding", "2025-II"): "minimax-m1
         ("math", "2025-II"): "deepseek-r1-0528", ("cyber", "2025-II"): "deepseek-r1-0528",
         ("science", "2026-I"): "kimi-k2-thinking", ("math", "2026-I"): "kimi-k2-thinking",
         ("coding", "2026-I"): "minimax-m2-full", ("cyber", "2026-I"): "deepseek-v3.2-full"}
+# the judge with the lowest reference leave-one-out MSE (pairwise linear, reasoning shown, full train set where
+# collected; 2026-09-23 refit after merging the judging repo), where it differs from RUNS; science 2026-I is the
+# 40-item run (minimax-m2 also leads on 100 items). compare.py plots these.
+LOO = RUNS | {("science", "2026-I"): "minimax-m2", ("math", "2026-I"): "kimi-k2-thinking-full",
+              ("coding", "2026-I"): "kimi-k2-thinking-full", ("cyber", "2026-I"): "kimi-k2-thinking-full"}
 
 
-def harnesses(domain: str, semester: str) -> tuple[DomainConfig, dict[str, JudgeBT]]:
-    """condition ("full" or "thirds-<kept>") -> the JudgeBT whose log_dir(semester) holds its verdicts."""
+def harnesses(domain: str, semester: str, stem: str | None = None) -> tuple[DomainConfig, dict[str, JudgeBT]]:
+    """condition ("full" or "thirds-<kept>") -> the JudgeBT whose log_dir(semester) holds its verdicts;
+    `stem` overrides the RUNS judge (e.g. a reference-LOO pick)."""
     dom = DomainConfig.from_cli(Path(f"configs/domain/{domain}.yml"))
-    cfg = JudgeConfig.from_cli(Path(f"configs/judges/reasoning/{RUNS[domain, semester]}.yml"))
+    cfg = JudgeConfig.from_cli(Path(f"configs/judges/reasoning/{stem or RUNS[domain, semester]}.yml"))
     return dom, {"full": JudgeBT(cfg, dom)} | {f"thirds-{k}": JudgeBT(replace(cfg, truncate=f"thirds-{k}"), dom) for k in KEPT}

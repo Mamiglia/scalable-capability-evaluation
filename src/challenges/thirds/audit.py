@@ -1,6 +1,6 @@
 """Audit the thirds runs of one domain x semester against their full-transcript baseline; no API calls.
 
-    PYTHONPATH=src .venv/bin/python src/challenges/thirds/audit.py <domain> <semester> [--inputs]
+    PYTHONPATH=src .venv/bin/python src/challenges/thirds/audit.py <domain> <semester> [--stem <yml-stem>] [--inputs]
 
 Per thirds condition dir: every log succeeded with no sample limit and the right truncate metadata, every
 logged sample id exists in the baseline dir (a pair the baseline left unscored on overflow may be scored
@@ -24,8 +24,8 @@ def sample_ids(run_dir):
             for p in run_dir.glob("*.eval") if is_successful_eval(p) for s in read_eval_log_sample_summaries(str(p))}
 
 
-def audit(domain, semester, inputs=False):
-    dom, runs = harnesses(domain, semester)
+def audit(domain, semester, inputs=False, stem=None):
+    dom, runs = harnesses(domain, semester, stem)
     baseline = sample_ids(runs["full"].log_dir(semester))
     task = Task.from_semester(semester, dom) if inputs else None
     ok = True
@@ -68,5 +68,6 @@ if __name__ == "__main__":
     parser.add_argument("domain")
     parser.add_argument("semester")
     parser.add_argument("--inputs", action="store_true", help="also rebuild every prompt from data/ and compare")
+    parser.add_argument("--stem", help="configs/judges/reasoning/<stem>.yml instead of the RUNS judge")
     args = parser.parse_args()
-    sys.exit(0 if audit(args.domain, args.semester, args.inputs) else 1)
+    sys.exit(0 if audit(args.domain, args.semester, args.inputs, args.stem) else 1)
