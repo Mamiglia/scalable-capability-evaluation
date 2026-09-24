@@ -29,6 +29,7 @@ def judge_task(
     truncate: str = "head",
     window: str = "",
     channels: str = "",
+    pair_max_length: int = 0,
 ) -> Task | None:
     """Build the judging task that compares one major eval log against one minor log.
 
@@ -60,6 +61,7 @@ def judge_task(
         truncate=truncate,
         window=window,
         channels=channels,
+        pair_max_length=pair_max_length,
     )
     if len(dataset) == 0:
         logger.warning("%s: no samples after filtering (%s vs %s), skipping", name, major_path, minor_path)
@@ -88,6 +90,7 @@ def judge_task(
             "truncate": truncate,
             "window": window,
             "channels": channels,
+            "pair_max_length": pair_max_length,
             **(metadata or {}),
         },
     )

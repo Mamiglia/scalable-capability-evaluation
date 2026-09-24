@@ -109,7 +109,7 @@ class JudgeBT(PairwiseBT):
                 task = judge_task(
                     DATA / train.models.loc[major, f"path_{name}"], DATA / cohort.models.loc[minor, f"path_{name}"],
                     system_prompt=bench.system_prompt or self.config.system_prompt,
-                    max_length=self.config.max_length,
+                    max_length=self.config.max_length, pair_max_length=self.config.pair_max_length,
                     include_reverse=self.config.include_reverse,
                     include_reasoning=self.config.include_reasoning,
                     truncate=self.config.truncate, window=self.config.window, channels=self.config.channels,

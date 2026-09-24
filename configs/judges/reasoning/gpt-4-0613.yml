@@ -1,0 +1,9 @@
+# Reasoning-on twin of configs/judges/gpt-4-0613.yml: the subjects' reasoning traces are shown (a plain model's
+# transcript is shown as is), nothing is truncated by max_length, and a pair too long for the judge's context is
+# left unscored (fail_on_error off) instead of failing the task. The context is 8,191 tokens and OpenAI rejects a
+# request whose input plus max_tokens exceeds it, so the output cap is 512 (judgments use ~75 tokens).
+name: gpt-4-0613
+judge: configs/models/openai/gpt-4-0613.yml
+include_reasoning: true
+max_length: 100000000
+_kwargs: {fail_on_error: false, max_tokens: 512}

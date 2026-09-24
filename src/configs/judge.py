@@ -43,6 +43,9 @@ class JudgeConfig(DraccusConfig):
     max_length: int = FULL_LENGTH  # chars kept per transcript; two must fit the judge's context with its output
     truncate: str = "head"  # which max_length chars to keep when a transcript is longer: head (prefix), tail (suffix) or ends (both halves, "..." between)
     window: str = ""  # a fraction of each transcript by characters, keep-k/n (show only the k-th n-th) or drop-k/n (hide it); applied before max_length
+    # a pair whose two transcripts together exceed this many chars has each cut to half of it (0 = never):
+    # fits a small-context judge without cutting the pairs that already fit
+    pair_max_length: int = 0
     channels: str = ""  # only-<c> shows one channel of the transcript, drop-<c> hides it: reasoning, text, calls, outputs or tools (calls and outputs)
     temperature: float = 0.0
     cache: bool = True  # inspect generate cache, never expires: a repeated pair is free
@@ -73,6 +76,8 @@ class JudgeConfig(DraccusConfig):
         if self.truncate != "head":  # likewise: head truncation is the historical behaviour
             condition += (self.truncate,)
         condition += self._partial_view()
+        if self.pair_max_length:
+            condition += (("pair_max_length", int(self.pair_max_length)),)
         return hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
 
     def _partial_view(self) -> tuple:
