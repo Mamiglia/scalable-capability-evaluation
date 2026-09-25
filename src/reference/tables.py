@@ -17,7 +17,7 @@ from configs.domain import DomainConfig
 SEMESTERS = Path("configs/semesters.yml")
 # Transcript logs; SCE_DATA points at a checkout elsewhere (e.g. an external volume).
 DATA = Path(os.environ.get("SCE_DATA", "data"))
-FEATURES = Path("glm_features")  # per-transcript feature CSVs mirroring data/ (ANONYMOUS/glm_features)
+FEATURES = Path("glm_features")  # per-transcript feature CSVs mirroring data/ (scripts/glm_features/extract.py)
 META = Path("data") / "meta"  # the frozen tables stay in the repo checkout
 
 

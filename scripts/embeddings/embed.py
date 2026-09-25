@@ -71,7 +71,7 @@ def frozen_items(data: Path) -> dict[str, set[str]]:
     for csv in sorted((data / "meta").glob("*/items.csv")):
         table = pd.read_csv(csv, dtype={"item": str})
         if os.environ.get("EMBED_TRAIN_ONLY"):  # ponytail: only what protocols.embeddings reads (train items); such
-            table = table[table.filter(regex="_train$").any(axis=1)]  # files are partial -> keep them out of the HF cache
+            table = table[table.filter(regex="_train$").any(axis=1)]  # partial files: keep them out of the shared cache
         for bench, ids in table.groupby("bench").item:
             found.setdefault(bench, set()).update(ids)
     return found

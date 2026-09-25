@@ -48,30 +48,51 @@ uv run pytest                  # offline, no API calls
 cp env.example .env            # API keys: only needed to re-collect or re-judge
 ```
 
-### Data
+### Data: the supplementary zip
 
 The full data (every rollout and judge run, >100 GB) will be released after review. The supplementary material
-holds one complete semester task, **cyber 2026-I** (`cyber-2026-I.zip`, 64 MB): what the forecasting pipeline
-reads for that task, from which every protocol's forecasts for its 8 target models are recomputed exactly.
+holds one complete semester task, **cyber 2026-I** (`cyber-2026-I.zip`, 64 MB): everything the forecasting
+pipeline reads for that task. From it every protocol's forecasts for the task's 8 target models are recomputed
+exactly, with no API calls.
 
 | path | contents |
 | --- | --- |
 | `data/meta/cyber/` | the frozen tables: item parameters, EASY/HARD split and train items, θ\* per task |
 | `data/<bench>/<hash>/<model>/0/*.eval` | repeat-0 rollouts of the task's 8 references, 7 historical models and 8 targets on CyBench and InterCode, train items only |
-| `logs/judge/cyber/2026-I/<judge>/24d6cc32/` | pairwise verdicts of the four judges, reasoning shown |
+| `logs/judge/cyber/2026-I/<judge>/24d6cc32/` | pairwise verdicts of the four judges, subjects' reasoning shown |
 | `logs/direct/cyber/2026-I/<judge>/` | absolute-scoring ratings of the three judges |
 | `glm_features/`, `transcript-embeddings/` | deterministic features and Qwen3-Embedding-8B vectors of those rollouts |
 
+To fit the size limit the logs are reduced to what the analyses read: rollouts keep the train items without their
+event traces, judge logs keep their verdict summaries (each judge's verdict and explanation, not the prompt).
+Machine paths and account names in the logs are replaced by placeholders (`/home/user`, `/workspace/sce`).
+
+**Reproducing the cyber 2026-I results**
+
 ```bash
-unzip cyber-2026-I.zip   # at the repository root: creates data/, logs/, glm_features/, transcript-embeddings/
-SCE_DOMAINS=cyber SCE_SEMESTERS=2026-I uv run python scripts/analyses/results.py   # -> analysis/results/forecasts.csv
+# 1. install (see above), then unzip at the repository root: creates data/, logs/, glm_features/, transcript-embeddings/
+unzip cyber-2026-I.zip
+
+# 2. restrict every analysis to the released task, and make sure no judging can be launched
+export SCE_DOMAINS=cyber SCE_SEMESTERS=2026-I
+unset OPENROUTER_API_KEY
+
+# 3. forecasts of every protocol, then the likelihood-ratio tests, then the tables and figures that use them
+uv run python scripts/analyses/results.py            # -> analysis/results/forecasts.csv, metrics.csv, summary.csv
+                                                     #    (its last cells need step 4's output and stop there on a first run)
+uv run python scripts/analyses/likelihood_ratio.py   # -> analysis/results/likelihood_ratio.csv
+uv run python scripts/analyses/results.py            # -> analysis/results/tables/, analysis/results/figures/
 ```
 
-To fit in the size limit the logs are reduced to what the analyses read: rollouts keep the train items without
-their event traces, judge logs keep their verdict summaries (the judges' verdicts and explanations, not the
-prompts). The analyses make **no API calls** on this data (leave `OPENROUTER_API_KEY` unset to be sure). The
-analyses that pool domains or semesters, and re-judging, need the full data. `scripts/export_subset.py` builds
-this archive for any domain and semester from the full data (`--compact` for the reduced logs).
+`results.py` prints the per-protocol squared error of the task; for cyber 2026-I:
+
+| Saturated-item baseline | Deterministic features | Embeddings | Absolute scoring | Pairwise judge |
+| ---: | ---: | ---: | ---: | ---: |
+| 1.70 | 2.31 | 1.49 | 1.95 | **0.20** |
+
+The analyses that pool domains or semesters (most figures), re-judging and re-embedding need the full data;
+`scripts/export_subset.py <domain> <semester> --out <dir> --conditions 24d6cc32 --compact` builds the same archive
+for any task from it. Without the data, everything can be recollected with the pipeline below (API costs apply).
 
 ## Method
 
@@ -114,14 +135,14 @@ uv run evaluate   judging on demand, fit / predict every protocol  -> logs/judge
 ```
 
 ```bash
-# collection (costs money; the released data already holds it): benches x models x repeats
+# collection (costs money): benches x models x repeats
 uv run collect -b configs/bench/gpqa.yml -m configs/models/google/gemma4-31b.yml -n 2
 scripts/collect_openrouter.sh          # the sweeps: configs/collect/*.txt, one script per bench family
 
-# freeze a domain (already frozen in data/meta)
+# freeze a domain (the zip ships data/meta/cyber frozen)
 uv run reference configs/domain/science.yml
 
-# score protocols; --judge / --direct-judge add LLM judges (released logs are reused)
+# score protocols; --judge / --direct-judge add LLM judges (existing logs are reused, missing ones judged)
 uv run evaluate configs/domain/science.yml --protocol ridge embedding
 uv run evaluate configs/domain/science.yml --judge configs/judges/reasoning/kimi-k2-thinking.yml --semester 2026-I
 uv run evaluate configs/domain/science.yml --direct-judge configs/judges/kimi-k2-thinking.yml --semester 2026-I
@@ -129,7 +150,8 @@ uv run evaluate configs/domain/science.yml --direct-judge configs/judges/kimi-k2
 
 ### Reproducing the paper
 
-Run from the repository root. `results.py` comes first: it writes `analysis/results/forecasts.csv`, which the
+These need the full data (the supplementary zip covers the cyber 2026-I rows only). Run from the repository
+root. `results.py` comes first: it writes `analysis/results/forecasts.csv`, which the
 other analyses read. Figures go under `analysis/`. The drawing code lives in `src/plots/`, one module per
 analysis; `src/analysis/` and the scripts under `scripts/analyses/` compute.
 

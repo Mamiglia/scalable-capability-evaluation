@@ -30,8 +30,9 @@ from analysis.challenges import likelihood_ratio as lr  # noqa: E402
 from protocols.embeddings import EmbeddingRegression  # noqa: E402
 from protocols import PROTOCOLS  # noqa: E402
 
-DOMAINS = ["science", "math", "coding", "cyber"]
-SEMESTERS = None  # every task: the time and 2025-I reasoning figures reach back; the rest filter to 2025-II, 2026-I
+DOMAINS = os.environ.get("SCE_DOMAINS", "science math coding cyber").split()  # as in results.py
+# every task by default: the time and 2025-I reasoning figures reach back; the rest filter to 2025-II, 2026-I
+SEMESTERS = os.environ.get("SCE_SEMESTERS", "").split() or None
 VARIANTS = {"pairwise": "linear", "direct": "raw"}  # as figure one; embedding is "full"
 OUT = Path("analysis/results")
 TRANSFER = [(s, d) for s in ("math", "science") for d in ("coding", "cyber")]  # cross-domain transfer cells

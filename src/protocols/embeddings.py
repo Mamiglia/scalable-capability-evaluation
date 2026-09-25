@@ -1,6 +1,6 @@
 """Ridge on the mean transcript embedding of a model's correct train transcripts.
 
-Vectors come from the HF dataset ANONYMOUS/transcript-embeddings (Qwen3-Embedding-8B), one
+Vectors come from transcript-embeddings/ (Qwen3-Embedding-8B, built by scripts/embeddings/embed.py), one
 .npz per collection log at the log's path with `.eval` replaced by `.<variant>.npz`, under
 the directory named by SCE_EMBEDDINGS. Variant "full" embeds the transcript with its
 reasoning (what a judge shown reasoning sees), "answer" the reasoning-stripped text. A
@@ -34,7 +34,7 @@ def read_vectors(path: Path, ids: set[str]) -> np.ndarray | None:
     """The [k, dim] float32 first-attempt vectors of the samples in `ids`, or None when the
     file is missing (reported) or holds none of them."""
     if not path.exists():
-        logger.warning("%s: no embedding file; pull it from ANONYMOUS/transcript-embeddings", path)
+        logger.warning("%s: no embedding file; build it with scripts/embeddings/embed.py", path)
         return None
     with np.load(path) as f:
         keep = np.isin(f["ids"], list(ids)) & (f["epochs"] == 1)

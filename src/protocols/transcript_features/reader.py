@@ -1,4 +1,4 @@
-"""Per-model feature rows from the per-transcript CSVs in glm_features/ (ANONYMOUS/glm_features).
+"""Per-model feature rows from the per-transcript CSVs in glm_features/ (built by scripts/glm_features/extract.py).
 
 scripts/glm_features/extract.py writes one CSV per successful log with extract_log: one row per
 sample and reasoning view. feature_table selects a cohort's correct first attempts on its

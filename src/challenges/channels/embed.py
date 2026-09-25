@@ -1,7 +1,7 @@
 """Embed channel-filtered transcripts with Qwen3-Embedding-8B, as the embedding protocol reads them.
 
     uv run python src/challenges/channels/embed.py plan --out jobs.json [--thirds] # laptop: which logs, items, variants
-    python src/challenges/channels/embed.py run jobs.json --out DIR --shard k/n      # GPU: download and embed
+    python src/challenges/channels/embed.py run jobs.json --out DIR --shard k/n      # GPU: embed the logs under data/
     python src/challenges/channels/embed.py check DIR REFERENCE_DIR                 # compare a "full" re-embedding
 
 The embedder is scripts/embeddings/embed.py, unchanged in its settings:
@@ -31,7 +31,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 MODEL = "Qwen/Qwen3-Embedding-8B"
 REVISION = "1d8ad4ca9b3dd8059ad90a75d4983776a23d44af"
-DATA_REPO = "ANONYMOUS/benchmarks"
 SPECS = ["drop-reasoning", "drop-text", "drop-calls", "drop-outputs", "drop-tools",
          "only-reasoning", "only-text", "only-calls", "only-outputs", "only-tools"]
 # domain -> (semesters, channel specs to embed)
@@ -146,10 +145,9 @@ def render(sample, variant: str) -> str:
     return extract_transcript(sample, include_reasoning=True, channels="" if variant == "full" else variant.removeprefix("channels-"))
 
 
-def run(jobs_path: Path, out: Path, shard: str, variants: list[str] | None, limit_samples: int, revision: str) -> None:
-    from huggingface_hub import hf_hub_download
-
+def run(jobs_path: Path, out: Path, shard: str, variants: list[str] | None, limit_samples: int) -> None:
     from evals.sample import extract_score
+    from reference.tables import DATA
 
     k, n = map(int, shard.split("/"))
     jobs = json.loads(jobs_path.read_text())[k::n]
@@ -162,7 +160,7 @@ def run(jobs_path: Path, out: Path, shard: str, variants: list[str] | None, limi
         if not targets:
             continue
         started = time.time()
-        log = Path(hf_hub_download(DATA_REPO, job["log"], repo_type="dataset", revision=revision))
+        log = DATA / job["log"]
         rows = []
         for sample in samples(log, set(job["items"])):
             texts = {v: render(sample, v) for v in targets}
@@ -182,7 +180,6 @@ def run(jobs_path: Path, out: Path, shard: str, variants: list[str] | None, limi
             os.replace(tmp, path)
         print(f"[{shard} {number + 1}/{len(jobs)}] {job['log']}: {len(rows)} samples x {len(targets)} variants, "
               f"{time.time() - started:.0f}s", flush=True)
-        log.unlink(missing_ok=True)  # the HF cache copy; keeps the pod disk small
 
 
 def check(new_root: Path, reference_root: Path) -> None:
@@ -207,12 +204,11 @@ if __name__ == "__main__":
     p = sub.add_parser("plan"); p.add_argument("--out", type=Path, required=True); p.add_argument("--thirds", action="store_true")
     r = sub.add_parser("run"); r.add_argument("jobs", type=Path); r.add_argument("--out", type=Path, required=True)
     r.add_argument("--shard", default="0/1"); r.add_argument("--variants", nargs="*"); r.add_argument("--limit-samples", type=int, default=0)
-    r.add_argument("--revision", required=True, help="ANONYMOUS/benchmarks revision the frozen tables point at (git -C data rev-parse HEAD)")
     c = sub.add_parser("check"); c.add_argument("new", type=Path); c.add_argument("reference", type=Path)
     args = parser.parse_args()
     if args.command == "plan":
         plan(args.out, args.thirds)
     elif args.command == "run":
-        run(args.jobs, args.out, args.shard, args.variants, args.limit_samples, args.revision)
+        run(args.jobs, args.out, args.shard, args.variants, args.limit_samples)
     else:
         check(args.new, args.reference)

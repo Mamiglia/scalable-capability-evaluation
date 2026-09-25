@@ -53,7 +53,7 @@ class JudgeConfig(DraccusConfig):
     channels: str = ""  # only-<c> shows one channel of the transcript, drop-<c> hides it: reasoning, text, calls, outputs or tools (calls and outputs)
     temperature: float = 0.0
     cache: bool = True  # inspect generate cache, never expires: a repeated pair is free
-    log_dir: Path = Path("logs/judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/ syncs to the HF judging repo)
+    log_dir: Path = Path("logs/judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/
     limit: int = 0  # samples per task, for smoke runs (such logs never count as complete)
     # judge only a stratified subset of the train items: this many per global-b quartile (0 = all),
     # the same items for every pair and judge of a task (seeded). Part of the condition.

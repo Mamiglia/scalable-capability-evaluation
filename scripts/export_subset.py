@@ -28,12 +28,14 @@ SCRUB = [  # (pattern, replacement) on raw bytes, most specific first
     (rb"/media/hdd/usr/tao/small-judge[\w-]*", b"/workspace/sce"),
     (rb"/media/hdd/usr/tao", b"/workspace"),
     (rb"/home/tao\b", b"/home/user"),
+    (rb"/Users/[\w.-]+/PycharmProjects/[\w.-]+/[\w.-]+", b"/workspace/sce"),  # a collaborator's checkout
+    (rb"/Users/[\w.-]+", b"/Users/user"),  # any macOS home
     (rb"small[-_]judge", b"sce"),
     (rb"Mamiglia|generality-labs|LASR-G5", b"anonymous"),
     (rb"/dev/shm/tao-podman", b"/dev/shm/user-podman"),  # the collection host's rootless podman store
     (rb"\bloki\b", b"host"),  # the collection host's name, seen by agents in /etc/hosts
 ]
-CHECK = re.compile(rb"/media/hdd|/home/tao\b|\btao-podman|\bloki\b|Mamiglia|small[-_]judge|generality-labs|LASR-G5")
+CHECK = re.compile(rb"/media/hdd|/home/tao\b|/Users/(?!user\b)|PycharmProjects|\btao-podman|\bloki\b|Mamiglia|small[-_]judge|generality-labs|LASR-G5")
 
 
 def scrub(data: bytes) -> bytes:

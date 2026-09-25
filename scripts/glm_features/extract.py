@@ -2,8 +2,7 @@
 
     uv run python scripts/glm_features/extract.py [bench ...] [--data data] [--out glm_features]
 
-glm_features/ is a clone of https://huggingface.co/datasets/ANONYMOUS/glm_features and mirrors
-data/'s layout: <bench>/<task_args_hash>/<model>/<repeat>/<eval id>.csv, one row per sample
+glm_features/ mirrors data/'s layout: <bench>/<task_args_hash>/<model>/<repeat>/<eval id>.csv, one row per sample
 and reasoning view (visible: text + raw CoT; hidden: text only). Values are per-transcript
 rates; averaging over a model's selected items happens at fit time. Only successful full-run
 logs newer than their CSV are extracted; `legacy/`, `judge/` and crashed/partial logs are skipped.
