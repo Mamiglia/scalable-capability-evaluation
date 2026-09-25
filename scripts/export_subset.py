@@ -8,8 +8,10 @@ Writes, mirroring the repository layout so `release/` can be dropped next to the
     glm_features/..., transcript-embeddings/... the deterministic features and embeddings of those rollouts
     logs/judge/<domain>/<semester>/<judge>/<condition>/   pairwise runs of the chosen conditions (default: all)
     logs/direct/<domain>/<semester>/                      absolute-scoring runs
-Every .eval is rewritten member by member with SCRUB applied to its bytes (git origins, home and checkout paths
-in headers, tracebacks and the transcripts judges saw); nothing else in a log changes.
+Every .eval is rewritten: samples keep only SAMPLE_FIELDS (the transcript, its score and usage; no event traces,
+retried attempts or API call records), headers lose HEADER_DROP (hosting, endpoint and revision details), the
+_journal/ copy of the header is dropped, and SCRUB is applied to every remaining byte (home and checkout paths,
+account and host names in tracebacks and in the transcripts judges saw).
 """
 
 import argparse
@@ -35,6 +37,10 @@ SCRUB = [  # (pattern, replacement) on raw bytes, most specific first
     (rb"/dev/shm/tao-podman", b"/dev/shm/user-podman"),  # the collection host's rootless podman store
     (rb"\bloki\b", b"host"),  # the collection host's name, seen by agents in /etc/hosts
 ]
+# What the readers use (evals.transcripts, protocols.*.from_logs); everything else in a sample is dropped.
+SAMPLE_FIELDS = {"id", "epoch", "input", "target", "messages", "output", "scores", "metadata", "model_usage",
+                 "attachments", "error", "limit", "uuid", "started_at", "completed_at", "total_time", "working_time"}
+HEADER_DROP = {"model_base_url", "runpod_pod_id", "runpod_machine", "runpod_datacenter", "source_path"}
 CHECK = re.compile(rb"/media/hdd|/home/tao\b|/Users/(?!user\b)|PycharmProjects|\btao-podman|\bloki\b|Mamiglia|small[-_]judge|generality-labs|LASR-G5")
 
 
@@ -44,18 +50,31 @@ def scrub(data: bytes) -> bytes:
     return data
 
 
+def drop_keys(o, keys: set[str]):
+    """o without any dict entry named in keys, at any depth; revision commits blanked (they name private commits)."""
+    if isinstance(o, dict):
+        o = {k: ("" if k == "commit" else drop_keys(v, keys)) for k, v in o.items() if k not in keys}
+    elif isinstance(o, list):
+        o = [drop_keys(v, keys) for v in o]
+    return o
+
+
 def copy_log(src: Path, dst: Path, keep=None) -> None:
-    """dst = src with every zip member scrubbed, same member order and compression. keep(name) -> False drops a
-    member; kept samples lose their event trace (the transcript is in their messages), summaries their input preview."""
+    """dst = src sanitised (module docstring), same member order and compression. keep(name) -> False drops a
+    member; with a keep (the compact export), summaries also lose their prompt preview, unread by any analysis."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w") as zout:
+        finished = "header.json" in zin.namelist()
         for info in zin.infolist():
-            if keep and not keep(info.filename):
+            name = info.filename
+            if (keep and not keep(name)) or (finished and name.startswith("_journal/")):
                 continue
             data = zin.read(info)
-            if keep and info.filename.startswith("samples/"):
-                data = json.dumps(json.loads(data) | {"events": []}).encode()
-            if keep and info.filename == "summaries.json":  # the prompt preview, unread by any analysis
+            if name.startswith("samples/"):
+                data = json.dumps({k: v for k, v in json.loads(data).items() if k in SAMPLE_FIELDS}).encode()
+            elif name in ("header.json", "_journal/start.json"):
+                data = json.dumps(drop_keys(json.loads(data), HEADER_DROP)).encode()
+            elif name == "summaries.json" and keep:
                 data = json.dumps([s | {"input": ""} for s in json.loads(data)]).encode()
             zout.writestr(info, scrub(data), compress_type=info.compress_type)
 

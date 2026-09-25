@@ -65,7 +65,9 @@ exactly, with no API calls.
 
 To fit the size limit the logs are reduced to what the analyses read: rollouts keep the train items without their
 event traces, judge logs keep their verdict summaries (each judge's verdict and explanation, not the prompt).
-Machine paths and account names in the logs are replaced by placeholders (`/home/user`, `/workspace/sce`).
+Logs are sanitised: samples keep only the transcript fields (no event traces, retried attempts or API call
+records), headers drop hosting, endpoint and revision details, and machine paths and account names are replaced by
+placeholders (`/home/user`, `/workspace/sce`).
 
 **Reproducing the cyber 2026-I results**
 
