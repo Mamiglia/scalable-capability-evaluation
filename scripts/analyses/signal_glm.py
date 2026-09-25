@@ -7,7 +7,6 @@ scripts/analyses/results.py); reads analysis/results/forecasts.csv written by th
 
     uv run python scripts/analyses/signal_glm.py
 
-Design: docs/superpowers/specs/2026-09-16-signal-glm-design.md
 """
 
 # %% settings

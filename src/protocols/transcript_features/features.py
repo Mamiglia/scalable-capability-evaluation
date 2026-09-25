@@ -1,10 +1,8 @@
 """Compact feature sets: 3 length, 9 lexical, and 12 tool/structure features.
 
-Lexicon/counting rules adapted from small-judge's judge-dissect branch,
-697f1e725c328b5b170fdd23dca01da47beb5767, scripts/verdict_dissection/features_basic.py.
+Lexicon/counting rules adapted from an earlier pilot of this project.
 Lexical values are hits per 1,000 prose words; lengths and tool-call count use log1p.
 These are lexical cues, not annotations of actual reasoning quality.
-Definitions and suggested changes: docs/transcript-feature-table.md.
 """
 
 import re

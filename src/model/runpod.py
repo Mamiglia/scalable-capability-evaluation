@@ -16,7 +16,7 @@ from configs.model import RunpodConfig
 
 def is_healthy(base_url: str, timeout: float = 3) -> bool:
     request = urllib.request.Request(
-        f"{base_url}/models", headers={"User-Agent": "small-judge/1.0"}
+        f"{base_url}/models", headers={"User-Agent": "sce/1.0"}
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -126,7 +126,7 @@ def direct_url(pod_id: str, port: int) -> str | None:
     request = urllib.request.Request(
         f"https://rest.runpod.io/v1/pods/{pod_id}",
         # Cloudflare in front of the API returns 403 to urllib's default User-Agent.
-        headers={"Authorization": f"Bearer {api_key}", "User-Agent": "small-judge/1.0"},
+        headers={"Authorization": f"Bearer {api_key}", "User-Agent": "sce/1.0"},
     )
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
@@ -175,7 +175,7 @@ def _graphql(query: str) -> dict | None:
         f"https://api.runpod.io/graphql?api_key={api_key}",
         data=json.dumps({"query": query}).encode(),
         # Cloudflare in front of the API returns 403 to urllib's default User-Agent.
-        headers={"content-type": "application/json", "User-Agent": "small-judge/1.0"},
+        headers={"content-type": "application/json", "User-Agent": "sce/1.0"},
     )
     try:
         with urllib.request.urlopen(request, timeout=10) as response:

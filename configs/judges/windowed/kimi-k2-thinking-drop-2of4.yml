@@ -1,7 +1,0 @@
-# Pairwise window condition (coding, cyber 2026-I): configs/judges/reasoning/kimi-k2-thinking-full.yml with characters 1/4..2/4 of each transcript removed ("..." in their place). Same items, prompt, orders and reasoning visibility as the full-transcript baseline.
-name: kimi-k2-thinking
-judge: configs/models/moonshotai/kimi-k2-thinking.yml
-include_reasoning: true
-max_length: 100000000
-_kwargs: {fail_on_error: false}
-window: drop-2/4

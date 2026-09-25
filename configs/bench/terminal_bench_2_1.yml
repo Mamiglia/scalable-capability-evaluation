@@ -1,5 +1,5 @@
 # Terminal-Bench 2.1 (89 tasks) via inspect-harbor, pinned to revision 6 (current `latest`).
-# Task images are linux/amd64 only — needs an x86_64 host, see AGENTS.md.
+# Task images are linux/amd64 only — needs an x86_64 host.
 name: terminal_bench_2_1
 task: inspect_harbor/terminal_bench_2_1
 task_args:

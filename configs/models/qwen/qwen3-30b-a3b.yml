@@ -19,7 +19,7 @@ generate_args:
 runpod:
   use: true
   model: Qwen/Qwen3-30B-A3B
-  name: small-judge-qwen3-30b-a3b
+  name: sce-qwen3-30b-a3b
   cloud_type: SECURE
   # 61GB of bf16 weights (MoE, 3B active): same footprint as Qwen3-32B, so the same 2×A40 layout. No single ≤48GB card fits, and one 80GB card leaves ~10GB of KV
   # (one 40k sequence, no concurrency). 2×A40 = 96GB at $0.88/h, ~20GB of KV (~3 full-length

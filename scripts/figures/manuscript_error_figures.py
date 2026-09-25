@@ -25,15 +25,13 @@ from scipy import stats as scipy_stats
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)
-os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
-os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/transcript-embeddings")
 
 from analysis.challenges import generalisation as gen  # noqa: E402
 from analysis.challenges import likelihood_ratio as lr  # noqa: E402
 from analysis.challenges.signal_glm import LABELS  # noqa: E402
 from plots import generalisation as gen_plots  # noqa: E402
 
-MANUSCRIPT = Path.home() / "Documents/AIS/LASR/manuscript"
+MANUSCRIPT = Path("analysis/manuscript")
 SCORE_DIR, ERROR_DIR, FINAL = MANUSCRIPT / "draft2_score", MANUSCRIPT / "draft3_se", MANUSCRIPT / "final_figs"
 ERROR_DIR.mkdir(parents=True, exist_ok=True)
 VARIANTS = {"pairwise": "linear", "direct": "raw", "embedding": "full"}  # as figure one

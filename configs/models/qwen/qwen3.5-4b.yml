@@ -9,7 +9,7 @@ generate_args:
 runpod:
   use: true
   model: Qwen/Qwen3.5-4B
-  name: small-judge-qwen35-4b
+  name: sce-qwen35-4b
   cloud_type: SECURE
   gpu_id: NVIDIA RTX A4500   # 20GB, $0.25/h: 8GB of bf16 weights, hybrid attention keeps KV tiny
   ready_timeout: 2700   # A40-fallback pod stalled past the 1800 default on first retry (2026-09-05)

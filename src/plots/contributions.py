@@ -11,7 +11,7 @@ from analysis.challenges.contributions import DOMAIN_TITLES, baseline_stats, cap
 from plots.results import unclip_markers
 from plots.signal_glm import DOMAIN_COLORS
 
-FINAL = Path.home() / "Documents/AIS/LASR/manuscript/final_figs"  # the manuscript's final figures
+FINAL = Path("analysis/manuscript/final_figs")  # the manuscript's final figures
 # the final figures' names and the caption sentences that differ between the two
 FINAL_NAMES = {"only": "kept_alone", "without": "removed"}
 PIE_COLORS = {"CoT": "#4a3aa7", "Messages": "#eda100", "Tools": "#1baf7a"}

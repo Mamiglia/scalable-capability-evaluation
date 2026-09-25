@@ -15,9 +15,9 @@ import yaml
 from configs.domain import DomainConfig
 
 SEMESTERS = Path("configs/semesters.yml")
-# Transcript logs; SMALL_JUDGE_DATA points at a checkout elsewhere (e.g. an external volume).
-DATA = Path(os.environ.get("SMALL_JUDGE_DATA", "data"))
-FEATURES = Path("glm_features")  # per-transcript feature CSVs mirroring data/ (generality-labs/glm_features)
+# Transcript logs; SCE_DATA points at a checkout elsewhere (e.g. an external volume).
+DATA = Path(os.environ.get("SCE_DATA", "data"))
+FEATURES = Path("glm_features")  # per-transcript feature CSVs mirroring data/ (ANONYMOUS/glm_features)
 META = Path("data") / "meta"  # the frozen tables stay in the repo checkout
 
 

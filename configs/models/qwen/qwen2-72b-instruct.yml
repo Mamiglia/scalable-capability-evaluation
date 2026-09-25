@@ -5,7 +5,7 @@ release_date: "2024-06-07"
 runpod:
   use: true
   model: Qwen/Qwen2-72B-Instruct
-  name: small-judge-qwen2-72b
+  name: sce-qwen2-72b
   cloud_type: SECURE
   # 145GB of bf16 weights: 4×A40 (192GB) leaves ~40GB of KV.
   gpu_id: NVIDIA A40

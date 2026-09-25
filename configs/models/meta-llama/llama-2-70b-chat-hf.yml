@@ -4,7 +4,7 @@ release_date: "2023-07-18"
 runpod:
   use: true
   model: meta-llama/Llama-2-70b-chat-hf   # gated: HF_TOKEN must have accepted the license
-  name: small-judge-llama-2-70b-chat
+  name: sce-llama-2-70b-chat
   cloud_type: SECURE
   # 138GB of bf16 weights: 4×A40 (192GB, $1.76/h) leaves ~35GB of KV; 2×80GB cards would
   # leave ~6GB and choke on concurrency.

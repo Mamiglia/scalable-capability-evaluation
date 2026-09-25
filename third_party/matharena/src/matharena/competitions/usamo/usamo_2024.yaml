@@ -1,0 +1,7 @@
+instruction: "Give a thorough answer to the following question. Your answer will be graded by human judges based on accuracy, correctness, and your ability to prove the result. You should include all steps of the proof. Do not skip important steps, as this will reduce your grade. It does not suffice to merely state the result. Use LaTeX to format your answer."
+strict_parsing: false
+n_problems: 3
+date: "2024-03-12"
+final_answer: false
+dataset_path: MathArena/usamo_2024
+judge_config: judges/ablations/judge

@@ -1,5 +1,5 @@
 # AgentBench OS split: react agent with bash/python in a Docker sandbox, 125 test samples.
-# One image built per sample (shared base layers); on loki run builds with --max-subprocesses 1.
+# One image built per sample (shared base layers); on a small host run builds with --max-subprocesses 1.
 #
 # The cap is on turns, not wall time. The task's own default (max_sample_time_mins=10) killed
 # 27/125 samples for deepseek-r1-0528 — most still on their first bash call — which measures

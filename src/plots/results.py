@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
 
-from analysis.stats import (BASELINE, BEST, CONDITIONS, DOMAIN_LABELS, JUDGED, LABELS, METRICS, chosen, ci95,
+from analysis.stats import (BASELINE, BEST, CONDITIONS, DOMAIN_LABELS, LABELS, METRICS, chosen, ci95,
                             one_per_target, with_pct)
 
 plt.rcParams.update({

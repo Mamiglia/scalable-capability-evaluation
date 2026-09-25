@@ -11,7 +11,7 @@ generate_args:
 runpod:
   use: true
   model: google/gemma-4-26B-A4B-it   # gated: HF_TOKEN must have accepted the Gemma license
-  name: small-judge-gemma4-26b-a4b
+  name: sce-gemma4-26b-a4b
   cloud_type: SECURE
   # ~52GB of bf16 MoE weights, TP=2 on 2x80GB (A40 pairs leave ~17GB KV per card, too tight at 131k).
   gpu_id: NVIDIA A100 80GB PCIe

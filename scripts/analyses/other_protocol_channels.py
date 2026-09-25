@@ -6,7 +6,7 @@ Both protocols are refitted per condition on the references' channel-filtered tr
 each channel (reasoning, messages, tool calls with their outputs) kept alone and removed; Maths and Science have
 no tool calls, so reasoning is kept alone and removed and messages removed (= the reasoning alone).
   Embedding: Qwen3-Embedding-8B vectors of the transcript rendered with only / without the channel
-    (src/challenges/channels/embed.py, LASR-G5/transcript-embeddings variants channels-<spec>; "answer" is the
+    (src/challenges/channels/embed.py, ANONYMOUS/transcript-embeddings variants channels-<spec>; "answer" is the
     transcript without reasoning for Maths and Science), ridge as in the main analysis.
   Deterministic features: the same 13 features (3 lengths, 9 lexical rates, tool-call count) read from the
     glm_features/ views: full = messages + reasoning ("visible"); without reasoning = "hidden"; reasoning alone =
@@ -16,9 +16,7 @@ no tool calls, so reasoning is kept alone and removed and messages removed (= th
 Statistics and figure: analysis.challenges.contributions (paired change in squared error from the full transcript;
 one-sided log likelihood ratio tests).
 
-Run from the repo root (needs the T7 data and embeddings):
-  SMALL_JUDGE_DATA=/Volumes/T7/small-judge-remote/data \\
-  SMALL_JUDGE_EMBEDDINGS=/Volumes/T7/small-judge-remote/transcript-embeddings \\
+Run from the repo root (needs data/ and transcript-embeddings/):
   uv run python scripts/analyses/other_protocol_channels.py [--redraw]
 """
 import argparse

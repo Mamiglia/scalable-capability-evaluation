@@ -19,7 +19,7 @@ Marks: one-sided log likelihood ratio tests (src/analysis/challenges/likelihood_
 unique estimate, the full transcript against the transcript without the channel.
 channel_shares: one pie per domain, the share of characters the models themselves wrote (role prefixes removed) in
 each channel, over the correct first-attempt transcripts of the references and targets on the same items and
-semesters, read from SMALL_JUDGE_DATA (default /Volumes/T7/small-judge-remote/data).
+semesters, read from SCE_DATA (default data/).
 Run from the repo root: uv run python scripts/analyses/channel_contributions.py
 """
 import os
@@ -39,7 +39,7 @@ from judge.dataset import response_chars
 from protocols.pairwise.judge import JudgeBT, from_logs, stratified_items
 
 OUT = Path("analysis/results/figures/channels")
-DATA = Path(os.environ.get("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data"))
+DATA = Path(os.environ.get("SCE_DATA", "data"))
 # channel label -> (only-run, removed-run)
 CHANNELS = {"CoT": ("only-reasoning", "drop-reasoning"), "Messages": ("only-text", "drop-text"),
             "Tool calls": ("only-calls", "drop-calls"), "Tool outputs": ("only-outputs", "drop-outputs"),

@@ -1,6 +1,5 @@
 """Results analysis of the forecasting task: every protocol against the easy-item prediction
-baseline and the accuracy oracle, per domain and semester
-(docs/superpowers/specs/2026-09-15-results-analysis-design.md).
+baseline and the accuracy oracle, per domain and semester.
 
 One module per step, chained by the cell runner scripts/analyses/results.py:
     loading      semester tasks from the frozen tables; verdict and rating tables from logs/

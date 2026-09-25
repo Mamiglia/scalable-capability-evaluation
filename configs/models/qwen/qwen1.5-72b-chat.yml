@@ -9,7 +9,7 @@ generate_args:
 runpod:
   use: true
   model: Qwen/Qwen1.5-72B-Chat
-  name: small-judge-qwen1.5-72b-chat
+  name: sce-qwen1.5-72b-chat
   cloud_type: SECURE
   # 145GB of bf16 weights: 4×A40 (192GB) leaves ~40GB of KV (same as qwen2-72b-instruct).
   gpu_id: NVIDIA A40

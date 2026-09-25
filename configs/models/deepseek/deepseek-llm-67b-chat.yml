@@ -5,7 +5,7 @@ release_date: "2023-11-29"
 runpod:
   use: true
   model: deepseek-ai/deepseek-llm-67b-chat
-  name: small-judge-deepseek-67b-chat
+  name: sce-deepseek-67b-chat
   cloud_type: SECURE
   # 134GB of bf16 weights: 4×A40 (192GB) leaves ~50GB of KV.
   gpu_id: NVIDIA A40

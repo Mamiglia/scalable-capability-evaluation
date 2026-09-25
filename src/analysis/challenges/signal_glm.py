@@ -8,7 +8,6 @@ prediction is the reference level of `protocol`, so every coefficient is a log e
 (scripts/analyses/signal_glm/); this module builds its rows, reads its posterior into a ratio
 table and fits the flat statsmodels cross-check; the figures are in plots.signal_glm.
 
-Design: docs/superpowers/specs/2026-09-16-signal-glm-design.md
 """
 
 import arviz as az

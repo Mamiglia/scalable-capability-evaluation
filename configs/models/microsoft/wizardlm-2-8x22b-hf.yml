@@ -14,7 +14,7 @@ generate_args:
 runpod:
   use: true
   model: alpindale/WizardLM-2-8x22B
-  name: small-judge-wizardlm-2-8x22b
+  name: sce-wizardlm-2-8x22b
   cloud_type: SECURE
   # MixtralForCausalLM, 281GB of bf16 weights, TP=4. On 4x80GB (2026-09-11, 4xH100 SXM) vLLM's
   # engine core died at init and the pod crash-looped: 70GB of weights per card leaves ~2GB

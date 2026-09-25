@@ -4,7 +4,7 @@ Two incompatibilities, both host-side, neither affecting what a task asks or how
 scored:
 
 1. The generated compose pins each sandbox to `cpuset: "0-3"`. On a cgroup-v2 host the
-   cpuset controller is not delegated to the user slice (loki's `user-1000004.slice` has
+   cpuset controller is not delegated to the user slice (e.g. a `user-<uid>.slice` that has
    only cpu/memory/pids), so every container start dies with
    `crun: the requested cgroup controller 'cpuset' is not available`. Root fixes it
    properly: `Delegate=cpu cpuset io memory pids` in

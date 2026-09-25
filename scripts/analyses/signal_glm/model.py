@@ -2,7 +2,7 @@
 pooled per protocol and a random intercept per (target model, domain) cell: every protocol
 forecasts the same target in the same domain, so the cell's distance from the reference mean
 is shared across its rows (the pairing unit of the paired tests), and a random intercept per
-judge within judge protocol (level "-", the transcript protocols and the best-judge table, pinned to 0). See docs/superpowers/specs/2026-09-16-signal-glm-design.md."""
+judge within judge protocol (level "-", the transcript protocols and the best-judge table, pinned to 0)."""
 
 import jax.numpy as jnp
 import numpyro

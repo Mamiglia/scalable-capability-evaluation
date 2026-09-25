@@ -10,7 +10,7 @@ generate_args:
 runpod:
   use: true
   model: google/gemma-4-E2B-it
-  name: small-judge-gemma4-e2b-it
+  name: sce-gemma4-e2b-it
   cloud_type: SECURE
   gpu_id: NVIDIA RTX A4500   # 20GB, $0.25/h: ~10GB of bf16 weights (2B effective + PLE)
   image: vllm/vllm-openai:v0.20.1

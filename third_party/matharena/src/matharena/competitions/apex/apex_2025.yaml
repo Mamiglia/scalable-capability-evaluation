@@ -1,0 +1,5 @@
+instruction: "Put your final answer within \\boxed{{}}."
+strict_parsing: false
+n_problems: 12
+date: "2025-08-18"
+dataset_path: MathArena/apex_2025

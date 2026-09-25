@@ -1,5 +1,0 @@
-task: inspect_evals/gsm8k
-name: gsm8k
-
-task_args:
-  fewshot: 0

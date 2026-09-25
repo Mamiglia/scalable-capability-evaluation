@@ -30,7 +30,7 @@ runpod:
   model: Qwen/Qwen3.5-9B
   model_args: {}
   image: vllm/vllm-openai:latest
-  name: small-judge-qwen35-9b
+  name: sce-qwen35-9b
   cloud_type: SECURE
   gpu_id: NVIDIA A40
   gpu_count: 1

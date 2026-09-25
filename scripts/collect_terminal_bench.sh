@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
   source .env
   set +a
 }
-export UV_CACHE_DIR=/tmp/small-judge-uv-cache
+export UV_CACHE_DIR=/tmp/sce-uv-cache
 export DOCKER_HOST="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 
 # skip Runpod-hosted models (no runpodctl / Runpod funds here); open-weight models first, closed last

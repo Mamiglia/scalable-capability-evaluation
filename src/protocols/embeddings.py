@@ -1,8 +1,8 @@
 """Ridge on the mean transcript embedding of a model's correct train transcripts.
 
-Vectors come from the HF dataset generality-labs/transcript-embeddings (Qwen3-Embedding-8B), one
+Vectors come from the HF dataset ANONYMOUS/transcript-embeddings (Qwen3-Embedding-8B), one
 .npz per collection log at the log's path with `.eval` replaced by `.<variant>.npz`, under
-the directory named by SMALL_JUDGE_EMBEDDINGS. Variant "full" embeds the transcript with its
+the directory named by SCE_EMBEDDINGS. Variant "full" embeds the transcript with its
 reasoning (what a judge shown reasoning sees), "answer" the reasoning-stripped text. A
 model's feature row is the mean of its train transcripts' L2-normalised vectors; the
 estimator is ridge with the penalty chosen by leave-one-out over the references, as for the
@@ -20,7 +20,7 @@ from capability.task import Cohort
 from configs.logs import logger
 from protocols.features import TabularRegression
 
-EMBEDDINGS = Path(os.environ.get("SMALL_JUDGE_EMBEDDINGS", "transcript-embeddings"))
+EMBEDDINGS = Path(os.environ.get("SCE_EMBEDDINGS", "transcript-embeddings"))
 VARIANTS = ("full", "answer")
 ALPHAS = np.logspace(-2, 4, 13)  # unit-norm inputs need stronger shrinkage than standardised features
 
@@ -34,7 +34,7 @@ def read_vectors(path: Path, ids: set[str]) -> np.ndarray | None:
     """The [k, dim] float32 first-attempt vectors of the samples in `ids`, or None when the
     file is missing (reported) or holds none of them."""
     if not path.exists():
-        logger.warning("%s: no embedding file; pull it from generality-labs/transcript-embeddings", path)
+        logger.warning("%s: no embedding file; pull it from ANONYMOUS/transcript-embeddings", path)
         return None
     with np.load(path) as f:
         keep = np.isin(f["ids"], list(ids)) & (f["epochs"] == 1)

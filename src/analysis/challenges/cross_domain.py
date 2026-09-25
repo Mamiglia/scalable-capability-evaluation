@@ -19,7 +19,7 @@ judge runs and their matching stay the source domain's, so `calibration.forecast
   domain's own baseline, so a column of the matrix shares its baseline and the diagonal reproduces
   the forecasts in analysis/results/forecasts.csv. The runner asserts that.
 
-Design: docs/superpowers/specs/2026-09-17-generalisation-design.md. Figures: plots.cross_domain.
+Figures: plots.cross_domain.
 """
 
 import numpy as np

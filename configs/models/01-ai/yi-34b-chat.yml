@@ -4,7 +4,7 @@ release_date: "2023-11-01"
 runpod:
   use: true
   model: 01-ai/Yi-34B-Chat
-  name: small-judge-yi-34b-chat
+  name: sce-yi-34b-chat
   cloud_type: SECURE
   # 69GB of bf16 weights: 2×A40 (96GB, $0.88/h) leaves ~18GB of KV, plenty at 4k context.
   gpu_id: NVIDIA A40

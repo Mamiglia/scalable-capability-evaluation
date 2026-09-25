@@ -1,7 +1,7 @@
 """Deterministic transcript features of the reasoning channel alone, for the channel ablation of the
 Deterministic features protocol (scripts/analyses/other_protocol_channels.py).
 
-    SMALL_JUDGE_DATA=/Volumes/T7/small-judge-remote/data uv run python src/challenges/channels/features.py [--out CSV]
+    uv run python src/challenges/channels/features.py [--out CSV]
 
 glm_features/ holds two views per transcript, "visible" (messages + reasoning) and "hidden" (messages
 only); the other channel views derive from them except the reasoning alone, extracted here: every

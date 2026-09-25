@@ -18,7 +18,7 @@ class _Stdout:
         sys.stdout.flush()
 
 
-logger = logging.getLogger("small_judge")
+logger = logging.getLogger("sce")
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler(_Stdout()))
 logger.handlers[0].setFormatter(FORMATTER)

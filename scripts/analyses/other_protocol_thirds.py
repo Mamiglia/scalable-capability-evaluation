@@ -10,9 +10,7 @@ variants); ridge refitted per condition on the references' cut transcripts, pred
 Statistics and figure: analysis.challenges.contributions (paired change in squared error from the full transcript,
 two-sided paired t-test and t-interval).
 
-Run from the repo root (needs the T7 data and embeddings):
-  SMALL_JUDGE_DATA=/Volumes/T7/small-judge-remote/data \\
-  SMALL_JUDGE_EMBEDDINGS=/Volumes/T7/small-judge-remote/transcript-embeddings \\
+Run from the repo root (needs data/ and transcript-embeddings/):
   uv run python scripts/analyses/other_protocol_thirds.py [--redraw]
 """
 import argparse

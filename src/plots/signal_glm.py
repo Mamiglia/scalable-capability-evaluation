@@ -11,7 +11,7 @@ from analysis.challenges.signal_glm import (BASELINE, DOMAINS, LABELS, PAPER_PRO
 from analysis.stats import DOMAIN_LABELS, ci95
 from plots.results import break_edges, break_strip, compress, fix_axes_height
 
-# The project's protocol palette (CLAUDE.md). Domains never share a hue with a protocol.
+# The project's protocol palette. Domains never share a hue with a protocol.
 COLORS = {"glm_length": "#f1a48a", "glm_regex": "#eb6834", "embedding": "#4a3aa7", "direct": "#1baf7a", "pairwise": "#2a78d6"}
 DOMAIN_COLORS = {"science": "#cc79a7", "math": "#d55e00", "coding": "#6a3d9a", "cyber": "#c9a800"}
 DOMAIN_MARKERS = {"science": "o", "math": "s", "coding": "^", "cyber": "D"}

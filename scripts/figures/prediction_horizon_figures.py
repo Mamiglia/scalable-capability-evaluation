@@ -1,4 +1,4 @@
-"""Figures for predicting further ahead (docs/static_method_plan.md): squared error per target of the
+"""Figures for predicting further ahead: squared error per target of the
 Pairwise judge and the baseline, over the series of tasks, against distance above the
 references, and by target semester. Science only. Styled as the manuscript's generalisation figures
 (plots.generalisation: log error axis 0.01-10, translucent interval boxes, grey panel tags).
@@ -26,7 +26,7 @@ from plots.signal_glm import COLORS
 from plots.results import unclip_markers
 
 OUT = Path("artifacts/prediction-horizon")
-MAIN = Path("../small-judge-remote")
+MAIN = Path(".")  # the checkout holding data/meta and analysis/results
 FIGURES = OUT / "figures"
 PAIRWISE = COLORS["pairwise"]
 TRANSCRIPT = {"glm_regex": "-", "embedding": "full"}  # the protocols without a judge: (key, the paper's variant)

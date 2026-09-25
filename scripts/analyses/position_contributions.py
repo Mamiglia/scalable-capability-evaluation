@@ -2,7 +2,7 @@
 
 Every rendered transcript (reasoning shown) is cut into three equal character spans and the judge sees one subset of
 them, the rest replaced by "..."; the runs are the teammate's thirds ablation (src/challenges/thirds on main, logs
-published to LASR-G5/judging). Prediction score = -log2(summed squared error / summed squared error of easy-item
+published to ANONYMOUS/judging). Prediction score = -log2(summed squared error / summed squared error of easy-item
 prediction) over a domain's target models, in bits: 0 is easy-item prediction, +1 is half its error, -1 twice it.
 On one axis per domain, above zero: the score with only that third shown (singular contribution); below zero: the
 reduction in score when that third is removed and the other two are shown (unique contribution), drawn downward.

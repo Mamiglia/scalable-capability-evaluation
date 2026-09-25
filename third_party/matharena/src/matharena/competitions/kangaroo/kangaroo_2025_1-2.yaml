@@ -1,0 +1,13 @@
+competition: kangaroo_2025_1-2
+dataset_path: MathArena/kangaroo_2025_1_2
+date: "2200-03-20"
+instruction: "You are given a Math Kangaroo problem in the form of an image.\
+  \ Look at the statement carefully.\n\
+  \ Some problems may contain illustrations that are essential for solving them. If an illustration\
+  \ is present, use it to help you solve the problem. Reason step by step, and put your final\
+  \ answer within \\boxed{{}}, referring to the given multiple choice options (A, B, C, D, or E),\
+  \ of which exactly one is correct.\nAn example of a valid answer is \\boxed{{A}}. Do not put your\
+  \ numerical answer in boxed, for example \\boxed{{42}} is not a valid answer; instead find that\
+  \ value in the options list and report the corresponding letter.\n"
+n_problems: 24
+options: ["A", "B", "C", "D", "E", "None"]

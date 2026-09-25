@@ -6,7 +6,7 @@ release_date: "2024-06-27"
 runpod:
   use: true
   model: google/gemma-2-27b-it   # gated: HF_TOKEN must have accepted the Gemma license
-  name: small-judge-gemma-2-27b
+  name: sce-gemma-2-27b
   cloud_type: SECURE
   # 54GB of bf16 weights: 2×A40 (96GB) leaves ~30GB of KV.
   gpu_id: NVIDIA A40

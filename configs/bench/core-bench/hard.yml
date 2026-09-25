@@ -1,5 +1,0 @@
-name: core_bench_hard
-task: inspect_evals/core_bench
-task_args:
-  difficulty: hard
-  max_messages: 100

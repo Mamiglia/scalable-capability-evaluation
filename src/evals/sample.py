@@ -27,8 +27,8 @@ PLACEHOLDER_BLOCKS = {
 def strip_think(text: str) -> str:
     """Drop inline `<think>…</think>` chain-of-thought from a text block.
 
-    A normalized log never has any: ``scripts/audit/logs/normalize_reasoning.py`` moves it
-    into a real reasoning block, where ``format_reasoning`` decides whether it is shown.
+    A normalized log never has any: normalization (applied to the released logs) moves it into a
+    real reasoning block, where ``format_reasoning`` decides whether it is shown.
     This is the fallback for a log that missed that migration -- the CoT is dropped rather
     than promoted, so it can never leak into the answer text of the no-reasoning condition.
     Dropping it also leaves the transcript with no reasoning mark, so ``build_dataset``
@@ -70,8 +70,7 @@ def format_text(text: str) -> str:
     if "<think>" not in text:
         return text
     logger.warning(
-        "inline <think> in a text block (%r...): log not normalized, dropping the CoT -- "
-        "run scripts/audit/logs/normalize_reasoning.py", text[:60],
+        "inline <think> in a text block (%r...): log not normalized, dropping the CoT", text[:60],
     )
     return strip_think(text)
 

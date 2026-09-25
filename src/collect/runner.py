@@ -138,7 +138,7 @@ def eval_runner(jobs: Sequence[Job], max_workers: int = MAX_WORKERS) -> int:
     queue = context.Manager().Queue()
     errors: list[tuple[str, str, str]] = []
 
-    log_root = Path(tempfile.mkdtemp(prefix="small_judge_runner_"))
+    log_root = Path(tempfile.mkdtemp(prefix="sce_runner_"))
     print(f"Per-job logs in {log_root} (tail -f them to watch a job)")
     log_files = {label: log_root / (re.sub(r"[^\w.-]+", "_", label) + ".log") for _, _, label in jobs}
 

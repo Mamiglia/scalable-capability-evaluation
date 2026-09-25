@@ -17,7 +17,7 @@ generate_args:
 runpod:
   use: true
   model: google/gemma-4-31b-it   # gated: HF_TOKEN must have accepted the Gemma license
-  name: small-judge-gemma4-31b
+  name: sce-gemma4-31b
   cloud_type: SECURE
   # 62GB of bf16 weights, TP=2: 2x80GB leaves ~40GB of KV per card at 131k context.
   # 2x48GB (A40) leaves ~12GB per card, too little for HLE/apex-length generations.

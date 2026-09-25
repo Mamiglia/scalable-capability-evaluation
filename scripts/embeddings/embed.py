@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Embed collected transcripts with Qwen3-Embedding-8B into the cache protocols.embeddings reads.
 
-    python scripts/embeddings/embed.py --bench gpqa arc_challenge hle [--out /fast/jyeon/smalljudge_embeddings]
+    python scripts/embeddings/embed.py --bench gpqa arc_challenge hle [--out transcript-embeddings]
         [--variant full answer] [--limit-logs N] [--limit-samples N] [--all-items]
 
-GPU job (scripts/embeddings/embed.sub). For every successful collection log
+GPU job. For every successful collection log
 data/<bench>/<hash>/<model>/<repeat>/*.eval (all repeats) and every text variant it writes
 <out>/<bench>/<hash>/<model>/<repeat>/<log>.<variant>.npz (arrays: see protocols.embeddings).
 Existing files are skipped, so a re-run only fills gaps. Samples are restricted to the items of the
@@ -14,7 +14,7 @@ a bench absent from every frozen table, or --all-items, embeds every sample.
 Text: evals.sample.extract_transcript (the judge-visible transcript), tokenised without truncation,
 chunked at --max-tokens with --overlap (at most --max-chunks chunks, the rest is dropped), each chunk
 ending in <|endoftext|>, last-token pooled, L2-normalised, token-weighted mean over chunks
-(as scripts/hibayes/sae_judge.py), stored as float16.
+stored as float16.
 """
 
 import argparse
@@ -181,7 +181,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--bench", nargs="+", required=True, help="data/<bench> directories")
     parser.add_argument("--data", type=Path, default=Path("data"))
-    parser.add_argument("--out", type=Path, default=Path("/fast/jyeon/smalljudge_embeddings"))
+    parser.add_argument("--out", type=Path, default=Path("transcript-embeddings"))
     parser.add_argument("--variant", nargs="+", default=list(store.VARIANTS), choices=store.VARIANTS)
     parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--overlap", type=int, default=256)

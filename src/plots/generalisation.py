@@ -14,7 +14,7 @@ from analysis.stats import BASELINE, ci95
 from plots.results import unclip_markers
 from plots.signal_glm import COLORS, DOMAIN_COLORS, score_axis, stars, two_lines
 
-MARKERS = {"science": "o", "math": "s", "coding": "^", "cyber": "D"}  # CLAUDE.md, one shape per domain
+MARKERS = {"science": "o", "math": "s", "coding": "^", "cyber": "D"}  # one shape per domain
 BASELINE_COLOUR = "#9a9a9a"
 SCORE_LABEL = "Prediction score\n(halvings of error)"
 
@@ -745,7 +745,7 @@ def prediction_example_figure(forecasts: pd.DataFrame, variants: dict[str, str],
     density there over the saturated-item prediction's. Every violin shares one width per unit of
     density, the widest `width_days` long, so a narrower distribution draws wider at its centre. Judge
     protocols use the task's best judge on references (forecast and spread from `forecasts`); feature
-    protocols are refitted on the references, so SMALL_JUDGE_DATA and SMALL_JUDGE_EMBEDDINGS must be set.
+    protocols are refitted on the references, so SCE_DATA and SCE_EMBEDDINGS must be set.
     Also returns the drawn values: per rule its forecast, spread, squared error and log LR, and the judge."""
     import matplotlib.dates as mdates
 

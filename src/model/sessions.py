@@ -19,8 +19,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-STATE_FILE = Path("/tmp/small_judge_runpod_sessions.json")
-LOCK_FILE = Path("/tmp/small_judge_runpod_sessions.lock")
+STATE_FILE = Path("/tmp/sce_runpod_sessions.json")
+LOCK_FILE = Path("/tmp/sce_runpod_sessions.lock")
 
 
 @contextmanager

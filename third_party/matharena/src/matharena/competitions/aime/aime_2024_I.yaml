@@ -1,0 +1,5 @@
+instruction: "Please reason step by step, and put your final answer within \\boxed{{}}.\nThe answer is an integer between 0 and 999 inclusive."
+strict_parsing: false
+n_problems: 15
+date: "2024-02-07"
+dataset_path: MathArena/aime_2024_I

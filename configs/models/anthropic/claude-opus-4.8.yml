@@ -1,6 +1,6 @@
 # Pinned to Anthropic first-party. Thinking is off unless enabled on this model - enabled explicitly
 # (adaptive; OpenRouter maps reasoning.enabled). Prompt caching: inspect's OpenRouter provider inserts
-# the cache_control markers; verify per-turn cache reads with src/challenges/frontier/cache_check.py
+# the cache_control markers; verify per-turn cache reads in a 1-item smoke log
 # before a full run (claude-opus-4.7 cached only the static prefix, collection_runs.md 2026-08-31).
 name: anthropic/claude-opus-4.8
 release_date: '2026-05-27'

@@ -1,0 +1,138 @@
+title: "MathArena: Uncontaminated Math Competition Problems"
+description: |
+  Final-answer problems from math competitions released after model training cutoffs
+  (AIME, HMMT, BRUMO, CMIMC, SMT), plus MathArena Apex (the hardest recent final-answer
+  problems) and ArxivMath (research-level problems extracted from arXiv papers). Each
+  competition is one task. Reproduces MathArena's pipeline: the competition instruction
+  prepended to the problem, a single "last chance" reprompt when no \boxed{} answer
+  parses, and symbolic (sympy-based) grading — no LLM judge.
+arxiv: https://arxiv.org/abs/2505.23281
+group: Mathematics
+contributors:
+  - anonymous
+version: "1-A"
+tasks:
+  - name: aime_2024_I
+    dataset_samples: 15
+  - name: aime_2024_II
+    dataset_samples: 15
+  - name: aime_2025
+    dataset_samples: 30
+  - name: aime_2026
+    dataset_samples: 30
+  - name: apex_2025
+    dataset_samples: 12
+  - name: apex_shortlist
+    dataset_samples: 47
+  - name: arxivmath
+    dataset_samples: 103
+  - name: arxivmath_1225
+    dataset_samples: 17
+  - name: arxivmath_0126
+    dataset_samples: 23
+  - name: arxivmath_0226
+    dataset_samples: 32
+  - name: arxivmath_0326
+    dataset_samples: 30
+  - name: arxivmath_0426
+    dataset_samples: 41
+  - name: arxivmath_0526
+    dataset_samples: 40
+  - name: brumo_2025
+    dataset_samples: 30
+  - name: cmimc_2025
+    dataset_samples: 40
+  - name: hmmt_feb_2024
+    dataset_samples: 30
+  - name: hmmt_feb_2025
+    dataset_samples: 30
+  - name: hmmt_nov_2025
+    dataset_samples: 30
+  - name: hmmt_feb_2026
+    dataset_samples: 33
+  - name: smt_2025
+    dataset_samples: 53
+metadata:
+  requires_internet: true
+external_assets:
+  - type: huggingface
+    source: MathArena/aime_2024_I
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/aime_2024_II
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/aime_2025
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/aime_2026
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/apex_2025
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/apex-shortlist
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/arxivmath
+    fetch_method: load_dataset
+    state: pinned
+    comment: Rolling aggregate of the monthly arxivmath sets; pinned by default, `-T revision=main` follows upstream.
+  - type: huggingface
+    source: MathArena/arxivmath-1225
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/arxivmath-0126
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/arxivmath-0226
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/arxivmath-0326
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/arxivmath-0426
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/arxivmath-0526
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/brumo_2025
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/cmimc_2025
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/hmmt_feb_2024
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/hmmt_feb_2025
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/hmmt_nov_2025
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/hmmt_feb_2026
+    fetch_method: load_dataset
+    state: pinned
+  - type: huggingface
+    source: MathArena/smt_2025
+    fetch_method: load_dataset
+    state: pinned

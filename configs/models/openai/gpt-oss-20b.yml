@@ -22,7 +22,7 @@ generate_args:
 runpod:
   use: true
   model: openai/gpt-oss-20b
-  name: small-judge-gpt-oss-20b
+  name: sce-gpt-oss-20b
   cloud_type: SECURE
   # ~13GB of mxfp4 weights; Hopper has the native mxfp4 MoE kernels, Ampere falls back to
   # slower triton ones. One H100 leaves ~60GB of KV for the 131k context.

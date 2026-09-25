@@ -5,7 +5,7 @@ release_date: "2024-04-18"
 runpod:
   use: true
   model: meta-llama/Meta-Llama-3-70B-Instruct   # gated: HF_TOKEN must have accepted the license
-  name: small-judge-llama-3-70b
+  name: sce-llama-3-70b
   cloud_type: SECURE
   # 141GB of bf16 weights: 4×A40 (192GB) leaves ~45GB of KV.
   gpu_id: NVIDIA A40

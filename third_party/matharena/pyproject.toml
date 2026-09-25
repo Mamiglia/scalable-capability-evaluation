@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "matharena"
+version = "0.1.0"
+description = "Inspect AI tasks for MathArena's final-answer math competitions"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "inspect_ai>=0.3.158",
+    "datasets>=2.21.0",
+    "pyyaml>=6.0",
+    # Upstream matharena.parser: sympy's LaTeX parser needs the antlr 4.11 runtime.
+    "sympy>=1.13",
+    "antlr4-python3-runtime~=4.11.0",
+    "regex",
+    "loguru>=0.7",
+]
+
+[project.urls]
+"MathArena" = "https://matharena.ai"
+
+# Registers the package with Inspect so `inspect eval matharena/<task>` works.
+[project.entry-points.inspect_ai]
+matharena = "matharena"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["matharena*"]
+
+[tool.setuptools.package-data]
+matharena = ["eval.yaml", "competitions/*/*.yaml", "LICENSE"]

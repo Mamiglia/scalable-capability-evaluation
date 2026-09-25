@@ -1,7 +1,0 @@
-# Terminal-Bench 3.0 (74 tasks) via inspect-harbor. The `terminal-bench/terminal-bench`
-# package has exactly one revision, tagged 3.0.0 — `ref: latest` resolves to it today, but
-# the slug rolls forward, so pin the digest: the task_args hash would not move on a 4.0.
-name: terminal_bench_3
-task: inspect_harbor/terminal_bench
-task_args:
-  ref: sha256:a32a61879ea94eb9dc16fa1fbeb398759f0c07ca633d9d1f6aec760207036da3

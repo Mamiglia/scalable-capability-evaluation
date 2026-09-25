@@ -1,0 +1,92 @@
+instruction: |
+  You are given a difficult, research-level mathematics question. Your task is to solve the problem.
+  The question is written in such a way that it solely requires you to find the final answer. Make sure to follow the additional formatting instructions if they are provided in the question.
+  Put the final answer you find within \\boxed{{}}.
+
+  Your are given access to tools that allow you to search for academic papers, read their content, and extract relevant information.
+  In particular, you can search the Semantic Scholar database, which contains millions of research papers across various fields and allows you to search through them using a semantic search API.
+  You can, but are not required to, use these tools to help you find the final answer.
+  Each tool has a maximum number of calls you can make:
+  - read_paper: 5
+  - read_pages: 20
+  - find_in_paper: 20
+  - query_semantic_scholar: 20
+  You have to stay within these limits while solving the problem.
+strict_parsing: false
+typed_delimited_answers: false
+n_problems: 17
+date: "2025-12-01"
+max_tool_calls:
+  read_paper: 5
+  read_pages: 10
+  find_in_paper: 10
+  query_semantic_scholar: 10
+dataset_path: data/arxiv/december
+tools:
+- tool_spec:
+    function:
+      description: | 
+        Queries Semantic Scholar API with the given query string and returns a list of relevant papers including their titles, abstracts, and IDs.
+        Also tells you whether a PDF is available for each paper.
+      name: query_semantic_scholar
+      parameters:
+        properties:
+          query:
+            description: The search query string.
+            type: string
+        required:
+        - query
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: | 
+        Reads the full content of the paper with the given paper ID (from Semantic Scholar) and returns it as markdown text.
+      name: read_paper
+      parameters:
+        properties:
+          paper_id:
+            description: The unique identifier of the paper to read.
+            type: string
+        required:
+        - paper_id
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: | 
+        Reads specific pages from the paper with the given paper ID (from Semantic Scholar) and returns the content as markdown text.
+      name: read_pages
+      parameters:
+        properties:
+          paper_id:
+            description: The unique identifier of the paper to read.
+            type: string
+          min_page:
+            description: The starting page number (1-indexed).
+            type: integer
+          max_page:
+            description: The ending page number (1-indexed, inclusive).
+            type: integer
+        required:
+        - paper_id
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: | 
+        Runs a Ctrl+F style search for the given string within the paper with the given paper ID (from Semantic Scholar) and returns the first 10 matching content.
+      name: find_in_paper
+      parameters:
+        properties:
+          paper_id:
+            description: The unique identifier of the paper to read.
+            type: string
+          string:
+            description: The string to search for within the paper.
+            type: string
+        required:
+        - paper_id
+        - string
+        type: object
+    type: function

@@ -11,7 +11,7 @@ number of halvings of the error, 0 at the baseline. Squared errors are pooled be
 taken, because a target the saturated-item prediction happens to nail has a near-zero baseline
 error and would otherwise dominate.
 
-Design: docs/superpowers/specs/2026-09-17-generalisation-design.md. Figures: plots.generalisation.
+Figures: plots.generalisation.
 """
 
 import numpy as np
@@ -253,8 +253,8 @@ def prediction_example(forecasts: pd.DataFrame, variants: dict[str, str], domain
     distributions of θ* the log likelihood ratio compares (likelihood_ratio.log_p). Returns per rule its
     (forecast, spread); the task's references' θ*; and per rule its forecast, spread, squared error, log LR
     and judge. Judge protocols use the task's best judge on references (forecast and spread from
-    `forecasts`); feature protocols are refitted on the references, so SMALL_JUDGE_DATA and
-    SMALL_JUDGE_EMBEDDINGS must be set."""
+    `forecasts`); feature protocols are refitted on the references, so SCE_DATA and
+    SCE_EMBEDDINGS must be set."""
     from analysis import loading
     from analysis.challenges import likelihood_ratio as lr
     from protocols.embeddings import EmbeddingRegression

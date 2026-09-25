@@ -1,0 +1,5 @@
+instruction: "Put your final answer within \\boxed{{}}."
+strict_parsing: false
+n_problems: 30
+date: "2025-11-08"
+dataset_path: MathArena/hmmt_nov_2025

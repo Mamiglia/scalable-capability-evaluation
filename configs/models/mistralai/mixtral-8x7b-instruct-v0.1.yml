@@ -4,7 +4,7 @@ release_date: "2023-12-11"
 runpod:
   use: true
   model: mistralai/Mixtral-8x7B-Instruct-v0.1
-  name: small-judge-mixtral-8x7b
+  name: sce-mixtral-8x7b
   cloud_type: SECURE
   # 93GB of bf16 weights: 4×A40 (192GB, $1.76/h) is the cheapest fit; 2×A100 80GB is $2.78/h.
   gpu_id: NVIDIA A40

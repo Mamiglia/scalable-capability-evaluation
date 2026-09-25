@@ -1,3 +1,0 @@
-# Docker sandbox: needs DOCKER_HOST=unix:///var/run/docker.sock like mbpp/core-bench.
-name: bigcodebench
-task: inspect_evals/bigcodebench

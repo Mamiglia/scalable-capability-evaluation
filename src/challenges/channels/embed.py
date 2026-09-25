@@ -4,7 +4,7 @@
     python src/challenges/channels/embed.py run jobs.json --out DIR --shard k/n      # GPU: download and embed
     python src/challenges/channels/embed.py check DIR REFERENCE_DIR                 # compare a "full" re-embedding
 
-The embedder is Tommy's scripts/embeddings/embed.py (methodology branch, 68d6db0), unchanged in its settings:
+The embedder is scripts/embeddings/embed.py, unchanged in its settings:
 extract_transcript text, tokenised without truncation, 8,192-token chunks with 256 overlap (at most 16), each chunk
 ending in <|endoftext|>, last-token pooled, L2-normalised, token-weighted mean, float16. A variant
 "channels-<spec>" renders the transcript with JudgeConfig.channels = <spec> (reasoning shown); "thirds-<kept>" renders it
@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 MODEL = "Qwen/Qwen3-Embedding-8B"
 REVISION = "1d8ad4ca9b3dd8059ad90a75d4983776a23d44af"
-DATA_REPO = "generality-labs/benchmarks"
+DATA_REPO = "ANONYMOUS/benchmarks"
 SPECS = ["drop-reasoning", "drop-text", "drop-calls", "drop-outputs", "drop-tools",
          "only-reasoning", "only-text", "only-calls", "only-outputs", "only-tools"]
 # domain -> (semesters, channel specs to embed)
@@ -69,7 +69,7 @@ def chunk(ids: list[int], size: int, overlap: int, max_chunks: int) -> list[list
 
 
 class Embedder:
-    """Tommy's embedder (scripts/embeddings/embed.py @ 68d6db0), settings unchanged."""
+    """The embedder of scripts/embeddings/embed.py, settings unchanged."""
 
     def __init__(self, max_tokens=8192, overlap=256, max_chunks=16, tokens_per_batch=32768, device="cuda"):
         import torch
@@ -207,7 +207,7 @@ if __name__ == "__main__":
     p = sub.add_parser("plan"); p.add_argument("--out", type=Path, required=True); p.add_argument("--thirds", action="store_true")
     r = sub.add_parser("run"); r.add_argument("jobs", type=Path); r.add_argument("--out", type=Path, required=True)
     r.add_argument("--shard", default="0/1"); r.add_argument("--variants", nargs="*"); r.add_argument("--limit-samples", type=int, default=0)
-    r.add_argument("--revision", required=True, help="generality-labs/benchmarks revision the frozen tables point at (git -C data rev-parse HEAD)")
+    r.add_argument("--revision", required=True, help="ANONYMOUS/benchmarks revision the frozen tables point at (git -C data rev-parse HEAD)")
     c = sub.add_parser("check"); c.add_argument("new", type=Path); c.add_argument("reference", type=Path)
     args = parser.parse_args()
     if args.command == "plan":

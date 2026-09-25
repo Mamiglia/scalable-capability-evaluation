@@ -5,7 +5,6 @@ Cell script: run top to bottom as `PYTHONPATH=src uv run python scripts/analyses
 or cell by cell (`# %%`). Reads `analysis/results/forecasts.csv` written by results.py; the frozen
 model tables supply the references' theta*. Launches nothing.
 
-Design: docs/superpowers/specs/2026-09-17-generalisation-design.md
 """
 
 # %% settings
@@ -19,7 +18,6 @@ import pandas as pd
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)
-os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
 
 from analysis.challenges import generalisation as gen  # noqa: E402  (after the path is set)
 from analysis.challenges.signal_glm import LABELS  # noqa: E402
@@ -29,7 +27,7 @@ from analysis.challenges import likelihood_ratio as lr  # noqa: E402
 VARIANTS = {"pairwise": "linear", "direct": "raw", "embedding": "full"}  # as figure one
 OUT = Path("analysis/results/generalisation")
 FIG = Path("analysis/results/figures/generalisation")
-FINAL = Path.home() / "Documents/AIS/LASR/manuscript/final_figs"  # the manuscript's final figures
+FINAL = Path("analysis/manuscript/final_figs")  # the manuscript's final figures
 OUT.mkdir(parents=True, exist_ok=True)
 FIG.mkdir(parents=True, exist_ok=True)
 FINAL.mkdir(parents=True, exist_ok=True)

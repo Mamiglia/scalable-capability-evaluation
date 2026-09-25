@@ -5,7 +5,7 @@ release_date: "2023-06-22"
 runpod:
   use: true
   model: adamrb/mpt-30b-chat-safetensors
-  name: small-judge-mpt-30b
+  name: sce-mpt-30b
   cloud_type: SECURE
   # 60GB of weights: 2×A40 (96GB, $0.88/h) beats one A100 80GB ($1.39/h). Slower decode.
   gpu_id: NVIDIA A40

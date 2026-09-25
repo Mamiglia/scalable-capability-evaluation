@@ -11,7 +11,7 @@ generate_args:
 runpod:
   use: true
   model: Qwen/Qwen3-14B
-  name: small-judge-qwen3-14b
+  name: sce-qwen3-14b
   cloud_type: SECURE
   # 30GB of weights; KV is 160KB/token so ~13GB of cache holds 2 full 40k sequences.
   # Concurrency-bound, not memory-bound: an A100 ($1.39/h) triples cache but not price/token.

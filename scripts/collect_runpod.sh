@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 [[ ! -f .env ]] || { set -a; source .env; set +a; }
-export UV_CACHE_DIR=/tmp/small-judge-uv-cache
+export UV_CACHE_DIR=/tmp/sce-uv-cache
 export PYTHONUNBUFFERED=1
 
 mapfile -t models < <(grep -rl '^  use: true$' configs/models --include='*.yml' | sort)

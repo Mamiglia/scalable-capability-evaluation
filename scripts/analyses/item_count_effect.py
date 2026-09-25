@@ -9,7 +9,7 @@ Judges = the top-3 references of each semester (data/meta/<domain>/fit.yml `top`
 number of judged train items, DRAWS random subsets of n (bench, item)s are taken from the judged verdicts, and
 the targets are placed from those verdicts alone by the per-bench calibration (JudgeLinear). MSE over all targets
 as % of the mean_ref baseline; the figure plots the prediction score = 100 - that percentage (100 = perfect, 0 = no
-better than the reference mean). One panel per semester, one line per domain (colour as in reasoning_effect.py, marker
+better than the reference mean). One panel per semester, one line per domain (colour as in plots.item_count, marker
 as in scripts/analyses/palette.py), each stopping at the task's number of judged items; the band is the 2.5-97.5
 percentile over draws (uncertainty from which items were judged). Writes analysis/judge/item_count_effect.{csv,png,svg}.
 """
@@ -76,7 +76,7 @@ def compute() -> pd.DataFrame:
 
 def compute_direct() -> pd.DataFrame:
     """The same subsampling for direct judging: the top-1 reference's 1-10 ratings (logs/direct/<domain>/<sem>/<judge>/),
-    mean rating -> theta* calibrated on the references (protocols.direct_judge.scoring.calibrate, as in protocol_compare.py)."""
+    mean rating -> theta* calibrated on the references (protocols.direct_judge.scoring.calibrate)."""
     rows, rng = [], np.random.default_rng(0)
     for name in DOMAINS:
         domain = DomainConfig.from_cli(Path(f"configs/domain/{name}.yml"))

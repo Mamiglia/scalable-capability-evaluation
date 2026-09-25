@@ -4,7 +4,7 @@ release_date: "2024-02-21"
 runpod:
   use: true
   model: google/gemma-7b-it
-  name: small-judge-gemma-7b-it
+  name: sce-gemma-7b-it
   cloud_type: SECURE
   gpu_id: NVIDIA RTX A5000   # 24GB, $0.27/h: 17GB of weights, 8192 context
   ready_timeout: 900

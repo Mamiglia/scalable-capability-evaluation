@@ -1,5 +1,0 @@
-name: core_bench_easy
-task: inspect_evals/core_bench
-task_args:
-  difficulty: easy
-  max_messages: 100

@@ -1,4 +1,4 @@
-"""Per-model feature rows from the per-transcript CSVs in glm_features/ (generality-labs/glm_features).
+"""Per-model feature rows from the per-transcript CSVs in glm_features/ (ANONYMOUS/glm_features).
 
 scripts/glm_features/extract.py writes one CSV per successful log with extract_log: one row per
 sample and reasoning view. feature_table selects a cohort's correct first attempts on its
@@ -24,7 +24,7 @@ from reference import tables
 ClauseTyper = Callable[[Sequence[ChatMessage]], Sequence[str]]
 MEMBER = re.compile(r"samples/(.+)_epoch_(\d+)\.json$")
 VIEWS = ("visible", "hidden")
-COLUMNS = FEATURES + STRUCTURE_FEATURES  # structure columns are filled by scripts/glm_features/merge_labels.py
+COLUMNS = FEATURES + STRUCTURE_FEATURES  # structure columns come from an RST labeller outside this release (NaN otherwise)
 
 
 def sample_features(sample: EvalSample, *, include_reasoning: bool = True,

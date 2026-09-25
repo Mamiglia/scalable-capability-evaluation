@@ -9,7 +9,7 @@ release_date: '2025-06-20'
 runpod:
   use: true
   model: mistralai/Mistral-Small-3.2-24B-Instruct-2506
-  name: small-judge-mistral-small-3.2
+  name: sce-mistral-small-3.2
   cloud_type: SECURE
   # 48GB of bf16 weights: 2×A40 (96GB) leaves ~40GB of KV.
   gpu_id: NVIDIA A40

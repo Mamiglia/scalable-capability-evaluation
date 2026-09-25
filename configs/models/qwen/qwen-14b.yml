@@ -4,7 +4,7 @@ release_date: "2023-09-25"
 runpod:
   use: true
   model: Qwen/Qwen-14B
-  name: small-judge-qwen-14b
+  name: sce-qwen-14b
   image: vllm/vllm-openai:v0.22.0
   cloud_type: SECURE
   gpu_id: NVIDIA A40

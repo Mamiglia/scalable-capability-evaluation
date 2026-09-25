@@ -1,7 +1,0 @@
-# Reasoning-hidden twin of configs/judges/reasoning/deepseek-r1-0528.yml: identical condition except include_reasoning (the subjects'
-# reasoning blocks are stripped); full train set, nothing truncated, a pair too long for the judge's context is left unscored.
-name: deepseek-r1-0528
-include_reasoning: false
-judge: configs/models/deepseek/deepseek-r1-0528.yml
-max_length: 100000000
-_kwargs: {fail_on_error: false, max_tokens: 32768}

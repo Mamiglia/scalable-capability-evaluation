@@ -12,7 +12,7 @@ import pandas as pd
 
 from plots.palette import DOMAIN  # domain markers
 
-COLOR = {"science": "#2a78d6", "math": "#eb6834", "coding": "#1baf7a", "cyber": "#4a3aa7"}  # as in reasoning_effect.py
+COLOR = {"science": "#2a78d6", "math": "#eb6834", "coding": "#1baf7a", "cyber": "#4a3aa7"}
 XMIN = 10  # the figure starts here
 
 

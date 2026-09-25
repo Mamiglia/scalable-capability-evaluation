@@ -16,7 +16,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 [[ "$(uname -m)" == x86_64 ]] || { echo "swe_bench_mini needs an x86_64 host" >&2; exit 1; }
 [[ ! -f .env ]] || { set -a; source .env; set +a; }
-export UV_CACHE_DIR=/tmp/small-judge-uv-cache
+export UV_CACHE_DIR=/tmp/sce-uv-cache
 export DOCKER_HOST="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 
 # Agentic context grows until it overflows the window (OpenRouter 400s the turn), so max_tokens

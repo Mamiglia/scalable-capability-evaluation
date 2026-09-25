@@ -1,0 +1,13 @@
+instruction: |
+  Your task is to write a proof to the following problem. Your proof will be graded by human judges for accuracy, thoroughness, and clarity. When you write your proof, follow these guidelines:
+
+  - You are creating a proof, not a proof outline. Each step should be carefully explained and documented. If not properly explained, the judge will assume that you cannot explain it, and therefore decrease your grade.
+  - Do not skip computation steps in your proof. Clearly explain what transformations were done and why they are allowed in each step of a calculation.
+  - You should use correct LaTeX notation to write up your solution. You should encompass equations in appropriate symbols ("\(" and "\)" for inline math, "\[" and "\]" for block math) to enhance the clarity of your proof. Do not use any unicode characters.
+  - Your proof should be self-contained.
+strict_parsing: false
+n_problems: 10
+date: "2025-11-04"
+final_answer: false
+dataset_path: MathArena/miklos_2025
+judge_config: judges/ablations/judge

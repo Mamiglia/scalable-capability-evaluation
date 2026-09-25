@@ -4,7 +4,7 @@ release_date: "2024-04-23/2024-05-21"
 runpod:
   use: true
   model: microsoft/Phi-3-medium-128k-instruct
-  name: small-judge-phi3-medium-14b
+  name: sce-phi3-medium-14b
   cloud_type: SECURE
   gpu_id: NVIDIA A40   # 48GB, $0.44/h: 28GB of weights
   ready_timeout: 900

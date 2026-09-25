@@ -9,7 +9,7 @@ analysis/results/cross_domain/transfer_likelihood_ratio.csv: the cross-domain tr
 and science transcripts scored on coding and cyber theta* (cross_domain.swap), `domain`
 "<source>-><scored>", the source domain's best judge as in the cross-domain figures. Every protocol fits on the task's
 references only, as the null and the results do. Reads transcripts and embeddings
-from T7 and judge runs from logs/; launches nothing. Method: src/analysis/challenges/likelihood_ratio.py.
+from data/ and judge runs from logs/; launches nothing. Method: src/analysis/challenges/likelihood_ratio.py.
 """
 
 # %% settings
@@ -23,8 +23,6 @@ import pandas as pd
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)
-os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
-os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/transcript-embeddings")
 
 from analysis import loading, matching, stats  # noqa: E402
 from analysis.challenges import cross_domain as cd  # noqa: E402
