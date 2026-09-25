@@ -1,9 +1,44 @@
-# Capability estimation from saturated-benchmark transcripts
+# Evaluating Model Capabilities After Benchmark Saturation
 
-Code for the submission. Can a model's capability be estimated from its correctly answered transcripts on
-*saturated* benchmark items, by protocols calibrated on earlier models and applied to newer ones?
+Code for the anonymous submission. Built on [Inspect AI](https://inspect.aisi.org.uk/); Python ≥ 3.13 and
+[`uv`](https://docs.astral.sh/uv/).
 
-Built on [Inspect AI](https://inspect.aisi.org.uk/). Python ≥ 3.13 and [`uv`](https://docs.astral.sh/uv/).
+## Abstract
+
+Rapid advancements in AI capabilities are causing benchmarks to saturate. Once several models approach perfect
+scores, a benchmark loses its power to differentiate between them, and with it its utility for informing AI safety
+cases and frontier policies. Yet benchmark items produce far more information than the scores we typically extract
+from them: a full transcript of *how* each model solved the task. We investigate whether these transcripts can be
+used to assess model capabilities, even after benchmark scores have saturated. We simulate saturation
+retrospectively using historical benchmark and model releases, and test whether protocols that access only
+correctly solved transcripts from saturated benchmarks can predict capabilities measured on held-out, unsaturated
+items. We evaluate representative contemporary approaches for extracting information from model transcripts:
+pairwise judging, single-transcript absolute scoring, and predictions from deterministic transcript features or
+embeddings. We find that saturated transcripts retain capability information beyond benchmark accuracy. Amongst our
+evaluated protocols, pairwise judging performs best, reducing prediction error by 5.27× compared to a baseline
+using only saturated benchmark scores. This capability-relevant information is distributed across transcript
+sections, but concentrated in specific channels of information such as reasoning and tool-calls. However, the
+predictive power of protocols does not always generalise across distribution shifts -- for example, by
+underestimating the capabilities of the first reasoning models introduced in early 2025. Saturated benchmarks thus
+retain capability-predicting signal in their task transcripts, but extending the lifetime of existing benchmarks
+requires methods designed to extract these signals more robustly.
+
+## The paper and the code
+
+| paper section | what it covers | code |
+| --- | --- | --- |
+| §2 Problem Setting | capability θ as a 2PL latent; saturated (EASY) vs held-out (HARD) items; semester tasks with references and targets | `src/irt/`, `src/reference/freeze.py` (item split, θ\*), `src/capability/task.py` (Task, Cohort), `configs/semesters.yml` |
+| §3.1 Evaluation Setup | four domains, their benchmarks and models; rollout collection | `configs/domain/`, `configs/bench/`, `configs/models/`, `src/collect/` |
+| §3.2 Prediction Protocols | baseline, deterministic features, embeddings, absolute scoring, pairwise judging | `src/protocols/`, `src/judge/`, `configs/judges/`, `src/analysis/baselines.py` |
+| §4.1 Saturated transcripts contain capability information (Fig. 3) | squared error and likelihood-ratio tests per protocol | `scripts/analyses/results.py`, `scripts/analyses/likelihood_ratio.py`, `scripts/figures/manuscript_error_figures.py` |
+| §4.2 Signal is distributed across the transcript: position (Fig. 4) | judging with thirds of each transcript removed | `src/challenges/thirds/`, `scripts/analyses/position_contributions.py` |
+| §4.2 Signal is distributed across the transcript: channels (Fig. 5) | judging with reasoning, text, tool calls or tool outputs removed | `configs/judges/channels/`, `scripts/analyses/channel_contributions.py` |
+| §4.3 Generalisation across time and domains (Fig. 6) | per-semester and per-domain error | `scripts/figures/manuscript_error_figures.py` |
+| §4.3 Reasoning-model shift (Fig. 7) | pre-reasoning judges on reasoning models, reasoning hidden vs shown | `scripts/analyses/generalisation.py` |
+| §4.3 More capable targets (Fig. 8) | error against distance above the strongest reference | `scripts/analyses/generalisation.py` |
+| §4.3 Closed-source frontier models | frontier targets on the coding subset | `src/challenges/frontier/` |
+| §4.3 Domain differences (Table) | per-domain error by protocol | `scripts/analyses/signal_glm.py`, `scripts/analyses/results.py` |
+| Appendix | full methodology, configs, per-protocol ablations and robustness checks | see [Reproducing the paper](#reproducing-the-paper) |
 
 ## Install
 
@@ -13,7 +48,7 @@ uv run pytest                  # offline, no API calls
 cp env.example .env            # API keys: only needed to re-collect or re-judge
 ```
 
-## Data
+### Data
 
 Everything the paper uses is released as four Hugging Face datasets (anonymised for review):
 
@@ -50,7 +85,12 @@ attempt are EASY (saturated), items all 3 answered but some failed are HARD. A p
 stratified subset of the EASY items (25 per difficulty quartile) and only correct transcripts on them. The
 ground truth θ\* is fit on the HARD items only, with the item parameters fixed to the global fit.
 
-**Protocols** (`src/protocols/`), with the paper's names:
+**Metric.** Squared error between θ̂ and θ\* per target, and the log-likelihood ratio of θ\* under the
+protocol's forecast against the baseline's (`src/analysis/challenges/likelihood_ratio.py`).
+
+## Protocols
+
+In `src/protocols/`, with the paper's names:
 
 | paper | code |
 | --- | --- |
@@ -60,10 +100,9 @@ ground truth θ\* is fit on the HARD items only, with the item parameters fixed 
 | Absolute scoring | `direct_judge_<judge>` (`protocols/direct_judge/`) |
 | Pairwise judging | `judge_<judge>` (Bradley-Terry) and `judgelin_<judge>` (linear calibration) (`protocols/pairwise/`) |
 
-**Metric.** Squared error between θ̂ and θ\* per target, and the log-likelihood ratio of θ\* under the
-protocol's forecast against the baseline's (`src/analysis/challenges/likelihood_ratio.py`).
+## Pipeline and reproducing scripts
 
-## Pipeline
+### Pipeline
 
 ```
 uv run collect    rollouts of every model on every bench          -> data/<bench>/<hash>/<model>/<repeat>/*.eval
@@ -85,7 +124,7 @@ uv run evaluate configs/domain/science.yml --judge configs/judges/reasoning/kimi
 uv run evaluate configs/domain/science.yml --direct-judge configs/judges/kimi-k2-thinking.yml --semester 2026-I
 ```
 
-## Reproducing the paper
+### Reproducing the paper
 
 Run from the repository root. `results.py` comes first: it writes `analysis/results/forecasts.csv`, which the
 other analyses read. Figures go under `analysis/`. The drawing code lives in `src/plots/`, one module per
