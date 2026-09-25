@@ -40,6 +40,7 @@ def offset(ax, x=True, y=True):
 def save(fig, stub: Path):
     fig.savefig(stub.with_suffix(".png"), dpi=300, bbox_inches="tight")
     fig.savefig(stub.with_suffix(".svg"), bbox_inches="tight")
+    fig.savefig(stub.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(fig)
     print("wrote", stub.with_suffix(".png"))
 
