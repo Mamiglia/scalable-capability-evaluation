@@ -50,25 +50,28 @@ cp env.example .env            # API keys: only needed to re-collect or re-judge
 
 ### Data
 
-Everything the paper uses is released as four Hugging Face datasets (anonymised for review):
+The full data (every rollout and judge run, >100 GB) will be released after review. The supplementary material
+holds one complete semester task, **cyber 2026-I** (`cyber-2026-I.zip`, 64 MB): what the forecasting pipeline
+reads for that task, from which every protocol's forecasts for its 8 target models are recomputed exactly.
 
-| dataset | local path | contents |
-| --- | --- | --- |
-| `ANONYMOUS/benchmarks` | `data/` (git submodule) | every model's rollouts (`data/<bench>/<hash>/<model>/<repeat>/*.eval`) and the frozen tables (`data/meta/<domain>/`) |
-| `ANONYMOUS/judging` | `logs/` | every pairwise and absolute-scoring judge run (`logs/judge/`, `logs/direct/`, and the `_channels-*`, thirds and reasoning-hidden conditions) |
-| `ANONYMOUS/glm_features` | `glm_features/` | deterministic per-transcript features |
-| `ANONYMOUS/transcript-embeddings` | `transcript-embeddings/` | Qwen3-Embedding-8B transcript vectors |
+| path | contents |
+| --- | --- |
+| `data/meta/cyber/` | the frozen tables: item parameters, EASY/HARD split and train items, θ\* per task |
+| `data/<bench>/<hash>/<model>/0/*.eval` | repeat-0 rollouts of the task's 8 references, 7 historical models and 8 targets on CyBench and InterCode, train items only |
+| `logs/judge/cyber/2026-I/<judge>/24d6cc32/` | pairwise verdicts of the four judges, reasoning shown |
+| `logs/direct/cyber/2026-I/<judge>/` | absolute-scoring ratings of the three judges |
+| `glm_features/`, `transcript-embeddings/` | deterministic features and Qwen3-Embedding-8B vectors of those rollouts |
 
 ```bash
-git submodule update --init data
-uv run hf download ANONYMOUS/judging --repo-type dataset --local-dir logs
-uv run hf download ANONYMOUS/glm_features --repo-type dataset --local-dir glm_features
-uv run hf download ANONYMOUS/transcript-embeddings --repo-type dataset --local-dir transcript-embeddings
+unzip cyber-2026-I.zip   # at the repository root: creates data/, logs/, glm_features/, transcript-embeddings/
+SCE_DOMAINS=cyber SCE_SEMESTERS=2026-I uv run python scripts/analyses/results.py   # -> analysis/results/forecasts.csv
 ```
 
-`SCE_DATA` and `SCE_EMBEDDINGS` point at copies elsewhere. With these downloaded, every analysis below runs from
-the released logs and makes **no API calls**. Judging is collected on demand: a judge condition whose logs are
-missing is judged through OpenRouter, which costs money.
+To fit in the size limit the logs are reduced to what the analyses read: rollouts keep the train items without
+their event traces, judge logs keep their verdict summaries (the judges' verdicts and explanations, not the
+prompts). The analyses make **no API calls** on this data (leave `OPENROUTER_API_KEY` unset to be sure). The
+analyses that pool domains or semesters, and re-judging, need the full data. `scripts/export_subset.py` builds
+this archive for any domain and semester from the full data (`--compact` for the reduced logs).
 
 ## Method
 

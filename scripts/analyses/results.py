@@ -24,8 +24,9 @@ os.chdir(ROOT)  # every path in src/ is repo-relative
 from analysis import calibration, loading, matching, stats  # noqa: E402  (after the env is set)
 from plots import results as plots  # noqa: E402
 
-DOMAINS = ["science", "math", "coding", "cyber"]
-SEMESTERS = None  # e.g. ["2026-I"]; None = every frozen semester task
+# SCE_DOMAINS / SCE_SEMESTERS restrict the run, e.g. to a released subset: SCE_DOMAINS=cyber SCE_SEMESTERS=2026-I
+DOMAINS = os.environ.get("SCE_DOMAINS", "science math coding cyber").split()
+SEMESTERS = os.environ.get("SCE_SEMESTERS", "").split() or None  # None = every frozen semester task
 OUT = Path("analysis/results")
 # Every variant is computed and scored; these pick the ones the figures and tables show.
 # Pairwise: the user's condition is the linear calibration (per-bench slope and noise on the reference
