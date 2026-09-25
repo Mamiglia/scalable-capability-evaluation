@@ -117,8 +117,10 @@ def direct_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
     """Every fetched direct run for the task, subject reasoning shown and hidden, for every
     judge YAML in configs/judges/ whose judge is in the semester's top-3 roster
     (data/meta/<domain>/fit.yml `top`; file stems are the roster shortnames). The run
-    directory comes from JudgeDirect.log_dir, which hashes the prompts too, so a config whose
-    directory does not exist was never run."""
+    directories come from JudgeDirect.log_dirs, which hashes the prompts too, so a config whose
+    directory does not exist was never run; a run split across bench sets (coding: SWE-bench and
+    Terminal-Bench before agent_bench_os joined) is read from every directory, the full bench set's
+    rating winning where two directories rate the same (model, bench, item)."""
     roster = yaml.safe_load((tables.frozen_dir(dom) / "fit.yml").read_text())["top"][task.semester]
     runs = []
     for path in sorted(JUDGES.glob("*.yml")):
@@ -126,11 +128,13 @@ def direct_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
             continue
         for hidden in (False, True):
             harness = JudgeDirect(DirectJudgeConfig.from_cli(path), dom, include_reasoning=not hidden)
-            run_dir = harness.log_dir(task.semester)
-            if not run_dir.is_dir() or not fetched(run_dir):
+            run_dirs = [d for d in harness.log_dirs(task.semester) if fetched(d)]
+            if not run_dirs:
                 continue
+            table = pd.concat([direct_from_logs(d) for d in run_dirs], ignore_index=True)
+            table = table.drop_duplicates(["model", "bench", "item", "epoch"], keep="first")
             label = "reasoning-hidden" if hidden else "reasoning-shown"
-            runs.append(JudgeRun("direct", path.stem, label, harness, direct_from_logs(run_dir)))
+            runs.append(JudgeRun("direct", path.stem, label, harness, table))
     return runs
 
 
