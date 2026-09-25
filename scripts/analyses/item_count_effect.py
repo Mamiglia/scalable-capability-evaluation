@@ -30,10 +30,11 @@ import yaml
 from capability.evaluate import score
 from capability.task import Task
 from configs.domain import DomainConfig
+from configs.judge import DirectJudgeConfig
 from configs.logs import logger
 from palette import DOMAIN  # domain markers, scripts/analyses/palette.py
 from protocols import PROTOCOLS
-from protocols.direct_judge import from_logs as direct_logs
+from protocols.direct_judge import JudgeDirect, from_logs as direct_logs
 from protocols.direct_judge.scoring import calibrate
 from protocols.pairwise import from_logs
 from protocols.pairwise.linear import weighted_theta
@@ -89,12 +90,13 @@ def compute_direct() -> pd.DataFrame:
         top = yaml.safe_load(Path(f"data/meta/{name}/fit.yml").read_text())["top"]
         for sem, judges in top.items():
             judge, task = judges[0].lower(), Task.from_semester(sem, domain)
-            runs = sorted(Path("logs/direct", name, sem, judge).glob("*"))
+            runs = JudgeDirect(DirectJudgeConfig.from_cli(Path(f"configs/judges/{judge}.yml")), domain).log_dirs(sem)
             if not runs:
                 print("missing", name, sem, judge, file=sys.stderr)
                 continue
             refs, targets = task.references.theta, task.truth.index
-            r = direct_logs(runs[0]).merge(task.references.items[["bench", "item"]])
+            r = pd.concat([direct_logs(d) for d in runs], ignore_index=True)  # every bench set's directory (JudgeDirect.log_dirs)
+            r = r.drop_duplicates(["model", "bench", "item", "epoch"]).merge(task.references.items[["bench", "item"]])
             r = r[(r.semester == sem) & r.model.isin(refs.index.union(targets))]
             items = r[["bench", "item"]].drop_duplicates().reset_index(drop=True)
             baseline = score(PROTOCOLS["mean_ref"](task), task.truth)["mse"]
