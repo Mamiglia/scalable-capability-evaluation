@@ -204,6 +204,7 @@ def build_dataset(
     truncate: str = "head",
     window: str = "",
     channels: str = "",
+    pair_max_length: int = 0,
 ) -> MemoryDataset:
     """Build the judging dataset comparing a major and a minor model's eval log.
 
@@ -219,6 +220,7 @@ def build_dataset(
         items: question ids to keep (e.g. one difficulty quartile); None = all.
         window: keep-k/n or drop-k/n, a fraction of each transcript by characters.
         channels: only-<c> or drop-<c>, which transcript channels are rendered (reasoning, text, calls, outputs; tools is calls and outputs).
+        pair_max_length: a pair whose two transcripts together exceed this many chars has each cut to half of it (0 = never).
     Questions where either model wrote fewer than MIN_RESPONSE_CHARS (after the window) are skipped.
     """
     self_pair = Path(major_path) == Path(minor_path)
@@ -237,11 +239,14 @@ def build_dataset(
             first, second = major[sample_id][0], major[sample_id][1]
         else:
             first, second = major[sample_id][0], minor[sample_id][0]
-        shown = [cut(window_text(t.text, window), max_len, truncate) for t in (first, second)]
+        pair_len = max_len
+        if pair_max_length and sum(len(window_text(t.text, window)) for t in (first, second)) > pair_max_length:
+            pair_len = min(max_len, pair_max_length // 2)
+        shown = [cut(window_text(t.text, window), pair_len, truncate) for t in (first, second)]
         if min(map(response_chars, shown)) < MIN_RESPONSE_CHARS:
             continue  # e.g. an answer-only transcript, or a window of a short one: nothing for the judge to compare
 
-        pair_kwargs = dict(format_str=format_str, max_len=max_len, truncate=truncate, window=window)
+        pair_kwargs = dict(format_str=format_str, max_len=pair_len, truncate=truncate, window=window)
         samples.append(responses_to_sample(first, second, target='1', **pair_kwargs))
         if include_reverse:
             samples.append(responses_to_sample(second, first, target='2', **pair_kwargs))
