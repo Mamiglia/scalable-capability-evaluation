@@ -24,7 +24,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.linear_model import RidgeCV
 
-from analysis import embeddings, loading
+from analysis import loading
+from protocols import embeddings
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
 from analysis.challenges.signal_glm import DOMAIN_COLORS

@@ -29,7 +29,7 @@ os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/
 from analysis import loading, matching, stats  # noqa: E402
 from analysis.challenges import cross_domain as cd  # noqa: E402
 from analysis.challenges import likelihood_ratio as lr  # noqa: E402
-from analysis.embeddings import EmbeddingRegression  # noqa: E402
+from protocols.embeddings import EmbeddingRegression  # noqa: E402
 from protocols import PROTOCOLS  # noqa: E402
 
 DOMAINS = ["science", "math", "coding", "cyber"]

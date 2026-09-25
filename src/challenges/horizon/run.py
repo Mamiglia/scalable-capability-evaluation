@@ -125,7 +125,7 @@ def transcript(only: list[str] | None = None) -> None:
     """The protocols without a judge on every new task, as the paper runs them (all 100 train items, fit on the
     references): Deterministic features (glm_regex) and Embedding (full transcript). Writes
     OUT/forecasts_transcript_<task>.csv."""
-    from analysis.embeddings import EmbeddingRegression
+    from protocols.embeddings import EmbeddingRegression
     from protocols import PROTOCOLS
 
     protocols = [("glm_regex", PROTOCOLS["glm_regex"]), ("embedding", EmbeddingRegression("full"))]

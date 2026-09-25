@@ -33,7 +33,8 @@ from sklearn.linear_model import RidgeCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from analysis import embeddings, loading
+from analysis import loading
+from protocols import embeddings
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
 from capability.task import Cohort
