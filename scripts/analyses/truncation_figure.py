@@ -20,6 +20,7 @@ os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/
 
 from analysis import loading, stats  # noqa: E402
 from analysis.challenges import truncation  # noqa: E402
+from plots import truncation as truncation_plots  # noqa: E402
 
 DOMAINS = ["coding", "cyber"]
 CUT = "ends"  # the cut the figure shows against the full transcripts
@@ -47,4 +48,4 @@ results = pd.read_csv(OUT / "forecasts.csv")
 tasks = set(zip(forecasts.domain, forecasts.semester))
 baseline = results[results.protocol == stats.BASELINE].merge(pd.DataFrame(sorted(tasks), columns=["domain", "semester"]))
 for ext in ("svg", "png"):
-    truncation.figure(forecasts, baseline, OUT / "figures/truncation" / f"truncation.{ext}", cut=CUT)
+    truncation_plots.figure(forecasts, baseline, OUT / "figures/truncation" / f"truncation.{ext}", cut=CUT)

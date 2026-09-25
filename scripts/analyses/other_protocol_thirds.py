@@ -28,7 +28,8 @@ from analysis import loading
 from protocols import embeddings
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
-from analysis.challenges.signal_glm import DOMAIN_COLORS
+from plots import contributions as contributions_plots
+from plots.signal_glm import DOMAIN_COLORS
 
 OUT = Path("analysis/results/figures/positions")
 ERRORS = OUT / "other_protocol_thirds_errors.csv"
@@ -75,7 +76,7 @@ if __name__ == "__main__":
     else:
         errors = compute()
         errors.to_csv(ERRORS, index=False)
-    contributions.save_figures(
+    contributions_plots.save_figures(
         errors, PARTS, DOMAIN_COLORS, OUT, "other_protocol_thirds", final="transcript_thirds_other_protocols",
         measures=("without",),
         caption="Embedding protocol on transcript thirds. Every rendered transcript (reasoning shown) is cut into three "

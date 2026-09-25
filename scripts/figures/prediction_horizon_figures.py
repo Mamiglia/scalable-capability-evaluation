@@ -1,9 +1,9 @@
 """Figures for predicting further ahead (docs/static_method_plan.md): squared error per target of the
 Pairwise judge and the baseline, over the series of tasks, against distance above the
 references, and by target semester. Science only. Styled as the manuscript's generalisation figures
-(analysis.challenges.generalisation: log error axis 0.01-10, translucent interval boxes, grey panel tags).
+(plots.generalisation: log error axis 0.01-10, translucent interval boxes, grey panel tags).
 
-    uv run python scripts/analyses/prediction_horizon_figures.py
+    uv run python scripts/figures/prediction_horizon_figures.py
 
 The new tasks (40 train items) come from artifacts/prediction-horizon/; the one-semester tasks are the
 paper's best judge on references (linear variant, core condition, 100 items) from the main checkout's
@@ -21,8 +21,8 @@ from scipy import stats
 
 import plots.results  # noqa: F401  (house rcParams)
 from analysis.challenges import likelihood_ratio as lr
-from analysis.challenges.generalisation import BASELINE_COLOUR
-from analysis.challenges.signal_glm import COLORS
+from plots.generalisation import BASELINE_COLOUR
+from plots.signal_glm import COLORS
 from plots.results import unclip_markers
 
 OUT = Path("artifacts/prediction-horizon")

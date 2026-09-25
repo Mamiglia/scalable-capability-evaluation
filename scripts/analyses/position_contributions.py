@@ -28,7 +28,8 @@ import pandas as pd
 from analysis import judges, loading
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
-from analysis.challenges.signal_glm import DOMAIN_COLORS
+from plots import contributions as contributions_plots
+from plots.signal_glm import DOMAIN_COLORS
 from protocols.pairwise.judge import from_logs
 
 OUT = Path("analysis/results/figures/positions")
@@ -150,7 +151,7 @@ if __name__ == "__main__":  # importable, so a side analysis can redraw these es
     print(fulls.round(3).to_string())
     print(coverage.to_string(index=False))
     # the manuscript figure, as change in squared error from the full transcript: each third removed
-    contributions.save_figures(
+    contributions_plots.save_figures(
         errors, POSITIONS, DOMAIN_COLORS, OUT, "position_contributions", final="transcript_thirds",
         measures=("without",), baseline=True,
         caption="Pairwise judge on transcript thirds. Every rendered transcript (reasoning shown) is cut into three "

@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from analysis.challenges import signal_glm
+from plots import signal_glm as signal_glm_plots
 
 
 def synthetic(ratio: float = 0.5, n: int = 200, seed: int = 0) -> pd.DataFrame:
@@ -86,8 +87,8 @@ def test_appendix_figures_report_mse_without_score_transform():
         for protocol in protocols if protocol != "pairwise" for domain in domains
     ])
 
-    effects_fig = signal_glm.appendix_effect_figure(effects)
-    contrast_fig = signal_glm.appendix_contrast_figure(contrasts, effects)
+    effects_fig = signal_glm_plots.appendix_effect_figure(effects)
+    contrast_fig = signal_glm_plots.appendix_contrast_figure(contrasts, effects)
     assert effects_fig.axes[0].get_xscale() == "log"
     assert effects_fig.axes[0].get_xlabel() == "MSE ratio to baseline"
     assert contrast_fig.axes[0].get_xscale() == "log"
@@ -121,7 +122,7 @@ def test_appendix_fit_figure_reports_squared_error_and_coverage():
         posterior_predictive={"obs": np.tile(np.array([0.2, 0.8, 0.1, 0.4]), (1, 3, 1))},
     )
 
-    fig, fit = signal_glm.appendix_fit_figure(idata, features, table)
+    fig, fit = signal_glm_plots.appendix_fit_figure(idata, features, table)
     assert fig.axes[0].get_xscale() == fig.axes[0].get_yscale() == "log"
     assert {"protocol", "coverage95", "r2_log"}.issubset(fit.columns)
     text = " ".join(t.get_text() for ax in fig.axes for t in [*ax.texts, ax.xaxis.label, ax.yaxis.label])

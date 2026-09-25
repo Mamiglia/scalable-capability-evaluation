@@ -24,11 +24,12 @@ import pandas as pd
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
-from item_count_effect import CONDITIONS, DOMAINS, plot  # noqa: E402
+from item_count_effect import CONDITIONS, DOMAINS  # noqa: E402
 
 from capability.evaluate import score  # noqa: E402
 from capability.task import Task  # noqa: E402
 from configs.domain import DomainConfig  # noqa: E402
+from plots.item_count import plot  # noqa: E402
 from protocols import PROTOCOLS  # noqa: E402
 from protocols.pairwise import from_logs  # noqa: E402
 from protocols.pairwise.bradley_terry import rank  # noqa: E402

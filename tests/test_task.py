@@ -55,6 +55,7 @@ class TestJudgeTask:
             truncate="head",
             window="",
             channels="",
+            pair_max_length=0,
         )
 
 

@@ -32,10 +32,8 @@ import yaml
 from scipy.stats import t
 
 sys.path.insert(0, str(Path(__file__).parent))
-from item_count_effect import COLOR  # noqa: E402  (sets the Agg backend)
+from plots.judge_ensemble import figure  # noqa: E402
 from plots.palette import DOMAIN  # noqa: E402
-
-import matplotlib.pyplot as plt  # noqa: E402
 
 from capability.task import Task
 from configs.domain import DomainConfig
@@ -133,19 +131,11 @@ def diagnostics(v: pd.DataFrame, f: pd.DataFrame) -> None:
     print(pd.DataFrame(out).set_index(cells).round(2).to_string())
 
 
-def offset(ax) -> None:
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    for side in ("left", "bottom"):
-        ax.spines[side].set_position(("outward", 5))
-
-
-def figures(mse: pd.DataFrame) -> None:
-    """JudgeLinear, squared error (theta MSE over the task's targets; log axis), the task's mean_ref MSE as a grey tick.
-
-    The ensemble = mean of the three judges' forecasts (the best and cheapest way to combine them) against the judge in
-    use today, the top-1 reference, on the same items. Left: both per task. Right: the paired difference per task
-    (N = 14 tasks; the mean and its CI are printed, not drawn). Writes analysis/judge/judge_ensemble.{png,svg,pdf}."""
+def compare(mse: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    """JudgeLinear: the ensemble = mean of the three judges' forecasts (the best and cheapest way to combine them)
+    against the judge in use today, the top-1 reference, on the same items. Prints both per task and the paired
+    difference (N = 14 tasks; the mean and its CI). Returns (one row per task: squared error and score of the top-1
+    judge and of the ensemble, x position; the task's mean_ref MSE), which plots.judge_ensemble.figure draws."""
     cells = ["domain", "semester"]
     lin = mse[mse.estimator == "linear"].merge(mse[mse.estimator == "mean_ref"][[*cells, "se"]].rename(columns={"se": "baseline"}))
     lin = lin.assign(score=(100 - 100 * lin.se / lin.baseline).clip(lower=0))
@@ -160,29 +150,7 @@ def figures(mse: pd.DataFrame) -> None:
     print(both.drop(columns=["order", "x"]).assign(delta=delta).round(2).to_string(index=False))
     print(f"MSE mean {both.se_top1.mean():.2f} -> {both.se_ens.mean():.2f}, median {both.se_top1.median():.2f} -> {both.se_ens.median():.2f}; "
           f"score {delta.mean():+.1f} +- {half:.1f} points (legacy) (t 95% CI, N = {len(delta)} tasks), ensemble better in {(delta > 0).sum()}/{len(delta)}")
-
-    plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "svg.fonttype": "none"})
-    fig, (ax, dx) = plt.subplots(1, 2, figsize=(3.6, 1.5), gridspec_kw={"width_ratios": [6, 1], "wspace": 0.45})
-    base = both.merge(lin[lin.method == "single"].drop_duplicates(cells)[[*cells, "baseline"]]).baseline
-    ax.plot(both.x, base, "_", ms=6, color="#9a9a9a", mew=1, ls="", clip_on=False)
-    ax.vlines(both.x, both.se_top1, both.se_ens, color="#c8c8c8", lw=0.8)
-    ax.plot(both.x, both.se_top1, "o", ms=3, color="#6e6e6e", mew=0, clip_on=False)
-    for name, marker in DOMAIN.items():
-        e = both[both.domain == name.lower()]
-        ax.plot(e.x, e.se_ens, marker, ms=4, color=COLOR[name.lower()], mfc="white", mew=1, ls="", clip_on=False, label=name.capitalize())
-        dx.plot(np.linspace(-0.25, 0.25, len(e)), e.se_ens - e.se_top1, marker, ms=3, color=COLOR[name.lower()], mfc="white", mew=0.7, ls="", clip_on=False)
-    ax.set_xticks(both.x, both.semester), ax.tick_params(axis="x", labelrotation=90)
-    ax.set_yscale("log"), ax.set_ylim(0.05, 4), ax.set_yticks([0.1, 1], ["0.1", "1"]), ax.yaxis.set_minor_locator(plt.NullLocator())
-    ax.set_ylabel("Squared error (θ²)")
-    dx.axhline(0, color="#9a9a9a", lw=0.8, ls="--")
-    dx.set_xlim(-0.5, 0.5), dx.set_xticks([]), dx.spines["bottom"].set_visible(False)
-    dx.set_ylim(-0.4, 0.4), dx.set_yticks([-0.4, 0, 0.4]), dx.set_ylabel("Δ vs top-1 judge (θ²)", labelpad=1)
-    offset(ax), offset(dx)
-    handles = [plt.Line2D([], [], marker="_", ms=6, color="#9a9a9a", mew=1, ls="", label="Baseline"),
-               plt.Line2D([], [], marker="o", ms=3, color="#6e6e6e", mew=0, ls="", label="Top-1 judge")] + ax.get_legend_handles_labels()[0]
-    fig.legend(handles=handles, loc="lower center", ncol=6, frameon=False, bbox_to_anchor=(0.5, 0.92), handletextpad=0.1, columnspacing=0.6)
-    for ext in (".png", ".svg", ".pdf"):
-        fig.savefig(OUT.with_suffix(ext), dpi=300, bbox_inches="tight")
+    return both, both.merge(lin[lin.method == "single"].drop_duplicates(cells)[[*cells, "baseline"]]).baseline
 
 
 def main() -> int:
@@ -218,7 +186,7 @@ def main() -> int:
     agg = by_k.groupby(["estimator", "method", *cells, "k"]).se.agg(["mean", "min", "max"]).groupby(["estimator", "method", "k"]).mean()
     print(agg.round(2).to_string())
     diagnostics(v, f)
-    figures(mse)
+    figure(*compare(mse), OUT)
     return 0
 
 

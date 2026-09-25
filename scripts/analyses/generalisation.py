@@ -22,6 +22,8 @@ os.chdir(ROOT)
 os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
 
 from analysis.challenges import generalisation as gen  # noqa: E402  (after the path is set)
+from analysis.challenges.signal_glm import LABELS  # noqa: E402
+from plots import generalisation as gen_plots  # noqa: E402
 from analysis.challenges import likelihood_ratio as lr  # noqa: E402
 
 VARIANTS = {"pairwise": "linear", "direct": "raw", "embedding": "full"}  # as figure one
@@ -56,10 +58,10 @@ if len(off):
     print("task MSE disagrees with metrics.csv (stale results.py output?):")
     print(off[["domain", "semester", "protocol", "mse", "mse_results"]].round(3).to_string(index=False))
 for ext in ("png", "svg"):
-    gen.time_figure(scores).savefig(FIG / f"score_over_time.{ext}", bbox_inches="tight")
-    gen.time_figure(scores, by="domain").savefig(FIG / f"score_over_time_by_domain.{ext}", bbox_inches="tight")
-    gen.time_figure(scores, by="domain", stack=True).savefig(FIG / f"score_over_time_stacked.{ext}", bbox_inches="tight")
-    gen.time_figure(scores, by="domain", box=True).savefig(FIG / f"score_over_time_box.{ext}", bbox_inches="tight")
+    gen_plots.time_figure(scores).savefig(FIG / f"score_over_time.{ext}", bbox_inches="tight")
+    gen_plots.time_figure(scores, by="domain").savefig(FIG / f"score_over_time_by_domain.{ext}", bbox_inches="tight")
+    gen_plots.time_figure(scores, by="domain", stack=True).savefig(FIG / f"score_over_time_stacked.{ext}", bbox_inches="tight")
+    gen_plots.time_figure(scores, by="domain", box=True).savefig(FIG / f"score_over_time_box.{ext}", bbox_inches="tight")
 print(scores.pivot_table(index=["domain", "semester"], columns="protocol", values="score").round(0).to_string())
 
 # %% error against distance from the references
@@ -81,7 +83,7 @@ for ext in ("png", "svg"):
         for metric in ("signed", "score"):
             for points in (True, False):
                 name = f"distance_{which}" + ("" if metric == "signed" else "_score") + ("" if points else "_binned")
-                gen.distance_figure(distance, which, metric, points, slope_tests[which] if metric == "signed" else None).savefig(
+                gen_plots.distance_figure(distance, which, metric, points, slope_tests[which] if metric == "signed" else None).savefig(
                     FIG / f"{name}.{ext}", bbox_inches="tight")
 print(slopes.round(2).to_string(index=False))
 print(slope_tests["above_top"].round(3).to_string(index=False))
@@ -90,18 +92,18 @@ bin_errors = lr.group_tests(llr, distance, "bin")
 bin_errors.to_csv(OUT / "distance_bin_tests.csv", index=False, float_format="%.4g")
 for ext in ("png", "svg"):
     for metric in ("signed", "squared"):
-        gen.bin_distance_figure(distance, slope_tests["above_top"], bin_errors, metric=metric).savefig(
+        gen_plots.bin_distance_figure(distance, slope_tests["above_top"], bin_errors, metric=metric).savefig(
             FIG / f"distance_above_top_bins{'' if metric == 'signed' else '_squared'}.{ext}", bbox_inches="tight")
-    gen.bin_distance_figure(distance, slope_tests["above_top"], bin_errors, metric="squared", lines=False,
+    gen_plots.bin_distance_figure(distance, slope_tests["above_top"], bin_errors, metric="squared", lines=False,
                             dot_slopes=True).savefig(FIG / f"distance_above_top_bins_squared_baseline_line.{ext}",
                                                      bbox_inches="tight")
-    gen.bin_distance_figure(distance, slope_tests["above_top"], None, metric="squared", lines=False, log=True).savefig(
+    gen_plots.bin_distance_figure(distance, slope_tests["above_top"], None, metric="squared", lines=False, log=True).savefig(
         FIG / f"distance_above_top_bins_squared_log.{ext}", bbox_inches="tight")
     # the final figure: linear axis, every dot the same, no per-bin test
-    fig = gen.bin_distance_figure(distance, slope_tests["above_top"], None, metric="squared", lines=False, fits=True)
+    fig = gen_plots.bin_distance_figure(distance, slope_tests["above_top"], None, metric="squared", lines=False, fits=True)
     for folder, name in ((FIG, "distance_above_top_bins_squared_untested"), (FINAL, "capability_generalisation")):
         fig.savefig(folder / f"{name}.{ext}", dpi=300, bbox_inches="tight")
-    gen.bin_distance_figure(distance, slope_tests["above_top"], bin_errors, metric="squared", lines=False,
+    gen_plots.bin_distance_figure(distance, slope_tests["above_top"], bin_errors, metric="squared", lines=False,
                                  log=True, bars=True).savefig(FIG / f"distance_above_top_bins_squared_log_bars.{ext}",
                                                               bbox_inches="tight")
 
@@ -111,7 +113,7 @@ from analysis.stats import BASELINE  # noqa: E402
 
 binned_points = distance.dropna(subset=["bin"]).groupby(["domain", "bin", "protocol"]).agg(
     x=("above_top", "mean"), err=("err", "mean"), n=("err", "size")).reset_index()
-names = {p: gen.LABELS[p] for p in ("glm_regex", "embedding", "direct", "pairwise")}
+names = {p: LABELS[p] for p in ("glm_regex", "embedding", "direct", "pairwise")}
 lines = []
 for domain in gen.DOMAINS:
     d = distance[(distance.domain == domain) & (distance.protocol == BASELINE)]
@@ -145,7 +147,7 @@ print("wrote", FINAL / "capability_generalisation.txt")
 # the same bins as dots with boxes over their 95% intervals, no lines
 boxes = gen.bin_boxes(distance)
 boxes.to_csv(OUT / "distance_bin_boxes.csv", index=False, float_format="%.4f")
-fig = gen.bin_box_figure(boxes, distance)
+fig = gen_plots.bin_box_figure(boxes, distance)
 for ext in ("png", "svg"):
     for folder, name in ((FIG, "distance_above_top_bins_boxes"), (FINAL, "capability_generalisation_boxes")):
         fig.savefig(folder / f"{name}.{ext}", dpi=300, bbox_inches="tight")
@@ -159,7 +161,7 @@ for domain in gen.DOMAINS:
     for b_, g in boxes[boxes.domain == domain].groupby("bin"):
         row = g.set_index("protocol")
         lines.append(f"  bin at {lr.num(row.x.iloc[0], sign=True)} ({int(row.n.iloc[0])} targets): " + "; ".join(
-            f"{gen.BASELINE_LABEL if p == BASELINE else gen.LABELS[p]} {lr.num(row.loc[p, 'mean'])} "
+            f"{gen.BASELINE_LABEL if p == BASELINE else LABELS[p]} {lr.num(row.loc[p, 'mean'])} "
             f"({lr.num(row.loc[p, 'lo'])} to {lr.num(row.loc[p, 'hi'])})" for p in series if p in row.index) + ".")
 (FINAL / "capability_generalisation_boxes.txt").write_text(
     "Squared error against how far each target's θ* sits above the strongest reference's, for 2025-II and 2026-I, one "
@@ -178,7 +180,7 @@ curves = gen.sliding_curves(distance)
 curves.to_csv(OUT / "distance_sliding.csv", index=False, float_format="%.4f")
 degrading = gen.degradation_tests(distance)  # does each protocol's squared error rise above the references?
 degrading.to_csv(OUT / "distance_degradation_tests.csv", index=False, float_format="%.4g")
-fig = gen.sliding_distance_figure(curves, tests=degrading)
+fig = gen_plots.sliding_distance_figure(curves, tests=degrading)
 for ext in ("png", "svg"):
     for folder, name in ((FIG, "distance_above_top_sliding"), (FINAL, "capability_generalisation_sliding")):
         fig.savefig(folder / f"{name}.{ext}", dpi=300, bbox_inches="tight")
@@ -188,7 +190,7 @@ for domain in gen.DOMAINS:
     for p in (BASELINE, "glm_regex", "embedding", "direct", "pairwise"):
         c = curves[(curves.domain == domain) & (curves.protocol == p)]
         test = degrading.set_index(["domain", "protocol"]).loc[(domain, p)]
-        lines.append(f"  {gen.BASELINE_LABEL if p == BASELINE else gen.LABELS[p]}: slope {lr.num(test.slope)} (SE "
+        lines.append(f"  {gen.BASELINE_LABEL if p == BASELINE else LABELS[p]}: slope {lr.num(test.slope)} (SE "
                      f"{lr.num(test.se)}), {lr.p_text(test.p)}; windows " + "; ".join(
             f"{lr.num(r.centre, sign=True)}: {lr.num(r.mean)} ({lr.num(r.lo)} to {lr.num(r.hi)})" for r in c.itertuples()) + ".")
 (FINAL / "capability_generalisation_sliding.txt").write_text(
@@ -212,10 +214,10 @@ reasoning = gen.reasoning_scores(rows)
 reasoning.to_csv(OUT / "reasoning_2025-I.csv", index=False, float_format="%.4f")
 gen.reasoning_model_scores(rows).to_csv(OUT / "reasoning_2025-I_models.csv", index=False, float_format="%.4f")
 for ext in ("png", "svg"):
-    gen.reasoning_figure(rows).savefig(FIG / f"reasoning_2025-I.{ext}", bbox_inches="tight")
-    gen.reasoning_pairwise_figure(rows).savefig(FIG / f"reasoning_2025-I_pairwise_math.{ext}", bbox_inches="tight")
-    gen.reasoning_pairwise_figure(rows, metric="error").savefig(FIG / f"reasoning_2025-I_pairwise_math_error.{ext}",
+    gen_plots.reasoning_figure(rows).savefig(FIG / f"reasoning_2025-I.{ext}", bbox_inches="tight")
+    gen_plots.reasoning_pairwise_figure(rows).savefig(FIG / f"reasoning_2025-I_pairwise_math.{ext}", bbox_inches="tight")
+    gen_plots.reasoning_pairwise_figure(rows, metric="error").savefig(FIG / f"reasoning_2025-I_pairwise_math_error.{ext}",
                                                               bbox_inches="tight")
-    gen.reasoning_score_figure(rows).savefig(FIG / f"reasoning_2025-I_score.{ext}", bbox_inches="tight")
-    gen.reasoning_scatter_figure(rows, "math").savefig(FIG / f"reasoning_2025-I_scatter_math.{ext}", bbox_inches="tight")
+    gen_plots.reasoning_score_figure(rows).savefig(FIG / f"reasoning_2025-I_score.{ext}", bbox_inches="tight")
+    gen_plots.reasoning_scatter_figure(rows, "math").savefig(FIG / f"reasoning_2025-I_scatter_math.{ext}", bbox_inches="tight")
 print(reasoning.pivot_table(index=["domain", "protocol"], columns="group", values="score").round(0).to_string())

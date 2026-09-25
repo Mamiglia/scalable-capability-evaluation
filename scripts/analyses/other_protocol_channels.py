@@ -37,6 +37,7 @@ from analysis import loading
 from protocols import embeddings
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
+from plots import contributions as contributions_plots
 from capability.task import Cohort
 from protocols.transcript_features.features import FEATURE_SETS
 from protocols.transcript_features.protocol import ALPHAS as FEATURE_ALPHAS
@@ -145,7 +146,7 @@ if __name__ == "__main__":
         errors, llrs = compute()
         errors.to_csv(OUT / "other_protocol_errors.csv", index=False)
         llrs.to_csv(OUT / "other_protocol_llr.csv", index=False)
-    contributions.save_grid(
+    contributions_plots.save_grid(
         errors, PROTOCOLS, PARTS, COLOURS, OUT, "other_protocol_channels", final="transcript_channels_other_protocols",
         caption="Transcript channels (reasoning, messages, tool calls with their outputs) for the Deterministic features and "
                 "Embedding protocols, refitted on the references' channel-filtered transcripts; 2025-II and 2026-I pooled "

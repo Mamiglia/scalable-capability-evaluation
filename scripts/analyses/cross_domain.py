@@ -22,6 +22,7 @@ os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
 os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/transcript-embeddings")
 
 from analysis.challenges import cross_domain as cd  # noqa: E402  (after the env is set)
+from plots import cross_domain as cd_plots  # noqa: E402
 
 DOMAINS = ["science", "math", "coding", "cyber"]
 SEMESTERS = ("2025-II", "2026-I")  # the semesters every domain has, so every cell holds 16 targets
@@ -78,8 +79,8 @@ print(transfer_tests.round(4).to_string(index=False))
 # %% figures
 for ext in ("png", "svg"):
     for protocol in [p for p in cd.PROTOCOLS[1:] if p != "glm_length"]:
-        cd.heatmap_figure(scores, protocol).savefig(FIG / f"cross_domain_heatmap_{protocol}.{ext}", bbox_inches="tight")
-        cd.heatmap_error_figure(scores, protocol).savefig(FIG / f"cross_domain_heatmap_{protocol}_error.{ext}",
+        cd_plots.heatmap_figure(scores, protocol).savefig(FIG / f"cross_domain_heatmap_{protocol}.{ext}", bbox_inches="tight")
+        cd_plots.heatmap_error_figure(scores, protocol).savefig(FIG / f"cross_domain_heatmap_{protocol}_error.{ext}",
                                                           bbox_inches="tight")
-    cd.transfer_figure(transferred, own, transfer_tests).savefig(FIG / f"cross_domain_transfer.{ext}", bbox_inches="tight")
+    cd_plots.transfer_figure(transferred, own, transfer_tests).savefig(FIG / f"cross_domain_transfer.{ext}", bbox_inches="tight")
 print("wrote", sorted(p.name for p in FIG.iterdir()))

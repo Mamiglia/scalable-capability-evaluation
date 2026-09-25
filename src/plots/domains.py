@@ -1,14 +1,6 @@
-"""Figures of a frozen domain: theta by semester and by release date, item difficulty per bench, theta-vs-b map per
-semester, accuracy heatmap.
+"""Figures of a frozen domain (scripts/figures/domain_figures.py): theta by semester and by release date, item
+difficulty per bench, theta-vs-b map per semester, accuracy heatmap, per-bench accuracy."""
 
-    uv run python scripts/analyses/domain_figures.py science
-    uv run python scripts/analyses/domain_figures.py science math coding cyber   # + joined analysis/{benchmarks,theta_release}
-
-Reads data/meta/<domain>/{models,items,responses}.csv (release dates: configs/models/*/*.yml), writes
-analysis/<domain>/{theta,theta_release,difficulty,wright,accuracy}.{png,svg}.
-"""
-
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -18,7 +10,6 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import yaml
 
 plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,
                      "ytick.labelsize": 7, "svg.fonttype": "none"})
@@ -138,17 +129,9 @@ def wright_figure(models: pd.DataFrame, items: pd.DataFrame, out: Path):
     save(fig, out / "wright")
 
 
-def release_dates() -> pd.Series:
-    """Model short name -> release date, from the `name` / `release_date` fields of configs/models/*/*.yml."""
-    configs = [yaml.safe_load(p.read_text()) or {} for p in Path("configs/models").glob("*/*.yml")]
-    raw = {c["name"].split("/")[-1].lower(): c.get("release_date") for c in configs if "name" in c}
-    # a few configs hold "2023-02" or a range "2024-04-23/2024-05-21": take the first date
-    return pd.to_datetime(pd.Series(raw, dtype=str).str.split("/").str[0], format="mixed")
-
-
-def release_figure(domains: dict[str, pd.DataFrame], out: Path):
-    """Global theta of the roster against release date, one panel per domain, coloured by semester."""
-    dates = release_dates()
+def release_figure(domains: dict[str, pd.DataFrame], dates: pd.Series, out: Path):
+    """Global theta of the roster against release date (`dates`: model -> release date), one panel per domain,
+    coloured by semester."""
     fig, axes = plt.subplots(1, len(domains), figsize=(1.75 * len(domains) + 0.4, 2.1), sharex=True, squeeze=False)
     for ax, (domain, models) in zip(axes[0], domains.items()):
         roster = models[models.semester.notna()]
@@ -236,29 +219,3 @@ def benchmarks_figure(domains: dict[str, tuple[pd.DataFrame, pd.DataFrame]], out
         ax.set_ylabel("Accuracy")
     fig.tight_layout(w_pad=0.6, h_pad=0.8)
     save(fig, out / "benchmarks")
-
-
-def main(domains: list[str]) -> int:
-    loaded = {}
-    for domain in domains:
-        root = Path("data/meta") / domain
-        models = pd.read_csv(root / "models.csv", index_col="model")
-        items = pd.read_csv(root / "items.csv", dtype={"item": str})
-        responses = pd.read_csv(root / "responses.csv", dtype={"item": str})
-        semesters = [s for s in SEMESTERS if s in set(models.semester.dropna())]
-        out = Path("analysis") / domain
-        out.mkdir(parents=True, exist_ok=True)
-        theta_figure(models, semesters, out)
-        release_figure({domain: models}, out)
-        difficulty_figure(items, out)
-        wright_figure(models, items, out)
-        accuracy_figure(models, responses, out)
-        loaded[domain] = (models, responses)
-    if len(loaded) > 1:  # joined across domains
-        release_figure({d: m for d, (m, _) in loaded.items()}, Path("analysis"))
-        benchmarks_figure(loaded, Path("analysis"))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))

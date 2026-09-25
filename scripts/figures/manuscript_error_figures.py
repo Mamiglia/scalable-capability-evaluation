@@ -9,7 +9,7 @@ y-axis is not a score (the distance and reasoning scatters, in theta) are copied
 
 Reads analysis/results/forecasts.csv and the figures the channel and thirds scripts write
 (scripts/analyses/channel_contributions.py, position_contributions.py): run those first.
-Run: PYTHONPATH=src uv run python scripts/analyses/manuscript_error_figures.py
+Run: PYTHONPATH=src uv run python scripts/figures/manuscript_error_figures.py
 """
 
 # %% settings
@@ -30,6 +30,8 @@ os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/
 
 from analysis.challenges import generalisation as gen  # noqa: E402
 from analysis.challenges import likelihood_ratio as lr  # noqa: E402
+from analysis.challenges.signal_glm import LABELS  # noqa: E402
+from plots import generalisation as gen_plots  # noqa: E402
 
 MANUSCRIPT = Path.home() / "Documents/AIS/LASR/manuscript"
 SCORE_DIR, ERROR_DIR, FINAL = MANUSCRIPT / "draft2_score", MANUSCRIPT / "draft3_se", MANUSCRIPT / "final_figs"
@@ -65,15 +67,15 @@ tests = lr.pooled_tests(llr[llr.semester.isin(["2025-II", "2026-I"]) & (llr.drop
 tests["p"] = 2 * tests.p.clip(upper=1 - tests.p)  # two-sided: pooled_tests gives the upper tail
 tests.to_csv(ERROR_DIR / "fig2_signal_error_tests.csv", index=False, float_format="%.4g")
 print(tests.round(4).to_string(index=False))
-save(gen.model_error_figure(forecasts, VARIANTS, tests), "fig2_signal_error_box", final="signal_by_protocol")
+save(gen_plots.model_error_figure(forecasts, VARIANTS, tests), "fig2_signal_error_box", final="signal_by_protocol")
 
 errors = gen.task_scores(rows, metric="error")
 errors = errors.drop(columns="p").merge(lr.task_tests(llr)[["domain", "semester", "protocol", "p"]], how="left")
 errors.to_csv(ERROR_DIR / "time_generalisation_error.csv", index=False, float_format="%.4f")
 # no per-semester stars: 8 targets and 7 or 8 references per task leave the test little power; figure one tests
-save(gen.time_figure(errors.assign(p=float("nan")), by="domain", box=True, metric="error", log=True), "time_generalisation_error",
+save(gen_plots.time_figure(errors.assign(p=float("nan")), by="domain", box=True, metric="error", log=True), "time_generalisation_error",
      final="time_generalisation")
-save(gen.time_figure(errors.assign(p=float("nan")), by="domain", metric="error"), "across_time_error")
+save(gen_plots.time_figure(errors.assign(p=float("nan")), by="domain", metric="error"), "across_time_error")
 
 # captions for the two final figures, every value from the tables the figures draw
 from analysis.challenges import signal_glm as sg  # noqa: E402
@@ -82,7 +84,7 @@ from analysis.stats import BASELINE  # noqa: E402
 
 
 def label(p: str) -> str:
-    return gen.BASELINE_LABEL if p == BASELINE else gen.LABELS[p]
+    return gen.BASELINE_LABEL if p == BASELINE else LABELS[p]
 
 
 pooled = sg.per_model(sg.rows(forecasts, VARIANTS))
@@ -193,7 +195,7 @@ test_lines = {k: f"{k}: mean squared error difference {lr.num(t['diff'], sign=Tr
                  f"{lr.num(t['t'])}, {lr.p_text(t['p'])}." for k, t in reasoning_tests.items()}
 print("\n".join(test_lines.values()))
 NON_VS_SHOWN, NON_VS_REMOVED = (reasoning_tests[k]["p"] for k in list(reasoning_tests)[:2])
-save(gen.reasoning_pairwise_figure(rows, metric="error", tests=[(0, 1, NON_VS_SHOWN)]), "simplified_reasoning_error",
+save(gen_plots.reasoning_pairwise_figure(rows, metric="error", tests=[(0, 1, NON_VS_SHOWN)]), "simplified_reasoning_error",
      final="simplified_reasoning")
 REASONING_TEST_TEXT = (
     "Each bracket marks a test of squared error against the non-reasoning targets (* p < .05, ** p < .01, "
@@ -210,7 +212,7 @@ REASONING_TEST_TEXT = (
     + "\n".join(lines + ["", test_lines["Reasoning minus non-reasoning targets"]]) + "\n")
 
 # the same figure with the same judge's reasoning-removed forecasts added (reasoning targets only)
-save(gen.reasoning_pairwise_figure(rows, metric="error", removed=removed,
+save(gen_plots.reasoning_pairwise_figure(rows, metric="error", removed=removed,
                                    tests=[(0, 1, NON_VS_SHOWN), (0, 2, NON_VS_REMOVED)]), "simplified_reasoning_removed_error",
      final="simplified_reasoning_removed")
 r = removed[removed.model.isin(gen.REASONING_2025_I)].assign(err=lambda d: (d.theta_hat - d.theta) ** 2).sort_values("theta")
@@ -252,7 +254,7 @@ print("wrote the reasoning and channel-share captions")
 
 
 # %% one target's forecast drawn as the distributions the log likelihood ratio compares
-fig, values = gen.prediction_example_figure(forecasts, VARIANTS, "cyber", "2025-II", "minimax-m2", ["pairwise", "glm_regex"])
+fig, values = gen_plots.prediction_example_figure(forecasts, VARIANTS, "cyber", "2025-II", "minimax-m2", ["pairwise", "glm_regex"])
 save(fig, "prediction_example", final="prediction_example")
 by = values.set_index("protocol")
 n = int(values.references.iloc[0])

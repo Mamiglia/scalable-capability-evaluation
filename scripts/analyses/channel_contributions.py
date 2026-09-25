@@ -34,7 +34,8 @@ import pandas as pd
 from analysis import judges, loading
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
-from analysis.challenges.signal_glm import DOMAIN_COLORS
+from plots import contributions as contributions_plots
+from plots.signal_glm import DOMAIN_COLORS
 from configs.domain import DomainConfig
 from configs.judge import JudgeConfig
 from evals.transcripts import read_transcripts
@@ -284,7 +285,7 @@ print(OUT / "channel_shares.png")
 SPLIT_PARTS = {"Reasoning": ("only-reasoning", "drop-reasoning"), "Messages": ("only-text", "drop-text"),
                "Tools": ("only-tools", "drop-tools")}
 SPLIT_COLOURS = {"Reasoning": PIE_COLORS["CoT"], "Messages": PIE_COLORS["Messages"], "Tools": PIE_COLORS["Tools"]}
-contributions.save_figures(
+contributions_plots.save_figures(
     errors, SPLIT_PARTS, SPLIT_COLOURS, OUT, "channel_contributions", final="transcript_channels",
     caption="Pairwise judge on transcript channels (reasoning, messages, tool calls with their outputs), 40 train "
             "items per semester, 2025-II and 2026-I pooled, each semester's best pairwise judge with reasoning shown. "
