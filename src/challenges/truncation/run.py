@@ -1,4 +1,4 @@
-"""Run frozen truncated direct tasks and reference-only calibration."""
+"""Run frozen truncated or channel-filtered direct tasks and reference-only calibration."""
 import argparse
 import hashlib
 import json
@@ -26,10 +26,24 @@ from protocols.direct_judge.scoring import calibrate, mean_scores
 
 REPO = Path(__file__).resolve().parents[3]
 ROOT = REPO / "artifacts/direct-judging-truncation"  # frozen inputs, logs, results
+CHANNELS_ROOT = REPO / "artifacts/direct-judging-channels"  # the same, for channel conditions
+
+
+def root(condition):
+    """Artifact root of <domain>/<judge>/<semester>/<cut>: channel cuts (channels-<spec>) have their own campaign dir."""
+    return CHANNELS_ROOT if condition.rsplit("/", 1)[-1].startswith("channels-") else ROOT
+
+
+def cut_fields(cut):
+    """DirectJudgeConfig fields a cut sets: head|tail|ends-<max_length>, or channels-<only|drop>-<channel>."""
+    if cut.startswith("channels-"):
+        return {"channels": cut.removeprefix("channels-")}
+    mode, max_length = cut.split("-")
+    return {"truncate": mode, "max_length": int(max_length)}
 
 
 def condition_summary(condition):
-    return json.loads((ROOT / "inputs" / condition / "summary.json").read_text())
+    return json.loads((root(condition) / "inputs" / condition / "summary.json").read_text())
 
 
 def tag(condition):
@@ -49,14 +63,16 @@ def save(path, value):
 
 def run(condition, max_retries=None, max_connections=None):
     """Execution knobs (retries, connections) do not enter the condition or the judged request."""
-    inputs, output = ROOT / "inputs" / condition, ROOT / "results" / condition
+    inputs, output = root(condition) / "inputs" / condition, root(condition) / "results" / condition
     output.mkdir(parents=True, exist_ok=True)
     expected = condition_summary(condition)
     assert hashlib.sha256((inputs / "job.json").read_bytes()).hexdigest() == expected["job_sha256"]
     assert hashlib.sha256((inputs / "prompt.txt").read_bytes()).hexdigest() == expected["prompt_sha256"]
     payload = json.loads((inputs / "job.json").read_text())
     config = DirectJudgeConfig.from_cli(payload["config"])
+    fields = cut_fields(condition.rsplit("/", 1)[-1])
     assert config.include_reasoning and config.limit == 0 and config.max_length == payload["max_length"] and config.truncate == payload["truncate"]
+    assert all(getattr(config, k) == v for k, v in fields.items()), fields
     config.system_prompt = str(inputs / "prompt.txt")
     overrides = {k: v for k, v in {"max_retries": max_retries, "max_connections": max_connections}.items() if v}
     config._kwargs = config._kwargs | overrides
@@ -73,6 +89,7 @@ def run(condition, max_retries=None, max_connections=None):
         assert all(s.metadata["chars"] <= payload["max_length"] + slack for s in samples)
         assert record["metadata"]["include_reasoning"] is True and record["metadata"]["max_length"] == payload["max_length"]
         assert record["metadata"]["truncate"] == payload["truncate"]
+        assert all(record["metadata"][k] == v for k, v in fields.items()), (record["name"], fields)
         tasks.append(Task(name=record["name"], dataset=MemoryDataset(samples),
                           version=int(expected["job_sha256"][:8], 16),
                           solver=[system_message(config.system_prompt), generate()], scorer=direct_judge_scorer(),
@@ -118,7 +135,7 @@ def run(condition, max_retries=None, max_connections=None):
 if __name__ == "__main__":
     load_dotenv(Path.cwd() / ".env", override=True)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("condition", help="<domain>/<judge>/<semester>/<head|tail|ends>-<max_length>")
+    parser.add_argument("condition", help="<domain>/<judge>/<semester>/<head|tail|ends>-<max_length> or .../channels-<only|drop>-<channel>")
     parser.add_argument("--max-retries", type=int, help="override the frozen job's API retry count")
     parser.add_argument("--max-connections", type=int, help="override the frozen job's concurrency")
     args = parser.parse_args()

@@ -79,6 +79,12 @@ for metric in stats.METRICS:
 print(plots.semester_table(metrics, "mse", VARIANTS).round(3).to_string())
 
 # %% figures: forecasts of the best condition, bars, timelines, frontier; each as svg and png
+# stars: the log likelihood ratio against the references' distribution, from analysis/results/likelihood_ratio.csv,
+# which scripts/analyses/likelihood_ratio.py writes from these forecasts: rerun it, then this cell, when they change
+from analysis.challenges import likelihood_ratio as lr  # noqa: E402
+
+llr = lr.select(pd.read_csv(OUT / "likelihood_ratio.csv"), lr.chosen_judges(forecasts, VARIANTS))
+llr = llr[llr["shape"] == lr.SHAPE]
 pooled = plots.chosen(metrics, VARIANTS)
 pooled = pooled[(pooled.domain == "all") & (pooled.semester == "all") & pooled.protocol.isin(plots.CONDITIONS)]
 best = pooled.sort_values("mse").iloc[0]
@@ -93,11 +99,11 @@ for ext in ("svg", "png"):
         plots.frontier_figure(forecasts, name, VARIANTS, FIG / "frontier" / f"all8_{name}.{ext}", top=8)
         for metric in ("mse", "delta", "pct"):
             plots.timeline_figure(metrics, name, VARIANTS, FIG / "timelines" / f"timeline_{metric}_{name}.{ext}",
-                                  scores=scores, metric=metric, forecasts=forecasts)
+                                  scores=scores, metric=metric, forecasts=forecasts, llr=llr)
     semesters = sorted({sem for _, sem in tasks})
     for metric in (*stats.METRICS, "pct"):
-        plots.bar_figure(metrics, metric, VARIANTS, FIG / "bars" / f"bars_{metric}.{ext}")
+        plots.bar_figure(metrics, metric, VARIANTS, FIG / "bars" / f"bars_{metric}.{ext}", llr=llr)
         for sem in semesters:
-            plots.bar_figure(metrics, metric, VARIANTS, FIG / "bars" / f"bars_{metric}_{sem}.{ext}", semester=sem)
+            plots.bar_figure(metrics, metric, VARIANTS, FIG / "bars" / f"bars_{metric}_{sem}.{ext}", semester=sem, llr=llr)
 print("best condition:", best.protocol, best.variant, "pooled mse", round(best.mse, 3))
 print("wrote", {sub.name: len(list(sub.iterdir())) for sub in FIG.iterdir() if sub.is_dir()})

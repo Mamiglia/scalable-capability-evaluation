@@ -316,3 +316,34 @@ def test_responses_to_sample_thirds_note():
     assert res.input.index(THIRDS_NOTE) < res.input.index("Which of the two")
     assert res.metadata["truncated_1"] and res.metadata["truncated_2"] and res.metadata["chars_1"] == 65
     assert THIRDS_NOTE not in responses_to_sample(transcript("x"), transcript("y")).input
+
+
+def test_window_modes():
+    """keep-k/n shows the k-th n-th of the text by characters; drop-k/n elides it."""
+    from judge.dataset import ENDS_SEPARATOR, window_text
+    text = "".join(chr(ord("a") + i) for i in range(20))
+    assert window_text(text, "") == text
+    gap = ENDS_SEPARATOR
+    assert window_text(text, "keep-1/4") == text[:5] + gap and window_text(text, "keep-4/4") == gap + text[15:]
+    assert window_text(text, "keep-3/10") == gap + text[4:6] + gap
+    assert window_text(text, "drop-2/4") == text[:5] + gap + text[10:]
+    assert window_text(text, "drop-1/4") == gap + text[5:]
+    assert window_text(text, "drop-10/10") == text[:18] + gap
+    assert "".join(window_text(text, f"keep-{k}/7").replace(gap, "") for k in range(1, 8)) == text  # slices tile the text
+    assert window_text(text, "keep-1/1") == text
+    with pytest.raises(ValueError):
+        window_text(text, "keep-5/4")
+
+
+def test_window_applies_before_cut_and_short_windows_are_skipped(monkeypatch):
+    text = "".join(chr(ord("a") + i) for i in range(20))
+    res = responses_to_sample(transcript(text, pad=False), transcript(text, pad=False), max_len=8, window="keep-2/4")
+    assert res.metadata["chars_1"] == 8 and text[5:8] in res.input and text[:5] not in res.input
+    # a window under MIN_RESPONSE_CHARS leaves nothing to judge: the pair is skipped like a short answer
+    import judge.dataset as module
+    long = "x" * 200
+    monkeypatch.setattr(module, "read_transcripts", lambda path, *a, **k: {"q1": [transcript(long, pad=False)]})
+    monkeypatch.setattr(module, "read_header",
+                        lambda p: SimpleNamespace(eval=SimpleNamespace(model="m", dataset=SimpleNamespace(name="b"))))
+    assert len(build_dataset(Path("a.eval"), Path("b.eval"), window="keep-1/4")) == 2
+    assert len(build_dataset(Path("a.eval"), Path("b.eval"), window="keep-1/20")) == 0

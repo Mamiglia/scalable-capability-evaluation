@@ -10,7 +10,7 @@ dependencies = [
     "draccus>=0.11.6",
     "ijson>=3.5.1",
     "inspect-ai>=0.3.249",
-    "inspect-evals @ git+https://github.com/UKGovernmentBEIS/inspect_evals.git@main",
+    "inspect-evals @ git+https://github.com/UKGovernmentBEIS/inspect_evals.git@b943de6895ea2e8fa77383228d589b4f9bcd93ca",
     # Terminal-Bench via Harbor. Pulls litellm, which caps openai<3 — see [tool.uv] below.
     "inspect-harbor>=0.7.4",
     "matharena @ git+https://github.com/Mamiglia/inspect-matharena.git",
@@ -29,6 +29,8 @@ dependencies = [
     "torch>=2.13.0",             # analysis only
     "voyageai>=0.5.0",           # analysis only
     "zipfile-zstd>=0.0.4",
+    "hibayes",
+    "statsmodels>=0.15.0",
 ]
 
 [project.scripts]
@@ -39,7 +41,10 @@ evaluate = "capability.evaluate:main"
 # litellm (via inspect-harbor) caps openai<3; inspect-ai's OpenRouter provider needs >=3.1.
 # We never call litellm, so ignore its cap.
 [tool.uv]
-override-dependencies = ["openai>=3.1.0"]
+override-dependencies = ["openai>=3.1.0", "rich>=14.1.0"]  # hibayes caps rich<14; it only uses rich for console output
+
+[tool.uv.sources]
+hibayes = { git = "https://github.com/UKGovernmentBEIS/hibayes" }
 
 [build-system]
 requires = ["setuptools>=77"]

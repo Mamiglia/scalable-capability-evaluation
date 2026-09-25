@@ -5,8 +5,8 @@ The three variants now use **3, 12, and 24 predictors**. The full transition mat
 | Variant | Included features | Count |
 | --- | --- | ---: |
 | `glm_length` | Length/visibility | 3 |
-| `glm_regex` | Length/visibility + lexical rates | 12 |
-| `glm_structure` | Above + tool-call count + action share + six transition rates + four availability flags | 24 |
+| `glm_regex` | Length/visibility + lexical rates + tool-call count | 13 |
+| `glm_structure` | Above + action share + six transition rates + four availability flags | 24 |
 
 The six transitions below are a **starting shortlist for review**, not features established as predictive by the earlier pilot. The feature calculations are implemented; connecting the production RST/tool labeller is still pending.
 

@@ -1,0 +1,9 @@
+# Pairwise channel condition (coding, cyber 2026-I): configs/judges/reasoning/kimi-k2-thinking-full.yml showing everything but the tool outputs of each transcript (channels: reasoning, text, calls, outputs). Same items, prompt and orders as the full-transcript baseline.
+name: kimi-k2-thinking
+judge: configs/models/moonshotai/kimi-k2-thinking.yml
+include_reasoning: true
+max_length: 100000000
+_kwargs: {fail_on_error: false}
+channels: drop-outputs
+# Judged on 10 train items per global-b quartile (seeded, same for every pair) to cut cost; compare against the baseline on the same items.
+train_per_quartile: 10

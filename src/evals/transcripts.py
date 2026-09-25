@@ -42,6 +42,7 @@ def read_transcripts(
     require_correct: bool = True,
     include_reasoning: bool = True,
     items: set[str] | None = None,
+    channels: str = "",
 ) -> dict[str, list[Transcript]]:
     """Read one eval log into transcripts per question id, ordered by epoch.
 
@@ -50,17 +51,17 @@ def read_transcripts(
     log is known to contain. Cached per log: however many pairs a model appears in, each
     sample is read once per process.
     """
-    key = (str(path), require_correct, include_reasoning)
+    key = (str(path), require_correct, include_reasoning, channels)
     if items is None:
         if key not in _STREAMED:
             _STREAMED[key] = _group(read_eval_log_samples(str(path), all_samples_required=False),
-                                    require_correct, include_reasoning)
+                                    require_correct, include_reasoning, channels)
         return _STREAMED[key]
     # Random access, cached incrementally: an id maps to [] when read but not correct.
     store = _RANDOM.setdefault(key, {})
     missing = sorted(set(map(str, items)) - store.keys())
     if missing:
-        read = _group(_read_samples(str(path), missing), require_correct, include_reasoning)
+        read = _group(_read_samples(str(path), missing), require_correct, include_reasoning, channels)
         store.update({item: read.get(item, []) for item in missing})
     return {item: store[item] for item in map(str, items) if item in store and store[item]}
 
@@ -80,7 +81,7 @@ def _read_samples(path: str, ids: list[str], epoch: int = 1):
             yield EvalSample.model_validate_json(archive.read(f"samples/{item}_epoch_{epoch}.json"))
 
 
-def _group(samples, require_correct: bool, include_reasoning: bool) -> dict[str, list[Transcript]]:
+def _group(samples, require_correct: bool, include_reasoning: bool, channels: str = "") -> dict[str, list[Transcript]]:
     by_id: dict[str, list[Transcript]] = {}
     for sample in samples:
         if require_correct and not extract_score(sample):
@@ -88,7 +89,7 @@ def _group(samples, require_correct: bool, include_reasoning: bool) -> dict[str,
         record = Transcript(
             id=str(sample.id),
             question=question_text(sample.input),
-            text=extract_transcript(sample, include_reasoning=include_reasoning),
+            text=extract_transcript(sample, include_reasoning=include_reasoning, channels=channels),
             options=tuple(getattr(sample, "choices", None) or ()),
             epoch=getattr(sample, "epoch", 0) or 0,
             tokens=sum(u.output_tokens or 0 for u in (getattr(sample, "model_usage", None) or {}).values()),

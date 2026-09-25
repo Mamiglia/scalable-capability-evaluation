@@ -22,7 +22,6 @@ uv.lock
 /logs/
 /glm_features/
 artifacts/
-/docs/
 /analysis/
 legacy/
 

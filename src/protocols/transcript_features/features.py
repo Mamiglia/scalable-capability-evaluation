@@ -80,7 +80,7 @@ STRUCTURE_FEATURES += ["tool_action_share"]
 
 FEATURE_SETS = {
     "length": LENGTH_FEATURES,
-    "regex": LENGTH_FEATURES + REGEX_FEATURES,
+    "regex": LENGTH_FEATURES + REGEX_FEATURES + ["log_tool_calls"],  # the paper's "deterministic features": tool use counts
     "structure": FEATURES + STRUCTURE_FEATURES,
 }
 
@@ -188,7 +188,7 @@ def extract_features(messages: Sequence[ChatMessage], include_reasoning: bool = 
 
     Returns a dict with 13 FEATURES keys: log lengths, a reasoning indicator,
     lexical rates per 1,000 prose words, and log_tool_calls = ln(1 + total calls).
-    Repeated calls count separately. Only glm_structure uses the call count.
+    Repeated calls count separately. glm_regex and glm_structure use the call count.
     RST/tool transition
     features are calculated separately. No assistant message gives all NaNs;
     an observed empty assistant message has zero text lengths/rates.

@@ -53,6 +53,8 @@ class TestJudgeTask:
             include_reasoning=True,
             items=None,
             truncate="head",
+            window="",
+            channels="",
         )
 
 

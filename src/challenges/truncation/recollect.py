@@ -17,10 +17,9 @@ from inspect_ai._util import appdirs
 from configs import DirectJudgeConfig
 from judge.run import run_tasks
 from judge.scorer import direct_judge_scorer, parse_direct_judge_output
-from challenges.truncation.run import condition_summary, interrupt, save
+from challenges.truncation.run import condition_summary, interrupt, root, save
 
 REPO = Path(__file__).resolve().parents[3]
-ROOT = REPO / "artifacts/direct-judging-truncation"  # frozen inputs, logs, results
 
 
 def unusable(sample):
@@ -29,6 +28,7 @@ def unusable(sample):
 
 
 def main(domain, attempt, execute, max_retries=None, max_connections=None):
+    ROOT = root(domain)
     summary = condition_summary(domain)
     assert hashlib.sha256((ROOT / "inputs" / domain / "job.json").read_bytes()).hexdigest() == summary["job_sha256"]
     assert hashlib.sha256((ROOT / "inputs" / domain / "prompt.txt").read_bytes()).hexdigest() == summary["prompt_sha256"]

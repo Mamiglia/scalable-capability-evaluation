@@ -1,0 +1,9 @@
+# Pairwise channel condition (2025-II): configs/judges/reasoning/deepseek-r1-0528.yml with channels drop-reasoning
+# (channels: reasoning, text, calls, outputs; tools = calls and outputs), on 10 train items per global-b quartile.
+name: deepseek-r1-0528
+judge: configs/models/deepseek/deepseek-r1-0528.yml
+include_reasoning: true
+max_length: 100000000
+_kwargs: {fail_on_error: false, max_tokens: 32768, max_retries: 5}  # provider 5xx: cap the backoff near 1.5 min; errored samples are re-judged on resume
+channels: drop-reasoning
+train_per_quartile: 10

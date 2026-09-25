@@ -1,4 +1,4 @@
-"""Audit a truncation condition's saved judgments against frozen inputs using Inspect log APIs."""
+"""Audit a truncation or channel condition's saved judgments against frozen inputs using Inspect log APIs."""
 import argparse
 import hashlib
 import json
@@ -12,10 +12,9 @@ from dotenv import dotenv_values
 from inspect_ai.log import read_eval_log, read_eval_log_sample, read_eval_log_sample_summaries
 from judge.dataset import DIRECT_USER_PROMPT, ENDS_SEPARATOR, cut
 from judge.scorer import parse_direct_judge_output
-from challenges.truncation.run import condition_summary, tag
+from challenges.truncation.run import condition_summary, root, tag
 
 REPO = Path(__file__).resolve().parents[3]
-ROOT = REPO / "artifacts/direct-judging-truncation"  # frozen inputs, logs, results
 
 
 def sha(value):
@@ -38,13 +37,14 @@ def baseline_request(log_dir):
 
 
 def audit(domain, log_dir=None):
-    """`domain` is the condition: <domain>/<judge>/<semester>/<max_length>."""
+    """`domain` is the condition: <domain>/<judge>/<semester>/<head|tail|ends>-<max_length> or .../channels-<spec>."""
     condition = domain
+    ROOT = root(condition)
     payload = json.loads((ROOT / "inputs" / condition / "job.json").read_text())
     summary = condition_summary(condition)
     state = json.loads((ROOT / "results" / condition / "status.json").read_text())
     domain, semester, judge = payload["domain"], payload["semester"], payload["judge"]
-    max_length, mode = payload["max_length"], payload["truncate"]
+    max_length, mode, channels = payload["max_length"], payload["truncate"], payload.get("channels")
     suffix = DIRECT_USER_PROMPT.split("{transcript}", 1)[1]
     slug = payload["config"]["judge"]["slug"]
     request_model = slug.split("/", 1)[1]
@@ -87,7 +87,7 @@ def audit(domain, log_dir=None):
         check(log.eval.config.limit is None, "limited run", str(path))
         for key, value in {"protocol": "direct", "domain": domain, "semester": semester,
                            "include_reasoning": True, "max_length": max_length, "truncate": mode, "require_correct": True,
-                           "input_manifest_sha256": summary["job_sha256"]}.items():
+                           "input_manifest_sha256": summary["job_sha256"], **({"channels": channels} if channels else {})}.items():
             check(md.get(key) == value, "metadata " + key, str(path))
         check(log.eval.model_args.get("provider") == payload["config"]["judge"]["model_args"]["provider"], "header provider", str(path))
         for sample in log.samples or []:
@@ -105,7 +105,7 @@ def audit(domain, log_dir=None):
             kept, body, full_body = (sample.metadata or {}).get("chars") or 0, sample.input[:-len(suffix)], full_inputs[key][:-len(suffix)]
             text, head = body[len(body) - kept:], body[:len(body) - kept]
             check(sample.input.endswith(suffix) and full_body.startswith(head)
-                  and text == cut(full_body[len(head):], max_length, mode), "not a cut of the full transcript", where)
+                  and (bool(channels) or text == cut(full_body[len(head):], max_length, mode)), "not a cut of the full transcript", where)
             serialized = sample.model_dump_json()
             check(not any(secret in serialized for secret in secrets) and not secret_pattern.search(serialized), "credential content", where)
             successful = [e for e in sample.events if e.event == "model" and not e.error and e.output.choices]
@@ -237,6 +237,7 @@ def audit(domain, log_dir=None):
             check(sha(sample.input) == all_inputs[(row["task"], row["item"])]["truncated_sha256"], "failed retry input", row)
     recollect = [row for row in recollect if (row["task"], row["item"]) not in declared_keys]
     report = {"condition": condition, "domain": domain, "judge": judge, "semester": semester, "truncate": mode, "max_length": max_length,
+              **({"channels": channels} if channels else {}),
               "baseline_request": base, "audited_at": datetime.now(timezone.utc).isoformat(),
               "job_sha256": summary["job_sha256"], "prompt_sha256": summary["prompt_sha256"], "counts": dict(counts),
               "providers": dict(providers), "stop_reasons": dict(stops), "files": files,
@@ -254,7 +255,7 @@ def audit(domain, log_dir=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("domains", nargs="+", help="conditions: <domain>/<judge>/<semester>/<head|tail|ends>-<max_length>")
+    parser.add_argument("domains", nargs="+", help="conditions: <domain>/<judge>/<semester>/<head|tail|ends>-<max_length> or .../channels-<spec>")
     parser.add_argument("--partial", action="store_true", help="Allow unfinished workers; never a publication gate")
     parser.add_argument("--log-dir", type=Path, help="Audit consolidated recovery copies for one condition")
     args = parser.parse_args()

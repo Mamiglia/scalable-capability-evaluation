@@ -1,9 +1,12 @@
-"""Freeze matched truncated direct inputs for <domain>/<judge>/<semester>/<head|tail|ends>-<max_length>; no API calls.
+"""Freeze matched direct inputs for <domain>/<judge>/<semester>/<head|tail|ends>-<max_length> or
+.../channels-<only|drop>-<channel>; no API calls.
 
 A condition reuses the full-transcript campaign's exact retained inputs, exclusions, references and
-target truth, re-rendered with JudgeConfig.max_length (characters kept per transcript, applied to
-calibration and target transcripts alike). Ratings are reused wherever the limit leaves the rendered
-input unchanged; every truncated transcript is verified to equal the head, tail or ends cut of the full one.
+target truth, re-rendered with JudgeConfig.max_length (characters kept per transcript) or JudgeConfig.channels
+(the transcript channels shown), applied to calibration and target transcripts alike. Ratings are reused
+wherever the condition leaves the rendered input unchanged; every truncated transcript is verified to equal
+the head, tail or ends cut of the full one. A channel condition that leaves a transcript under
+MIN_RESPONSE_CHARS excludes that input, as pairwise judging skips such a pair.
 """
 import argparse
 import hashlib
@@ -19,10 +22,11 @@ import capability.task as cohort_module
 from configs import DirectJudgeConfig
 from configs.domain import DomainConfig
 from evals.transcripts import read_transcripts
-from judge.dataset import DIRECT_USER_PROMPT, cut as cut_text
+from judge.dataset import DIRECT_USER_PROMPT, MIN_RESPONSE_CHARS, cut as cut_text
 from protocols.direct_judge import JudgeDirect
 from protocols.direct_judge import judge as judge_module
 from reference import tables
+from challenges.truncation.run import cut_fields, root
 
 REPO = Path(__file__).resolve().parents[3]
 ROOT = REPO / "artifacts/direct-judging-truncation"  # frozen inputs, logs, results
@@ -41,9 +45,12 @@ CAMPAIGNS = {
     # coding: the published refit = SWE/Terminal campaign (staged at e3d86809, filtered to the latest train
     # set) + AgentBench OS add-on (staged at c199498b), calibrated on the add-on's (latest) tables.
     "coding": ["direct-judging-coding-agentbench", "direct-judging-coding"],
+    "math": ["direct-judging-math"],
+    "science": ["direct-judging-science"],
 }
 SUBSET_DIR = {"direct-judging-cyber": "input-subsets", "direct-judging-coding": "input-subsets",
-              "direct-judging-coding-agentbench": "hf-snapshot"}
+              "direct-judging-coding-agentbench": "hf-snapshot", "direct-judging-math": "input-subsets",
+              "direct-judging-science": "input-subsets"}
 
 
 def stage_source(domain_name):
@@ -101,12 +108,13 @@ def retained(sources, judge_name, semester, train):
 
 
 def prepare(domain_name, judge_name, semester, cut):
-    mode, max_length = cut.split("-")
-    max_length = int(max_length)
+    fields = cut_fields(cut)
+    channels = "channels" in fields
     sources = stage_source(domain_name)
     source = sources[0]
     config = DirectJudgeConfig.from_cli(source / "configs" / f"{judge_name}.yml")
-    assert config.include_reasoning and config.max_length > max_length, (config.max_length, max_length)
+    assert config.include_reasoning and not config.channels and config.max_length > fields.get("max_length", 0), (config.max_length, fields)
+    max_length, mode = fields.get("max_length", config.max_length), fields.get("truncate", config.truncate)
     prompt = (source / "prompt.txt").read_text()
     domain = DomainConfig.from_cli(f"configs/domain/{domain_name}.yml")
     task = Task.from_semester(semester, domain)
@@ -115,7 +123,7 @@ def prepare(domain_name, judge_name, semester, cut):
     expected, jobs, source_hashes = retained(sources, judge_name, semester, train)
     assert all(h["prompt_sha256"] == sha(prompt) for h in source_hashes.values())
     full = JudgeDirect(config, domain)
-    truncated = JudgeDirect(replace(config, max_length=max_length, truncate=mode), domain)
+    truncated = JudgeDirect(replace(config, **fields), domain)
     originals = {(t.name, str(s.id)): s for t in full.tasks(task.references, task.test) for s in t.dataset}
     ratings_path = source / ("consolidated/results" if len(sources) > 1 else "results") / judge_name / semester / "ratings.csv"
     ratings = pd.read_csv(ratings_path, dtype={"item": str})
@@ -123,9 +131,10 @@ def prepare(domain_name, judge_name, semester, cut):
     assert ratings.epoch.eq(1).all() and ratings.semester.eq(semester).all()
     rated = {(f"{r.bench}/{r.model}", r.item): r._asdict() for r in ratings.itertuples(index=False)}
     assert set(rated) <= set(expected), "rating export outside the retained set"
-    tasks, reused, audit, observed = [], [], [], set()
+    tasks, reused, audit, observed, excluded = [], [], [], set(), []
     for t in truncated.tasks(task.references, task.test):
         assert t.metadata["include_reasoning"] is True and t.metadata["max_length"] == max_length and t.metadata["truncate"] == mode
+        assert all(t.metadata[k] == v for k, v in fields.items()), (t.name, fields)
         samples = []
         for sample in t.dataset:
             key = (t.name, str(sample.id))
@@ -139,41 +148,55 @@ def prepare(domain_name, judge_name, semester, cut):
             kept, full_chars = sample.metadata["chars"], original.metadata["chars"]
             text, full_text = body[len(body) - kept:], full_body[len(full_body) - full_chars:]
             assert body[:len(body) - kept] == full_body[:len(full_body) - full_chars], key  # same question and options
-            assert text == cut_text(full_text, max_length, mode), key  # deterministic cut of the full transcript
-            cut = len(full_text) > max_length
-            assert sample.metadata["truncated"] is cut and (cut or text == full_text), key
             # A shorter input still satisfies the full campaign's context preflight.
             unchanged = sample.input == original.input
-            assert unchanged is not cut
+            if channels:
+                assert not sample.metadata["truncated"] and kept <= full_chars, key  # a channel filter only removes text
+                was_cut = False
+                if sample.metadata["response_chars"] < MIN_RESPONSE_CHARS:
+                    excluded.append({"task": t.name, "item": str(sample.id), "response_chars": sample.metadata["response_chars"]})
+                    continue
+            else:
+                assert text == cut_text(full_text, max_length, mode), key  # deterministic cut of the full transcript
+                was_cut = len(full_text) > max_length
+                assert sample.metadata["truncated"] is was_cut and (was_cut or text == full_text), key
+                assert unchanged is not was_cut
+            observed.add(key)
             reuse = unchanged and key in rated
             audit.append({"task": t.name, "item": str(sample.id), "full_sha256": expected[key],
-                          "truncated_sha256": sha(sample.input), "truncated": cut, "reused": reuse,
+                          "truncated_sha256": sha(sample.input), "truncated": was_cut, "changed": not unchanged, "reused": reuse,
                           "truncated_chars": sample.metadata["chars"], "full_chars": original.metadata["chars"]})
             if reuse:
                 reused.append(rated[key])
             else:
                 samples.append(sample.model_dump(mode="json"))
-            observed.add(key)
         if samples:
             tasks.append({"name": t.name, "metadata": t.metadata, "samples": samples})
-    assert observed == set(expected)
-    assert len(reused) + sum(len(t["samples"]) for t in tasks) == len(expected)
-    changed = sum(row["truncated"] for row in audit)
-    summary = {"domain": domain_name, "judge": judge_name, "semester": semester, "truncate": mode, "max_length": max_length,
-               "total_ratings": len(observed), "changed_inputs": changed, "reused_ratings": len(reused),
+    # A channel condition drops inputs it leaves (nearly) empty, and the renderer drops a transcript it leaves empty entirely.
+    missing = set(expected) - observed - {(row["task"], row["item"]) for row in excluded}
+    excluded += [{"task": name, "item": item, "response_chars": 0} for name, item in sorted(missing)] if channels else []
+    assert channels or observed == set(expected)
+    assert len(observed) + len(excluded) == len(expected)
+    assert len(reused) + sum(len(t["samples"]) for t in tasks) == len(observed)
+    changed = sum(row["changed"] for row in audit)
+    summary = {"domain": domain_name, "judge": judge_name, "semester": semester, "condition": cut, "truncate": mode,
+               "max_length": max_length, **({"channels": fields["channels"]} if channels else {}),
+               "total_ratings": len(observed), "excluded_inputs": len(excluded), "changed_inputs": changed, "reused_ratings": len(reused),
                "new_ratings": sum(len(t["samples"]) for t in tasks), "tasks": len(tasks),
                "references": len(task.references.models), "targets": len(task.truth),
                "truncated_reference_inputs": sum(r["truncated"] for r in audit if r["task"].split("/", 1)[1] in task.references.models.index),
-               "truncated_target_inputs": sum(r["truncated"] for r in audit if r["task"].split("/", 1)[1] in task.truth.index)}
+               "truncated_target_inputs": sum(r["truncated"] for r in audit if r["task"].split("/", 1)[1] in task.truth.index),
+               "changed_reference_inputs": sum(r["changed"] for r in audit if r["task"].split("/", 1)[1] in task.references.models.index),
+               "changed_target_inputs": sum(r["changed"] for r in audit if r["task"].split("/", 1)[1] in task.truth.index)}
     if not changed:
         summary["status"] = "identical to full-transcript condition; no collection"
         print(json.dumps(summary), flush=True)
         return summary
-    assert not config.judge.on_runpod, "truncation collection is API-hosted; no Runpod judge selected"
-    output = ROOT / "inputs" / domain_name / judge_name / semester / f"{mode}-{max_length}"
+    assert not config.judge.on_runpod, "condition collection is API-hosted; no Runpod judge selected"
+    output = root(f"{domain_name}/{judge_name}/{semester}/{cut}") / "inputs" / domain_name / judge_name / semester / cut
     output.mkdir(parents=True, exist_ok=True)
     cfg = draccus.encode(truncated.config)
-    assert cfg["max_length"] == max_length and cfg["truncate"] == mode
+    assert cfg["max_length"] == max_length and cfg["truncate"] == mode and all(cfg[k] == v for k, v in fields.items())
     cfg["system_prompt"] = "prompt.txt"
     cfg["log_dir"] = "logs"
     pinned = cfg["judge"]["model_args"]["provider"]["only"]
@@ -182,7 +205,8 @@ def prepare(domain_name, judge_name, semester, cut):
                           log_model_api=True, log_realtime=True, log_buffer=1, retry_cleanup=False)
     cfg["judge"]["model_args"]["provider"]["require_parameters"] = True
     cfg["judge"]["model_args"]["default_headers"] = {"X-OpenRouter-Metadata": "enabled"}
-    payload = {"domain": domain_name, "semester": semester, "judge": judge_name, "truncate": mode, "max_length": max_length,
+    payload = {"domain": domain_name, "semester": semester, "judge": judge_name, "condition": cut, "truncate": mode,
+               "max_length": max_length, **({"channels": fields["channels"]} if channels else {}), "excluded": excluded,
                "judge_config": jobs[0]["route"]["judge_config"], "model_config": jobs[0]["route"]["model_config"],
                "baseline_log_dirs": [job["log_dirs"][semester] for job in jobs],
                "config": cfg, "tasks": tasks, "reused_ratings": reused,
@@ -199,11 +223,13 @@ def prepare(domain_name, judge_name, semester, cut):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("conditions", nargs="+", help="<domain>/<judge>/<semester>/<head|tail>-<max_length chars>")
+    parser.add_argument("conditions", nargs="+", help="<domain>/<judge>/<semester>/<head|tail|ends>-<max_length chars> or .../channels-<only|drop>-<channel>")
     args = parser.parse_args()
-    summaries = [prepare(*c.split("/")) for c in args.conditions]
-    path = ROOT / "sweep-summary.json"
-    previous = json.loads(path.read_text()) if path.exists() else []
-    keys = {(s["domain"], s["judge"], s["semester"], s["truncate"], s["max_length"]) for s in summaries}
-    kept = [s for s in previous if (s["domain"], s["judge"], s["semester"], s.get("truncate"), s["max_length"]) not in keys]
-    path.write_text(json.dumps(kept + summaries, indent=2) + "\n")
+    for sweep_root in {root(c) for c in args.conditions}:
+        summaries = [prepare(*c.split("/")) for c in args.conditions if root(c) == sweep_root]
+        path = sweep_root / "sweep-summary.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        previous = json.loads(path.read_text()) if path.exists() else []
+        key = lambda s: (s["domain"], s["judge"], s["semester"], s.get("condition") or f"{s.get('truncate')}-{s['max_length']}")
+        keys = {key(s) for s in summaries}
+        path.write_text(json.dumps([s for s in previous if key(s) not in keys] + summaries, indent=2) + "\n")

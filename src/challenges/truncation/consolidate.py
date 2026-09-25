@@ -5,12 +5,13 @@ import shutil
 from pathlib import Path
 
 from inspect_ai.log import read_eval_log, write_eval_log
-from challenges.truncation.prepare_publication import ROOT, sha, content, rebuild, stamp_edit
+from challenges.truncation.prepare_publication import sha, content, rebuild, stamp_edit
 from challenges.truncation.recollect import unusable
-from challenges.truncation.run import tag
+from challenges.truncation.run import root, tag
 
 
 def main(domain):
+    ROOT = root(domain)
     state = json.loads((ROOT / "results" / domain / "status.json").read_text())
     assert state["status"] != "running", "Primary collection must finish before consolidation"
     source = Path(state["log_dir"])

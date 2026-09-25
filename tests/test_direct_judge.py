@@ -17,7 +17,7 @@ from configs.domain import DomainBench, DomainConfig
 from configs import DirectJudgeConfig
 from configs.judge import JudgeConfig
 from configs.model import ModelConfig
-from judge.dataset import build_direct_dataset
+from judge.dataset import ENDS_SEPARATOR, build_direct_dataset
 from judge.scorer import direct_judge_scorer
 from judge.task import direct_judge_task
 from protocols.direct_judge import JudgeDirect, from_logs
@@ -33,7 +33,8 @@ def test_direct_config_defaults_and_condition_identity(tmp_path):
                            include_reasoning=True, include_reverse=False)
     assert config.condition_hash != pairwise.condition_hash
     assert replace(config, include_reverse=True).condition_hash == config.condition_hash
-    for change in ({"include_reasoning": False}, {"max_length": 100}, {"temperature": 0.5}):
+    for change in ({"include_reasoning": False}, {"max_length": 100}, {"temperature": 0.5},
+                   {"window": "keep-1/4"}, {"channels": "drop-text"}):
         assert replace(config, **change).condition_hash != config.condition_hash
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("First rating prompt.")
@@ -74,6 +75,9 @@ def test_dataset_uses_correct_first_attempts_with_options_and_reasoning_control(
     assert "Private reasoning" in shown.input
     shortened = build_direct_dataset(path, items={"short"}, max_len=5)[0]
     assert shortened.metadata["chars"] == 5 and shortened.metadata["truncated"]
+    half = build_direct_dataset(path, items={"short"}, window="keep-1/2")[0]
+    assert half.metadata["chars"] == shown.metadata["chars"] // 2 + len(ENDS_SEPARATOR) and not half.metadata["truncated"]
+    assert "Private reasoning" not in build_direct_dataset(path, items={"short"}, channels="only-text")[0].input
     assert len(build_direct_dataset(path, items={"wrong"})) == 0
     assert len(build_direct_dataset(path, items=set())) == 0
     for length in (0, -1):

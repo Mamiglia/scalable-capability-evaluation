@@ -10,7 +10,7 @@ from pathlib import Path
 
 from inspect_ai.dataset import MemoryDataset, Sample
 
-from configs.judge import TRUNCATE_MODES
+from configs.judge import TRUNCATE_MODES, parse_window
 from configs.logs import logger
 from evals.transcripts import Transcript, read_header, read_transcripts
 
@@ -49,6 +49,19 @@ def cut(text: str, max_len: int, truncate: str = "head") -> str:
         half = max_len // 2
         return text[:half] + ENDS_SEPARATOR + text[-half:]
     return text[:max_len] if truncate == "head" else text[-max_len:]
+
+
+def window_text(text: str, spec: str) -> str:
+    """The k-th n-th of the text by characters (keep-k/n), or the text without it (drop-k/n); "" leaves
+    the text alone. ENDS_SEPARATOR stands for whatever was cut, before and after a kept slice, in place
+    of a dropped one, so the judge sees where the transcript continues. The n slices tile the text."""
+    if not spec:
+        return text
+    mode, k, n = parse_window(spec)
+    start, stop = len(text) * (k - 1) // n, len(text) * k // n
+    if mode == "drop":
+        return text[:start] + ENDS_SEPARATOR + text[stop:]
+    return (ENDS_SEPARATOR if start else "") + text[start:stop] + (ENDS_SEPARATOR if stop < len(text) else "")
 
 
 def response_chars(text: str) -> int:
@@ -130,6 +143,7 @@ def responses_to_sample(
     format_str: str = USER_PROMPT,
     max_len: int = MAX_LENGTH,
     truncate: str = "head",
+    window: str = "",
 ) -> Sample:
     """Render two transcripts of the same question as one judging sample.
 
@@ -142,6 +156,7 @@ def responses_to_sample(
         format_str: prompt template to fill.
         max_len: maximum characters kept per transcript.
         truncate: a TRUNCATE_MODES cut; thirds modes also add THIRDS_NOTE to the prompt.
+        window: keep-k/n or drop-k/n, a fraction of each transcript by characters, cut before max_len.
     """
     assert first.id == second.id, "Sample IDs must match for comparison."
     # Same item under two scaffolds (the Epoch SWE-bench import omits our "Please solve..." line): one prompt is a
@@ -150,7 +165,8 @@ def responses_to_sample(
     assert question.endswith(first.question) and question.endswith(second.question), \
         "Sample inputs must match for comparison."
 
-    text_1, text_2 = cut(first.text, max_len, truncate), cut(second.text, max_len, truncate)
+    text_1 = cut(window_text(first.text, window), max_len, truncate)
+    text_2 = cut(window_text(second.text, window), max_len, truncate)
 
     return Sample(
         id=f"{first.id}_{target}",
@@ -186,6 +202,8 @@ def build_dataset(
     include_reasoning: bool = True,
     items: set[str] | None = None,
     truncate: str = "head",
+    window: str = "",
+    channels: str = "",
 ) -> MemoryDataset:
     """Build the judging dataset comparing a major and a minor model's eval log.
 
@@ -199,11 +217,13 @@ def build_dataset(
         include_reverse: also add each pair with the transcripts swapped.
         include_reasoning: include CoT reasoning blocks in the transcripts.
         items: question ids to keep (e.g. one difficulty quartile); None = all.
-    Questions where either model wrote fewer than MIN_RESPONSE_CHARS are skipped.
+        window: keep-k/n or drop-k/n, a fraction of each transcript by characters.
+        channels: only-<c> or drop-<c>, which transcript channels are rendered (reasoning, text, calls, outputs; tools is calls and outputs).
+    Questions where either model wrote fewer than MIN_RESPONSE_CHARS (after the window) are skipped.
     """
     self_pair = Path(major_path) == Path(minor_path)
-    major = read_transcripts(major_path, require_both_correct, include_reasoning, items)
-    minor = major if self_pair else read_transcripts(minor_path, require_both_correct, include_reasoning, items)
+    major = read_transcripts(major_path, require_both_correct, include_reasoning, items, channels)
+    minor = major if self_pair else read_transcripts(minor_path, require_both_correct, include_reasoning, items, channels)
 
     ids = major.keys() & minor.keys()
     # With include_reasoning a reasoning model's trace is shown and a non-reasoning model's
@@ -217,10 +237,11 @@ def build_dataset(
             first, second = major[sample_id][0], major[sample_id][1]
         else:
             first, second = major[sample_id][0], minor[sample_id][0]
-        if min(response_chars(cut(first.text, max_len, truncate)), response_chars(cut(second.text, max_len, truncate))) < MIN_RESPONSE_CHARS:
-            continue  # e.g. an answer-only transcript: nothing for the judge to compare
+        shown = [cut(window_text(t.text, window), max_len, truncate) for t in (first, second)]
+        if min(map(response_chars, shown)) < MIN_RESPONSE_CHARS:
+            continue  # e.g. an answer-only transcript, or a window of a short one: nothing for the judge to compare
 
-        pair_kwargs = dict(format_str=format_str, max_len=max_len, truncate=truncate)
+        pair_kwargs = dict(format_str=format_str, max_len=max_len, truncate=truncate, window=window)
         samples.append(responses_to_sample(first, second, target='1', **pair_kwargs))
         if include_reverse:
             samples.append(responses_to_sample(second, first, target='2', **pair_kwargs))
@@ -242,6 +263,8 @@ def build_direct_dataset(
     max_len: int = MAX_LENGTH,
     include_reasoning: bool = True,
     truncate: str = "head",
+    window: str = "",
+    channels: str = "",
 ) -> MemoryDataset:
     """One sample per correct first-attempt transcript on the requested train items.
 
@@ -250,11 +273,12 @@ def build_direct_dataset(
     """
     if max_len <= 0:
         raise ValueError("max_len must be positive")
-    transcripts = read_transcripts(path, require_correct=True, include_reasoning=include_reasoning, items=items)
+    transcripts = read_transcripts(path, require_correct=True, include_reasoning=include_reasoning, items=items,
+                                   channels=channels)
     samples = []
     for item in sorted(transcripts):
         transcript = transcripts[item][0]
-        text = cut(transcript.text, max_len, truncate)
+        text = cut(window_text(transcript.text, window), max_len, truncate)
         samples.append(Sample(
             id=item,
             input=DIRECT_USER_PROMPT.format(question=transcript.question,

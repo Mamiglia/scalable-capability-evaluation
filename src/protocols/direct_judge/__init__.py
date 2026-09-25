@@ -1,7 +1,7 @@
 """Direct protocols: transcript ratings linearly calibrated to training capability.
 
     scoring.py   mean ratings and linear calibration on references + historical theta*
-    protocol.py  DirectRegression — fit keeps task.train, predict calibrates ratings
+    protocol.py  DirectRegression — fit keeps the references, predict calibrates ratings
     judge.py     JudgeDirect — an LLM judge's ratings, collected on demand
 """
 

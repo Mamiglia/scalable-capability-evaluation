@@ -54,7 +54,7 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     t.references.__dict__["transcripts"] = {"a": {("b", "0"): 1, ("b", "1"): 1}, "b": {("b", "0"): 1, ("b", "1"): 1}, "c": {}}
     t.test.__dict__["transcripts"] = {"t": {("b", "0"): 1}, "u": {}}
     built = []
-    monkeypatch.setattr(judge_module, "judge_task", lambda *a, **k: built.append(k) or SimpleNamespace(name=k["task_name"]))
+    monkeypatch.setattr(judge_module, "judge_task", lambda *a, **k: built.append(k) or SimpleNamespace(name=k["task_name"], version=0))
     tasks = p.tasks(t.references, t.test)
     # 2 refs x 1 target on item 0, then the reference pair a|b on both items; no t|u, no c
     assert [x.name for x in tasks] == ["b/a|t", "b/b|t", "b/a|b"]
@@ -73,8 +73,10 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
         (log_dir / f"{name}.eval").touch()
     monkeypatch.setattr(judge_module, "read_header", lambda path: SimpleNamespace(eval=SimpleNamespace(task=path.stem.replace("_", "/", 1))))
     judged = {"b/a|t": ["0"], "b/b|t": ["0"], "b/a|b": ["0", "1"]}
+    errored = set()  # (task, sample id) the run tolerated an error on
     monkeypatch.setattr(judge_module, "read_eval_log_sample_summaries",
-                        lambda path: [SimpleNamespace(id=f"{i}_1") for i in judged[Path(path).stem.replace("_", "/", 1)]])
+                        lambda path: [SimpleNamespace(id=f"{i}_{o}", error="boom" if (task, f"{i}_{o}") in errored else None)
+                                      for task in [Path(path).stem.replace("_", "/", 1)] for i in judged[task] for o in "12"])
     p.judge(t.references, t.test)
     assert ran == [log_dir]
     # a train item the dir has no verdict on (item 1 of a|b, after a refreeze) is judged on its own
@@ -82,6 +84,24 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     built.clear()
     p.judge(t.references, t.test)
     assert ran == [log_dir, log_dir] and [(k["task_name"], k["items"]) for k in built] == [("b/a|b", {"1"})]
+    # one shown order of a judged item errored: that order alone is judged again
+    from inspect_ai.dataset import MemoryDataset, Sample
+    judged["b/a|b"] = ["0", "1"]
+    errored.add(("b/a|t", "0_2"))
+    built.clear()
+    monkeypatch.setattr(judge_module, "judge_task", lambda *a, **k: built.append(k) or SimpleNamespace(
+        name=k["task_name"], version=7, dataset=MemoryDataset([Sample(id=f"{i}_{o}", input="x") for i in sorted(k["items"]) for o in "12"])))
+    todo = p.tasks(t.references, t.test, p.judged_samples(log_dir))
+    assert [(x.name, [s.id for s in x.dataset]) for x in todo] == [("b/a|t", ["0_2"])]
+    # the retry errored again in a second finished log: the next retry is a new task identity, not skipped as finished
+    assert todo[0].version == "7-1"
+    (log_dir / "b_a|t.retry.eval").touch()
+    monkeypatch.setattr(judge_module, "read_header", lambda path: SimpleNamespace(eval=SimpleNamespace(task=path.name.split(".")[0].replace("_", "/", 1))))
+    monkeypatch.setattr(judge_module, "read_eval_log_sample_summaries",
+                        lambda path: [SimpleNamespace(id=f"{i}_{o}", error="boom" if (task, f"{i}_{o}") in errored else None)
+                                      for task in [Path(path).name.split(".")[0].replace("_", "/", 1)] for i in judged[task] for o in "12"])
+    todo = p.tasks(t.references, t.test, p.judged_samples(log_dir))
+    assert [(x.name, [s.id for s in x.dataset], x.version) for x in todo] == [("b/a|t", ["0_2"], "7-2")]
 
 
 def test_tabular_regression(monkeypatch):
@@ -144,3 +164,26 @@ def test_calibrated_recovers_theta_from_synthetic_verdicts():
     # a small held-out error keeps the estimate; a model without evidence gets the prior mean
     shrunk = calibrated.shrink(theta_hat, sigma2, (0.0, 1.0))
     assert abs(shrunk["t1"] - truth["t1"]) < 0.4 and calibrated.shrink(pd.Series({"x": np.nan}), sigma2, (0.5, 1.0))["x"] == 0.5
+
+
+def test_window_and_channels_are_conditions():
+    from dataclasses import replace
+
+    import pytest
+
+    cfg = {"name": "j", "judge": {"name": "p/j", "slug": "j"}}
+    base = JudgeConfig.from_cli(cfg)
+    assert base.condition_label == ""
+    windowed = JudgeConfig.from_cli(cfg | {"window": "keep-2/10"})
+    assert windowed.condition_hash != base.condition_hash and windowed.condition_label == "window-keep-2of10"
+    channel = JudgeConfig.from_cli(cfg | {"channels": "only-tools"})
+    assert channel.condition_hash not in (base.condition_hash, windowed.condition_hash)
+    assert channel.condition_label == "channels-only-tools"
+    both = JudgeConfig.from_cli(cfg | {"max_length": 2000, "truncate": "tail", "window": "drop-1/4"})
+    assert both.condition_label == "truncated-tail-2000_window-drop-1of4"
+    for bad in ("keep-2", "keep-0/4", "keep-5/4", "middle-1/4"):
+        with pytest.raises(ValueError):
+            replace(base, window=bad)
+    for bad in ("tools", "only-images", "keep-tools"):
+        with pytest.raises(ValueError):
+            replace(base, channels=bad)

@@ -74,8 +74,8 @@ class JudgeDirect(DirectRegression):
         condition = (self.config.condition_hash, prompts)
         condition_hash = hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
         directory = "direct" if self.config.include_reasoning else "direct_reasoning-hidden"
-        if self.config.truncation_label:  # e.g. direct_truncated-tail-4000
-            directory += f"_{self.config.truncation_label}"
+        if self.config.condition_label:  # e.g. direct_truncated-tail-4000, direct_channels-only-tools
+            directory += f"_{self.config.condition_label}"
         return (self.config.log_dir / directory / self.domain.name / semester
                 / self.config.judge.shortname.lower() / condition_hash)
 
@@ -96,7 +96,7 @@ class JudgeDirect(DirectRegression):
                         DATA / cohort.models.loc[model, f"path_{name}"], items=items,
                         system_prompt=system_prompt,
                         max_length=self.config.max_length, include_reasoning=self.config.include_reasoning,
-                        truncate=self.config.truncate,
+                        truncate=self.config.truncate, window=self.config.window, channels=self.config.channels,
                         task_name=f"{name}/{model}",
                         metadata={"protocol": "direct", "domain": self.domain.name, "bench": name,
                                   "model": model, "semester": test.semester},
