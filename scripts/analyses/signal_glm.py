@@ -15,7 +15,6 @@ import os
 import sys
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
 
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
@@ -79,21 +78,14 @@ compare = signal_glm.loo_compare(idatas)
 compare.to_csv(OUT / "loo_compare.csv", float_format="%.3f")
 print(diag.round(3).to_string()); print(compare.round(3).to_string())
 for name, fit in (("predictive", fitted), ("predictive_additive", additive)):
-    fig = signal_glm_plots.predictive_figure(fit.inference_data, table)
-    for ext in ("svg", "png"):
-        fig.savefig(FIG / f"{name}.{ext}", bbox_inches="tight")
-    plt.close(fig)
+    signal_glm_plots.save(signal_glm_plots.predictive_figure(fit.inference_data, table), FIG / name)
 for name, fit in (("fit", fitted), ("fit_additive", additive)):  # observed vs predicted per row, 95% predictive coverage
     fig, coverage = signal_glm_plots.fit_figure(fit.inference_data, fit.features, table)
-    for ext in ("svg", "png"):
-        fig.savefig(FIG / f"{name}.{ext}", bbox_inches="tight", dpi=300)
-    plt.close(fig)
+    signal_glm_plots.save(fig, FIG / name, dpi=300)
     coverage.to_csv(OUT / f"{name}_coverage.csv", index=False, float_format="%.3f")
     print(name); print(coverage.round(3).to_string(index=False))
 fig, appendix_fit = signal_glm_plots.appendix_fit_figure(fitted.inference_data, fitted.features, table)
-for ext in ("svg", "png"):
-    fig.savefig(FIG / f"appendix_fit.{ext}", bbox_inches="tight", dpi=300)
-plt.close(fig)
+signal_glm_plots.save(fig, FIG / "appendix_fit", dpi=300)
 appendix_fit.to_csv(OUT / "appendix_fit.csv", index=False, float_format="%.3f")
 
 # %% contrasts: Pairwise judge against every other protocol, pooled and per domain
@@ -101,10 +93,7 @@ contrasts = signal_glm.contrast_table(fitted.inference_data.posterior, fitted.co
 contrasts.to_csv(RESULTS / f"{TAG}_contrasts.csv", index=False, float_format="%.4f")
 print(contrasts.round(3).to_string(index=False))
 for name, scale in (("contrasts", "ratio"), ("contrasts_score", "score")):
-    fig = signal_glm_plots.contrast_figure(contrasts, scale)
-    for ext in ("svg", "png"):
-        fig.savefig(FIG / f"{name}.{ext}", bbox_inches="tight")
-    plt.close(fig)
+    signal_glm_plots.save(signal_glm_plots.contrast_figure(contrasts, scale), FIG / name)
 
 # %% ratio table: hierarchical next to the flat cross-check
 ratios = signal_glm.ratio_table(fitted.inference_data.posterior, fitted.coords)
@@ -124,8 +113,7 @@ for name, fig in (("ratios", signal_glm_plots.ratio_figure(ratios)), ("ratios_sc
                   ("posteriors_score", signal_glm_plots.posterior_figure(fitted.inference_data.posterior, fitted.coords, scale="score")),
                   ("convergence", signal_glm_plots.convergence_figure(fitted.inference_data, fitted.coords, table)),
                   ("fit_quality", signal_glm_plots.fit_quality_figure(fitted.inference_data, fitted.features, fitted.coords, table))):
-    for ext in ("svg", "png"):
-        fig.savefig(FIG / f"{name}.{ext}", bbox_inches="tight")
+    signal_glm_plots.save(fig, FIG / name)
 
 # %% figure one: prediction score per (target model, domain), averaged over domains per model; t-test over models
 if JUDGES != "best":
@@ -153,14 +141,9 @@ print(both.pivot_table(index="protocol", columns="shape", values=["llr", "p"]).r
 print(scores.mean(numeric_only=True).round(3).to_string())  # the mean prediction scores the figure draws
 suffix = TAG.removeprefix("signal_glm")  # "" or "_<semesters>", like the other bar figures
 for metric in ("mse", "delta", "ratio"):
-    fig = signal_glm_plots.model_bar_figure(pooled, tests, metric)
-    for ext in ("svg", "png"):
-        fig.savefig(RESULTS / "figures" / "bars" / f"figure1_{metric}{suffix}.{ext}", bbox_inches="tight")
-    plt.close(fig)
-fig = signal_glm_plots.model_box_figure(scores, tests)  # the score as mean, 95% interval box and points
-for ext in ("svg", "png"):
-    fig.savefig(RESULTS / "figures" / "bars" / f"figure1_score_box{suffix}.{ext}", bbox_inches="tight")
-plt.close(fig)
+    signal_glm_plots.save(signal_glm_plots.model_bar_figure(pooled, tests, metric), RESULTS / "figures" / "bars" / f"figure1_{metric}{suffix}")
+# the score as mean, 95% interval box and points
+signal_glm_plots.save(signal_glm_plots.model_box_figure(scores, tests), RESULTS / "figures" / "bars" / f"figure1_score_box{suffix}")
 
 # %% figure one without self-judging: each target judged by the best judge from another developer family
 no_self = signal_glm.model_scores(signal_glm.rows(forecasts, VARIANTS, semesters=SEMESTERS, judges="best_other_family"))
@@ -168,7 +151,5 @@ no_self_both = llr_tests(lr.chosen_judges(forecasts, VARIANTS, other_family=True
 no_self_tests = no_self_both[no_self_both["shape"] == lr.SHAPE]
 no_self_both.to_csv(RESULTS / f"{TAG.replace("signal_glm", "signal_llr_tests")}_no_self_judging.csv", index=False, float_format="%.4g")
 print(no_self_both.pivot_table(index="protocol", columns="shape", values=["llr", "p"]).round(4).to_string())
-fig = signal_glm_plots.model_box_figure(no_self, no_self_tests)
-for ext in ("svg", "png"):
-    fig.savefig(RESULTS / "figures" / "bars" / f"figure1_score_no_self_judging{suffix}.{ext}", bbox_inches="tight")
-plt.close(fig)
+signal_glm_plots.save(signal_glm_plots.model_box_figure(no_self, no_self_tests),
+                      RESULTS / "figures" / "bars" / f"figure1_score_no_self_judging{suffix}")

@@ -19,9 +19,6 @@ Run from the repo root: uv run python scripts/analyses/position_contributions.py
 """
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -51,10 +48,7 @@ RUNS = {"coding": {"2025-II": ("minimax-m1", "24d6cc32", WHOLE_REMOVED), "2026-I
 KEY = ["bench", "item", "model_left", "model_right"]
 DRAWS, SEED = 2000, 0
 
-plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
-                     "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "axes.linewidth": 0.8,
-                     "xtick.major.width": 0.8, "ytick.major.width": 0.8, "axes.spines.top": False,
-                     "axes.spines.right": False, "svg.fonttype": "none"})
+contributions_plots.rc()
 
 
 def runs_for(domain, semester, keep):

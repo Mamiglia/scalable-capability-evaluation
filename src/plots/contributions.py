@@ -9,10 +9,27 @@ import pandas as pd
 
 from analysis.challenges.contributions import DOMAIN_TITLES, baseline_stats, caption_lines, domain_stats
 from plots.results import unclip_markers
+from plots.signal_glm import DOMAIN_COLORS
 
 FINAL = Path.home() / "Documents/AIS/LASR/manuscript/final_figs"  # the manuscript's final figures
 # the final figures' names and the caption sentences that differ between the two
 FINAL_NAMES = {"only": "kept_alone", "without": "removed"}
+PIE_COLORS = {"CoT": "#4a3aa7", "Messages": "#eda100", "Tools": "#1baf7a"}
+# the pairwise channel figure's hues when coloured by channel (the pie chart's; the combined tools column takes a
+# darker shade of the tool-calls green)
+CHANNEL_COLORS = {"CoT": PIE_COLORS["CoT"], "Messages": PIE_COLORS["Messages"], "Tools": PIE_COLORS["Tools"],
+                  "Tool calls": "#7fd0b2", "Tool outputs": "#e87ba4", "Full transcript": "0.35"}
+# the channel figure keeps the tool calls and their outputs together; the csv still carries them apart
+DRAWN = ("CoT", "Messages", "Tools")
+WIDTH = 0.5
+
+
+def rc() -> None:
+    """The contribution figures' rcParams (Arial, 8 pt, no top/right spines)."""
+    plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
+                         "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "axes.linewidth": 0.8,
+                         "xtick.major.width": 0.8, "ytick.major.width": 0.8, "axes.spines.top": False,
+                         "axes.spines.right": False, "svg.fonttype": "none"})
 
 
 def stars(p: float) -> str:
@@ -146,3 +163,89 @@ def save_grid(errors: pd.DataFrame, protocols: dict[str, str], parts: dict[str, 
             for label in protocols.values():
                 lines += ["", f"== {label}"] + caption_lines(stats[label], fulls[label], targets[label], measure, "")[1:]
             (FINAL / f"{final}_{FINAL_NAMES[measure]}.txt").write_text("\n".join(lines) + "\n")
+
+
+def channel_figure(stats, fulls, order, out, name, color_by):
+    """One panel per domain, the channels as rows: to the right of zero the prediction score with only that channel
+    (scale on top), to the left the reduction when it is removed (scale on the bottom). Rows are shared by every
+    panel, so a channel sits at the same height throughout and a domain without tool calls leaves those rows empty.
+    `color_by`: "domain" (one hue per panel) or "channel" (the pie chart's hues). Values are in bits. `order`: the
+    domains, in panel order. Written to <out>/<name>.png and .svg."""
+    stats = stats.assign(channel=stats.channel.str.replace("\n", " "))
+    colors = {k.replace("\n", " "): v for k, v in CHANNEL_COLORS.items()}
+    rows = ["Full transcript"] + list(DRAWN)
+    domains = [d for d in order if d in set(stats.domain)]
+    left = float(np.floor(min(0, -stats.loc[stats.measure == "unique", "hi"].max())))
+    right = float(np.ceil(max(stats.loc[stats.measure == "singular", "hi"].max(), fulls.hi.max())))
+    fig, axes = plt.subplots(1, len(domains), figsize=(5.2, 2.1), sharey=True, sharex=True,
+                             gridspec_kw={"wspace": 0.1})
+    axes = np.atleast_1d(axes)
+    for ax, domain in zip(axes, domains):
+        part = stats[stats.domain == domain]
+        color = colors["Full transcript"] if color_by == "channel" else DOMAIN_COLORS[domain]
+        full = fulls.loc[domain]
+        ax.set_axisbelow(True)
+        ax.yaxis.grid(True, color="0.92", lw=0.5)  # one rule per channel row, to carry the eye across panels
+        ax.axvline(full.full_prediction_score, color="0.5", lw=0.8, ls="--", zorder=0)
+        ax.axvline(0, color="black", lw=0.8, zorder=0)
+        ax.add_patch(plt.Rectangle((full.lo, -WIDTH / 2), full.hi - full.lo, WIDTH, color=color, alpha=0.3,
+                                   linewidth=0, zorder=1))
+        ax.plot(full.full_prediction_score, 0, "o", ms=4, mfc=color, mec="black", mew=0.4, zorder=2)
+        for label in rows[1:]:
+            if color_by == "channel":
+                color = colors[label]
+            position = rows.index(label)
+            for measure, sign, alpha, face in (("singular", 1, 0.3, color), ("unique", -1, 0.6, "white")):
+                row = part[(part.channel == label) & (part.measure == measure)]
+                if row.empty:
+                    continue
+                row = row.iloc[0]
+                lo, hi = sorted((sign * row.lo, sign * row.hi))
+                ax.add_patch(plt.Rectangle((lo, position - WIDTH / 2), hi - lo, WIDTH, color=color, alpha=alpha,
+                                           linewidth=0, zorder=1))
+                ax.plot(sign * row.estimate, position, "o", ms=4, mfc=face, mec="black", mew=0.4, zorder=2)
+                # one column of marks per side, pinned just inside the panel edges, rather than hugging each estimate
+                ax.text(0.98 if sign > 0 else 0.02, position, stars(row.p), va="center",
+                        ha="right" if sign > 0 else "left", fontsize=6.5, transform=ax.get_yaxis_transform())
+        ax.set_xlim(left - 1.1, right + 1.1)
+        ax.set_ylim(len(rows) - 0.4, -0.7)  # the full transcript on top, channels under it
+        ax.set_xticks(np.arange(left, 0.01, 2), [f"{abs(v):g}" for v in np.arange(left, 0.01, 2)])
+        ax.spines["bottom"].set_bounds(left, 0)
+        ax.spines["left"].set_visible(False)
+        ax.tick_params(axis="y", length=0)
+        top = ax.secondary_xaxis("top")
+        top.set_xticks(np.arange(0, right + 0.01, 2))
+        top.spines["top"].set_bounds(0, right)
+        top.tick_params(labelsize=7, width=0.8)
+        ax.set_title(domain.capitalize(), loc="left", fontsize=7, color="0.4", pad=14)
+    axes[0].set_yticks(range(len(rows)), rows)
+    fig.supxlabel("Reduction (bits)", fontsize=8, y=-0.02)
+    fig.text(0.5, 1.12, "Prediction score (bits)", ha="center", fontsize=8)
+    handles = [plt.Line2D([], [], marker="o", ls="none", ms=4, mfc="0.6", mec="black", mew=0.4),
+               plt.Line2D([], [], marker="o", ls="none", ms=4, mfc="white", mec="black", mew=0.4),
+               plt.Line2D([], [], color="0.5", lw=0.8, ls="--")]
+    fig.legend(handles, ["Only this channel (right)", "Without this channel (left)", "Full transcript"],
+               frameon=False, ncol=3, loc="lower center", bbox_to_anchor=(0.5, 1.18), handlelength=1.2,
+               columnspacing=1.2, borderaxespad=0)
+    for suffix in (".png", ".svg"):
+        fig.savefig(out / f"{name}{suffix}", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(out / f"{name}.png")
+
+
+def shares_figure(share, out):
+    """One pie per domain (`share`: domain x channel), the share of model-written characters per channel, to
+    <out>/channel_shares.png and .svg."""
+    fig, axes = plt.subplots(1, len(share), figsize=(3.8, 1.4))
+    for ax, domain in zip(np.atleast_1d(axes), share.index):
+        values = share.loc[domain]
+        ax.pie(values, colors=[PIE_COLORS[c] for c in values.index], startangle=90, counterclock=False,
+               wedgeprops={"linewidth": 0.5, "edgecolor": "white"},
+               autopct=lambda pct: f"{pct:.0f}%" if pct >= 10 else "", pctdistance=0.6,
+               textprops={"fontsize": 7, "color": "white"})
+        ax.set_title(domain.capitalize(), fontsize=7, color="0.4", pad=2)
+    fig.legend([plt.Rectangle((0, 0), 1, 1, color=PIE_COLORS[c]) for c in PIE_COLORS], list(PIE_COLORS), frameon=False,
+               ncol=len(PIE_COLORS), loc="lower center", bbox_to_anchor=(0.5, -0.08), handlelength=1, columnspacing=1)
+    for suffix in (".png", ".svg"):
+        fig.savefig(out / f"channel_shares{suffix}", dpi=300, bbox_inches="tight")
+    print(out / "channel_shares.png")

@@ -18,9 +18,6 @@ Run from the repo root (needs the T7 data and embeddings):
 import argparse
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.linear_model import RidgeCV
 
@@ -39,10 +36,7 @@ PARTS = {"First third": ("thirds-1", "thirds-23"), "Middle third": ("thirds-2", 
          "Last third": ("thirds-3", "thirds-12")}
 CONDITIONS = ["full", "thirds-23", "thirds-13", "thirds-12"]
 
-plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
-                     "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "axes.linewidth": 0.8,
-                     "xtick.major.width": 0.8, "ytick.major.width": 0.8, "axes.spines.top": False,
-                     "axes.spines.right": False, "svg.fonttype": "none"})
+contributions_plots.rc()
 
 
 def compute() -> pd.DataFrame:

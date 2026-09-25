@@ -17,6 +17,13 @@ DOMAIN_COLORS = {"science": "#cc79a7", "math": "#d55e00", "coding": "#6a3d9a", "
 DOMAIN_MARKERS = {"science": "o", "math": "s", "coding": "^", "cyber": "D"}
 
 
+def save(fig: plt.Figure, stem, **kwargs) -> None:
+    """`fig` as <stem>.svg and .png (bbox_inches="tight", plus `kwargs`), then closed."""
+    for ext in ("svg", "png"):
+        fig.savefig(f"{stem}.{ext}", bbox_inches="tight", **kwargs)
+    plt.close(fig)
+
+
 def table_figure(table: pd.DataFrame) -> plt.Figure:
     """The hierarchical ratio table as an image: one row per protocol, columns pooled and per
     domain as "median [lo, hi]", plus the across-domain spread; caption below."""

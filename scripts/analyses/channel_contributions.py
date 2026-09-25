@@ -25,9 +25,6 @@ Run from the repo root: uv run python scripts/analyses/channel_contributions.py
 import os
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -35,7 +32,6 @@ from analysis import judges, loading
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
 from plots import contributions as contributions_plots
-from plots.signal_glm import DOMAIN_COLORS
 from configs.domain import DomainConfig
 from configs.judge import JudgeConfig
 from evals.transcripts import read_transcripts
@@ -48,8 +44,6 @@ DATA = Path(os.environ.get("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/d
 CHANNELS = {"CoT": ("only-reasoning", "drop-reasoning"), "Messages": ("only-text", "drop-text"),
             "Tool calls": ("only-calls", "drop-calls"), "Tool outputs": ("only-outputs", "drop-outputs"),
             "Tools": ("only-tools", "drop-tools")}
-# the figure keeps the tool calls and their outputs together; the csv still carries them apart
-DRAWN = ("CoT", "Messages", "Tools")
 # domain -> semester -> (judge, {run: log dir hash}), or a judge name = its channel runs of configs/judges/channels/
 RUNS = {"coding": {"2025-II": "minimax-m1", "2026-I": "kimi-k2-thinking"},
         "cyber": {"2025-II": "deepseek-r1-0528", "2026-I": "kimi-k2-thinking"},
@@ -58,18 +52,12 @@ RUNS = {"coding": {"2025-II": "minimax-m1", "2026-I": "kimi-k2-thinking"},
         "science": {"2025-II": ("minimax-m1", {"full": "24d6cc32", "drop-reasoning": "7ea04f2b"}),
                     "2026-I": ("minimax-m2", {"full": "24d6cc32", "drop-reasoning": "7ea04f2b"})}}
 PIE_CHANNELS = {"CoT": "only-reasoning", "Messages": "only-text", "Tools": "only-tools"}
-PIE_COLORS = {"CoT": "#4a3aa7", "Messages": "#eda100", "Tools": "#1baf7a"}
-DRAWS, SEED, WIDTH = 2000, 0, 0.5
+DRAWS, SEED = 2000, 0
 # COLOR_BY: "domain" (signal_glm DOMAIN_COLORS, one hue per panel) or "channel" (the pie chart's hues, shared
 # across panels; the combined tools column takes a darker shade of the tool-calls green)
 COLOR_BY = os.environ.get("CHANNEL_FIGURE_COLOR_BY", "domain")
-CHANNEL_COLORS = {"CoT": PIE_COLORS["CoT"], "Messages": PIE_COLORS["Messages"], "Tools": PIE_COLORS["Tools"],
-                  "Tool calls": "#7fd0b2", "Tool outputs": "#e87ba4", "Full transcript": "0.35"}
 
-plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
-                     "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "axes.linewidth": 0.8,
-                     "xtick.major.width": 0.8, "ytick.major.width": 0.8, "axes.spines.top": False,
-                     "axes.spines.right": False, "svg.fonttype": "none"})
+contributions_plots.rc()
 
 
 def runs_for(domain, semester, keep):
@@ -92,10 +80,6 @@ def runs_for(domain, semester, keep):
         if run_dir.exists():
             runs[run] = from_logs(run_dir)
     return runs
-
-
-def stars(p):
-    return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
 
 
 def domain_stats(domain):
@@ -181,76 +165,9 @@ fulls.to_csv(OUT / "channel_contributions_full_transcript.csv")
 print(stats.assign(channel=stats.channel.str.replace("\n", " ")).drop(columns="run").round(3).to_string(index=False))
 print(fulls.round(3).to_string())
 
-def draw(stats, fulls, name, color_by):
-    """One panel per domain, the channels as rows: to the right of zero the prediction score with only that channel
-    (scale on top), to the left the reduction when it is removed (scale on the bottom). Rows are shared by every
-    panel, so a channel sits at the same height throughout and a domain without tool calls leaves those rows empty.
-    `color_by`: "domain" (one hue per panel) or "channel" (the pie chart's hues). Values are in bits."""
-    stats = stats.assign(channel=stats.channel.str.replace("\n", " "))
-    colors = {k.replace("\n", " "): v for k, v in CHANNEL_COLORS.items()}
-    rows = ["Full transcript"] + list(DRAWN)
-    domains = [d for d in RUNS if d in set(stats.domain)]
-    left = float(np.floor(min(0, -stats.loc[stats.measure == "unique", "hi"].max())))
-    right = float(np.ceil(max(stats.loc[stats.measure == "singular", "hi"].max(), fulls.hi.max())))
-    fig, axes = plt.subplots(1, len(domains), figsize=(5.2, 2.1), sharey=True, sharex=True,
-                             gridspec_kw={"wspace": 0.1})
-    axes = np.atleast_1d(axes)
-    for ax, domain in zip(axes, domains):
-        part = stats[stats.domain == domain]
-        color = colors["Full transcript"] if color_by == "channel" else DOMAIN_COLORS[domain]
-        full = fulls.loc[domain]
-        ax.set_axisbelow(True)
-        ax.yaxis.grid(True, color="0.92", lw=0.5)  # one rule per channel row, to carry the eye across panels
-        ax.axvline(full.full_prediction_score, color="0.5", lw=0.8, ls="--", zorder=0)
-        ax.axvline(0, color="black", lw=0.8, zorder=0)
-        ax.add_patch(plt.Rectangle((full.lo, -WIDTH / 2), full.hi - full.lo, WIDTH, color=color, alpha=0.3,
-                                   linewidth=0, zorder=1))
-        ax.plot(full.full_prediction_score, 0, "o", ms=4, mfc=color, mec="black", mew=0.4, zorder=2)
-        for label in rows[1:]:
-            if color_by == "channel":
-                color = colors[label]
-            position = rows.index(label)
-            for measure, sign, alpha, face in (("singular", 1, 0.3, color), ("unique", -1, 0.6, "white")):
-                row = part[(part.channel == label) & (part.measure == measure)]
-                if row.empty:
-                    continue
-                row = row.iloc[0]
-                lo, hi = sorted((sign * row.lo, sign * row.hi))
-                ax.add_patch(plt.Rectangle((lo, position - WIDTH / 2), hi - lo, WIDTH, color=color, alpha=alpha,
-                                           linewidth=0, zorder=1))
-                ax.plot(sign * row.estimate, position, "o", ms=4, mfc=face, mec="black", mew=0.4, zorder=2)
-                # one column of marks per side, pinned just inside the panel edges, rather than hugging each estimate
-                ax.text(0.98 if sign > 0 else 0.02, position, stars(row.p), va="center",
-                        ha="right" if sign > 0 else "left", fontsize=6.5, transform=ax.get_yaxis_transform())
-        ax.set_xlim(left - 1.1, right + 1.1)
-        ax.set_ylim(len(rows) - 0.4, -0.7)  # the full transcript on top, channels under it
-        ax.set_xticks(np.arange(left, 0.01, 2), [f"{abs(v):g}" for v in np.arange(left, 0.01, 2)])
-        ax.spines["bottom"].set_bounds(left, 0)
-        ax.spines["left"].set_visible(False)
-        ax.tick_params(axis="y", length=0)
-        top = ax.secondary_xaxis("top")
-        top.set_xticks(np.arange(0, right + 0.01, 2))
-        top.spines["top"].set_bounds(0, right)
-        top.tick_params(labelsize=7, width=0.8)
-        ax.set_title(domain.capitalize(), loc="left", fontsize=7, color="0.4", pad=14)
-    axes[0].set_yticks(range(len(rows)), rows)
-    fig.supxlabel("Reduction (bits)", fontsize=8, y=-0.02)
-    fig.text(0.5, 1.12, "Prediction score (bits)", ha="center", fontsize=8)
-    handles = [plt.Line2D([], [], marker="o", ls="none", ms=4, mfc="0.6", mec="black", mew=0.4),
-               plt.Line2D([], [], marker="o", ls="none", ms=4, mfc="white", mec="black", mew=0.4),
-               plt.Line2D([], [], color="0.5", lw=0.8, ls="--")]
-    fig.legend(handles, ["Only this channel (right)", "Without this channel (left)", "Full transcript"],
-               frameon=False, ncol=3, loc="lower center", bbox_to_anchor=(0.5, 1.18), handlelength=1.2,
-               columnspacing=1.2, borderaxespad=0)
-    for suffix in (".png", ".svg"):
-        fig.savefig(OUT / f"{name}{suffix}", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    print(OUT / f"{name}.png")
-
-
-draw(stats, fulls, "channel_contributions", COLOR_BY)
-draw(stats, fulls, "channel_contributions_by_domain" if COLOR_BY == "channel" else "channel_contributions_by_channel",
-     "domain" if COLOR_BY == "channel" else "channel")
+contributions_plots.channel_figure(stats, fulls, RUNS, OUT, "channel_contributions", COLOR_BY)
+contributions_plots.channel_figure(stats, fulls, RUNS, OUT, "channel_contributions_by_domain" if COLOR_BY == "channel"
+                                   else "channel_contributions_by_channel", "domain" if COLOR_BY == "channel" else "channel")
 # the same measures for the other protocols, from the tables their runners write next to these
 for prefix in ("embedding", "direct"):
     table = OUT / f"{prefix}_channel_contributions.csv"
@@ -259,31 +176,20 @@ for prefix in ("embedding", "direct"):
     # their runners label the combined tools channel "Tool calls + outputs"; the figure's row is "Tools"
     other = pd.read_csv(table).rename(columns={"wilcoxon_p": "p"}).replace({"channel": {"Tool calls + outputs": "Tools"}})
     other_fulls = pd.read_csv(OUT / f"{prefix}_channel_contributions_full_transcript.csv").set_index("domain")
-    draw(other, other_fulls, f"{prefix}_channel_contributions", COLOR_BY)
+    contributions_plots.channel_figure(other, other_fulls, RUNS, OUT, f"{prefix}_channel_contributions", COLOR_BY)
 
 # the share of model-written characters per channel, one pie per domain
 frame = pd.DataFrame(shares).T
 share = frame.div(frame.sum(axis=1), axis=0)
 share.to_csv(OUT / "channel_shares.csv")
 print((share * 100).round(1).to_string())
-fig, axes = plt.subplots(1, len(share), figsize=(3.8, 1.4))
-for ax, domain in zip(np.atleast_1d(axes), share.index):
-    values = share.loc[domain]
-    ax.pie(values, colors=[PIE_COLORS[c] for c in values.index], startangle=90, counterclock=False,
-           wedgeprops={"linewidth": 0.5, "edgecolor": "white"},
-           autopct=lambda pct: f"{pct:.0f}%" if pct >= 10 else "", pctdistance=0.6,
-           textprops={"fontsize": 7, "color": "white"})
-    ax.set_title(domain.capitalize(), fontsize=7, color="0.4", pad=2)
-fig.legend([plt.Rectangle((0, 0), 1, 1, color=PIE_COLORS[c]) for c in PIE_COLORS], list(PIE_COLORS), frameon=False,
-           ncol=len(PIE_COLORS), loc="lower center", bbox_to_anchor=(0.5, -0.08), handlelength=1, columnspacing=1)
-for suffix in (".png", ".svg"):
-    fig.savefig(OUT / f"channel_shares{suffix}", dpi=300, bbox_inches="tight")
-print(OUT / "channel_shares.png")
+contributions_plots.shares_figure(share, OUT)
 
 # the manuscript figures, as change in squared error from the full transcript: each channel kept alone, then each channel removed. Maths and science
 # have no tool calls, and their hidden-reasoning run is not drawn a second time as "only messages".
 SPLIT_PARTS = {"Reasoning": ("only-reasoning", "drop-reasoning"), "Messages": ("only-text", "drop-text"),
                "Tools": ("only-tools", "drop-tools")}
+PIE_COLORS = contributions_plots.PIE_COLORS
 SPLIT_COLOURS = {"Reasoning": PIE_COLORS["CoT"], "Messages": PIE_COLORS["Messages"], "Tools": PIE_COLORS["Tools"]}
 contributions_plots.save_figures(
     errors, SPLIT_PARTS, SPLIT_COLOURS, OUT, "channel_contributions", final="transcript_channels",

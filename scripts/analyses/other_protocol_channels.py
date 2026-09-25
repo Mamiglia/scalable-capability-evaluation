@@ -24,9 +24,6 @@ Run from the repo root (needs the T7 data and embeddings):
 import argparse
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import RidgeCV
@@ -53,10 +50,7 @@ COLOURS = {"Reasoning": "#4a3aa7", "Messages": "#eda100", "Tools": "#1baf7a"}  #
 PROTOCOLS = {"glm_regex": "Deterministic features", "embedding": "Embedding"}
 REGEX = FEATURE_SETS["regex"]
 
-plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
-                     "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "axes.linewidth": 0.8,
-                     "xtick.major.width": 0.8, "ytick.major.width": 0.8, "axes.spines.top": False,
-                     "axes.spines.right": False, "svg.fonttype": "none"})
+contributions_plots.rc()
 
 
 def conditions(domain: str) -> list[str]:
