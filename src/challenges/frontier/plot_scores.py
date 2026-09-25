@@ -17,8 +17,8 @@ import pandas as pd
 from scipy import stats
 
 sys.path.insert(0, "scripts/analyses")
-from palette import PROTOCOL  # noqa: E402
-from plots import INK2, MUTED, save, style  # noqa: E402
+from plots.palette import PROTOCOL  # noqa: E402
+from plots.style import INK2, MUTED, save, style  # noqa: E402
 
 import matplotlib.pyplot as plt  # noqa: E402
 

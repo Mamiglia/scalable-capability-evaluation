@@ -21,7 +21,7 @@ import pandas as pd
 from scipy import stats as scipy_stats
 
 from analysis.challenges import likelihood_ratio as lr
-from analysis.plots import unclip_markers
+from plots.results import unclip_markers
 
 PER_QUARTILE = 10  # every removal analysis uses the 40-item subset the pairwise removal runs judged
 

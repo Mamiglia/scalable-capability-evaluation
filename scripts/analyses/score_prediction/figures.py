@@ -20,7 +20,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from plots import (COL, INK2, MUTED, PALETTE, SURFACE, WIDE, chance, dot_ci,
+from plots.style import (COL, INK2, MUTED, PALETTE, SURFACE, WIDE, chance, dot_ci,
                    legend, save, style)
 
 ROOT = Path(__file__).resolve().parents[3]

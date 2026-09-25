@@ -13,7 +13,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from analysis import loading, matching, plots
+from analysis import loading, matching
+from plots import results as plots
 from analysis.calibration import OfflineBT, OfflineDirect
 from capability.evaluate import forecast
 

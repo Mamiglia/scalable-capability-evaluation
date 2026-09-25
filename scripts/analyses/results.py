@@ -24,7 +24,8 @@ os.chdir(ROOT)  # every path in src/ is repo-relative
 os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
 os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/transcript-embeddings")
 
-from analysis import calibration, loading, matching, plots, stats  # noqa: E402  (after the env is set)
+from analysis import calibration, loading, matching, stats  # noqa: E402  (after the env is set)
+from plots import results as plots  # noqa: E402
 
 DOMAINS = ["science", "math", "coding", "cyber"]
 SEMESTERS = None  # e.g. ["2026-I"]; None = every frozen semester task
@@ -74,9 +75,9 @@ print(core[["domain", "protocol", "variant", "judge", "n", "missing", "mse", "ba
 # %% tables: semester x condition, every metric, per domain and pooled
 for metric in stats.METRICS:
     for domain in [None, *DOMAINS]:
-        table = plots.semester_table(metrics, metric, VARIANTS, domain)
+        table = stats.semester_table(metrics, metric, VARIANTS, domain)
         table.to_csv(OUT / "tables" / f"{metric}_{domain or 'pooled'}.csv", float_format="%.3f")
-print(plots.semester_table(metrics, "mse", VARIANTS).round(3).to_string())
+print(stats.semester_table(metrics, "mse", VARIANTS).round(3).to_string())
 
 # %% figures: forecasts of the best condition, bars, timelines, frontier; each as svg and png
 # stars: the log likelihood ratio against the references' distribution, from analysis/results/likelihood_ratio.csv,
@@ -85,7 +86,7 @@ from analysis.challenges import likelihood_ratio as lr  # noqa: E402
 
 llr = lr.select(pd.read_csv(OUT / "likelihood_ratio.csv"), lr.chosen_judges(forecasts, VARIANTS))
 llr = llr[llr["shape"] == lr.SHAPE]
-pooled = plots.chosen(metrics, VARIANTS)
+pooled = stats.chosen(metrics, VARIANTS)
 pooled = pooled[(pooled.domain == "all") & (pooled.semester == "all") & pooled.protocol.isin(plots.CONDITIONS)]
 best = pooled.sort_values("mse").iloc[0]
 latest = max(sem for _, sem in tasks)

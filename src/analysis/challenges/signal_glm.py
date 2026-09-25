@@ -21,8 +21,9 @@ from patsy import build_design_matrices
 
 from scipy import stats as scipy_stats
 
-from analysis.plots import CONDITIONS, DOMAIN_LABELS, break_edges, break_strip, chosen, ci95, compress, fix_axes_height
-from analysis.plots import LABELS as plots_labels
+from analysis.stats import CONDITIONS, DOMAIN_LABELS, chosen, ci95
+from plots.results import break_edges, break_strip, compress, fix_axes_height
+from analysis.stats import LABELS as plots_labels
 from analysis.stats import BASELINE, JUDGED, core_condition, one_per_target
 
 LABELS = {p: plots_labels[p] for p in CONDITIONS}  # the paper's protocol names, one source

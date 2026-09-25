@@ -1,6 +1,6 @@
 """Throwaway previews of every option combination of the three results figures, as PNGs in
 analysis/preview/, so the layouts to keep can be pointed at. Reads a forecasts table from
-disk (never downloads anything), reuses analysis.stats and analysis.plots unchanged.
+disk (never downloads anything), reuses analysis.stats and plots.results unchanged.
 
 Cell script: `PYTHONPATH=src uv run python scripts/analyses/preview_plots.py` from the repo
 root, or cell by cell (`# %%`) after the cells above. Writes analysis/preview/index.md.
@@ -19,7 +19,8 @@ ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)
 
-from analysis import plots, stats  # noqa: E402
+from analysis import stats  # noqa: E402
+from plots import results as plots  # noqa: E402
 from analysis.stats import BASELINE, BEST, KEYS, MEAN, one_per_target, task_metrics  # noqa: E402
 
 OUT = Path("analysis/preview")
@@ -160,7 +161,7 @@ for tag, variants in VARIANT_SETS.items():
                 continue
             # semester_table asserts metric in stats.METRICS: hand it z_baseline under the name "z"
             m = best_metrics.assign(z=best_metrics.z_baseline) if metric == "z_baseline" else best_metrics
-            table = plots.semester_table(m, "z" if metric == "z_baseline" else metric, variants, None if scope == "pooled" else scope)
+            table = stats.semester_table(m, "z" if metric == "z_baseline" else metric, variants, None if scope == "pooled" else scope)
             path = save(f"table_{metric}_{scope}{tag}", f"metric {metric}; scope {scope}; best judge on references; variants {variants or '-'}")
             table.to_csv(path.with_suffix(".csv"))
             table_png(table, path.with_suffix(".png"))

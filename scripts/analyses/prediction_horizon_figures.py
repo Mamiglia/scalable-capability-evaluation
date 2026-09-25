@@ -19,11 +19,11 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from analysis import plots  # noqa: F401  (house rcParams)
+import plots.results  # noqa: F401  (house rcParams)
 from analysis.challenges import likelihood_ratio as lr
 from analysis.challenges.generalisation import BASELINE_COLOUR
 from analysis.challenges.signal_glm import COLORS
-from analysis.plots import unclip_markers
+from plots.results import unclip_markers
 
 OUT = Path("artifacts/prediction-horizon")
 MAIN = Path("../small-judge-remote")

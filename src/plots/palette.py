@@ -1,21 +1,19 @@
 """The protocol/domain palette: swatch sheet + example plots (synthetic data).
 
-    uv run python scripts/analyses/palette.py
+    uv run python -m plots.palette
 
 Writes analysis/palette.{png,svg} and analysis/palette_examples.{png,svg}.
 Import PROTOCOL / DOMAIN / MATCHUP from here in real figures.
 """
 
-import sys
 from pathlib import Path
 
 import numpy as np
 from scipy.stats import t
 
-sys.path.insert(0, str(Path(__file__).parent))
-from plots import INK, INK2, MUTED, legend, save, style  # noqa: E402
+from plots.style import INK, INK2, MUTED, legend, save, style
 
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
 PROTOCOL = {
     "Length": "#f1a48a",

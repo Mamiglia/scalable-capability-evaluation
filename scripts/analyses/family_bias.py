@@ -28,7 +28,7 @@ import pandas as pd
 from scipy.stats import t as student_t
 
 sys.path.insert(0, str(Path(__file__).parent))
-from plots import INK2, MUTED, PALETTE, legend, save, style  # noqa: E402
+from plots.style import INK2, MUTED, PALETTE, legend, save, style  # noqa: E402
 
 import matplotlib.pyplot as plt  # noqa: E402
 

@@ -30,7 +30,7 @@ from analysis import calibration, loading, matching
 from analysis.challenges import generalisation as gen
 from analysis.challenges.signal_glm import COLORS, DOMAINS, LABELS, PROTOCOLS, score, stars
 from analysis import stats
-from analysis.plots import DOMAIN_LABELS, chosen, ci95
+from analysis.stats import DOMAIN_LABELS, chosen, ci95
 
 DOMAIN_LABELS = {**DOMAIN_LABELS, "math": "Maths"}  # the manuscript spells the domain with an s
 from analysis.stats import BASELINE

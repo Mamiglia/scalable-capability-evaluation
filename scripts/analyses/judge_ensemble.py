@@ -33,7 +33,7 @@ from scipy.stats import t
 
 sys.path.insert(0, str(Path(__file__).parent))
 from item_count_effect import COLOR  # noqa: E402  (sets the Agg backend)
-from palette import DOMAIN  # noqa: E402
+from plots.palette import DOMAIN  # noqa: E402
 
 import matplotlib.pyplot as plt  # noqa: E402
 

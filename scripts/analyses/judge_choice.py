@@ -27,7 +27,7 @@ import pandas as pd
 from scipy import stats as st
 
 sys.path.insert(0, str(Path(__file__).parent))
-from plots import INK2, MUTED, legend, save, style  # noqa: E402  (sets the Agg backend)
+from plots.style import INK2, MUTED, legend, save, style  # noqa: E402  (sets the Agg backend)
 
 import matplotlib.pyplot as plt  # noqa: E402
 

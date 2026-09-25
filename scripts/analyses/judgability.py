@@ -91,7 +91,8 @@ print("Spearman(item accuracy, share of pairs where the stronger model is longer
 # %% figure: what the pairwise judge follows, and whether "easy to judge" is an item property
 import matplotlib.pyplot as plt  # noqa: E402
 
-from analysis.plots import DOMAIN_COLORS, DOMAIN_LABELS  # noqa: E402  (sets the rcParams)
+from analysis.stats import DOMAIN_LABELS
+from plots.results import DOMAIN_COLORS  # noqa: E402  (sets the rcParams)
 
 FIG = Path("analysis/results/figures/judgability")
 FIG.mkdir(parents=True, exist_ok=True)

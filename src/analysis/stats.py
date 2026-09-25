@@ -6,6 +6,7 @@ tables use: raw MSE, delta from easy-item prediction, and the paired-bootstrap z
 
 import numpy as np
 import pandas as pd
+from scipy import stats as scipy_stats
 
 from configs.logs import logger
 
@@ -143,3 +144,48 @@ def task_metrics(forecasts: pd.DataFrame) -> pd.DataFrame:
     for k, g in paired.groupby(KEYS[1:], sort=False):
         rows.append(dict(zip(KEYS[1:], k), domain="all", semester="all", **paired_metrics(g)))
     return pd.DataFrame(rows)[["domain", "semester", *KEYS[1:], "n", "mse", "baseline_mse", "delta", "z"]]
+
+
+# Protocol names as the paper uses them, shared by tables (here) and figures (plots/)
+CONDITIONS = ["glm_length", "glm_regex", "embedding", "direct", "pairwise"]  # the bars, in this order
+LABELS = {BASELINE: "Prediction from saturated items", "glm_length": "Length", "glm_regex": "Deterministic features",
+          "embedding": "Embedding", "direct": "Absolute scoring", "pairwise": "Pairwise judge"}
+LABELS.update({"direct_ensemble": "Direct scoring, pooled judges", "pairwise_ensemble": "Pairwise judges, pooled"})
+DOMAIN_LABELS = {"science": "Science", "math": "Maths", "coding": "Coding", "cyber": "Cyber"}
+
+
+def with_pct(metrics: pd.DataFrame) -> pd.DataFrame:
+    """metrics with a `pct` column: 100 * mse / baseline_mse per row, the MSE as a percentage of
+    the prediction from saturated items's MSE on the same targets (100 = the baseline, below = better)."""
+    return metrics.assign(pct=100 * metrics.mse / metrics.baseline_mse)
+
+
+def ci95(values: np.ndarray) -> float:
+    """Half-width of the t-based 95% interval of the mean of `values`; NaN with fewer than 3."""
+    n = len(values)
+    if n < 3:
+        return float("nan")
+    return float(scipy_stats.t.ppf(0.975, n - 1) * np.std(values, ddof=1) / np.sqrt(n))
+
+
+def chosen(metrics: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
+    """The metric rows of the chosen variant per protocol ("-" for protocols without one)."""
+    return metrics[[variants.get(p, "-") == v for p, v in zip(metrics.protocol, metrics.variant)]]
+
+
+def semester_table(metrics: pd.DataFrame, metric: str, variants: dict[str, str], domain: str | None = None) -> pd.DataFrame:
+    """Semester x condition (prediction from saturated items first, then CONDITIONS) for one domain, or pooled when
+    `domain` is None: the mean over the domains that have that semester, plus an "all" row
+    (the domain's pooled row, or the mean over every (domain, semester) cell). Columns are
+    the LABELS; a condition without a value is NaN."""
+    assert metric in METRICS, metric
+    m = chosen(metrics, variants)
+    m = m[m.domain == domain] if domain else m[(m.domain != "all") & (m.semester != "all")]
+    per_task = m[m.semester != "all"].pivot_table(index="semester", columns="protocol", values=metric, aggfunc="mean").sort_index()
+    if domain:
+        pooled = m[m.semester == "all"].set_index("protocol")[metric]
+    else:
+        pooled = m.groupby("protocol")[metric].mean()
+    table = pd.concat([per_task, pooled.to_frame("all").T])
+    columns = [p for p in [BASELINE, *CONDITIONS] if p in table.columns]
+    return table[columns].rename(columns=LABELS)

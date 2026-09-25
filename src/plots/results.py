@@ -1,4 +1,4 @@
-"""Figures and tables of the results section.
+"""Figures of the results section (the tables they draw from: analysis.stats).
 
 forecast_figure   one panel per domain, semesters along x; within a semester the targets
                   sorted by theta*, black = true theta, orange = forecast, dotted connectors
@@ -7,8 +7,6 @@ bar_figure        four bars (the conditions), coloured by method, at the mean of
                   joined across conditions by a solid line in the domain's colour; saturated-item
                   prediction as a dashed line; off-axis values compressed into a band above
                   the in-range axis
-semester_table    semester x condition for one domain, or pooled over the domains that have
-                  the semester, with an "all" row
 
 Judge protocols appear as the best judge on references (task_metrics has no other judge
 rows); one variant per protocol is drawn, chosen by the runner's toggles.
@@ -25,7 +23,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
 
-from analysis.stats import BASELINE, BEST, JUDGED, METRICS, one_per_target
+from analysis.stats import (BASELINE, BEST, CONDITIONS, DOMAIN_LABELS, JUDGED, LABELS, METRICS, chosen, ci95,
+                            one_per_target, with_pct)
 
 plt.rcParams.update({
     "font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
@@ -33,28 +32,16 @@ plt.rcParams.update({
     "xtick.major.width": 0.8, "ytick.major.width": 0.8, "axes.spines.top": False, "axes.spines.right": False,
     "svg.fonttype": "none", "pdf.fonttype": 42, "savefig.dpi": 300,
 })
-CONDITIONS = ["glm_length", "glm_regex", "embedding", "direct", "pairwise"]  # the bars, in this order
-# Protocol names as the paper uses them (CLAUDE.md, figure colour palette); Length alone is a diagnostic, not a paper protocol.
-LABELS = {BASELINE: "Prediction from saturated items", "glm_length": "Length", "glm_regex": "Deterministic features",
-          "embedding": "Embedding", "direct": "Absolute scoring", "pairwise": "Pairwise judge"}
-DOMAIN_LABELS = {"science": "Science", "math": "Maths", "coding": "Coding", "cyber": "Cyber"}
 # regressions in greens, light to dark (length, length + prose, embedding); judges in blues (direct
 # light, pairwise dark); domains in warm hues, so the two encodings never share a colour
 COLORS = dict(zip(CONDITIONS, ["#b8e0c2", "#3f9c73", "#0d4a30", "#9dc6e6", "#1f4c85"]))  # muted, print-like; wider steps for visibility
 # the pooled-judge conditions are not bars, but task figures may draw them
-LABELS.update({"direct_ensemble": "Direct scoring, pooled judges", "pairwise_ensemble": "Pairwise judges, pooled"})
 COLORS.update({"direct_ensemble": "#c9d9ec", "pairwise_ensemble": "#7a93b8"})
 DOMAIN_COLORS = {"science": "#b4485a", "math": "#e0955a", "coding": "#a97aa8", "cyber": "#cdb04c"}
 STAGGER = 0.05  # the four domains' circles sit within ±0.05 of the bar centre
 TRUE, PRED = "black", "#eb6834"
 METRIC_LABELS = {"mse": "Squared error", "delta": "MSE − saturated-item MSE", "z": "z of MSE − saturated-item MSE",
                  "pct": "Relative MSE (%)"}
-
-
-def with_pct(metrics: pd.DataFrame) -> pd.DataFrame:
-    """metrics with a `pct` column: 100 * mse / baseline_mse per row, the MSE as a percentage of
-    the prediction from saturated items's MSE on the same targets (100 = the baseline, below = better)."""
-    return metrics.assign(pct=100 * metrics.mse / metrics.baseline_mse)
 
 
 def compress(values: np.ndarray, extent: np.ndarray | None = None) -> tuple[np.ndarray, dict[float, float]]:
@@ -123,14 +110,6 @@ def unclip_markers(fig):
     return fig
 
 
-def ci95(values: np.ndarray) -> float:
-    """Half-width of the t-based 95% interval of the mean of `values`; NaN with fewer than 3."""
-    n = len(values)
-    if n < 3:
-        return float("nan")
-    return float(scipy_stats.t.ppf(0.975, n - 1) * np.std(values, ddof=1) / np.sqrt(n))
-
-
 AXES_HEIGHT = 1.6  # inches; bar_figure and task_figure share it so the panels sit side by side
 
 
@@ -141,11 +120,6 @@ def fix_axes_height(fig, ax, inches: float = AXES_HEIGHT, rounds: int = 3) -> No
         fig.canvas.draw()
         current = ax.get_position().height * fig.get_figheight()
         fig.set_figheight(fig.get_figheight() + inches - current)
-
-
-def chosen(metrics: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
-    """The metric rows of the chosen variant per protocol ("-" for protocols without one)."""
-    return metrics[[variants.get(p, "-") == v for p, v in zip(metrics.protocol, metrics.variant)]]
 
 
 def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, semesters: list[str] | None = None) -> None:
@@ -265,24 +239,6 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
     fix_axes_height(fig, ax)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
-
-
-def semester_table(metrics: pd.DataFrame, metric: str, variants: dict[str, str], domain: str | None = None) -> pd.DataFrame:
-    """Semester x condition (prediction from saturated items first, then CONDITIONS) for one domain, or pooled when
-    `domain` is None: the mean over the domains that have that semester, plus an "all" row
-    (the domain's pooled row, or the mean over every (domain, semester) cell). Columns are
-    the LABELS; a condition without a value is NaN."""
-    assert metric in METRICS, metric
-    m = chosen(metrics, variants)
-    m = m[m.domain == domain] if domain else m[(m.domain != "all") & (m.semester != "all")]
-    per_task = m[m.semester != "all"].pivot_table(index="semester", columns="protocol", values=metric, aggfunc="mean").sort_index()
-    if domain:
-        pooled = m[m.semester == "all"].set_index("protocol")[metric]
-    else:
-        pooled = m.groupby("protocol")[metric].mean()
-    table = pd.concat([per_task, pooled.to_frame("all").T])
-    columns = [p for p in [BASELINE, *CONDITIONS] if p in table.columns]
-    return table[columns].rename(columns=LABELS)
 
 
 def task_figure(forecasts: pd.DataFrame, domain: str, semester: str, conditions: list[tuple[str, str]], path,

@@ -122,7 +122,7 @@ def plot():
     sys.path.append(str(Path(__file__).resolve().parents[1]))  # scripts/analyses -> plots.py
     import numpy as np
     import matplotlib.pyplot as plt
-    from plots import INK2, MUTED, PALETTE, WIDE, chance, legend, save, style
+    from plots.style import INK2, MUTED, PALETTE, WIDE, chance, legend, save, style
 
     byic = _collect()
     gaps = sorted({g for g, _ in byic})
@@ -183,7 +183,7 @@ def plot_by_judge():
     sys.path.append(str(Path(__file__).resolve().parents[1]))
     import numpy as np
     import matplotlib.pyplot as plt
-    from plots import INK2, MUTED, PALETTE, WIDE, chance, legend, save, style
+    from plots.style import INK2, MUTED, PALETTE, WIDE, chance, legend, save, style
 
     byic = _collect(by_judge=True)
     judges = [j.split("/")[-1] for j in JUDGES]

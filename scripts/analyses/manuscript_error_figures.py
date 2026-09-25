@@ -77,7 +77,7 @@ save(gen.time_figure(errors.assign(p=float("nan")), by="domain", metric="error")
 
 # captions for the two final figures, every value from the tables the figures draw
 from analysis.challenges import signal_glm as sg  # noqa: E402
-from analysis.plots import ci95  # noqa: E402
+from analysis.stats import ci95  # noqa: E402
 from analysis.stats import BASELINE  # noqa: E402
 
 

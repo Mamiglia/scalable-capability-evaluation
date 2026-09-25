@@ -20,7 +20,8 @@ import pandas as pd
 from scipy import stats as scipy_stats
 
 from analysis.challenges.signal_glm import COLORS, DOMAIN_COLORS, DOMAINS, LABELS, PROTOCOLS, score, score_axis, stars
-from analysis.plots import DOMAIN_LABELS, chosen, ci95, fix_axes_height, unclip_markers
+from analysis.stats import DOMAIN_LABELS, chosen, ci95
+from plots.results import fix_axes_height, unclip_markers
 from analysis.stats import BASELINE, one_per_target
 
 DOMAIN_LABELS = {**DOMAIN_LABELS, "math": "Maths"}  # the manuscript spells the domain with an s

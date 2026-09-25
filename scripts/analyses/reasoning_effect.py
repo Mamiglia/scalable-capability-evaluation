@@ -26,7 +26,7 @@ from capability.evaluate import score
 from capability.task import Task
 from configs.domain import DomainConfig
 from configs.logs import logger
-from palette import DOMAIN  # domain markers, scripts/analyses/palette.py
+from plots.palette import DOMAIN  # domain markers, scripts/analyses/palette.py
 from protocols import PROTOCOLS
 from protocols.pairwise import from_logs
 from protocols.pairwise.linear import JudgeLinear

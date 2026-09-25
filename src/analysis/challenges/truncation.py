@@ -15,7 +15,8 @@ import pandas as pd
 
 from analysis import calibration, matching
 from analysis.loading import JUDGES, LOGS, JudgeRun, direct_from_logs, fetched, pairwise_from_logs
-from analysis.plots import BASELINE, COLORS, DOMAIN_COLORS, DOMAIN_LABELS, LABELS, fix_axes_height
+from analysis.stats import BASELINE, DOMAIN_LABELS, LABELS
+from plots.results import COLORS, DOMAIN_COLORS, fix_axes_height
 from capability.task import Task
 from configs.domain import DomainConfig
 from configs.judge import DirectJudgeConfig, JudgeConfig

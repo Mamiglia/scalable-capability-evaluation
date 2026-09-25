@@ -31,7 +31,7 @@ from capability.evaluate import score
 from capability.task import Task
 from configs.domain import DomainConfig
 from configs.logs import logger
-from palette import DOMAIN  # domain markers, scripts/analyses/palette.py
+from plots.palette import DOMAIN  # domain markers, scripts/analyses/palette.py
 from protocols import PROTOCOLS
 from protocols.direct_judge import from_logs as direct_logs
 from protocols.direct_judge.scoring import calibrate
