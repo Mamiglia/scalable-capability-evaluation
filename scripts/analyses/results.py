@@ -81,6 +81,9 @@ print(plots.semester_table(metrics, "mse", VARIANTS).round(3).to_string())
 # which scripts/analyses/likelihood_ratio.py writes from these forecasts: rerun it, then this cell, when they change
 from analysis.challenges import likelihood_ratio as lr  # noqa: E402
 
+if not (OUT / "likelihood_ratio.csv").exists():  # a first run: likelihood_ratio.py reads the forecasts written above
+    print("no likelihood_ratio.csv yet: run scripts/analyses/likelihood_ratio.py, then this cell, for these figures")
+    sys.exit(0)
 llr = lr.select(pd.read_csv(OUT / "likelihood_ratio.csv"), lr.chosen_judges(forecasts, VARIANTS))
 llr = llr[llr["shape"] == lr.SHAPE]
 pooled = plots.chosen(metrics, VARIANTS)
