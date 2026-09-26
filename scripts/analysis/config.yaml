@@ -30,9 +30,7 @@ protocols: {pairwise: linear, direct: raw, embedding: full}
 # the 40 train items (10 per difficulty quartile) the thirds and channel analyses judge
 removal_items: {per_quartile: 10, seed: 0}
 
-statistics:
-  predictive_shape: t                 # Student t with n - 1 degrees of freedom for the log likelihood ratio
-  alpha: 0.05
+statistics:                           # the log likelihood ratio's predictive is Student t, n - 1 df (likelihood_ratio.SHAPE)
   bootstrap_draws: 2000
   seed: 0
 

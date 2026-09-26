@@ -178,8 +178,8 @@ def test_direct_runs_restricts_to_the_top3_roster(tmp_path, monkeypatch):
         def __init__(self, config, domain, include_reasoning=True):
             pass
 
-        def log_dir(self, semester):
-            return tmp_path  # exists for every judge; fetched() finds no .eval stubs there
+        def log_dirs(self, semester):
+            return [tmp_path]  # exists for every judge; fetched() finds no .eval stubs there
 
     monkeypatch.setattr(loading, "JUDGES", judges_dir)
     monkeypatch.setattr(loading.DirectJudgeConfig, "from_cli", staticmethod(lambda path: path))

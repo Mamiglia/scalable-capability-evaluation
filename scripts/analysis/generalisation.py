@@ -25,6 +25,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from analysis import likelihood_ratio as lr
 from analysis import stats
 from analysis.config import apply_paths, load_config
 from analysis.generalisation import capability_distance, cross_domain, frontier, reasoning_targets, time
@@ -99,7 +100,7 @@ def run_frontier(config: dict, forecasts: pd.DataFrame, out: Path) -> None:
                 for p in ("pairwise", "direct")}
         args = (task, targets[group], runs["pairwise"], runs["direct"], f["views"]["embedding"], f["views"]["glm_regex"])
         errors.append(frontier.target_errors(*args).assign(group=group))
-        llr.append(frontier.target_llr(*args, config["statistics"]["predictive_shape"])
+        llr.append(frontier.target_llr(*args, lr.SHAPE)
                    .assign(group=group, domain=f["domains"]["open"], semester=semester))
     errors, llr = pd.concat(errors, ignore_index=True), pd.concat(llr, ignore_index=True)
     errors.to_csv(out / "closed_targets_errors.csv", index=False, float_format="%.4f")

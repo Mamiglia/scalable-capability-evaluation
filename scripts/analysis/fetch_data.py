@@ -10,7 +10,7 @@ Fetches into paths.data, paths.logs, paths.features and paths.embeddings:
                 absolute scoring (direct/, direct_reasoning-hidden/, direct_channels-*, direct_truncated-thirds-*)
     features    all of generality-labs/glm_features
     embeddings  the vectors of those transcript logs
-A file already present with the published size is skipped. Each download is checked against the published hash.
+A file already present with the published hash is skipped; every download is checked against it.
 Requires read access to the generality-labs datasets (HF_TOKEN, or `hf auth login`).
 """
 import argparse
@@ -51,13 +51,23 @@ def digest(path: Path, lfs: bool, size: int) -> str:
     return h.hexdigest()
 
 
+def published(path: Path, f) -> bool:
+    """Whether the local file at `path` is the published file `f` (same size and hash)."""
+    return path.exists() and path.stat().st_size == f.size and digest(path, f.lfs is not None, f.size) == want(f)
+
+
+def want(f) -> str:
+    """The published file's hash: sha256 for LFS files, the git blob sha1 otherwise."""
+    return f.lfs.sha256 if f.lfs else f.blob_id
+
+
 def fetch(repo: str, revision: str, root: Path, wanted, dry_run: bool) -> None:
-    """Download the files of `repo` for which `wanted(path)` is true into `root`, skipping those already present.
+    """Download the files of `repo` for which `wanted(path)` is true into `root`, skipping those already published.
 
     wanted: path within the repository -> whether the analysis reads it.
     """
     files = [f for f in published_files(repo, revision) if wanted(f.path)]
-    todo = [f for f in files if not ((root / f.path).exists() and (root / f.path).stat().st_size == f.size)]
+    todo = [f for f in files if not published(root / f.path, f)]
     print(f"{repo}: {len(files)} files ({sum(f.size for f in files) / 1e9:.1f} GB), "
           f"{len(todo)} to download ({sum(f.size for f in todo) / 1e9:.1f} GB)", flush=True)
     if dry_run:
@@ -72,8 +82,7 @@ def fetch(repo: str, revision: str, root: Path, wanted, dry_run: bool) -> None:
                 time.sleep(60 * (attempt + 1))
         else:
             raise SystemExit(f"could not download {f.path}")
-        want = f.lfs.sha256 if f.lfs else f.blob_id
-        if digest(root / f.path, f.lfs is not None, f.size) != want:
+        if not published(root / f.path, f):
             raise SystemExit(f"{f.path}: hash differs from the published file")
         if i % 200 == 0:
             print(f"{repo}: {i}/{len(todo)}", flush=True)

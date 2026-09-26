@@ -123,7 +123,7 @@ def difference_test(a: pd.DataFrame, b: pd.DataFrame, paired: bool = False) -> d
         vx, vy = np.var(x, ddof=1) / len(x), np.var(y, ddof=1) / len(y)
         v, df = vx + vy, (vx + vy) ** 2 / (vx ** 2 / (len(x) - 1) + vy ** 2 / (len(y) - 1))
     se, d = float(np.sqrt(v + var_refs)), float(diff["-"])
-    p = float(scipy_stats.t.sf(d / se, df)) if se > 0 else (0.0 if d > 0 else 1.0)
+    p = float(scipy_stats.t.sf(d / se, df)) if se > 0 else degenerate_p(d)
     return dict(diff=d, se=se, df=float(df), p=p)
 
 
@@ -138,6 +138,12 @@ def task_llr(rule: Rule, refs: pd.Series, truth: pd.Series) -> pd.DataFrame:
 
 
 TARGET = ("domain", "semester", "model")  # one target of one task
+
+
+def degenerate_p(effect: float) -> float:
+    """The upper-tail p of an effect with zero standard error: 0 above zero, 1 below, 0.5 at exactly zero (so the
+    two-sided p, 2 min(p, 1 - p), is 1 for no effect rather than 0)."""
+    return 0.0 if effect > 0 else 1.0 if effect < 0 else 0.5
 
 
 def unit_test(rows: pd.DataFrame, unit: tuple[str, ...] = TARGET) -> dict:
@@ -168,7 +174,7 @@ def unit_test(rows: pd.DataFrame, unit: tuple[str, ...] = TARGET) -> dict:
     mean = float(per_unit.mean())
     se = float(np.sqrt(per_unit.var(ddof=1) / n + var_refs))
     if se == 0:  # every log LR identical, e.g. all 0 for a protocol that forecasts the references' mean
-        return dict(n=n, llr=mean, se=se, p=0.0 if mean > 0 else 1.0)
+        return dict(n=n, llr=mean, se=se, p=degenerate_p(mean))
     return dict(n=n, llr=mean, se=se, p=float(scipy_stats.t.sf(mean / se, n - 1)))
 
 
@@ -215,7 +221,7 @@ def slope_test(rows: pd.DataFrame, x: pd.Series) -> dict:
         slopes = np.array(slopes)
         var_refs += (len(slopes) - 1) / len(slopes) * float(((slopes - slopes.mean()) ** 2).sum())
     se = float(np.sqrt(fit.stderr ** 2 + var_refs))
-    p = float(scipy_stats.t.sf(fit.slope / se, len(base) - 2)) if se > 0 else (0.0 if fit.slope > 0 else 1.0)
+    p = float(scipy_stats.t.sf(fit.slope / se, len(base) - 2)) if se > 0 else degenerate_p(fit.slope)
     return dict(n=len(base), slope=float(fit.slope), se=se, p=p)
 
 

@@ -1,4 +1,4 @@
-"""Reproduce every figure and table of the paper from the generality-labs data, in order.
+"""Reproduce the paper's figures and tables from the generality-labs data, in order (exceptions at the end).
 
     uv run python scripts/analysis/run.py                        # everything, about three hours
     uv run python scripts/analysis/run.py --list                 # the steps and what each makes
@@ -19,6 +19,8 @@ Where each paper figure and table comes from (docs/manuscript_draft.pdf numberin
                       (frontier), Figure 18 numbers and the Appendix D.5 tests (cross_domain); Table 7
     sensitivity       Figure 15 (judge_choice), Figure 19 (item_count), Figure 20 (reference_count), Figure 25
                       (saturation_boundary), Figure 27 (cost), Figure 28 (ensemble); Tables 8, 10
+Not here: Figures 11 to 14 (scripts/analyses/domain_figures.py), Figure 26 (branch prediction-horizon), and the drawing
+of Figure 18.
 """
 import argparse
 import subprocess

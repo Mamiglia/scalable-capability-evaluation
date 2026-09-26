@@ -27,6 +27,7 @@ def apply_paths(config: dict[str, Any]) -> None:
     from reference import tables
 
     tables.DATA = Path(config["paths"]["data"])
+    tables.META = tables.DATA / "meta"  # the frozen tables, fetched with the transcripts
     tables.FEATURES = Path(config["paths"]["features"])
     embeddings.EMBEDDINGS = Path(config["paths"]["embeddings"])
     # worker processes re-import these modules: they read the paths from the environment
