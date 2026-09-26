@@ -134,12 +134,22 @@ def pairwise_figure(out: Path, name: str, errors: pd.DataFrame, rows: dict[str, 
     publish(out, name, fig, caption, table, errors)
 
 
+def other_protocols(config: dict, variant_prefix: str) -> list[str]:
+    """transcript_parts.other_protocols, without Embedding when paths.embeddings has no vectors of the cut transcripts
+    (`variant_prefix`: "thirds-" or "channels-"; not yet published on generality-labs/transcript-embeddings)."""
+    protocols = list(config["transcript_parts"]["other_protocols"])
+    if "embedding" in protocols and not any(Path(config["paths"]["embeddings"]).rglob(f"*.{variant_prefix}*.npz")):
+        print(f"no {variant_prefix}* embedding vectors in {config['paths']['embeddings']}: drawn without Embedding", flush=True)
+        protocols.remove("embedding")
+    return protocols
+
+
 def other_protocols_figure(out: Path, name: str, errors: pd.DataFrame, rows: dict[str, str], colours: dict[str, str],
                     config: dict, text: str, **layout) -> None:
-    """A figure of the other protocols, a row of domain panels each, every part removed, and its outputs."""
+    """A figure of the other protocols in `errors`, a row of domain panels each, every part removed, and its outputs."""
     names, labels = config["display"]["domain_names"], config["display"]["protocol_names"]
     tables, lines = {}, [f"{text} {method_text('full', True)}"]
-    for protocol in config["transcript_parts"]["other_protocols"]:
+    for protocol in [p for p in config["transcript_parts"]["other_protocols"] if p in set(errors.protocol)]:
         part = errors[errors.protocol == protocol]
         tables[protocol], means = domain_changes(part, rows, "full")
         targets = part[part.condition == "full"].groupby("domain").size()
@@ -221,9 +231,9 @@ def thirds_other_protocols(config: dict, out: Path) -> None:
     logs, rows = Path(config["paths"]["logs"]), third_rows(config, False)
     removed, alone = list(rows.values()), list(third_rows(config, True).values())
     features = pd.read_csv(Path(config["paths"]["cache"]) / "features_thirds.csv", dtype={"item": str})
-    judges, frames = direct_judges(config), []
+    judges, frames, protocols = direct_judges(config), [], other_protocols(config, "thirds-")
     for domain, task, keep in removal_tasks(config):
-        for protocol in config["transcript_parts"]["other_protocols"]:
+        for protocol in protocols:
             if protocol == "direct":
                 frames.append(thirds.direct_errors(domain, task, judges[domain, task.semester], removed, removed + alone, logs))
             else:
@@ -236,11 +246,11 @@ def channels_other_protocols(config: dict, out: Path) -> None:
     """Figure 24: Deterministic features, Embedding and Absolute scoring, each channel removed."""
     logs, tool_domains = Path(config["paths"]["logs"]), config["channels"]["tool_domains"]
     reasoning_only = pd.read_csv(Path(config["paths"]["cache"]) / "features_reasoning_only.csv", dtype={"item": str})
-    judges, frames = direct_judges(config), []
+    judges, frames, protocols = direct_judges(config), [], other_protocols(config, "channels-")
     for domain, task, keep in removal_tasks(config):
         tools = domain in tool_domains
         removed = list(channel_rows(config, tools).values())
-        for protocol in config["transcript_parts"]["other_protocols"]:
+        for protocol in protocols:
             if protocol == "direct":
                 frames.append(channels.direct_errors(domain, task, judges[domain, task.semester], removed, keep, logs))
             else:
