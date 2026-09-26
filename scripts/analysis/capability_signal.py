@@ -1,7 +1,7 @@
 """Do saturated transcripts carry capability information? Each protocol's squared error and log likelihood ratio
 against the Baseline for the targets of the main analysis, and how they vary by domain.
 
-Writes to <paths.outputs>/capability_signal/ (docs/manuscript_draft.pdf numbering):
+Writes to <paths.outputs>/capability_signal/ (the paper's numbering):
     error_by_protocol.{svg,png,txt}        Figure 3: squared error per target model pooled over domains, with the
                                            one-sample test of the log likelihood ratio; the .txt holds every plotted
                                            number and both tests of Table 6

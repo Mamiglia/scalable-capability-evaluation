@@ -35,11 +35,10 @@ def judge_errors(forecasts: pd.DataFrame, variants: dict[str, str]) -> pd.DataFr
         base[(d, s)] = (refs.mean(), refs)
     f["e"] = (f.theta_hat - f.theta) ** 2
     f["e_base"] = [(base[(d, s)][0] - t) ** 2 for d, s, t in zip(f.domain, f.semester, f.theta)]
-    f["score"] = stats.prediction_score(f.e, f.e_base)  # only to drop the targets where it is undefined
     f["judge_theta"] = [base[(d, s)][1].get(j, np.nan) for d, s, j in zip(f.domain, f.semester, f.judge)]
     f["task"] = f.domain + " " + f.semester
     f["rank"] = f.groupby(["task", "protocol"]).judge_theta.rank(ascending=False, method="dense").astype(int)
-    return f.dropna(subset=["score"])
+    return f.dropna(subset=["e", "e_base"])
 
 
 def medians(f: pd.DataFrame, semesters: list[str]) -> pd.Series:

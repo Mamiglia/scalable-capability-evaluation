@@ -2,7 +2,7 @@
 D.8 to D.10).
 
 Writes to <paths.outputs>/transcript_parts/ (config.yaml); each figure as .pdf, .svg and .png with a .txt of every
-plotted number and its test, and a .csv of the plotted changes (docs/manuscript_draft.pdf numbering):
+plotted number and its test, and a .csv of the plotted changes (the paper's numbering):
     thirds_removed            Figure 4: pairwise judge, each transcript third removed, against the full transcript
     channel_shares            Figure 5A: each channel's share of the characters the models wrote (the .csv: the shares)
     channels_removed          Figure 5B: pairwise judge, each channel removed, against the full transcript

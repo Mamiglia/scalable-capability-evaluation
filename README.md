@@ -66,8 +66,8 @@ correct repeat-0 transcripts. A cohort's `semester` identifies the task, not a r
 **Protocols.** Supervised protocols use `fit(task.train) → predict(task.test)`:
 
 - *Tabular regression* on transcript statistics (length, answer length, reasoning length,
-  output tokens): preprocessing and regression coefficients fit on references + history,
-  applied to the targets. Models with missing features are excluded from fitting/prediction.
+  output tokens): preprocessing and regression coefficients fit on the references, applied
+  to the targets. Models with missing features are excluded from fitting/prediction.
 - *Pairwise judging*: an LLM judge compares a target's transcript with a reference's on the
   same item and picks the more capable model. Every (target, reference) pair is judged, in both
   shown orders. A Bradley-Terry model over the verdicts with the references **pinned at θ\***
@@ -75,9 +75,12 @@ correct repeat-0 transcripts. A cohort's `semester` identifies the task, not a r
   expanding history does not expand target pairings. Its likelihood is fixed, with no fitted
   judge sensitivity or bias and no separate calibration stage. Existing reference–reference
   judgments have no effect on target estimates; history–history judgments are not added.
+  The paper reports the linear calibration instead (`protocols.pairwise.linear`, the `linear` variant in
+  `scripts/analysis/config.yaml`): per benchmark, the reference pairs' log odds are regressed on their θ\*
+  difference, and a target's θ̂ is the precision-weighted mean over references of θ\*_r + log odds / slope.
 - *Direct judging*: an LLM judge rates each model's correct train transcripts from 1 to 10,
   with available reasoning shown and decimal ratings preserved. A linear calibration maps
-  mean ratings of references + history to their task-specific HARD-item θ*, then forecasts
+  mean ratings of the references to their task-specific HARD-item θ*, then forecasts
   targets from their mean ratings. Judging covers `task.train` and `task.test`.
 
 **Metric.** Mean squared error between θ̂ and θ\* over the targets, per semester and pooled.

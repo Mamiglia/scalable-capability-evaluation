@@ -1,5 +1,5 @@
 """How much do the analysis choices matter? The judge, the number of judged items and of references, the saturation
-boundary, the cost, and an ensemble of judges (Appendix D; figure and table numbers of docs/manuscript_draft.pdf).
+boundary, the cost, and an ensemble of judges (Appendix D; the paper's figure and table numbers).
 
 Writes to paths.outputs/sensitivity (config.yaml), each figure as .pdf, .png, .svg with a .txt of its plotted numbers:
     judge_choice            Figure 15: squared error per target with the strongest, 2nd and 3rd strongest reference as
@@ -162,6 +162,8 @@ ANALYSES = {"judge_choice": run_judge_choice, "item_count": run_item_count, "ref
 
 
 def main(config: dict, only: list[str] | None) -> None:
+    # the item-count, reference-count and ensemble code converts verdicts and ratings with these variants only
+    assert config["protocols"]["pairwise"] == "linear" and config["protocols"]["direct"] == "raw", config["protocols"]
     apply_paths(config)
     out, cache = Path(config["paths"]["outputs"]) / "sensitivity", Path(config["paths"]["cache"])
     out.mkdir(parents=True, exist_ok=True), cache.mkdir(parents=True, exist_ok=True)

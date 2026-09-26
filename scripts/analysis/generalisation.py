@@ -1,6 +1,6 @@
 """Does the capability signal hold beyond the reference models? Five analyses, each selectable with --only.
 
-Writes to paths.outputs/generalisation (config.yaml); docs/manuscript_draft.pdf numbering:
+Writes to paths.outputs/generalisation (config.yaml), in the paper's numbering:
     time                 error_over_time.{svg,png,txt} (Figure 6) and error_over_time.csv (Table 7): each task's mean
                          squared error per protocol, 2024-I to 2026-I
     reasoning_targets    reasoning_targets.{svg,png,txt} (Figure 7): Maths 2025-I reasoning targets predicted from

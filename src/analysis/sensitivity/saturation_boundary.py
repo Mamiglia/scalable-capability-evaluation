@@ -1,6 +1,6 @@
 """Saturation boundary: tighten the EASY boundary from the 3 strongest references to the k = 4..8 strongest, or to
 every reference and target ("all"); theta* is refit on the enlarged HARD set and every protocol is refit on the train
-items still EASY (Figure 25, Table 10; Appendix D.11). Spec: docs/saturation-boundary-refit.md.
+items still EASY (Figure 25, Table 10; Appendix D.11).
 """
 import copy
 

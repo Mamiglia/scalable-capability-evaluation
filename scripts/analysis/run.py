@@ -10,7 +10,7 @@ Every setting is in scripts/analysis/config.yaml. Outputs go to analysis/: forec
 reads), one folder per group with its figures (each with a .txt of every plotted number and its test) and tables,
 and cache/ (expensive intermediates, reused when present; delete it for a clean run). Launches no judging.
 
-Where each paper figure and table comes from (docs/manuscript_draft.pdf numbering; files in analysis/<step>/):
+Where each paper figure and table comes from (the paper's numbering; files in analysis/<step>/):
     capability_signal Figure 3 error_by_protocol, Figure 10 prediction_example, Figure 16 domain_glm_effects, Figure 17
                       domain_glm_contrasts, Figure 21 no_self_judging; Table 3 error_by_domain.csv, Table 6
                       error_by_protocol.csv, Table 9 domain_glm_ratios.csv
