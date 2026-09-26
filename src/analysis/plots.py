@@ -1,20 +1,10 @@
-"""Figures and tables of the results section.
-
-forecast_figure   one panel per domain, semesters along x; within a semester the targets
-                  sorted by theta*, black = true theta, orange = forecast, dotted connectors
-bar_figure        four bars (the conditions), coloured by method, at the mean of a per-(domain,
-                  semester) metric; one staggered open circle per domain at its pooled value,
-                  joined across conditions by a solid line in the domain's colour; saturated-item
-                  prediction as a dashed line; off-axis values compressed into a band above
-                  the in-range axis
-semester_table    semester x condition for one domain, or pooled over the domains that have
-                  the semester, with an "all" row
-
-Judge protocols appear as the best judge on references (task_metrics has no other judge
-rows); one variant per protocol is drawn, chosen by the runner's toggles.
-
-matplotlib.use("Agg") below is deliberate: figures go to files, nothing renders inline in an
-IDE cell.
+"""
+Shared plotting code: the figure style, protocol and domain names and colours, the axis helpers other figure modules
+import (unclip_markers, ci95, stars), and the prediction figures and tables of the exploratory runner
+scripts/analyses/results.py (forecast_figure, also drawn by scripts/analysis/capability_signal.py; bar_figure,
+semester_table, task_figure, timeline_figure, frontier_figure; reasoning_figure, which nothing calls at present).
+Judge protocols are drawn as the best judge on references, in the one variant per protocol the caller chooses.
+matplotlib.use("Agg") below is deliberate: figures go to files, nothing renders inline in an IDE cell.
 """
 
 import matplotlib
@@ -34,40 +24,52 @@ plt.rcParams.update({
     "svg.fonttype": "none", "pdf.fonttype": 42, "savefig.dpi": 300,
 })
 CONDITIONS = ["glm_length", "glm_regex", "embedding", "direct", "pairwise"]  # the bars, in this order
-# Protocol names as the paper uses them (CLAUDE.md, figure colour palette); Length alone is a diagnostic, not a paper protocol.
-LABELS = {BASELINE: "Prediction from saturated items", "glm_length": "Length", "glm_regex": "Deterministic features",
+# Display names of the protocols (CLAUDE.md, figure colour palette); Length alone is a diagnostic.
+LABELS = {BASELINE: "Baseline", "glm_length": "Length", "glm_regex": "Deterministic features",
           "embedding": "Embedding", "direct": "Absolute scoring", "pairwise": "Pairwise judge"}
 DOMAIN_LABELS = {"science": "Science", "math": "Maths", "coding": "Coding", "cyber": "Cyber"}
-# regressions in greens, light to dark (length, length + prose, embedding); judges in blues (direct
-# light, pairwise dark); domains in warm hues, so the two encodings never share a colour
-COLORS = dict(zip(CONDITIONS, ["#b8e0c2", "#3f9c73", "#0d4a30", "#9dc6e6", "#1f4c85"]))  # muted, print-like; wider steps for visibility
+# the project palette (CLAUDE.md, scripts/analysis/config.yaml display.protocol_colours)
+COLORS = {"glm_length": "#f1a48a", "glm_regex": "#eb6834", "embedding": "#4a3aa7", "direct": "#1baf7a",
+          "pairwise": "#2a78d6"}
 # the pooled-judge conditions are not bars, but task figures may draw them
 LABELS.update({"direct_ensemble": "Direct scoring, pooled judges", "pairwise_ensemble": "Pairwise judges, pooled"})
-COLORS.update({"direct_ensemble": "#c9d9ec", "pairwise_ensemble": "#7a93b8"})
-DOMAIN_COLORS = {"science": "#b4485a", "math": "#e0955a", "coding": "#a97aa8", "cyber": "#cdb04c"}
+# the palette's tenuous colour, and a shade of the Pairwise judge's
+COLORS.update({"direct_ensemble": "#f8cbbc", "pairwise_ensemble": "#6aa1e2"})
+# domains in colours no protocol uses (config.yaml display.domain_colours)
+DOMAIN_COLORS = {"science": "#cc79a7", "math": "#d55e00", "coding": "#6a3d9a", "cyber": "#c9a800"}
 STAGGER = 0.05  # the four domains' circles sit within ±0.05 of the bar centre
-TRUE, PRED = "black", "#eb6834"
-METRIC_LABELS = {"mse": "Squared error", "delta": "MSE − saturated-item MSE", "z": "z of MSE − saturated-item MSE",
+TRUE, PRED = "black", "#eb6834"  # PRED: a prediction of a protocol without a palette colour
+METRIC_LABELS = {"mse": "Squared error", "delta": "MSE − Baseline MSE", "z": "z of MSE − Baseline MSE",
                  "pct": "Relative MSE (%)"}
 
 
 def with_pct(metrics: pd.DataFrame) -> pd.DataFrame:
-    """metrics with a `pct` column: 100 * mse / baseline_mse per row, the MSE as a percentage of
-    the prediction from saturated items's MSE on the same targets (100 = the baseline, below = better)."""
+    """
+    Adds the MSE as a percentage of the Baseline's MSE on the same targets (100 = the Baseline, below 100 = better).
+
+    Inputs:
+        metrics: per-task metrics (stats.task_metrics output); uses mse and baseline_mse.
+    Outputs:
+        a copy of `metrics` with a `pct` column, 100 * mse / baseline_mse per row.
+    """
     return metrics.assign(pct=100 * metrics.mse / metrics.baseline_mse)
 
 
 def compress(values: np.ndarray, extent: np.ndarray | None = None) -> tuple[np.ndarray, dict[float, float]]:
-    """Map off-axis values into a band above the in-range values, keeping their order.
+    """
+    Moves far-high values into a band above the in-range values, keeping their order, so that an outlier does not
+    squash the rest of the axis. With at least 10 values, a value more than 3 interquartile ranges above the upper
+    quartile is off-axis; every other value keeps its position. The distinct off-axis values are spread in rank order
+    from 52.5% to 70% of the in-range span above the in-range maximum (a single one at 61%).
 
-    values: every y that will be drawn (bar means, domain values, the baseline); `extent`:
-    further y's that must stay in range, e.g. the ends of the in-range error bars. Returns
-    (position per value, {true off-axis value: drawn position}). Values within 3 IQR above the
-    upper quartile, and every value below it, keep their position; only far-high values (and
-    only when there are at least 10 values) are off-axis. Off-axis values are placed above
-    max(in-range) + a gap of 35% of the in-range span, spread over a band of another 35%
-    in rank order (a single off-axis value sits at the band's centre). The dict is empty
-    when nothing is off-axis."""
+    Inputs:
+        values: every y value that will be drawn (bar means, domain values, the Baseline level).
+        extent: further y values that must stay in range, e.g. the tops of the in-range error bars; they widen the
+            in-range span but are not placed themselves. None for no such values.
+    Outputs:
+        (drawn position of each value, dict from each off-axis value to its drawn position); the dict is empty and the
+        positions equal the values when nothing is off-axis.
+    """
     values = np.asarray(values, float)
     q1, q3 = np.percentile(values, [25, 75])
     fence = 3 * (q3 - q1)
@@ -90,8 +92,18 @@ def compress(values: np.ndarray, extent: np.ndarray | None = None) -> tuple[np.n
 
 
 def break_strip(ax, raw: np.ndarray, mapping: dict[float, float], extent: np.ndarray | None = None) -> None:
-    """A white strip across the panel and its left spine in the gap between the in-range
-    values and the compressed band, so the axis break is visible; the glyph is the user's."""
+    """
+    Draws a white strip across the panel and its left spine in the gap between the in-range values and the compressed
+    band, so the axis break is visible; the break glyph itself is left to be added by hand.
+
+    Inputs:
+        ax: the axes to draw on.
+        raw: the true values passed to compress.
+        mapping: compress's dict from off-axis value to drawn position; nothing is drawn when it is empty.
+        extent: the in-range error-bar tops passed to compress, or None.
+    Outputs:
+        none; draws on ax.
+    """
     if not mapping:
         return
     lo, hi = break_edges(raw, mapping, extent)
@@ -99,9 +111,18 @@ def break_strip(ax, raw: np.ndarray, mapping: dict[float, float], extent: np.nda
 
 
 def break_edges(raw: np.ndarray, mapping: dict[float, float], extent: np.ndarray | None = None) -> tuple[float, float]:
-    """(bottom, top) of the white break strip in drawn units: just above the highest in-range
-    value and just below the compressed band. Error bars are capped at the bottom edge so
-    nothing pokes through the strip into the band. (inf, inf) without a band."""
+    """
+    Computes where the white break strip goes, in drawn units: just above the highest in-range value (or error-bar top)
+    and just below the compressed band. Callers cap error bars at the bottom edge so nothing pokes through the strip.
+
+    Inputs:
+        raw: the true values passed to compress.
+        mapping: compress's dict from off-axis value to drawn position.
+        extent: the in-range error-bar tops, or None.
+    Outputs:
+        (bottom, top) of the strip: 5% of the gap above the highest in-range value and 25% of the gap below the band's
+        lowest position; (inf, inf) when there is no band.
+    """
     if not mapping:
         return float("inf"), float("inf")
     lo = max([v for v in raw if v not in mapping] + ([float(np.nanmax(extent))] if extent is not None and len(extent) else []))
@@ -110,8 +131,15 @@ def break_edges(raw: np.ndarray, mapping: dict[float, float], extent: np.ndarray
 
 
 def unclip_markers(fig):
-    """Every marker drawn in full: scatter points and marker lines are never clipped by the axes, so a point
-    on an axis limit is not cut in half. Lines, bands and boxes stay clipped. Returns the figure."""
+    """
+    Makes every marker draw in full: scatter points and lines with markers are no longer clipped at the axes, so a
+    point on an axis limit is not cut in half. Lines without markers, bands and boxes stay clipped.
+
+    Inputs:
+        fig: a matplotlib figure.
+    Outputs:
+        the same figure, modified in place.
+    """
     from matplotlib.collections import PathCollection
     for ax in fig.axes:
         for c in ax.collections:
@@ -124,7 +152,14 @@ def unclip_markers(fig):
 
 
 def ci95(values: np.ndarray) -> float:
-    """Half-width of the t-based 95% interval of the mean of `values`; NaN with fewer than 3."""
+    """
+    Computes the half-width of the t-based 95% confidence interval of a sample's mean.
+
+    Inputs:
+        values: the sample, a 1-D array.
+    Outputs:
+        float, t(0.975, n - 1) * sd / sqrt(n); NaN with fewer than three values.
+    """
     n = len(values)
     if n < 3:
         return float("nan")
@@ -135,8 +170,18 @@ AXES_HEIGHT = 1.6  # inches; bar_figure and task_figure share it so the panels s
 
 
 def fix_axes_height(fig, ax, inches: float = AXES_HEIGHT, rounds: int = 3) -> None:
-    """Grow or shrink the figure so the axes' drawn height equals `inches`, whatever the legend
-    and tick labels take up. Constrained layout re-runs on each draw, so a few rounds converge."""
+    """
+    Resizes the figure so that the axes' drawn height is `inches`, whatever the legend and tick labels take up; the
+    constrained layout re-runs on each draw, so a few rounds converge.
+
+    Inputs:
+        fig: the figure.
+        ax: the axes whose height is fixed.
+        inches: the axes height to reach (default AXES_HEIGHT, shared so that figures placed side by side line up).
+        rounds: how many draw-and-resize rounds to run.
+    Outputs:
+        none; changes the figure's height.
+    """
     for _ in range(rounds):
         fig.canvas.draw()
         current = ax.get_position().height * fig.get_figheight()
@@ -144,15 +189,35 @@ def fix_axes_height(fig, ax, inches: float = AXES_HEIGHT, rounds: int = 3) -> No
 
 
 def chosen(metrics: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
-    """The metric rows of the chosen variant per protocol ("-" for protocols without one)."""
+    """
+    Keeps the rows of each protocol's chosen variant.
+
+    Inputs:
+        metrics: any table with protocol and variant columns (e.g. stats.task_metrics output).
+        variants: protocol -> the variant to keep; a protocol not named keeps its "-" rows.
+    Outputs:
+        the matching rows of `metrics`, every column kept.
+    """
     return metrics[[variants.get(p, "-") == v for p, v in zip(metrics.protocol, metrics.variant)]]
 
 
 def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, semesters: list[str] | None = None) -> None:
-    """True theta (black) and the condition's forecast (orange) for every target: one panel per
-    domain (panel width follows its number of semesters), semesters along x, targets within
-    a semester sorted by theta*, a dotted connector per target. `semesters` restricts the
-    x-axis (e.g. the latest one). Judge protocols are drawn as the best judge on references."""
+    """
+    Draws every target's true theta* and one protocol's prediction of it: one panel per domain (its width set by its
+    number of semesters), semesters along x, the targets within a semester sorted by theta*, a grey connector from
+    truth to prediction, and the Baseline as a dashed level per task. Judge protocols are drawn as the best judge on
+    references (stats.one_per_target).
+
+    Inputs:
+        forecasts: the forecasts table (calibration.forecasts rows, every column); the drawing uses domain, semester,
+            protocol, variant, theta and theta_hat.
+        protocol: the protocol to draw, e.g. "pairwise".
+        variant: its variant, e.g. "linear" ("-" for a protocol without variants).
+        path: the image file to write.
+        semesters: draw only these semesters (e.g. the latest); None draws all.
+    Outputs:
+        the figure, written to path: open black circles for the truth, orange filled circles for the prediction.
+    """
     f = one_per_target(forecasts)
     baseline = f[f.protocol == BASELINE].groupby(["domain", "semester"]).theta_hat.first()  # one value per task
     f = f[(f.protocol == protocol) & (f.variant == variant)]
@@ -169,15 +234,16 @@ def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, 
             g = d[d.semester == sem].sort_values("theta")
             x = i + np.linspace(-0.36, 0.36, len(g))  # targets spread within the semester's slot
             ax.vlines(x, np.minimum(g.theta, g.theta_hat), np.maximum(g.theta, g.theta_hat), color="#b0aea6", lw=0.6, zorder=1)
-            if (dom, sem) in baseline.index:  # the prediction from saturated items: one level per task
+            if (dom, sem) in baseline.index:  # the Baseline: one level per task
                 ax.hlines(baseline[(dom, sem)], i - 0.45, i + 0.45, color="grey", lw=0.8, ls="--", zorder=0)
             ax.scatter(x, g.theta, s=16, facecolor="white", edgecolor=TRUE, linewidth=0.8, zorder=3)
-            ax.scatter(x, g.theta_hat, s=16, facecolor=PRED, edgecolor="none", zorder=4)
+            ax.scatter(x, g.theta_hat, s=16, facecolor=COLORS.get(protocol, PRED), edgecolor="none", zorder=4)
         ax.set_xticks(range(len(sems)), sems, rotation=90 if len(sems) > 3 else 0)
         ax.text(0, 1.02, DOMAIN_LABELS.get(dom, dom), transform=ax.transAxes, color="grey", ha="left")
     np.atleast_1d(axes)[0].set_ylabel("Model Capability (θ)")
     handles = [plt.Line2D([], [], marker="o", ms=4, ls="", markerfacecolor="white", markeredgecolor=TRUE, label="Target models (true θ)"),
-               plt.Line2D([], [], marker="o", ms=4, ls="", color=PRED, label=f"{LABELS.get(protocol, protocol)} prediction"),
+               plt.Line2D([], [], marker="o", ms=4, ls="", color=COLORS.get(protocol, PRED),
+                          label=f"{LABELS.get(protocol, protocol)} prediction"),
                plt.Line2D([], [], color="grey", lw=0.8, ls="--", label=LABELS[BASELINE])]
     fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False)
     fig.savefig(path, bbox_inches="tight")
@@ -186,16 +252,28 @@ def forecast_figure(forecasts: pd.DataFrame, protocol: str, variant: str, path, 
 
 def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], path, semester: str | None = None,
                llr: pd.DataFrame | None = None) -> None:
-    """One bar per condition in CONDITIONS, coloured by method, at the mean over the (domain,
-    semester) tasks of the metric ("mse", "delta" or "z"), with a capless 95% t-interval over
-    those tasks (none below 3); one open circle per domain at the domain's pooled value
-    (semester "all", or the given semester's value), the domains staggered across the bar
-    and each domain's circles joined across the conditions by a solid line in its colour; the
-    prediction from saturated items as a dashed grey line (its mean raw MSE, or 0 for delta and z); stars
-    above a bar, given `llr` (likelihood_ratio rows, one shape and judge per target), are the one-sided
-    log likelihood ratio test against the references' distribution with each task as the unit
-    (*, **, *** for p below .05, .01, .001; a protocol without log LRs gets none). Off-axis values (beyond 3 IQR) are drawn in a compressed band above the in-range values
-    with ticks at their true values (see compress); the break glyph is left to the user."""
+    """
+    Draws one per-task metric as bars: one bar per protocol in CONDITIONS at the mean over the (domain, semester)
+    tasks, with a capless 95% t-interval over those tasks (none with fewer than three); one filled circle per domain at
+    the mean over its semesters, the domains staggered across the bar and each domain's circles joined across the
+    protocols by a line in its colour; and the Baseline as a dashed grey line (its mean MSE over the tasks for "mse",
+    100 for "pct", 0 for "delta" and "z"). Far-high values are drawn in a compressed band above a break strip, with
+    ticks at their true values (see compress).
+
+    Inputs:
+        metrics: per-task metrics (stats.task_metrics output); uses domain, semester, protocol, variant, mse,
+            baseline_mse and the metric's column; rows with domain or semester "all" are ignored.
+        metric: "mse", "delta", "z" or "pct" (the MSE as a percentage of the Baseline's).
+        variants: protocol -> the variant to draw (see chosen).
+        path: the image file to write.
+        semester: draw only this semester's tasks; None uses every semester.
+        llr: log likelihood ratio rows (analysis.likelihood_ratio, one shape and judge per target) for the stars; None
+            draws no stars.
+    Outputs:
+        the figure, written to path. A star above a bar marks the one-sided log likelihood ratio test against the
+        references' distribution with each task as the unit (*, **, *** for p below .05, .01, .001); a protocol
+        without log likelihood ratios gets none.
+    """
     assert metric in (*METRICS, "pct"), metric
     m = chosen(with_pct(metrics), variants)
     m = m[m.domain != "all"]
@@ -259,8 +337,8 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
     ax.tick_params(axis="x", rotation=90)
     ax.set_ylabel(METRIC_LABELS[metric])
     handles = [plt.Line2D([], [], color=DOMAIN_COLORS[d], lw=0.8, marker="o", ms=4, markeredgecolor="black", markeredgewidth=0.4, label=DOMAIN_LABELS.get(d, d)) for d in domains]
-    ax.text(len(CONDITIONS) - 0.5, place[baseline], LABELS[BASELINE].replace(" from ", " from\n"), color="grey", fontsize=7,
-            ha="right", va="bottom", zorder=6)  # the baseline named at its line, as in the draft
+    ax.text(len(CONDITIONS) - 0.5, place[baseline], LABELS[BASELINE], color="grey", fontsize=7,
+            ha="right", va="bottom", zorder=6)  # the Baseline named at its line
     fig.legend(handles=handles, loc="outside lower center", ncol=2, frameon=False, handlelength=2.0)
     fix_axes_height(fig, ax)
     fig.savefig(path, bbox_inches="tight")
@@ -268,10 +346,20 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
 
 
 def semester_table(metrics: pd.DataFrame, metric: str, variants: dict[str, str], domain: str | None = None) -> pd.DataFrame:
-    """Semester x condition (prediction from saturated items first, then CONDITIONS) for one domain, or pooled when
-    `domain` is None: the mean over the domains that have that semester, plus an "all" row
-    (the domain's pooled row, or the mean over every (domain, semester) cell). Columns are
-    the LABELS; a condition without a value is NaN."""
+    """
+    Tabulates one metric by semester and protocol, for one domain or pooled over the domains; pooled, a semester's
+    value is the mean over the domains that have that semester.
+
+    Inputs:
+        metrics: per-task metrics (stats.task_metrics output); uses domain, semester, protocol, variant and the metric.
+        metric: "mse", "delta" or "z".
+        variants: protocol -> the variant to show (see chosen).
+        domain: a domain's code key (e.g. "math"); None pools over the domains.
+    Outputs:
+        DataFrame with one row per semester plus a row "all" (for a domain, its pooled row from stats.task_metrics;
+        pooled, the mean over every (domain, semester) cell), and one column per protocol, the Baseline first and then
+        CONDITIONS, named by LABELS; NaN where a protocol has no value.
+    """
     assert metric in METRICS, metric
     m = chosen(metrics, variants)
     m = m[m.domain == domain] if domain else m[(m.domain != "all") & (m.semester != "all")]
@@ -287,15 +375,23 @@ def semester_table(metrics: pd.DataFrame, metric: str, variants: dict[str, str],
 
 def task_figure(forecasts: pd.DataFrame, domain: str, semester: str, conditions: list[tuple[str, str]], path,
                 reasoning: set[str] | None = None) -> None:
-    """One forecasting task: the references' known theta* (grey filled circles, left slot) and,
-    in the right slot, the targets' true theta (open black circles) with each condition's
-    forecast as filled circles in the condition's bar colour (COLORS), joined to the truth by a
-    thin connector in the same colour, targets sorted by theta*; the prediction from saturated items (the
-    references' mean) as a dashed level across the target slot. `conditions` are (protocol,
-    variant) pairs, e.g. [("pairwise", "linear"), ("glm_regex", "-")]. Judge protocols are drawn
-    as the best judge on references. Reads the references' theta* from the frozen tables.
-    `reasoning`: model names whose transcripts carry visible chain of thought; their truth is
-    drawn as an open diamond instead of a circle (and named in the legend)."""
+    """
+    Draws one prediction task: the references' theta* as grey filled circles in the left slot and, in the right slot,
+    the targets' true theta* (open black circles, sorted by theta*) with each protocol's prediction as a filled circle
+    in the protocol's colour (COLORS) joined to the truth by a thin connector, and the Baseline (the references' mean)
+    as a dashed level across the target slot. Judge protocols are drawn as the best judge on references.
+
+    Inputs:
+        forecasts: the forecasts table (calibration.forecasts rows, every column).
+        domain: the domain's code key; the references' theta* are read from its frozen tables.
+        semester: the task's semester; the left slot is labelled with the semester before it.
+        conditions: (protocol, variant) pairs to draw, e.g. [("pairwise", "linear"), ("glm_regex", "-")].
+        path: the image file to write.
+        reasoning: names of target models whose transcripts show chain of thought; their truth is drawn as an open
+            diamond and named in the legend. None for no such models.
+    Outputs:
+        the figure, written to path.
+    """
     from analysis import loading  # local import: plots stays importable without configs
     from reference import tables
     models, _ = tables.load(loading.domain(domain))
@@ -336,31 +432,45 @@ def task_figure(forecasts: pd.DataFrame, domain: str, semester: str, conditions:
     plt.close(fig)
 
 
-TIMELINE = ["glm_regex", "embedding", "direct", "pairwise"]  # the four main approaches, in this order
+TIMELINE = ["glm_regex", "embedding", "direct", "pairwise"]  # the four protocols these figures draw, in this order
 
 
 def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str], path, scores: pd.DataFrame | None = None,
                     metric: str = "mse", forecasts: pd.DataFrame | None = None, band: bool = False, shade: bool = False,
                     cut: float | None = None, llr: pd.DataFrame | None = None) -> None:
-    """One domain's tasks over time: x = semester, y = the task's `metric` ("mse"; "delta": MSE minus
-    the saturated-item MSE, baseline at 0; "pct": MSE as a percentage of the saturated-item MSE, baseline
-    at 100), one line with filled
-    circles per approach in TIMELINE (bar colours), and the prediction from saturated items as a dashed
-    grey line drawn on top. Judge approaches are the best judge on references. The approaches
-    are offset slightly in x so their points do not overlap. With `scores` (stats.scores
-    output) each point carries a capless error bar: the task's percentile-bootstrap 95%
-    interval of the MSE over its 8 targets (lo, hi); for "delta" and "pct" with `forecasts` it is
-    instead the 95% t-interval of the paired difference of squared errors over the task's
-    targets. With `llr` (likelihood_ratio rows, one shape and judge per target) a star above a
-    point gives the one-sided log likelihood ratio test of the task's targets against the
-    references' distribution (*, **, *** for p below .05, .01, .001). Far-high
-    values (beyond Tukey's far-out fence) are cut off by default: the axis spans the in-range
-    values and their error bars and the outliers run off the top (printed); with `band=True`
-    they are drawn in a compressed band above a break strip instead (the bar plots' convention).
-    `shade=True` draws each approach's interval as a translucent band along its line instead of
-    vertical bars (not drawn across compressed values). `cut` fixes the top of the axis at that
-    value: points above it are drawn as upward triangles on the cut line and the top tick reads
-    ">cut"; lines and bands are clipped there."""
+    """
+    Draws one domain's tasks over time: x = semester, y = the task's metric, one line with filled circles per protocol
+    in TIMELINE (colours from COLORS), slightly offset in x so the points do not overlap, and the Baseline as a dashed
+    grey line drawn on top. Judge protocols are the best judge on references. By default, far-high values (more than 3
+    interquartile ranges above the upper quartile) run off the top of the axis, which spans the other values and their
+    error bars, and are printed.
+
+    Inputs:
+        metrics: per-task metrics (stats.task_metrics output); uses domain, semester, protocol, variant, mse,
+            baseline_mse and the metric's column.
+        domain: the domain's code key.
+        variants: protocol -> the variant to draw (see chosen).
+        path: the image file to write.
+        scores: stats.scores output; when given, each point gets a capless error bar, the task's percentile-bootstrap
+            95% interval of the MSE over its targets (lo, hi), shifted by the Baseline's MSE for "delta" and divided
+            by it for "pct". None draws no error bars.
+        metric: "mse"; "delta", the MSE minus the Baseline's MSE (Baseline at 0); or "pct", the MSE as a percentage of
+            the Baseline's (Baseline at 100).
+        forecasts: the forecasts table; given together with `scores` and metric "delta" or "pct", the error bars are
+            instead the 95% t-interval of the paired difference of squared errors (protocol minus Baseline) over the
+            task's targets, in the metric's units.
+        band: draw the far-high values in a compressed band above a break strip (as bar_figure does) instead of
+            letting them run off the axis.
+        shade: draw each protocol's intervals as a translucent band along its line instead of vertical bars (not
+            across compressed values).
+        cut: fix the top of the axis at this value; points above it are drawn as upward triangles on the cut line,
+            the top tick reads ">cut", lines and bands are clipped there, and nothing is compressed.
+        llr: log likelihood ratio rows (analysis.likelihood_ratio, one shape and judge per target); when given, a
+            star above a point gives the one-sided log likelihood ratio test of the task's targets against the
+            references' distribution (*, **, *** for p below .05, .01, .001).
+    Outputs:
+        the figure, written to path; values cut off the top of the axis are printed.
+    """
     assert metric in ("mse", "delta", "pct"), metric
     m = chosen(with_pct(metrics), variants)
     m = m[(m.domain == domain) & (m.semester != "all")]
@@ -374,9 +484,9 @@ def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str]
         sc = scores[(scores.domain == domain) & (scores.semester != "all") & scores.judge.isin(["-", BEST])]
         sc = sc[[variants.get(pr, "-") == v for pr, v in zip(sc.protocol, sc.variant)]].set_index(["protocol", "semester"])
         base_of = sc.reset_index().semester.map(base_mse).to_numpy()
-        if metric == "delta":  # the bootstrap interval is on the MSE; shift it by the task's saturated-item MSE
+        if metric == "delta":  # the bootstrap interval is on the MSE; shift it by the task's Baseline MSE
             sc = sc.assign(lo=sc.lo.to_numpy() - base_of, hi=sc.hi.to_numpy() - base_of)
-        elif metric == "pct":  # or as a percentage of the task's saturated-item MSE
+        elif metric == "pct":  # or as a percentage of the task's Baseline MSE
             sc = sc.assign(lo=100 * sc.lo.to_numpy() / base_of, hi=100 * sc.hi.to_numpy() / base_of)
     _, first = compress(raw)  # which values are off-axis, before the error bars widen the in-range span
     extent = np.array([sc.hi.get((p, sem), np.nan) for p in TIMELINE for sem, v in series[p].dropna().items()
@@ -385,14 +495,15 @@ def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str]
     place = dict(zip(raw.tolist(), positions.tolist()))
     fig, ax = plt.subplots(figsize=(2.4, 2.4), layout="constrained")
     base = series[BASELINE]
-    ax.plot([x[s] for s in semesters], [place[float(v)] for v in base], color="grey", lw=0.8, ls="--", zorder=4)  # on top: a fit that collapses to the intercept sits exactly on it
-    offsets = dict(zip(TIMELINE, np.linspace(-0.09, 0.09, len(TIMELINE))))  # slight x offset per approach
+    # on top: a regression whose coefficients shrink to zero predicts the references' mean and sits exactly on it
+    ax.plot([x[s] for s in semesters], [place[float(v)] for v in base], color="grey", lw=0.8, ls="--", zorder=4)
+    offsets = dict(zip(TIMELINE, np.linspace(-0.09, 0.09, len(TIMELINE))))  # slight x offset per protocol
     task_p = None
     if llr is not None:
         from analysis import likelihood_ratio as lr
         task_p = lr.task_tests(llr[llr.domain == domain]).set_index(["protocol", "semester"]).p
     errors = None
-    if forecasts is not None:  # per-target squared errors, paired with the prediction from saturated items's on the same targets
+    if forecasts is not None:  # per-target squared errors, paired with the Baseline's on the same targets
         f = one_per_target(forecasts)
         f = f[(f.domain == domain).to_numpy() & np.array([variants.get(pr, "-") == v for pr, v in zip(f.protocol, f.variant)])]
         f = f.assign(err=(f.theta_hat - f.theta) ** 2)
@@ -429,7 +540,7 @@ def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str]
         s = series[p].dropna()
         xs = [x[i] + offsets[p] for i in s.index]
         ys = [place[float(v)] for v in s]
-        if sc is not None and shade:  # one translucent band per approach along its line
+        if sc is not None and shade:  # one translucent band per protocol along its line
             los = [sc.lo.get((p, sem), np.nan) if float(v) not in mapping else np.nan for sem, v in s.items()]
             his = [min(sc.hi.get((p, sem), np.nan), cap) if float(v) not in mapping else np.nan for sem, v in s.items()]
             ax.fill_between(xs, los, his, color=COLORS[p], alpha=0.2, linewidth=0, zorder=1)
@@ -472,8 +583,8 @@ def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str]
     ax.set_ylabel(METRIC_LABELS[metric])
     ax.text(0, 1.02, DOMAIN_LABELS.get(domain, domain), transform=ax.transAxes, color="grey", ha="left")
     handles = [plt.Line2D([], [], color=COLORS[p], lw=1.0, marker="o", ms=4, label=LABELS[p]) for p in TIMELINE]
-    ax.text(len(semesters) - 0.55, place[float(base.iloc[-1])] if np.isfinite(base.iloc[-1]) else 0, LABELS[BASELINE].replace(" from ", " from\n"),
-            color="grey", fontsize=7, ha="right", va="bottom", zorder=6)  # the baseline named at its line, as in the draft
+    ax.text(len(semesters) - 0.55, place[float(base.iloc[-1])] if np.isfinite(base.iloc[-1]) else 0, LABELS[BASELINE],
+            color="grey", fontsize=7, ha="right", va="bottom", zorder=6)  # the Baseline named at its line
     fig.legend(handles=handles, loc="outside lower center", ncol=2, frameon=False)
     fix_axes_height(fig, ax)
     fig.savefig(path, bbox_inches="tight")
@@ -482,18 +593,26 @@ def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str]
 
 def frontier_figure(forecasts: pd.DataFrame, domain: str, variants: dict[str, str], path, top: int = 3,
                     mse_panel: bool = False) -> None:
-    """The `top` frontier targets of each task in one domain: x = semester (one sub-slot per
-    frontier model, weakest to strongest), y = theta. Open black circles are the true theta*
-    of the semester's `top` strongest targets; each approach in TIMELINE (bar colours) puts a
-    filled circle at its forecast for that model, offset slightly within the sub-slot, with a
-    thin connector to the truth, which is also marked by a short black bar across the sub-slot;
-    the prediction from saturated items is a dashed grey segment per
-    semester. Judge approaches are the best judge on references. The y-axis spans the truths
-    and saturated-item levels (plus a margin); a forecast far outside runs off the panel and is
-    printed. With `mse_panel` a second panel below shows, per semester, each approach's MSE
-    over those `top` targets as a percentage of the prediction from saturated items's MSE on the same
-    targets (lines with circles; dashed line at 100); its axis spans the values within Tukey's
-    far-out fence, higher ones run off and are printed."""
+    """
+    Draws the strongest targets of each of one domain's tasks: x = semester, with one sub-slot per such target (weakest
+    to strongest), y = theta. Each target's true theta* is an open black circle on a short black bar across its
+    sub-slot; each protocol in TIMELINE (colours from COLORS) puts a filled circle at its prediction, offset within the
+    sub-slot, with a thin connector to the truth; the Baseline is a dashed grey segment per semester. Judge protocols
+    are the best judge on references. The theta axis spans the truths and the Baseline levels plus a margin.
+
+    Inputs:
+        forecasts: the forecasts table (calibration.forecasts rows, every column).
+        domain: the domain's code key.
+        variants: protocol -> the variant to draw.
+        path: the image file to write.
+        top: how many of each semester's strongest targets to draw; the number of targets per task (8) draws them all.
+        mse_panel: add a lower panel with, per semester, each protocol's MSE over those targets as a percentage of the
+            Baseline's MSE on the same targets (lines with circles, dashed line at 100); its axis spans the values
+            within 3 interquartile ranges above the upper quartile.
+    Outputs:
+        the figure, written to path; predictions outside the theta axis, and lower-panel values above its axis, are
+        printed.
+    """
     f = one_per_target(forecasts)
     f = f[(f.domain == domain) & np.array([variants.get(pr, "-") == v for pr, v in zip(f.protocol, f.variant)])]
     semesters = sorted(f.semester.unique())
@@ -502,7 +621,7 @@ def frontier_figure(forecasts: pd.DataFrame, domain: str, variants: dict[str, st
     frontier = truth.groupby("semester").tail(top)  # the `top` strongest targets per task
     base = f[f.protocol == BASELINE].groupby("semester").theta_hat.first()
     # targets of one semester sit within ±0.22 of its tick, so the gap between semesters (>= 0.56) is wider
-    # than the gap between neighbouring targets; the approaches spread inside each target's sub-slot
+    # than the gap between neighbouring targets; the protocols spread inside each target's sub-slot
     slots = np.linspace(-0.22, 0.22, top) if top > 1 else np.zeros(1)
     width = (slots[1] - slots[0]) if top > 1 else 0.2
     offsets = dict(zip(TIMELINE, np.linspace(-0.3 * width, 0.3 * width, len(TIMELINE))))
@@ -526,7 +645,7 @@ def frontier_figure(forecasts: pd.DataFrame, domain: str, variants: dict[str, st
                 ax.plot([xi, xi], [min(t, yi), max(t, yi)], color=COLORS[p], lw=0.5, alpha=0.6, zorder=2)
                 ax.scatter(xi, yi, s=12, facecolor=COLORS[p], edgecolor="none", zorder=4)
             ax.scatter(xc, t, s=18, facecolor="white", edgecolor=TRUE, linewidth=0.8, zorder=5)
-    # the axis spans the truths and the saturated-item levels; a forecast far outside runs off the panel
+    # the axis spans the truths and the Baseline levels; a prediction far outside runs off the panel
     shown = pd.concat([frontier.theta, base])
     lo, hi = float(shown.min()), float(shown.max())
     ax.set_ylim(lo - 0.15 * (hi - lo) - 0.2, hi + 0.15 * (hi - lo) + 0.2)
@@ -537,7 +656,7 @@ def frontier_figure(forecasts: pd.DataFrame, domain: str, variants: dict[str, st
         print(f"{path}: off the panel: " + ", ".join(f"{r.protocol} {r.semester} {r.model} {r.theta_hat:.1f}" for r in off.itertuples()))
     ax.set_ylabel("Model Capability (θ)")
     ax.text(0, 1.02, DOMAIN_LABELS.get(domain, domain), transform=ax.transAxes, color="grey", ha="left")
-    if ax2 is not None:  # MSE over the frontier targets as % of the prediction from saturated items's, per semester and approach
+    if ax2 is not None:  # MSE over the frontier targets as % of the Baseline's, per semester and protocol
         on_frontier = f[f.set_index(["semester", "model"]).index.isin(keys)].assign(err=lambda d: (d.theta_hat - d.theta) ** 2)
         mse = on_frontier.groupby(["protocol", "semester"]).err.mean()
         pct = {(p, s): 100 * mse.get((p, s), np.nan) / mse.get((BASELINE, s), np.nan) for p in TIMELINE for s in semesters}
@@ -569,17 +688,28 @@ def frontier_figure(forecasts: pd.DataFrame, domain: str, variants: dict[str, st
 
 def reasoning_figure(forecasts: pd.DataFrame, domain: str, semester: str, variants: dict[str, str], reasoning: set[str], path,
                      cut: float = 2.0, mse_cut: float = 400.0) -> None:
-    """One task split by whether the target is a reasoning model: two panels side by side.
-    Left: targets in two slots (no reasoning | reasoning), sorted by theta* within a slot, the
-    truth as a short black bar with an open circle (no reasoning) or diamond (reasoning), and
-    each approach in TIMELINE's forecast as a filled circle offset inside the target's
-    sub-slot with a thin connector; the prediction from saturated items as a dashed segment per slot.
-    The axis stops at `cut`: a forecast above it is drawn as a triangle on the cut line and the
-    top tick reads ">cut". Right: MSE per approach over each
-    group as paired bars (reasoning hatched) with 95% t-intervals over the group's squared
-    errors, and the prediction from saturated items's MSE per group as dashed / dotted lines; the axis
-    stops at `mse_cut`, a bar above it is drawn to the cut with a triangle on the cut line and
-    the top tick reads ">mse_cut"."""
+    """
+    Draws one task split by whether each target is a reasoning model, in two panels side by side. Left: the targets in
+    two slots (no reasoning, reasoning), sorted by theta* within a slot, the truth as a short black bar with an open
+    circle (no reasoning) or diamond (reasoning), each TIMELINE protocol's prediction as a filled circle offset inside
+    the target's sub-slot with a thin connector, and the Baseline as a dashed segment per slot. Right: per protocol and
+    group, a bar at the group's MSE as a percentage of the group's Baseline MSE (reasoning hatched), one circle per
+    target at its squared error on the same scale, and a dashed line at 100.
+
+    Inputs:
+        forecasts: the forecasts table (calibration.forecasts rows, every column).
+        domain: the domain's code key.
+        semester: the task's semester.
+        variants: protocol -> the variant to draw.
+        reasoning: names of the target models that reason (show chain of thought).
+        path: the image file to write.
+        cut: the top of the left panel's theta axis; a prediction above it is drawn as a triangle on the cut line and
+            the top tick reads ">cut".
+        mse_cut: the top of the right panel's axis, in percent; a bar or circle above it is marked by a triangle on
+            the cut line and the top tick reads ">mse_cut%".
+    Outputs:
+        the figure, written to path.
+    """
     f = one_per_target(forecasts)
     f = f[(f.domain == domain) & (f.semester == semester) & np.array([variants.get(pr, "-") == v for pr, v in zip(f.protocol, f.variant)])]
     truth = f.drop_duplicates("model").set_index("model").theta
@@ -615,9 +745,9 @@ def reasoning_figure(forecasts: pd.DataFrame, domain: str, semester: str, varian
     ax.set_yticks(ticks, [f"{t:g}" for t in ticks[:-1]] + [f">{cut:g}"])
     ax.set_ylabel("Model Capability (θ)")
     ax.text(0, 1.02, f"{DOMAIN_LABELS.get(domain, domain)} {semester}", transform=ax.transAxes, color="grey", ha="left")
-    # right: MSE per approach and group, with a t-interval over the group's squared errors
+    # right: per protocol and group, the MSE and each target's squared error as % of the group's Baseline MSE
     err = f.assign(err=(f.theta_hat - f.theta) ** 2, group=f.model.map(lambda m: "reasoning" if m in reasoning else "no reasoning"))
-    base_mse = err[err.protocol == BASELINE].groupby("group").err.mean()  # the group's baseline MSE
+    base_mse = err[err.protocol == BASELINE].groupby("group").err.mean()  # the group's Baseline MSE
     err = err.assign(err=100 * err.err / err.group.map(base_mse))  # relative: % of the group's baseline MSE
     mse = err.groupby(["protocol", "group"]).err.mean()
     for i, p in enumerate(TIMELINE):
@@ -654,5 +784,13 @@ def reasoning_figure(forecasts: pd.DataFrame, domain: str, semester: str, varian
 
 
 def stars(p: float, not_significant: str = "") -> str:
-    """The significance mark of a p-value: *** p < .001, ** p < .01, * p < .05, else `not_significant`."""
+    """
+    Returns the significance mark of a p-value.
+
+    Inputs:
+        p: the p-value.
+        not_significant: the mark for p of .05 or above (e.g. "n.s."); empty by default.
+    Outputs:
+        "***" for p < .001, "**" for p < .01, "*" for p < .05, else `not_significant`.
+    """
     return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else not_significant

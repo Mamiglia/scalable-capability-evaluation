@@ -1,4 +1,4 @@
-# Every setting of the paper's analysis. Runners (scripts/analysis/*.py) read this file and pass the values to
+# Every setting of the analysis. Runners (scripts/analysis/*.py) read this file and pass the values to
 # src/analysis as arguments; nothing else sets them. Paths are relative to the repository root.
 
 paths:
@@ -11,7 +11,7 @@ paths:
   model_configs: configs/models       # the models' release dates (the prediction example)
   outputs: analysis                   # one folder per group: capability_signal, transcript_parts, generalisation, sensitivity
 
-# the published datasets and the revisions the paper's numbers were computed from (scripts/analysis/fetch_data.py)
+# the published datasets, at the revisions the results were computed from (scripts/analysis/fetch_data.py)
 data_sources:
   data: {repo: generality-labs/benchmarks, revision: 0609b361e51aa58b06ac780d230f88fe67658c4d}
   logs: {repo: generality-labs/judging, revision: 061577335dc7092822eb7c0c4df27093b7beefcb}
@@ -19,9 +19,9 @@ data_sources:
   embeddings: {repo: generality-labs/transcript-embeddings, revision: 001cf012261f205bc965f46825aff452f4f386d9}
 
 tasks:
-  domains: [science, math, coding, cyber]                      # the paper's order
+  domains: [science, math, coding, cyber]
   semesters: [2025-II, 2026-I]                                 # the main analysis: 16 targets per domain
-  all_semesters: [2024-I, 2024-II, 2025-I, 2025-II, 2026-I]    # the time figure and Table 8
+  all_semesters: [2024-I, 2024-II, 2025-I, 2025-II, 2026-I]    # the error over time and the candidate judges
 
 # the variant each protocol is reported in (pairwise: verdicts to theta by the linear calibration; direct: mean raw
 # rating; embedding: vectors of the whole transcript)
@@ -94,7 +94,7 @@ sensitivity:
     proxies: {openai-api/runpod/NousResearch/Nous-Hermes-2-Yi-34B: qwen/qwen3-32b}   # judges without a list price
     seed: 0                           # the random item subsets of the curves
     # OpenRouter list prices, $ per million tokens [input, cached input, output] (cached = input where no cache price is
-    # listed), from openrouter.ai/api/v1/models on 2026-09-26; the same as the prices the paper's costs used
+    # listed), from openrouter.ai/api/v1/models on 2026-09-26, unchanged since the costs were first computed
     prices:
       deepseek/deepseek-r1-0528: [0.5, 0.35, 2.15]
       deepseek/deepseek-v3.2: [0.269, 0.1345, 0.4]
@@ -112,7 +112,7 @@ sensitivity:
       qwen/qwen3-32b: [0.08, 0.08, 0.28]
       z-ai/glm-4.7: [0.6, 0.11, 2.2]
 
-domain_glm:                           # the hierarchical Gamma GLM of Appendix D.4 (hibayes)
+domain_glm:                           # the hierarchical Gamma GLM of squared error by protocol and domain (hibayes)
   protocols: [easy_items, glm_length, glm_regex, embedding, direct, pairwise]   # the baseline first: reference level
   error_floor: 1.0e-6
   priors: {intercept_scale: 2.0, effect_scale: 1.0, sigma_scale: 0.5, cell_scale: 1.0}
@@ -120,15 +120,14 @@ domain_glm:                           # the hierarchical Gamma GLM of Appendix D
   contrast_against: pairwise          # the protocol every other protocol's error ratio is contrasted with
 
 display:
-  paper_protocols: [glm_regex, embedding, direct, pairwise]   # the protocols the paper's figures show (Length is a diagnostic)
+  paper_protocols: [glm_regex, embedding, direct, pairwise]   # the protocols the figures show (Length is a diagnostic)
   protocol_names: {easy_items: Baseline, glm_length: Length, glm_regex: Deterministic features, embedding: Embedding,
                    direct: Absolute scoring, pairwise: Pairwise judge}
   table_protocol_names: {easy_items: Baseline protocol, glm_regex: Deterministic features, embedding: Embedding,
-                         direct: Absolute scoring, pairwise: Pairwise judging}   # Table 3's rows, as printed
+                         direct: Absolute scoring, pairwise: Pairwise judging}   # row labels of the error-by-domain table
   domain_names: {science: Science, math: Maths, coding: Coding, cyber: Cyber}
   protocol_colours: {glm_regex: "#eb6834", embedding: "#4a3aa7", direct: "#1baf7a", pairwise: "#2a78d6",
                      glm_length: "#f1a48a", easy_items: "#9a9a9a"}
-  domain_colours: {science: "#cc79a7", math: "#d55e00", coding: "#6a3d9a", cyber: "#c9a800"}        # transcript parts
-  domain_line_colours: {science: "#2a78d6", math: "#eb6834", coding: "#1baf7a", cyber: "#4a3aa7"}   # sensitivity curves
+  domain_colours: {science: "#cc79a7", math: "#d55e00", coding: "#6a3d9a", cyber: "#c9a800"}   # colours no protocol uses
   channel_colours: {Reasoning: "#4a3aa7", Messages: "#eda100", Tools: "#1baf7a"}
   domain_markers: {science: o, math: s, coding: "^", cyber: D}
