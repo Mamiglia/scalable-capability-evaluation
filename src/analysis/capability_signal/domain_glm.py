@@ -1,12 +1,13 @@
-"""Does a protocol's gain over the Baseline depend on the domain? A hierarchical Gamma GLM of squared forecast error
-(Appendix D.4: Table 9, Figures 16 and 17):
+"""
+Tests whether a protocol's gain over the Baseline depends on the domain, with a hierarchical Gamma GLM of squared
+prediction error:
 
     squared_error ~ protocol + domain + (protocol | domain) + (1 | target:domain),   Gamma, log link
 
-over the targets of the main analysis, one forecast per target and protocol (judge protocols: each task's best judge
+over the targets of the main analysis, one prediction per target and protocol (judge protocols: each task's best judge
 on references). The Baseline is the reference level of protocol, so every coefficient is a log error ratio to it. The
-fit runs through hibayes (models in domain_glm_model.py); this module builds its rows and pipeline, reads the
-posterior into ratio and contrast tables, and draws the two figures.
+fit runs through hibayes (models in domain_glm_model.py); this module builds its rows and pipeline, checks the fit,
+reads the posterior into tables of error ratios and contrasts, and draws the ratio and contrast figures.
 """
 
 from pathlib import Path
@@ -25,11 +26,18 @@ RATIO_TICKS = [0.05, 0.25, 1, 4]
 
 
 def glm_rows(errors: pd.DataFrame, floor: float) -> pd.DataFrame:
-    """The model's rows, one per target and protocol: y (the squared error, at least `floor`: a Gamma outcome must be
-    positive), protocol, domain, semester, task, model, model_domain (the cell every protocol forecasts once), judge and
-    protocol_judge ("-": one judge per task).
+    """
+    Builds the GLM's data rows from the squared errors, raising each error to at least `floor` because a Gamma
+    outcome must be positive.
 
-    errors: stats.target_errors rows.
+    Inputs:
+        errors: one prediction per target and protocol (stats.target_errors); uses err, protocol, domain, semester and
+            model.
+        floor: the smallest squared error kept (config.yaml's domain_glm.error_floor).
+    Outputs:
+        DataFrame with one row per target and protocol: y (the floored squared error), protocol, domain, semester,
+        task ("<domain> <semester>"), model, model_domain ("<model> <domain>", the cell every protocol predicts once),
+        judge and protocol_judge (both "-": one judge per task, so the judge term has a single level).
     """
     return pd.DataFrame({
         "y": errors.err.clip(lower=floor).to_numpy(),
@@ -41,11 +49,21 @@ def glm_rows(errors: pd.DataFrame, floor: float) -> pd.DataFrame:
 
 def hibayes_config(rows_csv: Path, protocols: list[str], domains: list[str], priors: dict[str, float],
                    sampler: dict) -> dict:
-    """The hibayes pipeline: load the rows, index the categories (the Baseline first: the reference level), fit the
-    model with and without the (protocol | domain) term, run the sampler checks and write the summaries.
+    """
+    Builds the hibayes pipeline configuration: load the rows, index the categories (protocol and domain in the given
+    order, so the Baseline is the reference level), fit the model with and without the (protocol | domain) term, run
+    the prior predictive, divergence, r_hat, ESS and posterior predictive checks, and write a summary table and trace
+    plots.
 
-    protocols: the protocol levels, the Baseline first. priors: config.yaml's domain_glm.priors (intercept_scale,
-    effect_scale, sigma_scale, cell_scale). sampler: domain_glm.sampler (samples, warmup, chains, seed, target_accept).
+    Inputs:
+        rows_csv: the CSV of glm_rows written for hibayes to load.
+        protocols: the protocol levels, the Baseline first.
+        domains: the domain levels, in order.
+        priors: config.yaml's domain_glm.priors (intercept_scale, effect_scale, sigma_scale, cell_scale), passed to the
+            models as prior_<name>.
+        sampler: config.yaml's domain_glm.sampler (samples, warmup, chains, seed, target_accept).
+    Outputs:
+        dict in the layout hibayes' AnalysisConfig.from_dict reads.
     """
     model_config = {"link_function": "identity", "fit": dict(sampler), **{f"prior_{k}": v for k, v in priors.items()}}
     return {
@@ -79,11 +97,18 @@ def hibayes_config(rows_csv: Path, protocols: list[str], domains: list[str], pri
 
 def fit(rows: pd.DataFrame, out: Path, protocols: list[str], domains: list[str], priors: dict[str, float],
         sampler: dict) -> tuple:
-    """The fitted hibayes models (with the (protocol | domain) term, then without); asserts r_hat <= 1.01 on every free
-    parameter of both.
+    """
+    Fits the GLM with and without the (protocol | domain) term through hibayes, and asserts r_hat <= 1.01 on every
+    parameter of both fits whose r_hat is defined (the pinned reference levels have NaN r_hat).
 
-    out: hibayes' folder: rows.csv, its state, checks and summaries. protocols, domains, priors, sampler: as
-    hibayes_config.
+    Inputs:
+        rows: glm_rows' output.
+        out: the folder for hibayes' files; created if missing.
+        protocols, domains, priors, sampler: as hibayes_config.
+    Outputs:
+        tuple of the two hibayes ModelAnalysisState objects (with the term, then without), each holding
+        inference_data, features and coords; in out: rows.csv, and hibayes' saved state, check results, summary
+        table and plots.
     """
     from hibayes.analysis import AnalysisConfig, communicate, load_data, model, process_data
     from hibayes.platform import configure_computation_platform
@@ -110,7 +135,16 @@ def fit(rows: pd.DataFrame, out: Path, protocols: list[str], domains: list[str],
 
 
 def log_mu_draws(posterior, features: dict) -> np.ndarray:
-    """log mu per draw and row (draws x rows) from the fitted effects and the rows' indices in `features`."""
+    """
+    Computes the model's log mean squared error for every posterior draw and data row, adding the intercept and the
+    protocol, domain, interaction, cell and judge effects at each row's indices.
+
+    Inputs:
+        posterior: the fit's posterior (chain and draw dimensions first).
+        features: the fit's features; uses protocol_index, domain_index, model_domain_index and protocol_judge_index.
+    Outputs:
+        array of shape (draws, rows), chains flattened into draws.
+    """
     get = lambda k: np.asarray(posterior[k]).reshape(-1, *np.asarray(posterior[k]).shape[2:])  # noqa: E731
     p, d, c, j = (np.asarray(features[k]) for k in ("protocol_index", "domain_index", "model_domain_index", "protocol_judge_index"))
     return (get("intercept")[:, None] + get("protocol_effects")[:, p] + get("domain_effects")[:, d]
@@ -118,8 +152,19 @@ def log_mu_draws(posterior, features: dict) -> np.ndarray:
 
 
 def diagnostics(idata, features: dict) -> dict:
-    """One fit's convergence and fit summary: divergences, max r_hat and min ESS over the free parameters, LOO (elpd,
-    se, p_loo) with Pareto-k counts, and the Bayesian R^2 on the log scale."""
+    """
+    Summarises one fit's convergence and fit: divergent transitions, the largest r_hat and smallest bulk and tail ESS
+    over the posterior variables other than the standard-normal z draws, the leave-one-out cross-validation estimate
+    with its Pareto-k counts, and the Bayesian R^2 of log squared error.
+
+    Inputs:
+        idata: the fit's arviz InferenceData (posterior, sample_stats, observed_data "obs", log likelihood).
+        features: the fit's features, for log_mu_draws.
+    Outputs:
+        dict: divergences, r_hat_max, ess_bulk_min, ess_tail_min, elpd_loo, elpd_se, p_loo, pareto_k_bad (0.7 < k <= 1),
+        pareto_k_very_bad (k > 1), n (rows), r2_log with r2_log_lo and r2_log_hi (median and 2.5 / 97.5 percentiles
+        over draws of var(log mu) / (var(log mu) + var(log y - log mu))).
+    """
     summ = az.summary(idata, var_names=["~cell_z", "~judge_z", "~interaction_z"], filter_vars="like", round_to="none")
     loo = az.loo(idata, pointwise=True)
     k = np.asarray(loo.pareto_k)
@@ -134,16 +179,32 @@ def diagnostics(idata, features: dict) -> dict:
 
 
 def loo_compare(idatas: dict) -> pd.DataFrame:
-    """arviz.compare over the named fits (elpd_loo, elpd_diff, weight, se, dse, warning)."""
+    """
+    Compares the fits by their leave-one-out expected log predictive density (arviz.compare, log scale).
+
+    Inputs:
+        idatas: fit name -> its arviz InferenceData.
+    Outputs:
+        arviz.compare's DataFrame, one row per fit, best first: rank, elpd_loo, p_loo, elpd_diff, weight, se, dse,
+        warning, scale.
+    """
     return az.compare(idatas, ic="loo", scale="log")
 
 
 def ratio_table(posterior, coords: dict) -> pd.DataFrame:
-    """Each protocol's error ratio to the Baseline: one row per non-Baseline protocol and domain (exp(alpha + delta))
-    plus a pooled row per protocol (domain "all", exp(alpha), with sigma_protocol, sigma_lo, sigma_hi: the protocol's
-    between-domain SD on the log scale). ratio, lo, hi: posterior median and 2.5 / 97.5 percentiles.
+    """
+    Computes each protocol's error ratio to the Baseline from the posterior: per domain exp(protocol effect + the
+    protocol's deviation in that domain), and pooled exp(protocol effect), the ratio with no domain deviation.
 
-    posterior: the fit's posterior (chain and draw dims first). coords: the model's protocol and domain levels.
+    Inputs:
+        posterior: the fit's posterior (chain and draw dimensions first); uses protocol_effects, interaction and
+            sigma_protocol.
+        coords: the fit's levels; uses protocol and domain.
+    Outputs:
+        DataFrame with columns protocol, domain, ratio, lo, hi (posterior median and 2.5 / 97.5 percentiles),
+        sigma_protocol, sigma_lo, sigma_hi (the protocol's between-domain SD on the log scale, median and percentiles;
+        NaN on per-domain rows); one row per protocol other than the Baseline and domain, plus one pooled row per
+        protocol with domain "all".
     """
     alpha = np.asarray(posterior["protocol_effects"])
     delta = np.asarray(posterior["interaction"])
@@ -167,8 +228,15 @@ def ratio_table(posterior, coords: dict) -> pd.DataFrame:
 
 
 def wide_table(table: pd.DataFrame) -> pd.DataFrame:
-    """Table 9: ratio_table as protocol x domain, the Baseline first (ratio 1, no interval); columns <domain>,
-    <domain>_lo, <domain>_hi for each domain and "all" (pooled), then sigma, sigma_lo, sigma_hi."""
+    """
+    Reshapes ratio_table to one row per protocol, with the Baseline added first as ratio 1 and no interval.
+
+    Inputs:
+        table: ratio_table's output.
+    Outputs:
+        DataFrame indexed by protocol; columns <domain>, <domain>_lo and <domain>_hi for each domain and for "all"
+        (pooled), then sigma, sigma_lo and sigma_hi (the between-domain SD, NaN for the Baseline).
+    """
     cols = list(dict.fromkeys(table.domain))  # the domains, then "all"
     wide = table.pivot(index="protocol", columns="domain", values=["ratio", "lo", "hi"])
     out = pd.DataFrame(index=[BASELINE, *dict.fromkeys(table.protocol)])
@@ -182,10 +250,20 @@ def wide_table(table: pd.DataFrame) -> pd.DataFrame:
 
 
 def contrast_table(posterior, coords: dict, against: str) -> pd.DataFrame:
-    """Error ratios of `against` to every other non-Baseline protocol, from the same posterior draws: one row per
-    protocol and domain plus a pooled row (domain "all"); ratio, lo, hi (posterior median, 2.5 / 97.5 percentiles)
-    and p_below_1, the posterior mass with `against` the smaller error. The cell and domain terms cancel in the
-    difference, so these intervals are tighter than the two marginal ones suggest."""
+    """
+    Computes the error ratio of the protocol `against` to every other protocol except the Baseline, per domain and
+    pooled, from the same posterior draws. The cell and domain terms cancel in the difference, so these intervals
+    are tighter than the two protocols' separate intervals suggest.
+
+    Inputs:
+        posterior: the fit's posterior (chain and draw dimensions first); uses protocol_effects and interaction.
+        coords: the fit's levels; uses protocol and domain.
+        against: the protocol in the numerator (config.yaml's domain_glm.contrast_against).
+    Outputs:
+        DataFrame with columns against, protocol, domain, ratio, lo, hi (posterior median and 2.5 / 97.5 percentiles)
+        and p_below_1 (the posterior probability that `against` has the smaller error); one row per compared protocol
+        and domain, plus one per protocol with domain "all" (pooled).
+    """
     alpha = np.asarray(posterior["protocol_effects"]); alpha = alpha.reshape(-1, alpha.shape[-1])
     delta = np.asarray(posterior["interaction"]); delta = delta.reshape(-1, *delta.shape[-2:])
     a = coords["protocol"].index(against)
@@ -202,14 +280,32 @@ def contrast_table(posterior, coords: dict, against: str) -> pd.DataFrame:
 
 
 def _domain_axis(ax, labels: list[str]) -> None:
-    """Categorical x axis: pooled then the domains, spine trimmed to the ticks."""
+    """
+    Sets a categorical x axis with one tick per label, the bottom spine trimmed to the first and last tick.
+
+    Inputs:
+        ax: the axes.
+        labels: the tick labels, left to right (pooled, then the domains).
+    Outputs:
+        none; `ax` is changed in place.
+    """
     ax.set_xticks(range(len(labels)), labels)
     ax.set_xlim(-0.5, len(labels) - 0.5)
     ax.spines["bottom"].set_bounds(0, len(labels) - 1)
 
 
 def _ratio_axis(ax, ticks: list[float], label: str | None) -> None:
-    """Log MSE-ratio y axis with the equal-error line, spine trimmed to the ticks."""
+    """
+    Sets a log-scale y axis for error ratios, limited to the first and last tick, with a dashed line at 1 (equal
+    error) and the left spine trimmed to the ticks.
+
+    Inputs:
+        ax: the axes.
+        ticks: the tick values, ascending.
+        label: the y-axis label, or None for no label.
+    Outputs:
+        none; `ax` is changed in place.
+    """
     ax.axhline(1, color="0.5", ls="--", lw=0.8, zorder=0)
     ax.set(yscale="log", ylim=(ticks[0], ticks[-1]))
     ax.set_yticks(ticks, [f"{t:g}".replace("0.", ".") for t in ticks])
@@ -220,8 +316,19 @@ def _ratio_axis(ax, ticks: list[float], label: str | None) -> None:
 
 
 def _point(ax, x: float, row, color: str, marker: str | None) -> None:
-    """One estimate: its 95% interval as a vertical line and a marker, filled when pooled (marker None), open in the
-    domain's marker otherwise."""
+    """
+    Draws one estimate: its 95% interval as a vertical line and its median as a marker, a filled circle when pooled
+    and the domain's marker, open, otherwise.
+
+    Inputs:
+        ax: the axes.
+        x: the x position.
+        row: a row with ratio, lo and hi.
+        color: the line and marker colour.
+        marker: the domain's marker, or None for the pooled estimate.
+    Outputs:
+        none; draws on `ax`.
+    """
     pooled = marker is None
     ax.plot([x, x], [row.lo, row.hi], color=color, lw=1 if pooled else 0.8, solid_capstyle="butt")
     ax.plot(x, row.ratio, marker="o" if pooled else marker, ms=4 if pooled else 3.5,
@@ -229,10 +336,17 @@ def _point(ax, x: float, row, color: str, marker: str | None) -> None:
 
 
 def effects_figure(table: pd.DataFrame, protocols: list[str], display: dict) -> plt.Figure:
-    """Figure 16: each protocol's posterior error ratio to the Baseline, one panel per protocol, pooled then each
-    domain along x.
+    """
+    Draws each protocol's posterior error ratio to the Baseline with its 95% interval, one panel per protocol, the
+    pooled estimate then each domain along x, on a shared log y axis.
 
-    table: ratio_table. protocols: the protocols drawn. display: config.yaml's display section.
+    Inputs:
+        table: ratio_table's output.
+        protocols: the protocols to draw, in panel order; those missing from `table` are skipped.
+        display: config.yaml's display section; uses protocol_names, protocol_colours, domain_markers and
+            domain_names.
+    Outputs:
+        the matplotlib Figure (not saved).
     """
     names, colours, markers = display["protocol_names"], display["protocol_colours"], display["domain_markers"]
     protocols = [p for p in protocols if (table.protocol == p).any()]
@@ -251,10 +365,19 @@ def effects_figure(table: pd.DataFrame, protocols: list[str], display: dict) -> 
 
 
 def contrasts_figure(contrasts: pd.DataFrame, table: pd.DataFrame, protocols: list[str], display: dict) -> plt.Figure:
-    """Figure 17. a: the contrast protocol's error ratio to each other protocol, pooled then per domain, coloured by the
-    comparator. b: each protocol's between-domain SD of log error.
+    """
+    Draws two panels: a, the error ratio of the contrasted protocol to each other protocol with its 95% interval,
+    pooled then per domain, coloured by the other protocol; b, each protocol's between-domain SD of log error with
+    its 95% interval.
 
-    contrasts: contrast_table. table: ratio_table. protocols: the protocols drawn. display: config.yaml's display section.
+    Inputs:
+        contrasts: contrast_table's output.
+        table: ratio_table's output; its pooled rows give the SDs.
+        protocols: the protocols to draw; those missing from `contrasts` or `table` are skipped.
+        display: config.yaml's display section; uses protocol_names, protocol_colours, domain_markers and
+            domain_names.
+    Outputs:
+        the matplotlib Figure (not saved).
     """
     names, colours, markers = display["protocol_names"], display["protocol_colours"], display["domain_markers"]
     against = contrasts.against.iloc[0]
@@ -294,11 +417,29 @@ def contrasts_figure(contrasts: pd.DataFrame, table: pd.DataFrame, protocols: li
 
 
 def _interval(r) -> str:
+    """
+    Formats an estimate as "median [lo, hi]".
+
+    Inputs:
+        r: a row with ratio, lo and hi.
+    Outputs:
+        the formatted string.
+    """
     return f"{lr.num(r.ratio)} [{lr.num(r.lo)}, {lr.num(r.hi)}]"
 
 
 def effects_caption(table: pd.DataFrame, protocols: list[str], display: dict) -> str:
-    """The .txt of Figure 16: every drawn ratio with its interval, and each protocol's between-domain SD (Table 9)."""
+    """
+    Builds the text written next to the ratio figure: what it draws, then per protocol every ratio to the Baseline
+    (pooled and per domain) with its interval, and the protocol's between-domain SD.
+
+    Inputs:
+        table: ratio_table's output.
+        protocols: the protocols listed, in order.
+        display: config.yaml's display section; uses protocol_names and domain_names.
+    Outputs:
+        the caption as one string ending in a newline.
+    """
     columns = {POOLED: "Pooled", **display["domain_names"]}
     lines = []
     for p in protocols:
@@ -313,7 +454,18 @@ def effects_caption(table: pd.DataFrame, protocols: list[str], display: dict) ->
 
 
 def contrasts_caption(contrasts: pd.DataFrame, table: pd.DataFrame, protocols: list[str], display: dict) -> str:
-    """The .txt of Figure 17: every drawn contrast with its interval and posterior probability, and every drawn SD."""
+    """
+    Builds the text written next to the contrast figure: what its two panels draw, then every contrast (pooled and
+    per domain) with its interval and posterior probability of being below 1, and every protocol's between-domain SD.
+
+    Inputs:
+        contrasts: contrast_table's output.
+        table: ratio_table's output; its pooled rows give the SDs.
+        protocols: the protocols listed, in order.
+        display: config.yaml's display section; uses protocol_names and domain_names.
+    Outputs:
+        the caption as one string ending in a newline.
+    """
     names, columns = display["protocol_names"], {POOLED: "Pooled", **display["domain_names"]}
     against = contrasts.against.iloc[0]
     lines = ["a:"]

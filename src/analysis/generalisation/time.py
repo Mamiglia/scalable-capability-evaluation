@@ -1,6 +1,8 @@
-"""Prediction error over target semesters (Figure 6, Table 7): each semester's targets predicted from the previous
-semester's references, the mean squared error of every task and protocol with a bootstrap interval over the task's
-targets. Science and Maths run from 2024-I; Coding and Cyber from 2025-II, their first semester."""
+"""
+Prediction error over target semesters: each semester's targets predicted from the previous semester's references,
+and the mean squared error of every task and protocol with a percentile-bootstrap interval over the task's targets.
+Science and Maths run from 2024-I; Coding and Cyber from 2025-II, their first semester.
+"""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,11 +14,20 @@ from analysis.stats import BASELINE, with_baseline
 
 
 def task_errors(errors: pd.DataFrame, draws: int, seed: int) -> pd.DataFrame:
-    """Per (domain, semester, protocol): n, mse, baseline_mse, and lo, hi, the 2.5 and 97.5 percentiles of the mean
-    squared error over `draws` resamples of the task's targets (NaN with fewer than 3 targets).
+    """
+    Per task and protocol, the mean squared error over the task's targets, the Baseline's on the same targets, and
+    the 2.5 and 97.5 percentiles of the mean over `draws` bootstrap resamples of the targets (NaN with fewer than 3
+    targets). One random generator runs through the tasks and protocols in sorted order, so every protocol in `errors`
+    (Length included) moves the draws of those after it.
 
-    errors: stats.target_errors rows. One generator runs through the tasks in sorted order, so every protocol in
-        `errors` (Length included) moves the draws of the ones after it.
+    Inputs:
+        errors: per-target errors from stats.target_errors (domain, semester, model, protocol, err); a target without
+            a Baseline error is dropped.
+        draws: bootstrap resamples per task and protocol.
+        seed: the generator's seed.
+    Outputs:
+        DataFrame with columns domain, semester, protocol, n, mse, baseline_mse, lo, hi; one row per task and
+        protocol, sorted by domain, semester and protocol.
     """
     rng = np.random.default_rng(seed)
     out = []
@@ -32,13 +43,23 @@ def task_errors(errors: pd.DataFrame, draws: int, seed: int) -> pd.DataFrame:
 
 def error_over_time_figure(tasks: pd.DataFrame, domains: list[str], protocols: list[str], display: dict,
                            reasoning_semester: str, log: bool = True, box: bool = True) -> plt.Figure:
-    """One panel per domain over its own semesters, one dodged series per protocol and the baseline: the task's mean
-    squared error with its bootstrap interval as a translucent box (`box`) or a bar. `log` puts the error on a log
-    axis from 0.01 to 10; linear, the axis holds 1.25 times the 90th percentile. A point beyond the axis is a
-    triangle on its edge. An arrow marks `reasoning_semester` in the domains that have it.
+    """
+    Draws one panel per domain over its own semesters, with a dodged series for the Baseline and for each protocol:
+    the task's mean squared error as a dot and its bootstrap interval as a translucent box or a vertical line. A value
+    beyond the axis is drawn as a triangle on its edge, and a note with arrows marks `reasoning_semester` in the
+    domains that have it.
 
-    tasks: task_errors rows. protocols: the paper protocols, in drawing order.
-    display: config.yaml's display section (names and colours).
+    Inputs:
+        tasks: task_errors rows (domain, semester, protocol, mse, lo, hi).
+        domains: domain keys, in panel order.
+        protocols: the protocols drawn after the Baseline, in drawing order.
+        display: config.yaml's display section; uses protocol_names, protocol_colours and domain_names.
+        reasoning_semester: the semester the note "Reasoning models introduced in early 2025" points to.
+        log: a log squared-error axis from 0.01 to 10; if False, a linear axis from 0 to 1.25 times the 90th
+            percentile of the plotted errors, rounded up to a multiple of 0.5.
+        box: intervals as translucent boxes; if False, as vertical lines.
+    Outputs:
+        the matplotlib Figure; prints every value that falls off the axis.
     """
     names, colours = display["protocol_names"], display["protocol_colours"]
     lines = [BASELINE, *protocols]
@@ -66,7 +87,7 @@ def error_over_time_figure(tasks: pd.DataFrame, domains: list[str], protocols: l
             if out.any():
                 print(f"error_over_time_figure: {key} {line} off the axis: {[round(v, 1) for v in raw[out]]}")
             for xi, lo, hi in zip(xs, np.clip(d.lo, bottom, top), np.clip(d.hi, bottom, top)):
-                if box:  # figure one's box: the interval as a translucent rectangle
+                if box:  # the interval as a translucent rectangle
                     ax.add_patch(plt.Rectangle((xi - width / 2, lo), width, max(hi - lo, 1e-6), facecolor=colours[line],
                                                edgecolor="none", alpha=0.35, zorder=2))
                 else:
@@ -117,7 +138,19 @@ def error_over_time_figure(tasks: pd.DataFrame, domains: list[str], protocols: l
 
 
 def caption(tasks: pd.DataFrame, domains: list[str], protocols: list[str], display: dict, draws: int) -> str:
-    """The figure's .txt: what it draws, then every task's mean squared error and interval per series."""
+    """
+    The text of the figure's .txt file: what the figure draws, then for every domain and semester each series' mean
+    squared error and 95% interval.
+
+    Inputs:
+        tasks: task_errors rows.
+        domains: domain keys, in order.
+        protocols: the protocols listed after the Baseline.
+        display: config.yaml's display section; uses protocol_names and domain_names.
+        draws: the number of bootstrap resamples, quoted in the text.
+    Outputs:
+        str, the caption.
+    """
     names = display["protocol_names"]
     lines = []
     for domain in domains:

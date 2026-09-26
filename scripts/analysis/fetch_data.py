@@ -1,4 +1,5 @@
-"""Download the published data the analysis reads, at the revisions in config.yaml (data_sources), and nothing else.
+"""
+Downloads the published data the analysis reads, at the revisions in config.yaml (data_sources), and nothing else.
 
     uv run python scripts/analysis/fetch_data.py            # everything, about 40 GB
     uv run python scripts/analysis/fetch_data.py --dry-run  # how many files and GB per dataset, without downloading
@@ -6,8 +7,8 @@
 Fetches into paths.data, paths.logs, paths.features and paths.embeddings:
     data        the frozen tables (meta/) and every transcript log they reference for tasks.domains (and
                 coding_frontier, the closed-source targets)
-    logs        the judge runs of those domains for tasks.all_semesters: pairwise (judge/, judge_channels-*) and
-                absolute scoring (direct/, direct_reasoning-hidden/, direct_channels-*, direct_truncated-thirds-*)
+    logs        the judge runs of those domains for tasks.all_semesters: Pairwise judge (judge/, judge_channels-*) and
+                Absolute scoring (direct/, direct_reasoning-hidden/, direct_channels-*, direct_truncated-thirds-*)
     features    all of generality-labs/glm_features
     embeddings  the vectors of those transcript logs
 A file already present with the published hash is skipped; every download is checked against it.
@@ -24,17 +25,34 @@ from huggingface_hub import HfApi, hf_hub_download
 
 from analysis.config import load_config
 
-EXTRA_DOMAINS = ["coding_frontier"]  # the closed-source targets of the frontier figure
+EXTRA_DOMAINS = ["coding_frontier"]  # the closed-source Coding targets of generalisation.py's frontier analysis
 
 
 def published_files(repo: str, revision: str) -> list:
-    """Every file of a dataset repository at a revision (path, size, and blob or LFS hash)."""
+    """
+    Lists every file of a Hugging Face dataset repository at one revision.
+
+    Inputs:
+        repo: the dataset repository, e.g. generality-labs/benchmarks.
+        revision: the commit to list.
+    Outputs:
+        list of the Hub's file entries (folders left out), each with path, size, blob_id and lfs (None for a file not
+        stored in LFS).
+    """
     tree = HfApi().list_repo_tree(repo, repo_type="dataset", revision=revision, recursive=True)
     return [f for f in tree if hasattr(f, "blob_id") and hasattr(f, "size")]
 
 
 def transcript_logs(meta: Path, domains: list[str]) -> set[str]:
-    """The transcript logs (paths relative to data/) the frozen tables of `domains` reference."""
+    """
+    Collects the transcript logs the frozen model tables of the given domains point to.
+
+    Inputs:
+        meta: the frozen tables' folder (<paths.data>/meta); reads <meta>/<domain>/models.csv, its path_<bench> columns.
+        domains: domain names.
+    Outputs:
+        set of log paths relative to paths.data.
+    """
     paths = set()
     for domain in domains:
         models = pd.read_csv(meta / domain / "models.csv")
@@ -43,7 +61,17 @@ def transcript_logs(meta: Path, domains: list[str]) -> set[str]:
 
 
 def digest(path: Path, lfs: bool, size: int) -> str:
-    """The file's hash as the Hub reports it: sha256 for LFS files, the git blob sha1 otherwise."""
+    """
+    Hashes a local file the way the Hub identifies it: the sha256 of its content for an LFS file, otherwise the git
+    blob sha1 (the sha1 of the header "blob <size>" and a null byte, then the content).
+
+    Inputs:
+        path: the local file.
+        lfs: whether the published file is stored in LFS.
+        size: the published file's size in bytes, used in the git blob header.
+    Outputs:
+        the hex digest.
+    """
     h = hashlib.sha256() if lfs else hashlib.sha1(b"blob %d\0" % size)
     with open(path, "rb") as f:
         while chunk := f.read(1 << 22):
@@ -52,19 +80,45 @@ def digest(path: Path, lfs: bool, size: int) -> str:
 
 
 def published(path: Path, f) -> bool:
-    """Whether the local file at `path` is the published file `f` (same size and hash)."""
+    """
+    Checks whether a local file is the published one: present, of the same size and with the same hash.
+
+    Inputs:
+        path: the local file.
+        f: the Hub's entry for the published file (from published_files).
+    Outputs:
+        True when they match, else False.
+    """
     return path.exists() and path.stat().st_size == f.size and digest(path, f.lfs is not None, f.size) == want(f)
 
 
 def want(f) -> str:
-    """The published file's hash: sha256 for LFS files, the git blob sha1 otherwise."""
+    """
+    Returns the published file's hash as the Hub reports it: the LFS sha256 for an LFS file, otherwise the git blob id.
+
+    Inputs:
+        f: the Hub's entry for the published file (from published_files).
+    Outputs:
+        the hex hash.
+    """
     return f.lfs.sha256 if f.lfs else f.blob_id
 
 
 def fetch(repo: str, revision: str, root: Path, wanted, dry_run: bool) -> None:
-    """Download the files of `repo` for which `wanted(path)` is true into `root`, skipping those already published.
+    """
+    Downloads the files of a dataset repository that the analysis reads and that are not already present, trying each
+    download up to five times (the Hub rate-limits bursts of requests) and checking its hash; first prints how many
+    files and GB there are and how many are to download.
 
-    wanted: path within the repository -> whether the analysis reads it.
+    Inputs:
+        repo: the dataset repository.
+        revision: the commit to download.
+        root: the local folder the repository's paths are written under.
+        wanted: path within the repository -> whether the analysis reads it.
+        dry_run: print the counts and download nothing.
+    Outputs:
+        the downloaded files under root. Exits (SystemExit) when a file cannot be downloaded or its hash differs from
+        the published one.
     """
     files = [f for f in published_files(repo, revision) if wanted(f.path)]
     todo = [f for f in files if not published(root / f.path, f)]
@@ -89,6 +143,18 @@ def fetch(repo: str, revision: str, root: Path, wanted, dry_run: bool) -> None:
 
 
 def main(config: dict, dry_run: bool) -> None:
+    """
+    Fetches the four datasets: the frozen tables first, then the transcript logs they reference, the judge runs, the
+    features and the embeddings of those transcript logs. On a dry run without the frozen tables on disk, the transcript
+    and embedding counts are 0, since the tables that list them are not there yet.
+
+    Inputs:
+        config: the analysis configuration (scripts/analysis/config.yaml); uses data_sources, paths and tasks (domains,
+            all_semesters).
+        dry_run: count the files and bytes to download, download nothing.
+    Outputs:
+        the files under paths.data, paths.logs, paths.features and paths.embeddings.
+    """
     sources, paths, tasks = config["data_sources"], config["paths"], config["tasks"]
     domains = tasks["domains"] + EXTRA_DOMAINS
     data = Path(paths["data"])

@@ -1,13 +1,12 @@
-"""Transcript thirds: each target's squared error when every rendered transcript (reasoning shown) is cut into three
+"""
+Transcript thirds: each target's squared error when every rendered transcript (reasoning shown) is cut into three
 equal character spans and one third is removed or kept alone (conditions "thirds-<kept thirds>", e.g. "thirds-23"
-without the first third). Pairwise judge: Figure 4 (removed) and Figure 22 (kept alone); Deterministic features,
-Embedding and Absolute scoring: Figure 23 (removed).
-
-The pairwise judge re-judged the cut transcripts (the thirds runs of src/challenges/thirds); every condition of a task
-is scored on the pairs judged in all of them, since a third too short to judge drops a pair from that run only. The
-Deterministic features and Embedding protocols refit their ridge per condition on the references' cut transcripts.
-Absolute scoring: the task's direct judge rated the cut transcripts (published as logs/direct_truncated-thirds-<kept>/),
-each condition recalibrated on the references' ratings, on the ratings present in every condition.
+without the first third, "thirds-1" the first third alone), next to the full transcript ("full") and the Baseline
+("easy"). The Pairwise judge re-judged the cut transcripts (src/challenges/thirds), and each condition of a task is
+scored on the comparisons judged in all of them, since a third too short to judge drops a comparison from that run
+only. Deterministic features and Embedding refit their ridge per condition on the references' cut transcripts. For
+Absolute scoring the task's judge rated the cut transcripts (logs/direct_truncated-thirds-<kept>/), and each
+condition is calibrated on the references' ratings of the transcripts rated in every condition.
 """
 
 from pathlib import Path
@@ -28,12 +27,22 @@ RATING = ["model", "bench", "item"]  # one absolute rating
 
 
 def pairwise_errors(domain: str, task: Task, run_dirs: dict[str, Path], keep: set[str], conversion: str) -> pd.DataFrame:
-    """Each target's squared error per pairwise run and of the Baseline ("easy"): domain, semester,
-    condition, model, err.
+    """
+    Each target's squared error under each Pairwise judge run of the thirds analysis (the full transcript and every
+    third removed or kept alone) and under the Baseline ("easy"), every run scored on the same comparisons. Raises
+    FileNotFoundError when a run folder holds no .eval logs.
 
-    run_dirs: condition -> the run's log dir, "full" first. Each run is cut to the `keep` items, a verdict judged twice
-        kept once (the first, a run's own before an imported one), and every run to the pairs judged in all of them.
-    conversion: verdicts to theta-hat (analysis.judges.pairwise_theta), e.g. "linear".
+    Inputs:
+        domain: the task's domain key.
+        task: the task (the references' θ*, the targets and their θ*).
+        run_dirs: condition -> the run's log folder (logs/judge/<domain>/<semester>/<judge>/<hash>), "full" first.
+            Each run is cut to the `keep` items, a comparison judged twice is kept once (the run's own verdict before
+            an imported one), and every run is cut to the comparisons (bench, item, model_left, model_right) judged
+            in all of them.
+        keep: the item ids judged (removal_items).
+        conversion: how verdicts become predicted θ (analysis.judges.pairwise_theta), e.g. "linear".
+    Outputs:
+        DataFrame with columns domain, semester, condition, model, err; one row per target and condition.
     """
     refs, targets, truth = task.references.theta, list(task.test.models.index), task.truth
     runs = {}
@@ -54,12 +63,22 @@ def pairwise_errors(domain: str, task: Task, run_dirs: dict[str, Path], keep: se
 
 def ridge_errors(protocol: str, domain: str, task: Task, keep: set[str], conditions: list[str],
                  features: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Each target's squared error per condition for a ridge protocol refitted on the references' cut transcripts, and
-    of the Baseline ("easy"): protocol, domain, semester, condition, model, err.
+    """
+    Each target's squared error under a ridge protocol refitted per condition on the references' cut transcripts, and
+    under the Baseline ("easy").
 
-    protocol: "embedding" (the embedding variant named as the condition) or "glm_regex".
-    features: for "glm_regex", the deterministic features of the cut transcripts (scripts/analysis/features.py,
-        features_thirds.csv; a condition column).
+    Inputs:
+        protocol: "embedding" (the embedding variant with the condition's name, e.g. "full" or "thirds-23") or
+            "glm_regex".
+        domain: the task's domain key.
+        task: the task.
+        keep: the item ids the features are averaged over (removal_items).
+        conditions: the conditions scored, e.g. ["full", "thirds-23", "thirds-13", "thirds-12"].
+        features: for "glm_regex", the deterministic features of the cut transcripts, one row per transcript and
+            condition (columns path, item, correct, condition and the regex features; features_thirds.csv, written by
+            scripts/analysis/features.py).
+    Outputs:
+        DataFrame with columns protocol, domain, semester, condition, model, err; one row per target and condition.
     """
     refs, targets, truth = task.references.theta, list(task.test.models.index), task.truth
     cohorts = [on_items(c, keep) for c in (task.references, task.test)]
@@ -77,13 +96,24 @@ def ridge_errors(protocol: str, domain: str, task: Task, keep: set[str], conditi
 
 def direct_errors(domain: str, task: Task, judge: str, conditions: list[str], rated_in: list[str],
                   logs: Path) -> pd.DataFrame:
-    """Absolute scoring's squared error per condition, of the full transcript and of the Baseline
-    ("easy"): protocol, domain, semester, condition, model, err.
+    """
+    Each target's squared error under Absolute scoring of the full transcript and of each thirds condition, and under
+    the Baseline ("easy"). Every condition is calibrated on the references' mean ratings (protocols.direct_judge.
+    scoring.calibrate) over the same transcripts: the (model, bench, item) rated in the full run and in every
+    condition of `rated_in`.
 
-    judge: the task's direct judge; its full transcript is its reasoning-shown run as the main analysis loads it.
-    conditions: the thirds conditions scored.
-    rated_in: the thirds conditions whose ratings, with the full transcript's, define the ratings every condition is
-        calibrated on (the (model, bench, item) rated in all of them; the kept-alone runs count too).
+    Inputs:
+        domain: the task's domain key.
+        task: the task.
+        judge: the task's Absolute scoring judge; its full-transcript ratings are its "reasoning-shown" run from
+            loading.direct_runs.
+        conditions: the thirds conditions scored, e.g. ["thirds-23", "thirds-13", "thirds-12"].
+        rated_in: the thirds conditions whose published runs (logs/direct_truncated-<condition>/) are read and
+            intersected, the kept-alone ones included; must contain `conditions`.
+        logs: the logs/ checkout (paths.logs).
+    Outputs:
+        DataFrame with columns protocol ("direct"), domain, semester, condition, model, err; one row per target and
+        condition.
     """
     refs, truth = task.references.theta, task.truth
     runs = {c: published_ratings(logs, f"truncated-{c}", domain, task.semester, judge) for c in rated_in}

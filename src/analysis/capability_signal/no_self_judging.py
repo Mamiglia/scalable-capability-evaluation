@@ -1,9 +1,9 @@
-"""Figure 3 with each task's judge left out of its own references (Figure 21).
-
-Every task's best judge on references is itself one of the task's references, so the Pairwise judge compares targets
-against its own transcripts and Absolute scoring calibrates on its own ratings. Here the judge's forecasts are refitted
-on the references without the judge; the judge choice, the transcript protocols and the Baseline are unchanged. The
-test uses the log likelihood ratio rows whose dropped reference is the judge.
+"""
+The squared error by protocol with each task's judge left out of its own references. Every task's best judge on
+references is itself one of the task's references, so the Pairwise judge compares targets against its own transcripts
+and Absolute scoring calibrates on its own ratings. Here the judge's predictions are refitted on the references without
+the judge; the judge choice, the transcript protocols and the Baseline are unchanged. The test uses the log likelihood
+ratio rows whose dropped reference is the judge.
 """
 
 import pandas as pd
@@ -14,9 +14,21 @@ from analysis import loading, matching
 
 def refit_without_judge(forecasts: pd.DataFrame, best: pd.DataFrame, domains: list[str],
                         semesters: list[str]) -> pd.DataFrame:
-    """`forecasts` with each task's best judge's forecasts of its targets refitted on the references without the judge.
+    """
+    Recomputes each task's best judge's predictions of the task's targets from that judge run's verdicts or ratings,
+    calibrated on the references without the judge, and writes them over theta_hat in a copy of `forecasts`. Every
+    other row, and every judge_loo_mse, is left as it was, so the same judge stays selected.
 
-    best: stats.best_judges rows (domain, semester, protocol, variant, judge, condition) of the tasks to refit.
+    Inputs:
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv); uses domain,
+            semester, protocol, variant, judge, condition and model, and overwrites theta_hat.
+        best: stats.best_judges rows of the tasks to refit; uses domain, semester, protocol, variant, judge and
+            condition.
+        domains: the domains to refit.
+        semesters: the semesters to refit.
+    Outputs:
+        a copy of `forecasts`, same columns and rows, with the refitted theta_hat on the best judges' rows. Reads the
+        frozen tables and the judge logs of every task.
     """
     forecasts = forecasts.copy()
     for name in domains:
@@ -38,10 +50,15 @@ def refit_without_judge(forecasts: pd.DataFrame, best: pd.DataFrame, domains: li
 
 
 def judge_dropped_llr(llr: pd.DataFrame) -> pd.DataFrame:
-    """The log likelihood ratio rows of the refitted forecasts, as one reference set (dropped "-"): transcript
-    protocols on the full reference set, judge protocols on the references without their judge.
+    """
+    Selects the log likelihood ratio rows that match the refitted predictions: for transcript protocols the full
+    reference set, for judge protocols the reference set without the judge; all are relabelled as one reference set
+    (dropped "-") so protocol_tests treats them as its full set.
 
-    llr: by_protocol.chosen_llr rows (every reference set).
+    Inputs:
+        llr: by_protocol.chosen_llr's rows, of every reference set; uses judge and dropped.
+    Outputs:
+        the selected rows, same columns, with dropped set to "-"; one row per target and protocol.
     """
     own = (llr.judge == "-") & (llr.dropped == "-") | (llr.judge != "-") & (llr.dropped == llr.judge)
     return llr[own].assign(dropped="-")

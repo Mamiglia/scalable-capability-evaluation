@@ -1,6 +1,7 @@
-"""Judge choice: how much the prediction error depends on which of the three candidate judges (the three strongest
-references of a task) judges it (Figure 15, the Appendix D.3 medians), and the candidates ordered by reference
-leave-one-model-out error (Table 8).
+"""
+Judge choice: each task has three candidate judges (its three strongest references), and this module measures how much
+the prediction error of the Pairwise judge and of Absolute scoring depends on which of them judges. It also lists each
+task's candidates ordered by their leave-one-model-out error on the references, the error that selects the judge.
 """
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,11 +20,20 @@ STYLE = {"font.family": "sans-serif", "font.sans-serif": ["Arial", "Arimo", "Lib
 
 
 def judge_errors(forecasts: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
-    """Every candidate judge's forecast of every target, core condition, in each judge protocol's reported variant,
-    with its squared error `e`, the baseline's `e_base` (the references' mean theta*) and the judge's `rank` by theta*
-    among the task's candidates (1 = strongest). Targets whose error ratio to the baseline is undefined are dropped.
+    """
+    Every candidate judge's prediction of every target, in the core condition and in each judge protocol's reported
+    variant, with its squared error, the Baseline's squared error on the same target, and the judge's rank by theta*.
 
-    variants: protocol -> reported variant; its judge protocols (pairwise, direct) are the ones kept.
+    Inputs:
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv); uses domain,
+            semester, protocol, variant, judge, condition, model, theta_hat and theta.
+        variants: protocol -> the variant it is reported in; only its judge protocols (pairwise, direct) are kept.
+    Outputs:
+        DataFrame, one row per task, judge protocol, judge and target: forecasts.csv's columns plus e (squared error),
+        e_base (the Baseline's squared error: the references' mean theta* from data/meta/<domain>/models.csv),
+        judge_theta (the judge's theta* as a reference of the task), task ("<domain> <semester>") and rank (the
+        judge's dense rank by that theta* among the task's candidates, 1 = strongest). Rows without e or e_base are
+        dropped.
     """
     judged = [p for p in variants if p in stats.JUDGED]
     f = stats.core_condition(forecasts[forecasts.protocol.isin(judged)])
@@ -42,10 +52,17 @@ def judge_errors(forecasts: pd.DataFrame, variants: dict[str, str]) -> pd.DataFr
 
 
 def medians(f: pd.DataFrame, semesters: list[str]) -> pd.Series:
-    """Appendix D.3: the median over the tasks of `semesters` of the range of pairwise MSE over the three judges,
-    and of the gap from pairwise judging (mean MSE over judges) to absolute scoring and to the baseline.
+    """
+    Summarises the judge spread over the tasks of `semesters`: the median over tasks of the range (largest minus
+    smallest) of the Pairwise judge's MSE across its candidate judges, and of the gaps from the Pairwise judge's MSE
+    (averaged over its candidates) to Absolute scoring's (likewise averaged) and to the Baseline's.
 
-    f: judge_errors' output.
+    Inputs:
+        f: judge_errors' output; uses semester, task, protocol, judge, e and e_base.
+        semesters: the semesters whose tasks are summarised.
+    Outputs:
+        Series with entries "pairwise judge range", "absolute scoring - pairwise" and "baseline - pairwise", each a
+        median over tasks of an MSE range or MSE difference.
     """
     f = f[f.semester.isin(semesters)]
     t = f.groupby(["task", "protocol", "judge"]).agg(mse=("e", "mean"), base=("e_base", "mean")).reset_index()
@@ -56,10 +73,16 @@ def medians(f: pd.DataFrame, semesters: list[str]) -> pd.Series:
 
 
 def by_rank(f: pd.DataFrame, semesters: list[str]) -> pd.DataFrame:
-    """One row per protocol x judge rank (column "1", "2", "3") x target: the target's squared error averaged over the
-    domains it has (e), and their number (n_domains).
+    """
+    Each target's squared error with the candidate judge of each rank, averaged over the domains in which the model is
+    a target.
 
-    f: judge_errors' output.
+    Inputs:
+        f: judge_errors' output; uses semester, task, domain, protocol, rank, model, judge and e.
+        semesters: the semesters whose targets are kept.
+    Outputs:
+        DataFrame with columns protocol, column (the judge's rank as a string, "1" to "3"), model, e (the squared
+        error averaged over the model's domains) and n_domains (their number); one row per protocol, rank and target.
     """
     g = f[f.semester.isin(semesters)]
     ranked = g.assign(column=g["rank"].astype(str)).drop_duplicates(["task", "protocol", "column", "model", "judge"])
@@ -67,12 +90,21 @@ def by_rank(f: pd.DataFrame, semesters: list[str]) -> pd.DataFrame:
 
 
 def figure(f: pd.DataFrame, semesters: list[str], names: dict[str, str], colours: dict[str, str], path: str) -> pd.DataFrame:
-    """Figure 15: squared error per target (averaged over its domains), the baseline then one column per judge rank
-    within each judge protocol: small points, the mean as a large circle and its 95% t-interval as a box; log y-axis.
-    Writes path.{pdf,png,svg}; returns the plotted numbers, one row per column: protocol, column, n, mean, half
-    (the t-interval's half-width).
+    """
+    Draws each target's squared error (averaged over its domains) in one column for the Baseline, then one column per
+    judge rank within each judge protocol: a small point per target, the mean as a large circle and its 95% t-interval
+    as a box, on a log y-axis.
 
-    names, colours: protocol -> label and colour, the baseline's ("easy_items") included.
+    Inputs:
+        f: judge_errors' output.
+        semesters: the semesters whose targets are drawn.
+        names: protocol -> legend label, the Baseline's ("easy_items") included.
+        colours: protocol -> colour, the Baseline's included.
+        path: the output path without extension.
+    Outputs:
+        writes path.pdf, path.png and path.svg; returns the plotted numbers as a DataFrame with columns protocol,
+        column ("-" for the Baseline, else the judge's rank), n (targets), mean and half (the t-interval's
+        half-width), one row per drawn column.
     """
     t = by_rank(f, semesters)
     base = f[f.semester.isin(semesters)].drop_duplicates(["domain", "semester", "model"]).groupby("model").e_base.mean()
@@ -126,8 +158,19 @@ def figure(f: pd.DataFrame, semesters: list[str], names: dict[str, str], colours
 
 
 def candidate_judges(forecasts: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
-    """Table 8: per task and judge protocol, the three candidate judges ordered by reference leave-one-model-out error
-    (core condition, reported variant). Columns semester, domain, protocol, Best, 2nd best, 3rd best."""
+    """
+    The three candidate judges of each task and judge protocol, ordered from the lowest to the highest
+    leave-one-model-out error on the references (core condition, reported variant); barring ties, the first is the
+    judge that stats.best_judges selects.
+
+    Inputs:
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv); uses domain,
+            semester, protocol, variant, judge, condition and judge_loo_mse.
+        variants: protocol -> the variant it is reported in.
+    Outputs:
+        DataFrame with columns semester, domain, protocol, Best, 2nd best, 3rd best (judge names); one row per task
+        and judge protocol.
+    """
     core = stats.core_condition(forecasts)
     core = core[core.protocol.isin(stats.JUDGED) & (core.variant == core.protocol.map(variants))]
     loo = core.drop_duplicates(["domain", "semester", "protocol", "judge"]).sort_values("judge_loo_mse")

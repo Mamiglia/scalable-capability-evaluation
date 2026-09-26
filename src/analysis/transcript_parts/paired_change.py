@@ -1,11 +1,12 @@
-"""The change in squared error that every transcript-parts figure draws (Figures 4, 5, 22, 23, 24), the 40 items it is
-measured on, and the figure and caption shared by the thirds and channel analyses.
+"""
+The paired change in squared error that every transcript-parts figure draws, the items the cut-transcript conditions
+are judged on (10 per difficulty quartile), and the figure and caption text shared by the thirds and channel analyses.
 
-Each analysis forecasts the same targets from transcripts with one part removed or kept alone, next to the full
-transcript (condition "full") and the Baseline ("easy"). A row's change is the mean over a domain's
-targets of the target's squared error under the row's condition minus under the comparison condition (the full
-transcript, or the Baseline for a part kept alone), with its 95% t-interval and the two-sided paired
-t-test of it against 0 (the same test: an interval excluding 0 is p < .05), the targets of every semester pooled.
+Each analysis predicts the same targets from transcripts with one part removed or kept alone, next to the full
+transcript (condition "full") and the Baseline ("easy"). A row's change is the mean over a domain's targets of the
+target's squared error under the row's condition minus under the comparison condition (the full transcript, or the
+Baseline for a part kept alone), with its 95% t-interval and the two-sided paired t-test of it against 0 (the same
+test: an interval excluding 0 is p < .05), the targets of every semester pooled.
 """
 
 from dataclasses import replace
@@ -31,37 +32,84 @@ AGAINST = {"full": ("the full transcript", "full transcript"), "easy": ("the Bas
 
 
 def removal_items(task: Task, per_quartile: int, seed: int) -> set[str]:
-    """The task's train items every removal condition is judged on: `per_quartile` per difficulty quartile, seeded."""
+    """
+    The task's items every cut-transcript condition is judged on: a seeded draw of `per_quartile` train items from
+    each quartile of item difficulty (b), or every train item when `per_quartile` is 0.
+
+    Inputs:
+        task: the task; uses task.references.items (the frozen train items: bench, item, b).
+        per_quartile: items drawn per difficulty quartile (config.yaml removal_items.per_quartile, 10).
+        seed: the draw's random seed (removal_items.seed).
+    Outputs:
+        set of item ids, as strings.
+    """
     return set(map(str, stratified_items(task.references.items, per_quartile, seed)))
 
 
 def on_items(cohort: Cohort, keep: set[str]) -> Cohort:
-    """`cohort` restricted to the train items in `keep`."""
+    """
+    A copy of `cohort` with its items restricted to those in `keep`; its models are unchanged.
+
+    Inputs:
+        cohort: a task's references or targets (capability.task.Cohort); uses cohort.items.item.
+        keep: the item ids (strings) to keep, e.g. from removal_items.
+    Outputs:
+        the restricted Cohort.
+    """
     return replace(cohort, items=cohort.items[cohort.items.item.astype(str).isin(keep)])
 
 
 def published_ratings(logs: Path, condition: str, domain: str, semester: str, judge: str) -> pd.DataFrame:
-    """The audited ratings of a published absolute-scoring challenge run.
+    """
+    Reads the audited ratings of a published Absolute scoring run on cut transcripts from its ratings.csv.
 
-    condition: e.g. "channels-drop-reasoning" or "truncated-thirds-23", read from
-        <logs>/direct_<condition>/<domain>/<semester>/<judge>/<hash>/ratings.csv.
+    Inputs:
+        logs: the logs/ checkout (paths.logs).
+        condition: the run's condition, e.g. "channels-drop-reasoning" or "truncated-thirds-23"; the file read is
+            <logs>/direct_<condition>/<domain>/<semester>/<judge>/<hash>/ratings.csv, of which exactly one must exist.
+        domain: the task's domain key.
+        semester: the task's semester.
+        judge: the judge's shortname.
+    Outputs:
+        DataFrame of the file's rows with item read as a string; the callers use model, bench, item and score.
     """
     (path,) = Path(logs, f"direct_{condition}", domain, semester, judge).glob("*/ratings.csv")
     return pd.read_csv(path, dtype={"item": str})
 
 
 def squared_errors(theta: pd.Series | float, truth: pd.Series, **columns: str) -> pd.DataFrame:
-    """One row per target of `truth`: `columns` (e.g. domain, semester, condition), model, and err, the squared error
-    of `theta` (a forecast per model, or one number for every target)."""
+    """
+    Each target's squared error of a prediction, labelled with constant columns.
+
+    Inputs:
+        theta: the predicted θ per model (a Series, aligned to the targets), or one number for every target (the
+            Baseline: the references' mean θ*).
+        truth: the targets' θ*, indexed by model.
+        columns: label columns with one value each, e.g. domain, semester, condition.
+    Outputs:
+        DataFrame with the `columns`, model and err (the squared error, NaN for a target without a prediction); one
+        row per target of `truth`.
+    """
     if isinstance(theta, pd.Series):
         theta = theta.reindex(truth.index)
     return pd.DataFrame({**columns, "model": truth.index, "err": ((theta - truth) ** 2).to_numpy()})
 
 
 def ridge_forecast(protocol: str, x: pd.DataFrame, refs: pd.Series, targets: list[str]) -> pd.Series:
-    """The targets' theta-hat from a ridge refitted on the references' rows of `x` (one row per model).
+    """
+    Predicts the targets' θ with a ridge regression fitted on the references' rows of `x`, its penalty chosen by
+    cross-validation (RidgeCV). A reference with a non-finite feature is left out of the fit and such a target is
+    predicted NaN.
 
-    protocol: "embedding" (RidgeCV on the vectors) or "glm_regex" (RidgeCV on the standardised deterministic features).
+    Inputs:
+        protocol: "embedding" (RidgeCV on the embedding vectors, with protocols.embeddings.ALPHAS); any other value
+            is taken as "glm_regex" (RidgeCV on the standardised deterministic features, with the feature protocol's
+            ALPHAS).
+        x: one row of features per model, references and targets, indexed by model.
+        refs: the references' θ*, indexed by model.
+        targets: the target models.
+    Outputs:
+        Series of predicted θ, indexed by target.
     """
     if protocol == "embedding":
         estimator = RidgeCV(alphas=embeddings.ALPHAS)
@@ -71,7 +119,15 @@ def ridge_forecast(protocol: str, x: pd.DataFrame, refs: pd.Series, targets: lis
 
 
 def paired_t(diff: np.ndarray) -> dict[str, float]:
-    """The mean of the per-target differences `diff`, its 95% t-interval (lo, hi) and the two-sided p that it is 0."""
+    """
+    The mean of the per-target differences, its 95% t-interval and the two-sided one-sample t-test that it is 0.
+    NaN differences are dropped; p is 1 when the differences have no spread.
+
+    Inputs:
+        diff: per-target differences in squared error (under a condition minus under the comparison condition).
+    Outputs:
+        dict with estimate (the mean), lo and hi (the interval's ends) and p.
+    """
     diff = diff[np.isfinite(diff)]
     mean, se = float(diff.mean()), float(diff.std(ddof=1) / np.sqrt(len(diff)))
     half = float(scipy_stats.t.ppf(0.975, len(diff) - 1)) * se
@@ -80,12 +136,19 @@ def paired_t(diff: np.ndarray) -> dict[str, float]:
 
 
 def change_table(errors: pd.DataFrame, rows: dict[str, str], against: str) -> tuple[pd.DataFrame, dict[str, float]]:
-    """Each row's change in squared error from `against` over one domain's targets, and the domain's mean squared error
-    of the full transcript and of the Baseline.
+    """
+    For one domain, each row's mean change in squared error from the comparison condition, the targets paired within
+    each semester and every semester pooled, with its interval and test (paired_t); and the domain's mean squared
+    error with the full transcript and with the Baseline.
 
-    errors: one domain's rows (semester, condition, model, err), with conditions "full", "easy" and those in `rows`.
-    rows: row label -> condition; a condition missing in any semester is left out.
-    Returns (row, estimate, lo, hi, p per row; {"full": mean, "easy": mean}).
+    Inputs:
+        errors: one domain's per-target errors, columns semester, condition, model, err; conditions "full", "easy"
+            and those `rows` names.
+        rows: row label -> condition; a condition missing in any semester is left out.
+        against: the comparison condition, "full" or "easy".
+    Outputs:
+        (DataFrame with columns row, estimate, lo, hi, p, one row per row label kept; dict {"full": ..., "easy": ...},
+        the mean squared error of the full transcript and of the Baseline over every semester's targets).
     """
     wide = {s: g.pivot_table(index="model", columns="condition", values="err") for s, g in errors.groupby("semester")}
     present = set.intersection(*(set(w.columns) for w in wide.values()))
@@ -97,7 +160,17 @@ def change_table(errors: pd.DataFrame, rows: dict[str, str], against: str) -> tu
 
 
 def domain_changes(errors: pd.DataFrame, rows: dict[str, str], against: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """change_table per domain of `errors`: (domain, row, estimate, lo, hi, p; the full and easy means by domain)."""
+    """
+    Runs change_table for every domain in `errors`.
+
+    Inputs:
+        errors: per-target errors, columns domain, semester, condition, model, err.
+        rows: row label -> condition, as in change_table.
+        against: the comparison condition, "full" or "easy".
+    Outputs:
+        (DataFrame with columns domain, row, estimate, lo, hi, p, one row per domain and row label; DataFrame indexed
+        by domain with columns full and easy, the domain's mean squared error of each).
+    """
     tables, means = [], {}
     for domain, part in errors.groupby("domain"):
         table, means[domain] = change_table(part, rows, against)
@@ -107,8 +180,15 @@ def domain_changes(errors: pd.DataFrame, rows: dict[str, str], against: str) -> 
 
 
 def baseline_change(errors: pd.DataFrame) -> pd.DataFrame:
-    """Per domain, the Baseline's mean change in squared error from the full transcript, semesters
-    pooled: domain, estimate, and lo = hi = estimate (a point for scale, untested)."""
+    """
+    Per domain, the Baseline's mean change in squared error from the full transcript over the domain's targets, every
+    semester pooled; it is drawn as a grey point for scale and not tested.
+
+    Inputs:
+        errors: per-target errors, columns domain, semester, condition, model, err, with conditions "easy" and "full".
+    Outputs:
+        DataFrame with columns domain, estimate, lo and hi (both equal to estimate); one row per domain.
+    """
     rows = []
     for domain, part in errors.groupby("domain"):
         wide = {s: g.pivot_table(index="model", columns="condition", values="err") for s, g in part.groupby("semester")}
@@ -119,7 +199,15 @@ def baseline_change(errors: pd.DataFrame) -> pd.DataFrame:
 
 
 def method_text(against: str, removed: bool) -> str:
-    """The caption sentences on what a point, a box and a star are."""
+    """
+    The caption sentences saying what a point, a box and a star show.
+
+    Inputs:
+        against: the comparison condition, "full" or "easy" (named through AGAINST).
+        removed: True when the rows remove a part, False when they keep a part alone.
+    Outputs:
+        str, the sentences.
+    """
     name = AGAINST[against][0]
     tested = "without that part" if removed else "with only that part"
     return (f"Each point is the mean over a domain's targets of the change in squared error from {name} (the target's "
@@ -131,9 +219,18 @@ def method_text(against: str, removed: bool) -> str:
 
 def number_lines(table: pd.DataFrame, means: pd.DataFrame, targets: pd.Series, against: str,
                  domain_names: dict[str, str]) -> list[str]:
-    """The caption's plotted numbers: per domain, the mean squared errors and each row's change, interval and p.
+    """
+    The caption's list of plotted numbers: per domain, the mean squared error of the Baseline and of the full
+    transcript, then each row's change, interval and p.
 
-    means: domain_changes' second table. targets: targets per domain.
+    Inputs:
+        table: domain_changes' first table (domain, row, estimate, lo, hi, p).
+        means: domain_changes' second table (columns full and easy, indexed by domain).
+        targets: the number of targets per domain.
+        against: the comparison condition, "full" or "easy".
+        domain_names: domain key -> display name; also the order of the domains.
+    Outputs:
+        list of str: a heading line, then one line per domain.
     """
     lines = [f"Change in squared error from {AGAINST[against][0]} (95% interval), p:"]
     for domain in (d for d in domain_names if d in means.index):
@@ -149,14 +246,26 @@ def draw_row(axes, table: pd.DataFrame, rows: list[str], removed: bool, colours:
              domain_names: dict[str, str], titles: bool = True, alpha: float | None = None,
              baselines: pd.DataFrame | None = None, span: tuple[float, float] | None = None,
              ticks: list[float] | None = None) -> None:
-    """One panel per domain of `table` into `axes`, one line per row label: dot = mean change, box = its 95% t-interval,
-    a star mark just past the panel's widest box; the dashed line at 0 is the comparison condition.
+    """
+    Draws one row of panels, one per domain, into `axes`: a line per row label with a dot at the mean change, a box
+    over its 95% t-interval and the significance mark just past the panel's widest box, and a dashed line at 0 for the
+    comparison condition. Every panel gets the same x ticks and limits.
 
-    removed: parts removed (hollow dots, darker boxes) rather than kept alone.
-    colours: row label -> colour, or domain -> colour when every row of a panel shares one.
-    baselines: baseline_change's table, drawn as a grey point on a last line, for scale.
-    span: (low, high) the axis must cover, so several rows of panels can share one scale.
-    ticks: the x ticks; by default the finest nice step with at most 5 ticks covering every interval and 0.
+    Inputs:
+        axes: matplotlib axes, one per domain present in `table`, in domain_names order.
+        table: domain_changes' first table (domain, row, estimate, lo, hi, p).
+        rows: the row labels, top to bottom.
+        removed: True for parts removed (hollow dots, darker boxes), False for parts kept alone.
+        colours: row label -> colour, or domain -> colour when every row of a panel shares one.
+        domain_names: domain key -> display name, in drawing order.
+        titles: write each domain's name above its panel.
+        alpha: the boxes' opacity; by default 0.6 for parts removed and 0.35 for parts kept alone.
+        baselines: baseline_change's table, drawn as a grey point on an extra last line, "Baseline prediction".
+        span: (low, high) the axis must cover, so several rows of panels can share one scale.
+        ticks: the x ticks; by default the finest step of 1, 2 or 5 times a power of ten that gives at most five ticks
+            covering every interval and 0.
+    Outputs:
+        none; draws into `axes`.
     """
     domains = [d for d in domain_names if d in set(table.domain)]
     labels = list(rows)
@@ -208,7 +317,17 @@ def draw_row(axes, table: pd.DataFrame, rows: list[str], removed: bool, colours:
 
 def figure(table: pd.DataFrame, rows: list[str], removed: bool, colours: dict[str, str], domain_names: dict[str, str],
            against: str, baselines: pd.DataFrame | None = None) -> plt.Figure:
-    """draw_row on a figure of its own, 5.2 in wide, with the x label."""
+    """
+    Draws draw_row's row of domain panels on a figure of its own, 5.2 inches wide and taller with more rows, with the
+    x label "Δ Squared error vs <comparison>".
+
+    Inputs:
+        table: domain_changes' first table.
+        rows, removed, colours, domain_names, baselines: as in draw_row.
+        against: the comparison condition, "full" or "easy".
+    Outputs:
+        the matplotlib Figure.
+    """
     domains = [d for d in domain_names if d in set(table.domain)]
     fig, axes = plt.subplots(1, len(domains), figsize=(5.2, 1.3 + 0.3 * (len(rows) - 3 + (baselines is not None))),
                              sharey=True, gridspec_kw={"wspace": 0.08})
@@ -220,10 +339,17 @@ def figure(table: pd.DataFrame, rows: list[str], removed: bool, colours: dict[st
 def grid(tables: dict[str, pd.DataFrame], rows: list[str], removed: bool, colours: dict[str, str],
          domain_names: dict[str, str], against: str, alpha: float | None = None, shared_x: bool = False,
          ticks: list[float] | None = None) -> plt.Figure:
-    """One draw_row per protocol, stacked, domain titles on the top row only, the protocol's name left of its row.
+    """
+    Stacks one draw_row per protocol in a 5.2-inch-wide figure, domain titles on the top row only and each protocol's
+    name to the left of its row.
 
-    tables: protocol name -> its domain_changes table.
-    shared_x: one x scale for every protocol, zeros aligned.
+    Inputs:
+        tables: protocol display name -> its domain_changes first table, top to bottom.
+        rows, removed, colours, domain_names, alpha, ticks: as in draw_row.
+        against: the comparison condition, "full" or "easy".
+        shared_x: one x range for every protocol's row, the zeros aligned.
+    Outputs:
+        the matplotlib Figure.
     """
     domains = [d for d in domain_names if d in set(pd.concat(tables.values()).domain)]
     fig, axes = plt.subplots(len(tables), len(domains), figsize=(5.2, 1.3 * len(tables)), sharey="row", squeeze=False,

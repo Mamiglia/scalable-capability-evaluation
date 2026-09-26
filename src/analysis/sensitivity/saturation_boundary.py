@@ -1,6 +1,8 @@
-"""Saturation boundary: tighten the EASY boundary from the 3 strongest references to the k = 4..8 strongest, or to
-every reference and target ("all"); theta* is refit on the enlarged HARD set and every protocol is refit on the train
-items still EASY (Figure 25, Table 10; Appendix D.11).
+"""
+Saturation boundary: an item counts as saturated (EASY) when the 3 strongest references all solve it; this module
+tightens that to the k = 4 to 8 strongest references, or to every reference and target ("all"). At each level theta*
+is refitted on the enlarged set of unsaturated (HARD) items, every protocol is refitted on the train items still
+saturated, and each protocol's MSE is compared with the Baseline's.
 """
 import copy
 
@@ -22,16 +24,35 @@ ORDER = ("pairwise", "direct", "glm_regex", "embedding")  # the figure's drawing
 
 
 def saturating_models(task: Task, models: pd.DataFrame, level: int | str) -> list[str]:
-    """The models that must solve an item at `level`: the `level` references with the highest global theta,
-    or every reference and target for "all"."""
+    """
+    The models that must all solve an item for it to count as saturated at `level`.
+
+    Inputs:
+        task: the semester task; uses its references and targets.
+        models: the frozen models table (data/meta/<domain>/models.csv); uses global_theta.
+        level: a number of references, or "all".
+    Outputs:
+        list of model names: the `level` references with the highest global theta, or every reference and target
+        for "all".
+    """
     if level == "all":
         return [*task.references.models.index, *task.truth.index]
     return models.global_theta.loc[task.references.models.index].nlargest(level).index.tolist()
 
 
 def level_split(domain: DomainConfig, task: Task, level: int | str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(hard items, observed items) at `level`: rows of the frozen items table (bench, item, guess, a, b, ...).
-    Observed = the task's frozen train items still EASY at this level."""
+    """
+    Splits the domain's items at `level` from the repeat-0 answers of the models that must solve them: HARD items
+    (every such model answered, some wrongly), and observed items (the task's frozen train items that every such model
+    solved).
+
+    Inputs:
+        domain: the domain config; reads data/meta/<domain>/models.csv, items.csv and responses.csv.
+        task: the semester task.
+        level: a number of references, or "all" (see saturating_models).
+    Outputs:
+        (hard, observed): two DataFrames of rows of the frozen items table (bench, item, guess, a, b, ...).
+    """
     models, items = tables.load(domain)
     status = easy_hard(tables.load_responses(domain), items, saturating_models(task, models, level))
     observed = items[items[f"{task.semester}_train"].astype(bool) & (status == "easy")]
@@ -39,9 +60,19 @@ def level_split(domain: DomainConfig, task: Task, level: int | str) -> tuple[pd.
 
 
 def refit_theta(domain: DomainConfig, task: Task, hard: pd.DataFrame, seed: int = 0) -> pd.Series:
-    """theta* on `hard` as reference.freeze.semester_task fits it: references + targets together, then every
-    model of the semesters before the references with HARD responses in a second fit (the same model set as the
-    freeze, so level 3 reproduces the frozen theta*). Index = model."""
+    """
+    Refits theta* on the items `hard` as reference.freeze.semester_task does: the references and targets in one fit,
+    then, in a second fit, every model of the semesters before the references' that answered some of those items. The
+    model set is the freeze's, so level 3 reproduces the frozen theta*.
+
+    Inputs:
+        domain: the domain config; reads data/meta/<domain>/responses.csv and models.csv, and configs/semesters.yml.
+        task: the semester task.
+        hard: the HARD rows of the items table (level_split's first output).
+        seed: the sampler's seed.
+    Outputs:
+        Series of theta* indexed by model.
+    """
     responses = tables.load_responses(domain)
     theta = local_fit(responses, hard, [*task.references.models.index, *task.truth.index], seed=seed).theta
     rosters, models = tables.load_semesters(), tables.load(domain)[0]
@@ -54,11 +85,23 @@ def refit_theta(domain: DomainConfig, task: Task, hard: pd.DataFrame, seed: int 
 
 
 def level_task(task: Task, theta: pd.Series, observed: pd.DataFrame) -> Task:
-    """`task` with every theta* replaced by `theta` and every cohort's items cut to `observed`. A historical
-    model without a refit theta* is dropped (it has no HARD response at this level)."""
+    """
+    The task at one saturation level: every theta* replaced by the refitted one and every cohort's items cut to the
+    observed items. A reference or historical model without a refitted theta* (no HARD response at this level) is
+    dropped.
+
+    Inputs:
+        task: the semester task at the frozen boundary.
+        theta: the refitted theta* indexed by model (refit_theta's output).
+        observed: the items still saturated (level_split's second output); uses bench, item.
+    Outputs:
+        a Task with the same cohorts cut to `observed`, their theta* and truth taken from `theta`; transcripts already
+        read are carried over, cut to the kept items.
+    """
     items = task.references.items.merge(observed[["bench", "item"]])
 
     def cohort(c: Cohort, labelled: bool) -> Cohort:
+        """The cohort cut to the kept items, with the refitted theta* if it is labelled."""
         models = c.models.assign(theta=theta.reindex(c.models.index)) if labelled else c.models
         if labelled:
             models = models[np.isfinite(models.theta)]
@@ -73,7 +116,15 @@ def level_task(task: Task, theta: pd.Series, observed: pd.DataFrame) -> Task:
 
 
 def cut(run: loading.JudgeRun, items: pd.DataFrame) -> loading.JudgeRun:
-    """A copy of a matched run keeping only the rows on `items`."""
+    """
+    A shallow copy of a matched judge run whose verdicts or ratings are cut to the given items.
+
+    Inputs:
+        run: a judge run matched to the task (matching.match).
+        items: the items kept; uses bench, item.
+    Outputs:
+        a JudgeRun whose table holds only the rows on `items`.
+    """
     out = copy.copy(run)
     out.table = run.table.merge(items[["bench", "item"]])
     return out
@@ -81,13 +132,23 @@ def cut(run: loading.JudgeRun, items: pd.DataFrame) -> loading.JudgeRun:
 
 def level_forecasts(domains: list[str], semesters: list[str], levels: list, cached_theta: pd.DataFrame | None,
                     embedding: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(theta, forecasts) over every task and level: theta* per domain, semester, level and model (with the level's
-    numbers of HARD and observed items), and every protocol's forecast rows (calibration.forecasts) with a `level`
-    column. Levels above the task's number of references are skipped.
+    """
+    For every task and saturation level, refits theta* on the level's HARD items and computes every protocol's
+    prediction of every target on the level's observed items (calibration.forecasts): the Baseline, Deterministic
+    features, Embedding, and every judge run on disk. A level above the task's number of references is skipped.
 
-    levels: e.g. [3, 4, 5, 6, 7, 8, "all"].
-    cached_theta: a previous run's theta table, reused instead of refitting (the slow step); None refits.
-    embedding: the embedding variant the paper reports.
+    Inputs:
+        domains: the domains, in order.
+        semesters: the semesters whose tasks are used.
+        levels: the saturation levels, e.g. [3, 4, 5, 6, 7, 8, "all"].
+        cached_theta: a previous call's theta table, used instead of refitting theta* (the slow step); None refits.
+        embedding: the Embedding variant reported.
+    Outputs:
+        (theta, forecasts). theta: DataFrame with columns domain, semester, level (a string), model, theta, n_hard
+        and n_observed (the level's numbers of HARD and observed items); one row per task, level and model.
+        forecasts: calibration.forecasts' rows (domain, semester, protocol, variant, judge, condition, judge_loo_mse,
+        model, theta_hat, theta, missing) with a level column; one row per task, level, protocol, variant, judge,
+        condition and target.
     """
     thetas, frames = [], []
     for name in domains:
@@ -113,8 +174,17 @@ def level_forecasts(domains: list[str], semesters: list[str], levels: list, cach
 
 
 def ratio(g: pd.DataFrame, seed: int = 0, draws: int = 2000) -> dict:
-    """MSE of the condition over MSE of the Baseline on the same targets (columns err, err_baseline, one row
-    per target), with a percentile-bootstrap 95% interval over targets."""
+    """
+    The MSE of a protocol over the Baseline's MSE on the same targets, with a percentile-bootstrap 95% interval that
+    resamples targets.
+
+    Inputs:
+        g: one row per target; uses err (the protocol's squared error) and err_baseline (the Baseline's).
+        seed: the bootstrap's seed.
+        draws: the number of bootstrap draws.
+    Outputs:
+        dict with n (targets), mse, baseline_mse, ratio (mse / baseline_mse), lo and hi (the interval's bounds).
+    """
     c, b = g.err.to_numpy(float), g.err_baseline.to_numpy(float)
     idx = np.random.default_rng(seed).integers(0, len(c), size=(draws, len(c)))
     boot = c[idx].mean(1) / b[idx].mean(1)
@@ -123,11 +193,21 @@ def ratio(g: pd.DataFrame, seed: int = 0, draws: int = 2000) -> dict:
 
 
 def ratios(forecasts: pd.DataFrame, variants: dict[str, str], seed: int, draws: int) -> pd.DataFrame:
-    """Per level x domain (and domain "all", every target pooled) x protocol: MSE / Baseline MSE with a bootstrap
-    interval over targets. Judge protocols are the judge with the lowest reference leave-one-out error at that level.
+    """
+    Each protocol's MSE over the Baseline's MSE on the same targets, per saturation level and domain and pooled over
+    every domain, with a bootstrap interval over targets. A judge protocol is scored with the judge that has the
+    lowest leave-one-model-out error on the references at that level (stats.one_per_target).
 
-    forecasts: level_forecasts' output. variants: protocol -> reported variant.
-    Returns columns level, domain, protocol, judge, n, mse, baseline_mse, ratio, lo, hi.
+    Inputs:
+        forecasts: level_forecasts' second output; uses level, domain, semester, protocol, variant, judge, model,
+            theta_hat and theta.
+        variants: protocol -> the variant it is reported in; uses embedding, direct and pairwise.
+        seed: the bootstrap's seed.
+        draws: the number of bootstrap draws.
+    Outputs:
+        DataFrame with columns level, domain ("all" for every target pooled), protocol, judge ("best judge on
+        references" for a judge protocol, empty otherwise), n, mse, baseline_mse, ratio, lo and hi; one row per level,
+        domain and protocol.
     """
     shown = {stats.BASELINE: "-", "glm_regex": "-", **{p: variants[p] for p in ("embedding", "direct", "pairwise")}}
     rows = []
@@ -143,10 +223,19 @@ def ratios(forecasts: pd.DataFrame, variants: dict[str, str], seed: int, draws: 
 
 
 def pairwise_table(table: pd.DataFrame, theta: pd.DataFrame, domains: list[str], levels: list, names: dict[str, str]) -> pd.DataFrame:
-    """Table 10: pairwise judging's error ratio per domain (and pooled) and level, with the observed items summed over
-    the semesters at each level (n_<level>).
+    """
+    The Pairwise judge's MSE ratio to the Baseline per domain and level, with the number of observed items at each
+    level summed over the domain's semesters.
 
-    table: ratios' output. theta: level_forecasts' theta table. names: domain -> label.
+    Inputs:
+        table: ratios' output.
+        theta: level_forecasts' first output; uses domain, semester, level and n_observed.
+        domains: the domains, in row order.
+        levels: the saturation levels, in column order.
+        names: domain -> display name.
+    Outputs:
+        DataFrame with columns domain (display name, then "Pooled" for every domain pooled), one ratio column per
+        level and one n_<level> column per level (empty on the pooled row); one row per domain.
     """
     levels = [str(l) for l in levels]
     ratio = table[table.protocol == "pairwise"].pivot(index="domain", columns="level", values="ratio")[levels]
@@ -157,10 +246,20 @@ def pairwise_table(table: pd.DataFrame, theta: pd.DataFrame, domains: list[str],
 
 def figure(table: pd.DataFrame, domains: list[str], levels: list, protocols: list[str], names: dict[str, str],
            colours: dict[str, str], domain_names: dict[str, str], path: str) -> None:
-    """Figure 25: 2 x 2 domain panels, each protocol's error ratio to the Baseline per level with its bootstrap band.
-    Writes path.{svg,pdf,png}.
+    """
+    Draws one panel per domain (2 x 2), each protocol's MSE ratio to the Baseline against the saturation level with its
+    bootstrap band, on a log y-axis with a dashed line at 1.
 
-    protocols: the protocols drawn (in ORDER). names, colours: protocol -> label, colour. domain_names: domain -> label.
+    Inputs:
+        table: ratios' output.
+        domains: the domains, one panel each.
+        levels: the saturation levels, in x-axis order.
+        protocols: the protocols drawn (drawn in ORDER).
+        names, colours: protocol -> legend label, colour.
+        domain_names: domain -> panel title.
+        path: the output path without extension.
+    Outputs:
+        writes path.svg, path.pdf and path.png.
     """
     style = {"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7,
              "svg.fonttype": "none", "font.family": "sans-serif", "font.sans-serif": ["Arial"], "axes.linewidth": 0.8,

@@ -1,9 +1,9 @@
-"""Calibration: every signal to theta-hat on the theta* scale, one forecast row per target.
-
-Transcript protocols (easy-item prediction, oracle, surface-feature ridge, embedding ridge) fit
-themselves on the task. Judge runs are converted offline from their matched tables with
-every variant (pairwise: linear and calibrated; direct: raw and item_z), and each judge run
-carries its reference leave-one-out error so stats can pick the best judge without labels.
+"""
+Turns every protocol's output into predicted capabilities (theta-hat, on the theta* scale), one row per target. The
+protocols that need no judge (Baseline, the HARD-item accuracy oracle, Length, Deterministic features, Embedding) fit
+themselves on the task. Judge runs are converted from their matched tables with every variant (Pairwise judge: linear,
+calibrated and bt; Absolute scoring: raw and item_z), and each run carries its leave-one-model-out error on the
+references, which analysis.stats uses to pick a judge without target labels.
 """
 
 from types import SimpleNamespace
@@ -29,8 +29,16 @@ ENSEMBLE = "ensemble"  # the judge label of a pooled run
 
 
 def core_runs(runs: list[JudgeRun]) -> list[JudgeRun]:
-    """One run per (protocol, judge): the closest it has to reasoning-shown on the full train set — else its
-    smaller-train-set shown run ("-<k>pq"), else its reasoning-hidden run (`analysis.stats.condition_rank`)."""
+    """
+    Keeps one run per (protocol, judge): its reasoning-shown run on the full train set if there is one, else its
+    reasoning-shown run on a smaller train set ("-<k>pq"), else its reasoning-hidden run (the order of
+    analysis.stats.condition_rank). Runs of any other condition are dropped.
+
+    Inputs:
+        runs: JudgeRun objects of one task; uses protocol, judge and condition.
+    Outputs:
+        list of JudgeRun, at most one per (protocol, judge).
+    """
     out: dict[tuple[str, str], JudgeRun] = {}
     for run in runs:
         if condition_rank(run.condition) > 2:
@@ -42,12 +50,18 @@ def core_runs(runs: list[JudgeRun]) -> list[JudgeRun]:
 
 
 def ensemble_runs(runs: list[JudgeRun]) -> list[JudgeRun]:
-    """Per protocol, one pooled JudgeRun (judge ENSEMBLE, condition "core") over the core runs
-    of at least two judges: tables concatenated (pairwise: every judge's verdict is one more
-    observation of the pair; direct: a transcript's ratings from several judges average in
-    valid_ratings), `missing` summed over the pooled runs (a transcript unrated by several
-    judges counts once per judge), `harness` the first member's. Empty when no protocol
-    has two judges."""
+    """
+    Pools the judges of each protocol that has at least two: one JudgeRun over the core runs (core_runs) of all its
+    judges. For pairwise judging every judge's verdict counts as one more observation of the pair; for Absolute scoring
+    a transcript's ratings from several judges are averaged in judges.valid_ratings.
+
+    Inputs:
+        runs: matched JudgeRun objects of one task.
+    Outputs:
+        list of JudgeRun, at most one per protocol ("pairwise", "direct"), empty when no protocol has two judges. Each
+        has judge ENSEMBLE, condition "core", the members' tables concatenated, missing summed over the members (a
+        transcript unrated by several judges counts once per judge) and the first member's harness.
+    """
     out = []
     core = core_runs(runs)
     for protocol in ("pairwise", "direct"):
@@ -60,24 +74,42 @@ def ensemble_runs(runs: list[JudgeRun]) -> list[JudgeRun]:
 
 
 def transcript_protocols(dom: DomainConfig, embedding_variants: tuple[str, ...] = ("full", "answer")) -> list[tuple[Protocol, str]]:
-    """(protocol, variant) pairs needing no judge: easy-item prediction, oracle, glm_length (3 length features), glm_regex (length + regex), and one
-    embedding ridge per variant. Fresh instances per domain for the oracle (reads that domain's
-    frozen tables) and the embedding ridge; PROTOCOLS["glm_regex"] is a shared singleton, safe
-    because TabularRegression.fit clones the estimator."""
+    """
+    Lists the protocols that need no judge, each with its variant label: the Baseline, the HARD-item accuracy oracle,
+    Length (glm_length, the length features alone), Deterministic features (glm_regex: the length, regular-expression
+    and tool-call features), and one Embedding ridge per embedding variant. The oracle (which reads the domain's frozen
+    tables) and the Embedding ridges are new instances per domain; the two feature protocols are the shared
+    PROTOCOLS entries, which is safe because TabularRegression.fit clones the estimator.
+
+    Inputs:
+        dom: the domain configuration, for the oracle.
+        embedding_variants: the transcript embeddings to fit an Embedding ridge on, e.g. "full" and "answer".
+    Outputs:
+        list of (Protocol, variant) pairs; the variant is "-" except for Embedding, where it is the embedding variant.
+    """
     out = [(EasyItemPrediction(), "-"), (AccuracyOracle(dom), "-"), (PROTOCOLS["glm_length"], "-"), (PROTOCOLS["glm_regex"], "-")]
     return out + [(EmbeddingRegression(v), v) for v in embedding_variants]
 
 
 def judge_forecast(run: JudgeRun, task: Task, variant: str) -> tuple[pd.Series, float]:
-    """(theta-hat indexed by target, reference leave-one-out MSE) for one judge run under one
-    variant. Pairwise "calibrated" shrinks toward JudgeCalibrated's frontier prior for the
-    semester, as the protocol does (frontier_prior needs only a `.domain`); "linear" needs
-    none. Direct variants are OLS on mean ratings, raw or item-z-scored. A target with no
-    verdicts against the references gets the prior mean, not NaN; the run's `missing` count
-    says how many judgments are absent. The calibrated LOO (pairwise_reference_loo) shrinks
-    each held-out reference toward the other references' own (mean, var), while the forecast
-    above shrinks toward the frontier prior: `loo`/judge_loo_mse orders judges but is not the
-    forecast's own error estimate."""
+    """
+    Converts one judge run into theta-hat for the task's targets under one variant, and measures the judge's
+    leave-one-model-out error on the references. The pairwise "calibrated" variant shrinks toward JudgeCalibrated's
+    frontier prior for the semester, as that protocol does; "linear" and "bt" take no outside prior. The Absolute
+    scoring variants are a least-squares line from mean rating to theta*, on raw or item-z-scored ratings. The
+    leave-one-out error ranks judges but is not the prediction's own error: under "calibrated" it shrinks each held-out
+    reference toward the other references' mean and variance, not toward the frontier prior.
+
+    Inputs:
+        run: a matched JudgeRun; uses protocol, table and harness.domain (for the frontier prior).
+        task: the semester task; uses semester, references.theta and test.models.
+        variant: the conversion, one of judges.PAIRWISE for a pairwise run or judges.DIRECT for a direct run.
+    Outputs:
+        (theta-hat, a Series indexed by target model; the mean squared error of the references' leave-one-out theta-hat
+        against their theta*, over the references that have one). A target without evidence gets the prior mean under
+        "linear" and "calibrated" and NaN under "bt" and the Absolute scoring variants; the run's missing count says
+        how many judgments are absent.
+    """
     refs, targets = task.references.theta, list(task.test.models.index)
     if run.protocol == "pairwise":
         prior = (JudgeCalibrated.frontier_prior(SimpleNamespace(domain=run.harness.domain), task.semester)
@@ -91,12 +123,21 @@ def judge_forecast(run: JudgeRun, task: Task, variant: str) -> tuple[pd.Series, 
 
 
 def forecasts(dom: DomainConfig, task: Task, protocols: list[tuple[Protocol, str]], runs: list[JudgeRun]) -> pd.DataFrame:
-    """One row per target x (protocol, variant) x judge x condition, columns COLUMNS.
+    """
+    Collects every prediction of one task: each judge-free protocol's theta-hat, and each judge run's, plus the pooled
+    runs of ensemble_runs, under every variant of its protocol.
 
-    judge/condition are "-" and judge_loo_mse NaN for transcript protocols; theta_hat is NaN
-    where a protocol has nothing to say; missing is the run's unjudged count on its rows.
-    Pooled ensemble runs (ensemble_runs) are added with protocol `<protocol>_ensemble`, judge
-    `ensemble`, condition `core`.
+    Inputs:
+        dom: the domain configuration; its name fills the domain column.
+        task: the semester task; uses semester, truth (the targets' theta*) and whatever each protocol reads.
+        protocols: (Protocol, variant) pairs, as from transcript_protocols.
+        runs: the task's matched JudgeRun objects.
+    Outputs:
+        DataFrame with columns COLUMNS (domain, semester, protocol, variant, judge, condition, judge_loo_mse, model,
+        theta_hat, theta, missing); one row per target, protocol, variant, judge and condition. For judge-free
+        protocols judge and condition are "-", judge_loo_mse is NaN and missing is 0; pooled runs have protocol
+        "<protocol>_ensemble", judge "ensemble" and condition "core"; missing is the run's count of absent judgments,
+        repeated on each of its rows; theta_hat is NaN where a protocol gives no prediction.
     """
     frames = []
     for p, variant in protocols:

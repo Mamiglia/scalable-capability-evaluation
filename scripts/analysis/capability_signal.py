@@ -1,26 +1,33 @@
-"""Do saturated transcripts carry capability information? Each protocol's squared error and log likelihood ratio
-against the Baseline for the targets of the main analysis, and how they vary by domain.
+"""
+Tests whether transcripts of saturated items carry information about capability: each protocol's squared error and
+log likelihood ratio against the Baseline for the targets of tasks.semesters, pooled over domains and per domain, and a
+hierarchical Gamma model of how each protocol's error ratio to the Baseline varies with the domain. Judge protocols use
+each task's selected judge (lowest leave-one-model-out error on the references), shown the target's reasoning.
 
-Writes to <paths.outputs>/capability_signal/ (the paper's numbering):
-    error_by_protocol.{svg,png,txt}        Figure 3: squared error per target model pooled over domains, with the
-                                           one-sample test of the log likelihood ratio; the .txt holds every plotted
-                                           number and both tests of Table 6
-    error_by_protocol.csv                  Table 6
-    error_by_domain.csv                    Table 3: mean squared error per protocol and domain, marked by its test
-    prediction_example.{svg,png,txt}       Figure 10: one target's predictive distributions
-    no_self_judging.{svg,png,txt}          Figure 21: Figure 3 with each task's judge left out of its own references
-    domain_glm_ratios.csv                  Table 9: the domain GLM's error ratio to the Baseline per protocol and domain
-    domain_glm_effects.{svg,png,txt}       Figure 16: those ratios
-    domain_glm_contrasts.{svg,png,txt,csv} Figure 17: the Pairwise judge's error ratio to each other protocol, and each
+Writes to <paths.outputs>/capability_signal/ (config.yaml):
+    error_by_protocol.{svg,png,txt}        each target model's squared error averaged over its domains, per protocol,
+                                           with the one-sample t-test of the mean log likelihood ratio; the .txt holds
+                                           every plotted number, that test and the paired t-test against the
+                                           Baseline's error
+    error_by_protocol.csv                  those numbers, one row per protocol
+    error_by_domain.csv                    mean squared error per protocol and domain, marked by its test
+    prediction_example.{svg,png,txt}       one target's predictive distributions (config.yaml prediction_example)
+    no_self_judging.{svg,png,txt}          error_by_protocol with each task's judge left out of its own references
+    domain_glm_ratios.csv                  the Gamma model's error ratio to the Baseline per protocol and domain
+    domain_glm_effects.{svg,png,txt}       those ratios
+    domain_glm_contrasts.{svg,png,txt,csv} the Pairwise judge's error ratio to each other protocol, and each
                                            protocol's between-domain SD
-    domain_glm/                            hibayes' rows, fit state and checks; diagnostics.csv (the convergence numbers
-                                           of Appendix D.4) and loo_compare.csv (with against without the
+    domain_glm/                            hibayes' rows, fit state and checks; diagnostics.csv (convergence, LOO and
+                                           R^2 of both fits) and loo_compare.csv (with against without the
                                            (protocol | domain) term)
-    breakdowns/forecasts_<protocol>.{svg,png}   predicted against measured θ for every target, per domain and semester
-    breakdowns/error_by_domain_by_semester.csv  Table 3 for each semester on its own
+    breakdowns/forecasts_<protocol>.{svg,png}   predicted against measured theta* for every target, per domain and
+                                                semester
+    breakdowns/error_by_domain_by_semester.csv  error_by_domain for each semester on its own
 
-Reads <paths.forecasts>/forecasts.csv and likelihood_ratio.csv (scripts/analysis/forecasts.py); prediction_example
-and no_self_judging refit forecasts, so they also read the frozen tables, judge logs, features and embeddings.
+Reads <paths.forecasts>/forecasts.csv and likelihood_ratio.csv (written by forecasts.py); prediction_example also
+refits its listed protocols that have no judge on the references (the frozen tables, and the features or embeddings
+those protocols use) and reads the release dates in paths.model_configs; no_self_judging refits the selected judges
+from the frozen tables and the judge logs.
 Run from the repository root:
     uv run python scripts/analysis/capability_signal.py [--config scripts/analysis/config.yaml] [--only error_by_protocol ...]
 """
@@ -43,6 +50,15 @@ BEST_JUDGE = ("Judge protocols use each task's best judge on references (lowest 
 
 
 def save(fig: plt.Figure, stem: Path) -> None:
+    """
+    Saves a figure as .svg and .png at 300 dpi and closes it.
+
+    Inputs:
+        fig: the figure.
+        stem: the output path without its suffix.
+    Outputs:
+        stem.svg and stem.png.
+    """
     for ext in ("svg", "png"):
         fig.savefig(stem.with_suffix(f".{ext}"), dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -50,13 +66,39 @@ def save(fig: plt.Figure, stem: Path) -> None:
 
 
 def full_set_llr(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame) -> pd.DataFrame:
-    """The tested log likelihood ratio rows of the main analysis, full reference set."""
+    """
+    Selects the log likelihood ratio rows the tests use: the targets of tasks.semesters, the Student t shape, the full
+    reference set, and for judge protocols each task's selected judge.
+
+    Inputs:
+        config: the analysis configuration; uses protocols and tasks.semesters.
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv).
+        llr: every target's log likelihood ratios (analysis/forecasts/likelihood_ratio.csv).
+    Outputs:
+        DataFrame with llr's columns (domain, semester, model, protocol, judge, shape, dropped, llr); one row per target
+        and protocol (glm_regex, embedding, direct, pairwise).
+    """
     chosen = by_protocol.chosen_llr(llr, forecasts, config["protocols"], config["tasks"]["semesters"])
     return chosen[chosen.dropped == "-"]
 
 
 def error_by_protocol(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame, out: Path) -> None:
-    """Figure 3 and Table 6."""
+    """
+    Compares each protocol's squared error with the Baseline's, per target model averaged over its domains: the
+    models' errors, their mean with its 95% t-interval, the paired t-test against the Baseline's error, and the
+    two-sided one-sample t-test of the mean log likelihood ratio against 0 (a target model the unit).
+
+    Inputs:
+        config: the analysis configuration; uses protocols, tasks (domains, semesters) and display (paper_protocols,
+            protocol_names, protocol_colours).
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv).
+        llr: every target's log likelihood ratios (analysis/forecasts/likelihood_ratio.csv).
+        out: the output folder (<paths.outputs>/capability_signal).
+    Outputs:
+        in out: error_by_protocol.{svg,png}; error_by_protocol.csv (one row per protocol, the Baseline first: mse, lo,
+        hi, models, and for the others delta, delta_t, delta_df, delta_p against the Baseline and llr, llr_se, llr_p);
+        error_by_protocol.txt (the caption with every number).
+    """
     protocols, domains = [BASELINE, *config["display"]["paper_protocols"]], config["tasks"]["domains"]
     tests = by_protocol.protocol_tests(full_set_llr(config, forecasts, llr))
     print(tests.round(4).to_string(index=False))
@@ -70,7 +112,21 @@ def error_by_protocol(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame, 
 
 
 def error_by_domain(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame, out: Path) -> None:
-    """Table 3."""
+    """
+    Tabulates each protocol's mean squared error per domain and pooled (the mean of the domains), marked with stars
+    where the mean log likelihood ratio is positive and its two-sided one-sample t-test significant (per domain over
+    its targets; pooled with a target model the unit).
+
+    Inputs:
+        config: the analysis configuration; uses protocols, tasks.semesters and display (table_protocol_names,
+            domain_names).
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv).
+        llr: every target's log likelihood ratios (analysis/forecasts/likelihood_ratio.csv).
+        out: the output folder (<paths.outputs>/capability_signal).
+    Outputs:
+        in out: error_by_domain.csv, columns Protocol, Pooled and one per domain name, each cell the error as text to
+        two decimals with its stars; one row per protocol in display.table_protocol_names. Also printed.
+    """
     rows = full_set_llr(config, forecasts, llr)
     errors = stats.target_errors(forecasts, config["protocols"], config["tasks"]["semesters"])
     table = by_protocol.domain_table(errors, rows, by_protocol.protocol_tests(rows), config["display"]["table_protocol_names"],
@@ -80,7 +136,21 @@ def error_by_domain(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame, ou
 
 
 def prediction_example(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame, out: Path) -> None:
-    """Figure 10."""
+    """
+    Draws one target's predictions as the Student t distributions the log likelihood ratio compares, for the Baseline
+    and the protocols in config.yaml prediction_example, beside the references' theta* at their release dates.
+
+    Inputs:
+        config: the analysis configuration; uses prediction_example (domain, semester, target, protocols), protocols,
+            paths.model_configs and display.
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv); gives the judge
+            protocols' prediction and spread.
+        llr: unused; every capability-signal analysis takes it.
+        out: the output folder (<paths.outputs>/capability_signal).
+    Outputs:
+        in out: prediction_example.{svg,png}; prediction_example.txt (the caption with each distribution's centre,
+        spread, squared error and log likelihood ratio).
+    """
     ex, names = config["prediction_example"], config["display"]["protocol_names"]
     refs, values = example.example_distributions(forecasts, config["protocols"], ex["domain"], ex["semester"], ex["target"],
                                                  ex["protocols"])
@@ -93,7 +163,19 @@ def prediction_example(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame,
 
 
 def no_self_judging(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame, out: Path) -> None:
-    """Figure 21."""
+    """
+    Repeats error_by_protocol with each task's selected pairwise and absolute-scoring judge left out of its own
+    references: the judge's predictions are refitted on the other references (the judge choice is unchanged), and the
+    test uses the log likelihood ratios computed without that reference.
+
+    Inputs:
+        config: the analysis configuration; uses protocols, tasks (domains, semesters) and display.
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv).
+        llr: every target's log likelihood ratios (analysis/forecasts/likelihood_ratio.csv).
+        out: the output folder (<paths.outputs>/capability_signal).
+    Outputs:
+        in out: no_self_judging.{svg,png}; no_self_judging.txt (the caption with every number).
+    """
     protocols = [BASELINE, *config["display"]["paper_protocols"]]
     semesters, variants = config["tasks"]["semesters"], config["protocols"]
     best = stats.best_judges(forecasts, variants)
@@ -111,7 +193,20 @@ def no_self_judging(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame, ou
 
 
 def breakdowns(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame, out: Path) -> None:
-    """Predicted against measured θ per target; Table 3 per semester."""
+    """
+    Writes the per-task detail behind the pooled results: predicted against measured theta* for every target, one
+    figure per protocol, and error_by_domain's table for each semester on its own.
+
+    Inputs:
+        config: the analysis configuration; uses protocols, tasks.semesters and display (paper_protocols,
+            table_protocol_names, domain_names).
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv).
+        llr: every target's log likelihood ratios (analysis/forecasts/likelihood_ratio.csv).
+        out: the output folder (<paths.outputs>/capability_signal).
+    Outputs:
+        in out/breakdowns: forecasts_<protocol>.{svg,png} for each protocol in display.paper_protocols;
+        error_by_domain_by_semester.csv (error_by_domain's columns and Semester; one row per protocol and semester).
+    """
     semesters = config["tasks"]["semesters"]
     for p in config["display"]["paper_protocols"]:
         for ext in ("svg", "png"):
@@ -130,7 +225,25 @@ def breakdowns(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame, out: Pa
 
 
 def domain_glm(config: dict, forecasts: pd.DataFrame, llr: pd.DataFrame, out: Path) -> None:
-    """Table 9, Figures 16 and 17."""
+    """
+    Fits a hierarchical Gamma model of squared error (log link; protocol, domain, their interaction and a term per
+    target and domain; the Baseline the reference level) with hibayes, with and without the interaction, and reports
+    each protocol's error ratio to the Baseline per domain and the Pairwise judge's error ratio to each other protocol.
+
+    Inputs:
+        config: the analysis configuration; uses domain_glm (protocols, error_floor, priors, sampler,
+            contrast_against), protocols, tasks and display.
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv).
+        llr: unused; every capability-signal analysis takes it.
+        out: the output folder (<paths.outputs>/capability_signal).
+    Outputs:
+        in out/domain_glm: hibayes' rows.csv, fit state, checks and summaries; diagnostics.csv (per fit: divergences,
+        r_hat, ESS, LOO, Pareto k counts, R^2 on the log scale); loo_compare.csv. In out: domain_glm_ratios.csv (one row
+        per protocol, the Baseline first: the ratio and its lo, hi per domain and pooled ("all"), then the
+        between-domain SD sigma with sigma_lo, sigma_hi); domain_glm_contrasts.csv (per protocol and domain: against,
+        ratio, lo, hi, p_below_1); domain_glm_effects.{svg,png,txt}; domain_glm_contrasts.{svg,png,txt}. Raises
+        AssertionError when a free parameter's r_hat exceeds 1.01.
+    """
     settings, domains = config["domain_glm"], config["tasks"]["domains"]
     paper, show = config["display"]["paper_protocols"], config["display"]
     errors = stats.target_errors(forecasts, config["protocols"], config["tasks"]["semesters"], protocols=tuple(settings["protocols"]))
@@ -162,6 +275,15 @@ ANALYSES = {"error_by_protocol": error_by_protocol, "error_by_domain": error_by_
 
 
 def main(config: dict, only: list[str] | None) -> None:
+    """
+    Runs the capability-signal analyses in order.
+
+    Inputs:
+        config: the analysis configuration (scripts/analysis/config.yaml).
+        only: names of the analyses to run (keys of ANALYSES); None runs them all.
+    Outputs:
+        the files each analysis writes, in <paths.outputs>/capability_signal.
+    """
     apply_paths(config)
     out = Path(config["paths"]["outputs"]) / "capability_signal"
     (out / "breakdowns").mkdir(parents=True, exist_ok=True)

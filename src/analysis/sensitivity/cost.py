@@ -1,6 +1,7 @@
-"""Cost against error per domain (Figure 27): the selected judge's pairwise and direct runs cut to fractions of their
-judged train items, priced by the tokens they logged; deterministic features and embeddings as single points.
-No judging is run.
+"""
+Cost against error per domain: the selected judge's Pairwise judge and Absolute scoring runs are cut to fractions of
+their judged train items and priced by the tokens their logs record, giving a curve of MSE against dollars;
+Deterministic features and Embedding are single points. No judging is run and no API is called.
 """
 from pathlib import Path
 
@@ -20,10 +21,16 @@ ORDER = ("pairwise", "direct", "glm_regex", "embedding")  # the figure's drawing
 
 
 def run_cost(run_dir: Path, prices: dict[str, list[float]], proxies: dict[str, str]) -> tuple[float, int]:
-    """(dollars, input tokens) over every log of a run directory: uncached input, cache reads at the cached price, output.
+    """
+    Prices a judge run from the token usage in its log headers: uncached input tokens at the input price, cache reads
+    at the cached-input price, output tokens at the output price.
 
-    prices: OpenRouter model id -> $ per million tokens (input, cached input, output).
-    proxies: logged model -> the OpenRouter model priced in its place (judges without a list price).
+    Inputs:
+        run_dir: a run folder; every .eval log in it is read.
+        prices: OpenRouter model id -> dollars per million tokens (input, cached input, output).
+        proxies: logged model -> the OpenRouter model priced in its place (judges without a list price).
+    Outputs:
+        (dollars, input tokens) summed over the run's logs.
     """
     dollars, tokens = 0.0, 0
     for f in Path(run_dir).glob("*.eval"):
@@ -38,13 +45,31 @@ def run_cost(run_dir: Path, prices: dict[str, list[float]], proxies: dict[str, s
 def cost_curves(forecasts: pd.DataFrame, judges_used: pd.DataFrame, domains: list[str], variants: dict[str, str],
                 fractions: list[float], draws: int, seed: int, prices: dict[str, list[float]], proxies: dict[str, str],
                 embedding_price: float) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(curves, points) over every frozen task of each domain. curves: per target, judge protocol and fraction of the
-    selected run's judged items, the squared error averaged over `draws` random item subsets (at least 3 items) and
-    the baseline's, with the run's cost times the fraction. points: per target, deterministic features ($0) and
-    embeddings (the direct run's input tokens at `embedding_price`). One random stream over every task.
+    """
+    Computes the error and cost of every protocol over every frozen task of each domain. For the Pairwise judge and
+    Absolute scoring, the selected run is cut to each fraction of its judged items (at least 3 items, `draws` random
+    subsets, one subset at fraction 1) and each target's squared error averaged over the subsets; the cost is the
+    run's full cost times the fraction. Deterministic features cost $0; Embedding is priced as embedding the Absolute
+    scoring run's input tokens ($0 for a task without a selected Absolute scoring run). One random stream runs over
+    every task.
 
-    forecasts: analysis/forecasts/forecasts.csv. judges_used: stats.best_judges' output (domain, semester, protocol,
-    judge, condition). embedding_price: $ per million tokens.
+    Inputs:
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv); uses domain,
+            semester, protocol, variant, model, theta_hat and theta for Deterministic features and Embedding.
+        judges_used: the selected judge of each task and judge protocol (stats.best_judges); uses domain, semester,
+            protocol, judge and condition.
+        domains: the domains, in order.
+        variants: protocol -> the variant it is reported in.
+        fractions: the fractions of the judged items kept.
+        draws: the number of random subsets per fraction below 1.
+        seed: the seed of the random stream.
+        prices, proxies: as for run_cost.
+        embedding_price: dollars per million embedded tokens.
+    Outputs:
+        (curves, points). curves: DataFrame with columns model, se (squared error), baseline_se (the Baseline's),
+        domain, semester, protocol, judge, condition, fraction, n_items and cost; one row per task, judge protocol,
+        fraction and target. points: DataFrame with columns domain, semester, protocol, model, se and cost; one row
+        per task, protocol (glm_regex, embedding) and target.
     """
     rng = np.random.default_rng(seed)
     pick = judges_used.set_index(["domain", "semester", "protocol"])
@@ -88,17 +113,34 @@ def cost_curves(forecasts: pd.DataFrame, judges_used: pd.DataFrame, domains: lis
 
 
 def boot(se: pd.Series, seed: int, draws: int) -> tuple[float, float, float]:
-    """(mse, lo, hi): the mean of the squared errors and its 95% percentile bootstrap over targets."""
+    """
+    The mean of the squared errors with a percentile-bootstrap 95% interval that resamples targets.
+
+    Inputs:
+        se: one squared error per target; missing values are dropped.
+        seed: the bootstrap's seed.
+        draws: the number of bootstrap draws.
+    Outputs:
+        (mse, lo, hi).
+    """
     err = se.dropna().to_numpy()
     b = np.random.default_rng(seed).choice(err, size=(draws, len(err))).mean(axis=1)
     return err.mean(), *np.percentile(b, [2.5, 97.5])
 
 
 def summarise(curves: pd.DataFrame, points: pd.DataFrame, seed: int, draws: int) -> pd.DataFrame:
-    """One row per domain x protocol (x fraction for the judges): the mean cost per semester and the MSE over every
-    target of the domain with its bootstrap interval; protocol "mean_ref" is the baseline.
+    """
+    Summarises cost_curves per domain: the mean cost per semester and the MSE over every target of the domain with its
+    bootstrap interval, for each judge protocol at each fraction, for Deterministic features and Embedding, and for
+    the Baseline (protocol "mean_ref", cost $0, from the fraction-1 rows of the curves).
 
-    curves, points: cost_curves' outputs as read back from their csv.
+    Inputs:
+        curves, points: cost_curves' outputs as read back from their csv.
+        seed: the bootstrap's seed.
+        draws: the number of bootstrap draws.
+    Outputs:
+        DataFrame with columns domain, protocol, fraction (empty for protocols without a judge), cost, mse, lo and hi;
+        one row per domain, protocol and fraction.
     """
     rows = []
     for (name, protocol, frac), g in curves.groupby(["domain", "protocol", "fraction"]):
@@ -115,11 +157,21 @@ def summarise(curves: pd.DataFrame, points: pd.DataFrame, seed: int, draws: int)
 
 def figure(s: pd.DataFrame, domains: list[str], protocols: list[str], names: dict[str, str], colours: dict[str, str],
            domain_names: dict[str, str], path: str) -> None:
-    """Figure 27: one panel per domain, MSE against cost per semester on log axes: the judge protocols as curves over
-    the fractions with their bootstrap band, deterministic features and embeddings as points with their interval,
-    the baseline as a dashed line. Writes path.{png,svg,pdf}.
+    """
+    Draws one panel per domain (2 x 2) of MSE against cost per semester on log axes: the judge protocols as curves over
+    the item fractions with their bootstrap band, Deterministic features and Embedding as points with their interval
+    ($0 drawn at FREE; a point above YMAX as a triangle at the edge labelled with its value), and the Baseline as a
+    dashed line.
 
-    s: summarise's output. protocols: the protocols drawn (in ORDER). names, colours: protocol -> label, colour.
+    Inputs:
+        s: summarise's output.
+        domains: the domains, one panel each.
+        protocols: the protocols drawn (drawn in ORDER).
+        names, colours: protocol -> legend label, colour.
+        domain_names: domain -> panel title.
+        path: the output path without extension.
+    Outputs:
+        writes path.png, path.svg and path.pdf.
     """
     judged, drawn = ("pairwise", "direct"), [p for p in ORDER if p in protocols]
     style = {"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "svg.fonttype": "none"}

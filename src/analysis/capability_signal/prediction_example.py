@@ -1,6 +1,7 @@
-"""One target's forecasts drawn as the predictive distributions the log likelihood ratio compares (Figure 10): the
-references' θ* at their release dates, the target's true θ*, and from the target's release date each protocol's
-Student t distribution of θ* as a one-sided violin.
+"""
+Draws one target's predictions as the predictive distributions the log likelihood ratio compares: the references' θ*
+at their release dates, the target's true θ*, and from the target's release date each protocol's Student t
+distribution of θ* as a one-sided violin. Also computes the numbers behind the drawing and writes its caption text.
 """
 
 from pathlib import Path
@@ -21,10 +22,15 @@ from protocols.embeddings import EmbeddingRegression
 
 
 def release_dates(model_configs: Path) -> dict[str, pd.Timestamp]:
-    """Each model's release date, keyed by its data-dir shortname (the config name's last segment, lowercased) and by
-    the config's file stem; a date range keeps its start.
+    """
+    Reads each model's release date from the model configs; a date range ("start/end") keeps its start. Configs
+    without a release_date are skipped.
 
-    model_configs: the model configs' folder (configs/models), one subfolder per provider.
+    Inputs:
+        model_configs: the model configs' folder (configs/models), one subfolder of .yml files per provider.
+    Outputs:
+        dict model -> release date, keyed by the config's file stem and, when the config has a name field, also by
+        the last segment of that name, lowercased (the model's short name in the data folders).
     """
     out = {}
     for path in Path(model_configs).glob("*/*.yml"):
@@ -39,12 +45,27 @@ def release_dates(model_configs: Path) -> dict[str, pd.Timestamp]:
 
 def example_distributions(forecasts: pd.DataFrame, variants: dict[str, str], domain: str, semester: str, target: str,
                           protocols: list[str]) -> tuple[pd.Series, pd.DataFrame]:
-    """The references' θ* and, per rule (the Baseline, then `protocols`), the target's predictive distribution: one row
-    each with judge, theta (the target's θ*), forecast, spread (the rule's root-mean-square leave-one-model-out error
-    on the references), squared_error, log_lr and references (their number).
+    """
+    Computes one target's predictive distribution under the Baseline and each protocol in `protocols`: the centre
+    (the prediction), the spread (the rule's root-mean-square leave-one-model-out error on the references) and the log
+    likelihood ratio of the target's true θ* against the Baseline, under a Student t with (references - 1) degrees of
+    freedom. Judge protocols take the task's best judge on references, with prediction and judge_loo_mse read from
+    `forecasts`; transcript protocols are refitted on the references from the task's features and embeddings.
 
-    Judge protocols use the task's best judge on references, forecast and spread from `forecasts`; transcript protocols
-    are refitted on the references (reads the task's features and embeddings).
+    Inputs:
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv); uses domain,
+            semester, protocol, variant, judge, condition, model, theta_hat and judge_loo_mse.
+        variants: protocol -> the variant it is reported in (config.yaml's protocols); the embedding
+            entry picks which transcript embeddings are used.
+        domain, semester: the task.
+        target: the target model.
+        protocols: the protocols to compute besides the Baseline (pairwise and direct as judge protocols, any other as
+            a transcript protocol).
+    Outputs:
+        tuple (refs, values): refs, the references' θ* indexed by model; values, a DataFrame with one row per
+        protocol (the Baseline first) and columns protocol, judge ("-" for the Baseline and transcript protocols),
+        theta (the target's θ*), forecast, spread, squared_error, log_lr (0 for the Baseline) and references (their
+        number).
     """
     task = loading.tasks(loading.domain(domain), [semester])[0]
     refs, truth, df = task.references.theta, float(task.truth[target]), len(task.references.theta) - 1
@@ -71,14 +92,24 @@ def example_distributions(forecasts: pd.DataFrame, variants: dict[str, str], dom
 
 def prediction_example_figure(values: pd.DataFrame, refs: pd.Series, dates: dict[str, pd.Timestamp], target: str,
                               marker: str, display: dict, width_days: float = 90) -> plt.Figure:
-    """The references' θ* at their release dates (grey), the target's true θ* (black) and, from the target's release
-    date, each rule's Student t distribution of θ* as a one-sided violin, cut 3 spreads either side of its forecast or
-    at the axis, with a line across it at the forecast. The black line at θ* reaches the widest violin, so its length
-    inside each violin is that distribution's density at the truth. Every violin shares one width per unit of density,
-    the widest `width_days` long.
+    """
+    Draws the references' θ* at their release dates (in the Baseline's colour), the target's true θ* (black) and,
+    from the target's release date, each distribution as a one-sided violin cut 3 spreads either side of its centre
+    or at the axis, with a line across it at the prediction, and every protocol's squared error but the Baseline's
+    written to the left of the violins.
+    The black line at θ* reaches the widest violin, so where it crosses each violin's edge is that distribution's
+    density at the truth. Every violin has the same width per unit of density, the widest `width_days` long.
 
-    values, refs: example_distributions' output. dates: release_dates. marker: the domain's marker.
-    display: config.yaml's display section (protocol_names, protocol_colours with the Baseline's).
+    Inputs:
+        values: example_distributions' values; uses protocol, forecast, spread, theta and log_lr.
+        refs: example_distributions' refs (the references' θ* indexed by model).
+        dates: release_dates' output; must hold every reference and the target.
+        target: the target model.
+        marker: the domain's marker.
+        display: config.yaml's display section; uses protocol_names and protocol_colours (with the Baseline's).
+        width_days: the widest violin's width in days.
+    Outputs:
+        the matplotlib Figure (not saved).
     """
     names, colours = display["protocol_names"], display["protocol_colours"]
     spreads = {r.protocol: (r.forecast, r.spread) for r in values.itertuples()}
@@ -102,7 +133,7 @@ def prediction_example_figure(values: pd.DataFrame, refs: pd.Series, dates: dict
     reach = max(scipy_stats.t.pdf(truth, df, c, s) for c, s in spreads.values())
     ax.plot([x0, x0 + scale * reach], [truth] * 2, color="black", lw=0.8, zorder=4)
     ax.scatter([x0], [truth], s=18, marker=marker, color="black", linewidths=0, zorder=5)
-    for p in protocols:  # each protocol's squared error, left of the violins at its forecast
+    for p in protocols:  # each protocol's squared error, left of the violins at its prediction
         centre = spreads[p][0]
         ax.text(x0 - 5, centre, f"squared error {(centre - truth) ** 2:.2f}", color=colours[p], ha="right", va="center", fontsize=7)
     ax.set_ylim(lo, hi)
@@ -125,8 +156,19 @@ def prediction_example_figure(values: pd.DataFrame, refs: pd.Series, dates: dict
 
 
 def example_caption(values: pd.DataFrame, domain_name: str, semester: str, target: str, names: dict[str, str]) -> str:
-    """The .txt of the prediction example: what the figure draws, then every rule's forecast, spread, squared error
-    and log likelihood ratio."""
+    """
+    Builds the text written next to the prediction example figure: what it draws, which judges the judge protocols
+    use, then per protocol its prediction, spread, squared error and (except for the Baseline) log likelihood ratio.
+
+    Inputs:
+        values: example_distributions' values.
+        domain_name: the domain's display name.
+        semester: the task's semester.
+        target: the target model.
+        names: protocol -> display name.
+    Outputs:
+        the caption as one string ending in a newline.
+    """
     by = values.set_index("protocol")
     n = int(values.references.iloc[0])
     lines = [f"{names[p]}: forecast {lr.num(r.forecast)}, spread {lr.num(r.spread)}, squared error {lr.num(r.squared_error)}"

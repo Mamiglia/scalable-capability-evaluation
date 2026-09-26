@@ -1,7 +1,9 @@
-"""Reasoning targets predicted from non-reasoning references (Figure 7): the Pairwise judge on the Maths 2025-I
-targets, whose references (the 2024-II roster) are all non-reasoning models. Squared error of the non-reasoning
+"""
+Reasoning targets predicted from non-reasoning references: the Pairwise judge on the Maths 2025-I targets, whose
+references (the 2024-II roster) are all non-reasoning models. It compares the squared error of the non-reasoning
 targets, the reasoning targets, and the reasoning targets judged with their reasoning removed, with Welch's and paired
-t-tests between the groups."""
+t-tests between the groups.
+"""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,15 +23,41 @@ GROUPS = {"non-reasoning": "Non-reasoning targets", "reasoning": "Reasoning targ
 
 
 def shown(errors: pd.DataFrame, domain: str, semester: str, protocol: str, reasoning_models: list[str]) -> pd.DataFrame:
-    """One protocol's forecasts of one task's targets (stats.target_errors rows) with `group`, "reasoning" for
-    `reasoning_models` and "non-reasoning" for the rest."""
+    """
+    One protocol's per-target errors on one task, each target labelled "reasoning" if it is in `reasoning_models`
+    and "non-reasoning" otherwise.
+
+    Inputs:
+        errors: per-target errors from stats.target_errors (domain, semester, model, protocol, theta_hat, theta, err).
+        domain: the task's domain key.
+        semester: the task's semester.
+        protocol: the protocol, e.g. "pairwise".
+        reasoning_models: the targets whose transcripts carry reasoning (config.yaml generalisation.reasoning_targets).
+    Outputs:
+        the task's and protocol's rows of `errors` with a group column; one row per target.
+    """
     t = errors[(errors.domain == domain) & (errors.semester == semester) & (errors.protocol == protocol)]
     return t.assign(group=np.where(t.model.isin(reasoning_models), "reasoning", "non-reasoning"))
 
 
 def removed(forecasts: pd.DataFrame, domain: str, semester: str, protocol: str, variant: str, judge: str,
             reasoning_models: list[str]) -> pd.DataFrame:
-    """The same judge's forecasts of the reasoning targets from transcripts with the reasoning removed, with `err`."""
+    """
+    The same judge's predictions of the reasoning targets from transcripts with the reasoning removed (its
+    "reasoning-hidden" run), with their squared error.
+
+    Inputs:
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv); uses domain,
+            semester, protocol, variant, condition, judge, model, theta_hat and theta.
+        domain: the task's domain key.
+        semester: the task's semester.
+        protocol: the judge protocol, e.g. "pairwise".
+        variant: the protocol's reported variant, e.g. "linear".
+        judge: the judge used with the reasoning shown (the task's best judge on the references).
+        reasoning_models: the reasoning targets.
+    Outputs:
+        the matching rows of `forecasts` with an err column; one row per reasoning target.
+    """
     r = forecasts[(forecasts.domain == domain) & (forecasts.semester == semester) & (forecasts.protocol == protocol)
                   & (forecasts.variant == variant) & (forecasts.condition == REMOVED_CONDITION) & (forecasts.judge == judge)]
     r = r[r.model.isin(reasoning_models)]
@@ -37,9 +65,19 @@ def removed(forecasts: pd.DataFrame, domain: str, semester: str, protocol: str, 
 
 
 def group_tests(shown: pd.DataFrame, removed: pd.DataFrame) -> dict[str, dict]:
-    """Two-sided t-tests of squared error: reasoning against non-reasoning targets and reasoning removed against
-    non-reasoning targets (Welch), and the reasoning targets with the reasoning removed against shown (paired).
-    Each: diff (mean difference), t, df, p."""
+    """
+    Two-sided t-tests of squared error: the reasoning targets, and the reasoning targets with their reasoning removed,
+    each against the non-reasoning targets (Welch's, unequal variances); and the reasoning targets with the reasoning
+    removed against the same targets with it shown (paired).
+
+    Inputs:
+        shown: the rows shown returns (model, group, err).
+        removed: the rows removed returns (model, err).
+    Outputs:
+        dict test name -> {diff: the mean difference (first group minus second), t, df, p}; the names are "Reasoning
+        minus non-reasoning targets", "Reasoning targets with reasoning removed minus non-reasoning targets" and
+        "Reasoning targets, reasoning removed minus shown".
+    """
     err = shown.set_index("model").err
     reasoning, other = err[(shown.group == "reasoning").to_numpy()], err[(shown.group == "non-reasoning").to_numpy()]
     cut = removed.set_index("model").err.reindex(reasoning.index)
@@ -56,10 +94,20 @@ def group_tests(shown: pd.DataFrame, removed: pd.DataFrame) -> dict[str, dict]:
 
 
 def reasoning_targets_figure(shown: pd.DataFrame, removed: pd.DataFrame, tests: dict[str, dict]) -> plt.Figure:
-    """Left: predicted against true capability, the diagonal a perfect forecast, each group labelled beside its points;
-    the reasoning targets with their reasoning removed hollow. Right: one slot per group (non-reasoning, reasoning,
-    reasoning removed), a small marker per target, a large one at the mean and a box over the mean's 95% t-interval
-    floored at 0; brackets over the Welch tests against the non-reasoning targets, the wider one higher."""
+    """
+    Draws two panels. On the left, predicted against true capability with the diagonal for a perfect prediction, each
+    group labelled beside its points and the reasoning targets with their reasoning removed hollow; on the right, one
+    slot per group (non-reasoning, reasoning, reasoning removed) with a small marker per target, a large one at the
+    mean, a box over the mean's 95% t-interval floored at 0, and brackets marking the two Welch tests against the
+    non-reasoning targets, the wider one higher.
+
+    Inputs:
+        shown: the rows shown returns (group, theta, theta_hat, err).
+        removed: the rows removed returns (theta, theta_hat, err).
+        tests: group_tests' dict; the brackets use the two Welch tests' p.
+    Outputs:
+        the matplotlib Figure.
+    """
     fig, (left, right) = plt.subplots(1, 2, figsize=(3.8, 1.5), layout="constrained", width_ratios=[1, 1.6])
     reach = max(2.0, float(np.ceil(np.abs(shown[["theta", "theta_hat"]].to_numpy()).max() * 2) / 2)) + 0.2
     left.plot([-reach, reach], [-reach, reach], color="grey", lw=0.8, zorder=1)
@@ -75,7 +123,7 @@ def reasoning_targets_figure(shown: pd.DataFrame, removed: pd.DataFrame, tests: 
             left.text(g.theta.max() + 0.25, g.theta_hat.mean(), name, ha="left", va="center", fontsize=5.5, color=st["edge"])
         v = g.err.to_numpy(float)
         half = ci95(v)
-        if np.isfinite(half):  # figure one's box: the mean's 95% t-interval, floored at 0
+        if np.isfinite(half):  # a box over the mean's 95% t-interval, floored at 0
             lo = max(v.mean() - half, 0.0)
             right.add_patch(plt.Rectangle((i - 0.25, lo), 0.5, v.mean() + half - lo, facecolor=st["face"],
                                           edgecolor="none", alpha=0.45, zorder=2))
@@ -125,8 +173,18 @@ def reasoning_targets_figure(shown: pd.DataFrame, removed: pd.DataFrame, tests: 
 
 
 def caption(shown: pd.DataFrame, removed: pd.DataFrame, tests: dict[str, dict], judge: str) -> str:
-    """The figure's .txt: what it draws, every target's θ*, forecast and squared error, each group's mean and
-    interval, and the three tests."""
+    """
+    The text of the figure's .txt file: what the figure draws, each group's mean squared error with its 95% t-interval
+    and every target's θ*, predicted θ and squared error, then the three tests.
+
+    Inputs:
+        shown: the rows shown returns.
+        removed: the rows removed returns.
+        tests: group_tests' dict.
+        judge: the judge's shortname, quoted in the text.
+    Outputs:
+        str, the caption.
+    """
     def group_lines(title: str, g: pd.DataFrame) -> list[str]:
         v = g.err.to_numpy(float)
         return [f"{title} ({len(g)}): mean squared error {num(v.mean())} (95% CI {num(max(v.mean() - ci95(v), 0))} to "

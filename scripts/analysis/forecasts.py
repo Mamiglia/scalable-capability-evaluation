@@ -1,13 +1,20 @@
-"""The two tables every analysis group reads: each protocol's forecast of each target, and each target's log
-likelihood ratio against the baseline.
+"""
+Builds the two tables every other analysis runner reads: each protocol's prediction of each target's theta*, and each
+target's log likelihood ratio against the Baseline. The predictions cover every task of tasks.all_semesters, every
+protocol and variant and every judge run on disk; the other runners pick the rows they report from them.
 
-Writes to paths.forecasts (config.yaml):
-    forecasts.csv          one row per (domain, semester, protocol, variant, judge, condition, target): theta_hat, the
-                           target's measured theta, and for judge protocols the judge's reference leave-one-model-out
-                           error (judge_loo_mse). Every task of tasks.all_semesters, every judge run on disk, every variant.
-    likelihood_ratio.csv   one row per (domain, semester, target, protocol, judge, dropped reference, shape): the log
-                           likelihood ratio of the target's measured theta under the protocol's predictive distribution
-                           against the baseline's. dropped "-" is the full reference set; judge "-" a transcript protocol.
+Writes to <paths.forecasts> (config.yaml):
+    forecasts.csv          one row per domain, semester, protocol, variant, judge, condition and target (model):
+                           theta_hat (the prediction), theta (the target's measured theta*), missing (the judgments the
+                           judge run still lacks) and judge_loo_mse (the judge run's leave-one-model-out error on the
+                           references; NaN for protocols without a judge, whose judge and condition are "-"). The
+                           protocols include the accuracy oracle (accuracy_hard), Length (glm_length) and each judge
+                           protocol's pooled run over its judges (pairwise_ensemble, direct_ensemble; judge "ensemble").
+    likelihood_ratio.csv   one row per domain, semester, target, protocol, judge, dropped reference and shape: the log
+                           likelihood ratio of the target's measured theta* under the protocol's predictive distribution
+                           against the Baseline's. Protocols glm_regex and embedding (judge "-"), and pairwise and
+                           direct for every judge's run closest to reasoning shown on the full train set, in the
+                           variant config.yaml reports; dropped "-" is the full reference set; shape "normal" or "t".
 
 Reads the frozen tables and transcripts (paths.data), judge logs (logs/), features and embeddings. Launches no judging.
 Run from the repository root:
@@ -28,10 +35,18 @@ from protocols.embeddings import EmbeddingRegression
 
 
 def forecasts_table(domains: list[str], semesters: list[str]) -> pd.DataFrame:
-    """Every protocol's forecast of every target, for every judge run and variant.
+    """
+    Predicts every target of every task with every protocol: the protocols without a judge are fitted on the task's
+    references, and every judge run on disk (cut to the frozen train items) is converted to theta_hat in each of its
+    variants.
 
-    domains: domain names (configs/domain/<name>.yml).
-    semesters: the target semesters to forecast; a domain is forecast on those of them it has.
+    Inputs:
+        domains: domain names (configs/domain/<name>.yml).
+        semesters: the target semesters; each domain is predicted on those of them it has.
+    Outputs:
+        DataFrame with columns domain, semester, protocol, variant, judge, condition, judge_loo_mse, model, theta_hat,
+        theta, missing; one row per target, protocol, variant and judge run (judge and condition "-" for protocols
+        without a judge; pooled judge runs as protocol pairwise_ensemble or direct_ensemble, judge "ensemble").
     """
     frames = []
     for name in domains:
@@ -46,10 +61,23 @@ def forecasts_table(domains: list[str], semesters: list[str]) -> pd.DataFrame:
 
 def likelihood_ratio_table(forecasts: pd.DataFrame, domains: list[str], semesters: list[str],
                            variants: dict[str, str]) -> pd.DataFrame:
-    """Each target's log likelihood ratio per protocol against the baseline, with each reference left out in turn.
+    """
+    Computes each target's log likelihood ratio against the Baseline for Deterministic features, Embedding and every
+    judge's scored run, on the full reference set and with each reference left out in turn, then checks that the
+    full-reference predictions equal those in `forecasts` (each task's selected judge, the transcript protocols as
+    they are).
 
-    forecasts: forecasts_table's output; its core-condition judge runs are the ones scored.
-    variants: protocol -> reported variant; the judge protocols' entries pick the variant scored.
+    Inputs:
+        forecasts: forecasts_table's output; per task and judge protocol, each judge's run closest to reasoning shown
+            on the full train set, in the reported variant, is the one scored.
+        domains: domain names (configs/domain/<name>.yml).
+        semesters: the target semesters; each domain is scored on those of them it has.
+        variants: protocol -> reported variant (config.yaml protocols); sets the judge protocols' conversion and the
+            embedding variant.
+    Outputs:
+        DataFrame with columns domain, semester, model, protocol, judge, shape, dropped, llr; one row per target,
+        protocol, judge ("-" for glm_regex and embedding), reference set (dropped: "-" for all references, else the
+        one left out) and shape ("normal" or "t"). Raises AssertionError when the check fails.
     """
     core = stats.core_condition(forecasts)
     core = core[np.array([variants.get(p) == v for p, v in zip(core.protocol, core.variant)])]
@@ -72,7 +100,7 @@ def likelihood_ratio_table(forecasts: pd.DataFrame, domains: list[str], semester
                 check.append(pd.DataFrame(dict(domain=name, semester=task.semester, protocol=protocol, judge=judge, model=truth.index,
                                                theta_hat=rule(refs, list(truth.index)).reindex(truth.index).to_numpy())))
             print(name, task.semester, "likelihood ratios done", flush=True)
-    # the full-reference predictions must be the forecasts' own (each task's best judge, transcript protocols as they are)
+    # the full-reference predictions must equal forecasts_table's (each task's best judge; other protocols as they are)
     ours = lr.select(pd.concat(check, ignore_index=True).assign(dropped="-"), lr.chosen_judges(forecasts, variants))
     theirs = stats.in_variants(stats.one_per_target(forecasts), variants)
     merged = ours.merge(theirs[["domain", "semester", "protocol", "model", "theta_hat"]],
@@ -83,6 +111,15 @@ def likelihood_ratio_table(forecasts: pd.DataFrame, domains: list[str], semester
 
 
 def main(config: dict) -> None:
+    """
+    Builds both tables and writes them.
+
+    Inputs:
+        config: the analysis configuration (scripts/analysis/config.yaml); uses paths, tasks.domains,
+            tasks.all_semesters and protocols.
+    Outputs:
+        <paths.forecasts>/forecasts.csv and <paths.forecasts>/likelihood_ratio.csv.
+    """
     apply_paths(config)
     out = Path(config["paths"]["forecasts"])
     out.mkdir(parents=True, exist_ok=True)

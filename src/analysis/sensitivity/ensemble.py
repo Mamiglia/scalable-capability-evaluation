@@ -1,5 +1,6 @@
-"""Judge ensemble: the mean of the three candidate judges' pairwise predictions against the single judge the main
-analysis selects, both on the train items all three judged (Figure 28). No judging is run.
+"""
+Judge ensemble: compares the mean of the three candidate judges' Pairwise judge predictions with the prediction of the
+single judge the main analysis selects, both computed from the train items all three judged. No judging is run.
 """
 from pathlib import Path
 
@@ -15,12 +16,18 @@ from protocols.pairwise.linear import weighted_theta
 
 
 def ensemble_forecasts(runs: dict[tuple[str, str, str], Path], domains: list[str]) -> pd.DataFrame:
-    """Per task, JudgeLinear's forecast of every target from each candidate judge alone (method "single") and the mean
-    of the candidates' forecasts (method "mean", k judges), all on the items every candidate judged, and the baseline
-    (method "constant", estimator "mean_ref": the references' mean theta*).
+    """
+    For every task, predicts every target with each candidate judge alone (linear conversion, weighted_theta; method
+    "single"), with the mean of the candidates' predictions (method "mean"), both from the items every candidate
+    judged, and with the Baseline (method "constant", estimator "mean_ref": the references' mean theta*).
 
-    runs: item_budget.core_run_dirs' output; a candidate without a run is left out.
-    Returns columns domain, semester, judges ("|"-joined), k, method, estimator, model, forecast, truth.
+    Inputs:
+        runs: item_budget.core_run_dirs' output; a candidate without a run is left out with a printed "missing".
+        domains: the domains, in order; their tasks are the semesters of data/meta/<domain>/fit.yml `top`.
+    Outputs:
+        DataFrame with columns domain, semester, judges (the judges pooled, "|"-joined; empty for the Baseline), k
+        (their number), method, estimator ("linear" or "mean_ref"), model, forecast (the predicted theta*) and truth
+        (the target's theta*); one row per task, method, judge set and target.
     """
     rows = []
     for name in domains:
@@ -39,6 +46,7 @@ def ensemble_forecasts(runs: dict[tuple[str, str, str], Path], domains: list[str
             print(name, sem, list(per_judge), len(common), "items", flush=True)
 
             def add(subset, method, estimator, forecasts):
+                """Appends one row per target of `forecasts` (model -> predicted theta*) to rows."""
                 rows.extend(dict(domain=name, semester=sem, judges="|".join(subset), k=len(subset), method=method, estimator=estimator,
                                  model=m, forecast=f, truth=task.truth.get(m)) for m, f in forecasts.items())
 
@@ -51,12 +59,18 @@ def ensemble_forecasts(runs: dict[tuple[str, str, str], Path], domains: list[str
 
 
 def task_errors(forecasts: pd.DataFrame, judges: pd.DataFrame, n_candidates: int, domains: list[str]) -> pd.DataFrame:
-    """Per task: the baseline's, the selected judge's and the ensemble's MSE over the targets.
+    """
+    The MSE over each task's targets of the Baseline, of the selected pairwise judge alone and of the mean of the
+    candidate judges, the latter two from the items every candidate judged.
 
-    forecasts: ensemble_forecasts' output as read back from its csv (judges "" read as NaN).
-    judges: the judge of each task, columns domain, semester, judge (stats.best_judges, pairwise).
-    n_candidates: the ensemble must pool this many judges; a task with fewer is left out.
-    Returns columns domain, semester, judge, baseline, single, ensemble, ordered by `domains`, then semester.
+    Inputs:
+        forecasts: ensemble_forecasts' output as read back from its csv (the Baseline's empty judges read as NaN).
+        judges: the selected pairwise judge of each task (stats.best_judges); uses domain, semester, judge.
+        n_candidates: the number of judges the ensemble must pool; a task with fewer is left out.
+        domains: the domains, in row order.
+    Outputs:
+        DataFrame with columns domain, semester, baseline, judge, single and ensemble (MSEs); one row per task,
+        ordered by `domains`, then semester.
     """
     cells = ["domain", "semester"]
     f = forecasts.dropna(subset=["truth"])
@@ -71,11 +85,18 @@ def task_errors(forecasts: pd.DataFrame, judges: pd.DataFrame, n_candidates: int
 
 def figure(t: pd.DataFrame, domains: list[str], colours: dict[str, str], markers: dict[str, str], names: dict[str, str],
            path: str) -> None:
-    """Figure 28. Left: per task (in `t`'s order, a gap between domains) the ensemble's MSE (domain marker),
-    the selected judge's (grey dot) joined by a line, and the baseline's (grey tick); log axis. Right: the paired
-    difference, ensemble minus single judge, per task. Writes path.{pdf,png,svg}.
+    """
+    Draws, in the left panel, each task's ensemble MSE (domain marker) joined by a line to the selected judge's MSE
+    (grey dot), with the Baseline's MSE as a grey tick, tasks in `t`'s order with a gap between domains, on a log
+    axis; in the right panel, each task's difference, ensemble minus single judge.
 
-    t: task_errors' output. colours, markers, names: domain -> colour, marker, label.
+    Inputs:
+        t: task_errors' output.
+        domains: the domains, in x-axis order.
+        colours, markers, names: domain -> colour, marker, legend label.
+        path: the output path without extension.
+    Outputs:
+        writes path.png, path.svg and path.pdf.
     """
     t = t.assign(x=np.arange(len(t)) + t.domain.map({d: i for i, d in enumerate(domains)}) * 0.6)
     style = {"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7, "svg.fonttype": "none",

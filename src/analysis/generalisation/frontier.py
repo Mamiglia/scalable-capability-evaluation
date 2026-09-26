@@ -1,7 +1,9 @@
-"""Closed-source targets (Figure 9): six closed Coding 2026-I targets and the eight open ones of the same task,
-predicted from the same eight 2025-II references on the frozen train items, reasoning hidden for every model and
-protocol. Each target's squared error minus its baseline error, and per protocol and group the one-sample t-test of
-the targets' log likelihood ratios against the baseline."""
+"""
+Closed-source targets: six closed Coding 2026-I targets and the eight open ones of the same task, predicted from the
+same eight 2025-II references on the frozen train items, reasoning hidden for every model and protocol. For each
+target and protocol it computes the squared error minus the Baseline's, and per protocol and group the one-sample
+t-test of the targets' log likelihood ratios against the Baseline.
+"""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,16 +35,35 @@ GROUP_SHADES = {"closed": "#b3b3b3", "open": "#dcdcdc"}
 
 
 def on_train(table: pd.DataFrame, task: Task) -> pd.DataFrame:
-    """A judge table's rows on the task's frozen train items."""
+    """
+    The rows of a judge table on the task's frozen train items, item ids compared as strings.
+
+    Inputs:
+        table: a pairwise verdict table or an absolute rating table, with bench and item columns.
+        task: the task; uses task.references.items (bench, item).
+    Outputs:
+        the rows of `table` whose (bench, item) is a train item, with item as a string.
+    """
     return table.assign(item=table.item.astype(str)).merge(task.references.items[["bench", "item"]].astype({"item": str}))
 
 
 def target_errors(task: Task, targets: list[str], pairwise_log: str, direct_log: str, embedding_variant: str,
                   features_view: str) -> pd.DataFrame:
-    """Per target and protocol (the baseline, the references' mean θ*, included): θ*, forecast and squared error.
+    """
+    Each target's θ*, predicted θ and squared error under every protocol and the Baseline (the references' mean θ*),
+    reasoning hidden: the Pairwise judge with the linear conversion (weighted_theta), Absolute scoring calibrated on
+    the references' mean ratings, and Embedding and Deterministic features refitted on the references.
 
-    pairwise_log, direct_log: the judge run dirs, reasoning hidden. embedding_variant: the embedding view with the
-        reasoning stripped ("answer"). features_view: the deterministic features' view without reasoning ("hidden").
+    Inputs:
+        task: the task (the references' θ*, the targets' θ*, the cohorts).
+        targets: the targets to predict (the closed or the open group).
+        pairwise_log: the Pairwise judge's run folder, reasoning hidden.
+        direct_log: the Absolute scoring judge's run folder, reasoning hidden.
+        embedding_variant: the embedding variant with the reasoning stripped ("answer").
+        features_view: the deterministic features' view without reasoning ("hidden").
+    Outputs:
+        DataFrame with columns model, protocol, theta, theta_hat, error; one row per target and protocol (pairwise,
+        direct, easy_items for the Baseline, embedding, glm_regex).
     """
     refs, truth = task.references.theta, task.truth.reindex(targets)
     theta_hat = {"pairwise": weighted_theta(on_train(pairwise_logs(pairwise_log), task), refs, targets),
@@ -57,8 +78,18 @@ def target_errors(task: Task, targets: list[str], pairwise_log: str, direct_log:
 
 def target_llr(task: Task, targets: list[str], pairwise_log: str, direct_log: str, embedding_variant: str,
                features_view: str, shape: str) -> pd.DataFrame:
-    """Per target and protocol, the log likelihood ratio against the baseline on the full reference set, in `shape`
-    ("t" or "normal"). Columns: model, shape, llr, dropped ("-"), protocol."""
+    """
+    Each target's log likelihood ratio of every protocol against the Baseline on the full reference set: log p(θ* |
+    protocol) minus log p(θ* | the references' mean), each density centred on the prediction and scaled by its
+    leave-one-model-out error on the references. The protocols are set up as in target_errors.
+
+    Inputs:
+        task, targets, pairwise_log, direct_log, embedding_variant, features_view: as in target_errors.
+        shape: the density's shape, "t" (Student t with one fewer degrees of freedom than references) or "normal".
+    Outputs:
+        DataFrame with columns model, shape, llr, dropped ("-": no reference dropped), protocol; one row per target
+        and protocol (pairwise, direct, embedding, glm_regex).
+    """
     refs, truth = task.references.theta, task.truth.reindex(targets)
     cohorts = (task.references, task.test)
     rules = {"pairwise": lr.judge_rule(on_train(pairwise_logs(pairwise_log), task), "pairwise", "linear"),
@@ -73,14 +104,29 @@ def target_llr(task: Task, targets: list[str], pairwise_log: str, direct_log: st
 
 
 def error_deltas(errors: pd.DataFrame) -> pd.DataFrame:
-    """`errors` (target_errors, with `group`) with `delta`: each target's squared error minus its baseline error."""
+    """
+    Adds each target's squared error minus the Baseline's squared error on the same target of the same group.
+
+    Inputs:
+        errors: target_errors rows with a group column ("closed" or "open"); uses protocol, group, model and error.
+    Outputs:
+        `errors` with a delta column (0 on the Baseline's own rows).
+    """
     base = errors[errors.protocol == BASELINE].set_index(["group", "model"]).error
     return errors.assign(delta=errors.error - errors.set_index(["group", "model"]).index.map(base).to_numpy())
 
 
 def group_tests(llr: pd.DataFrame) -> pd.DataFrame:
-    """Per protocol and group: n, the mean log likelihood ratio, its standard error, the two-sided one-sample t-test p
-    and the mark drawn: stars when the mean is positive and p < .05, else "n.s."."""
+    """
+    Per protocol and group, the one-sample t-test that the targets' mean log likelihood ratio against the Baseline is
+    0 (likelihood_ratio.pooled_tests, its one-sided p made two-sided), and the mark drawn: stars when the mean is
+    positive and p < .05, otherwise "n.s.".
+
+    Inputs:
+        llr: target_llr rows with group, domain and semester columns added.
+    Outputs:
+        DataFrame with columns protocol, group, n, llr (the mean), se, p, mark; one row per protocol and group.
+    """
     rows = []
     for (protocol, group), g in llr.groupby(["protocol", "group"]):
         t = lr.pooled_tests(g).iloc[0]
@@ -91,9 +137,19 @@ def group_tests(llr: pd.DataFrame) -> pd.DataFrame:
 
 
 def frontier_figure(deltas: pd.DataFrame, tests: pd.DataFrame, vendors: dict[str, str], display: dict) -> plt.Figure:
-    """One row per protocol, closed then open targets: each target's change in squared error from its baseline error
-    (closed targets in their developer's colour), a white circle at the group's mean over a grey box of its 95%
-    t-interval, and the group's mark at the right. vendors: closed target -> developer."""
+    """
+    Draws one row per protocol, the closed targets above the open ones: each target's change in squared error from
+    the Baseline's (closed targets in their developer's colour, open ones grey), a white circle at the group's mean
+    over a grey box of its 95% t-interval, and the group's mark at the right.
+
+    Inputs:
+        deltas: error_deltas rows (protocol, group, model, delta).
+        tests: group_tests rows (protocol, group, mark).
+        vendors: closed target -> developer ("Anthropic", "OpenAI" or "Google").
+        display: config.yaml's display section; uses protocol_names.
+    Outputs:
+        the matplotlib Figure.
+    """
     fig, ax = plt.subplots(figsize=(2.3, 3.0))
     rng = np.random.default_rng(0)
     marks = tests.set_index(["protocol", "group"]).mark
@@ -131,8 +187,19 @@ def frontier_figure(deltas: pd.DataFrame, tests: pd.DataFrame, vendors: dict[str
 
 
 def caption(deltas: pd.DataFrame, tests: pd.DataFrame, display: dict, pairwise_judge: str, direct_judge: str) -> str:
-    """The figure's .txt: what it draws, every target's change in squared error, each group's mean and interval and
-    its log likelihood ratio test."""
+    """
+    The text of the figure's .txt file: what the figure draws, then per protocol and group the mean change in squared
+    error with its 95% t-interval, the log likelihood ratio test and its mark, and every target's change.
+
+    Inputs:
+        deltas: error_deltas rows.
+        tests: group_tests rows.
+        display: config.yaml's display section; uses protocol_names.
+        pairwise_judge: the Pairwise judge's shortname, quoted in the text.
+        direct_judge: the Absolute scoring judge's shortname, quoted in the text.
+    Outputs:
+        str, the caption.
+    """
     names = display["protocol_names"]
     by = tests.set_index(["protocol", "group"])
     lines = []

@@ -1,6 +1,7 @@
-"""Item and reference budget: the prediction error when a judge's verdicts on only some of the judged train items are
-used (Figure 19; per candidate judge in the breakdowns), and when only some of the references are kept (Figure 20).
-No judging is run: every subset is cut from the verdicts and ratings already on disk.
+"""
+Item and reference budget: the prediction error when a judge's verdicts or ratings on only a random subset of the
+judged train items are used, for every candidate judge, and when the Pairwise judge places the targets against only a
+subset of the references. No judging is run: every subset is cut from the verdicts and ratings already on disk.
 """
 from collections.abc import Iterator
 from itertools import combinations
@@ -27,17 +28,34 @@ KEY = ["bench", "item", "model_left", "model_right"]
 
 
 def candidates(domain: str) -> dict[str, list[str]]:
-    """semester -> the task's three candidate judges, strongest reference first (data/meta/<domain>/fit.yml `top`)."""
+    """
+    The three candidate judges of every frozen task of a domain, as the freeze recorded them: the task's three
+    references with the highest global theta, strongest first.
+
+    Inputs:
+        domain: the domain's short name ("science", "math", "coding", "cyber"); reads data/meta/<domain>/fit.yml,
+            key `top`.
+    Outputs:
+        dict semester -> list of the three judge names in lower case.
+    """
     top = yaml.safe_load((tables.frozen_dir(loading.domain(domain)) / "fit.yml").read_text())["top"]
     return {sem: [j.lower() for j in judges] for sem, judges in top.items()}
 
 
 def core_run_dirs(forecasts: pd.DataFrame, variant: str, logs: Path) -> dict[tuple[str, str, str], Path]:
-    """(domain, semester, judge) -> the directory of each pairwise judge's core-condition run (stats.core_condition),
-    the run the main analysis scores (for the 2024 tasks, whose subjects show no reasoning, the reasoning-hidden run).
+    """
+    Finds the log folder of the run the main analysis scores for each pairwise judge: its core-condition run
+    (stats.core_condition), reasoning shown on the full train set where that run exists, else reasoning shown on a
+    smaller train set, else reasoning hidden.
 
-    forecasts: analysis/forecasts/forecasts.csv. variant: the pairwise variant reported.
-    logs: the judge-logs checkout (logs/judge/<domain>/<semester>/<judge>/<condition hash>).
+    Inputs:
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv); uses domain,
+            semester, protocol, variant, judge and condition.
+        variant: the pairwise variant reported (e.g. "linear").
+        logs: the judge-logs checkout; the run folders are logs/judge/<domain>/<semester>/<judge>/<condition hash>.
+    Outputs:
+        dict (domain, semester, judge) -> the run folder whose condition hash maps (loading.pairwise_configs) to the
+        judge's core condition; the first such folder in sorted order.
     """
     configs = loading.pairwise_configs()
     core = stats.core_condition(forecasts)
@@ -47,19 +65,43 @@ def core_run_dirs(forecasts: pd.DataFrame, variant: str, logs: Path) -> dict[tup
 
 
 def pairwise_verdicts(run_dir: Path) -> pd.DataFrame:
-    """A pairwise run's verdicts, one per (bench, item, left, right), the run's own verdict over an imported one."""
+    """
+    Reads a pairwise run's verdicts, one per bench, item and ordered pair of models; where the run's own verdict and
+    one imported from an older campaign overlap, the run's own is kept.
+
+    Inputs:
+        run_dir: a pairwise run folder (logs/judge/<domain>/<semester>/<judge>/<condition hash>).
+    Outputs:
+        DataFrame with protocols.pairwise.from_logs' columns (bench, judge, item, model_left, model_right, pick_left,
+        semester, imported, ...); one row per bench, item, model_left and model_right.
+    """
     return from_logs(run_dir).sort_values("imported", kind="stable").drop_duplicates(KEY)
 
 
 def baseline_mse(task: Task) -> float:
-    """The baseline's MSE on the task's targets (the references' mean theta*)."""
+    """
+    The Baseline's MSE on the task's targets: every target predicted as the references' mean theta*.
+
+    Inputs:
+        task: the semester task (references with theta*, targets, and the targets' theta* in task.truth).
+    Outputs:
+        float, the MSE over the targets.
+    """
     return score(PROTOCOLS["mean_ref"](task), task.truth)["mse"]
 
 
 def item_subsets(items: pd.DataFrame, sizes: list[int], draws: int, rng: np.random.Generator) -> Iterator[tuple[int, int, pd.DataFrame]]:
-    """(n, draw, items kept): `draws` random subsets of n items for every size below the number of items, then all.
+    """
+    Yields random item subsets: `draws` subsets of n items, drawn without replacement, for every n in `sizes` below the
+    number of items, then one subset holding every item.
 
-    items: the judged items, sorted, so the draws do not depend on the log order.
+    Inputs:
+        items: the judged items (columns bench, item), sorted so that the draws do not depend on the log order.
+        sizes: the subset sizes.
+        draws: the number of random subsets per size.
+        rng: the random generator, shared across calls.
+    Outputs:
+        an iterator of (n, draw, the rows of `items` kept).
     """
     for n in [s for s in sizes if s < len(items)] + [len(items)]:
         for draw in range(1 if n == len(items) else draws):
@@ -68,11 +110,21 @@ def item_subsets(items: pd.DataFrame, sizes: list[int], draws: int, rng: np.rand
 
 def pairwise_item_draws(runs: dict[tuple[str, str, str], Path], domains: list[str], sizes: list[int], draws: int,
                         seed: int) -> pd.DataFrame:
-    """Per task, candidate judge and item subset, the MSE of the targets placed from that subset's pairwise verdicts
-    (JudgeLinear) and the baseline's MSE. One random stream over every task, in domain and semester order.
+    """
+    For every task, candidate judge and random subset of its judged train items, places the targets from the Pairwise
+    judge's verdicts on those items alone (the linear conversion, weighted_theta) and records their MSE. One random
+    stream runs over every task, in domain and semester order.
 
-    runs: core_run_dirs' output; a candidate without a run is skipped.
-    Returns columns domain, semester, judge, judge_rank, n_judged, n, draw, baseline, linear.
+    Inputs:
+        runs: core_run_dirs' output; a candidate without a run is skipped with a printed "missing".
+        domains: the domains, in order; their tasks are the semesters of data/meta/<domain>/fit.yml `top`.
+        sizes: the subset sizes (numbers of items).
+        draws: the number of random subsets per size.
+        seed: the seed of the random stream.
+    Outputs:
+        DataFrame with columns domain, semester, judge, judge_rank (1 = strongest candidate), n_judged (items the
+        judge judged), n (items kept), draw, baseline (the Baseline's MSE on the task) and linear (the MSE from the
+        kept items); one row per task, judge, n and draw.
     """
     rows, rng = [], np.random.default_rng(seed)
     for name in domains:
@@ -96,10 +148,21 @@ def pairwise_item_draws(runs: dict[tuple[str, str, str], Path], domains: list[st
 
 
 def direct_item_draws(domains: list[str], sizes: list[int], draws: int, seed: int) -> pd.DataFrame:
-    """As pairwise_item_draws for absolute scoring: each candidate judge's 1-10 ratings (reasoning shown, every bench
-    set's run directory), mean rating -> theta* calibrated on the references.
+    """
+    As pairwise_item_draws for Absolute scoring: for every task, candidate judge and random subset of its rated train
+    items, each target's mean 1-10 rating on those items is mapped to theta* by the line fitted on the references
+    (calibrate), and the MSE over the targets recorded. The ratings are those of the judge's reasoning-shown runs, read
+    from every run folder of its bench sets; the ratings of models other than the task's references and targets are
+    dropped.
 
-    Returns columns domain, semester, judge, judge_rank, n_judged, n, draw, baseline, direct.
+    Inputs:
+        domains: the domains, in order; their tasks are the semesters of data/meta/<domain>/fit.yml `top`.
+        sizes: the subset sizes (numbers of items).
+        draws: the number of random subsets per size.
+        seed: the seed of the random stream, which runs over every task in domain and semester order.
+    Outputs:
+        DataFrame with columns domain, semester, judge, judge_rank, n_judged, n, draw, baseline and direct (the MSE
+        from the kept items); one row per task, judge, n and draw. A candidate without a run is skipped.
     """
     rows, rng = [], np.random.default_rng(seed)
     for name in domains:
@@ -126,12 +189,21 @@ def direct_item_draws(domains: list[str], sizes: list[int], draws: int, seed: in
 
 
 def reference_subsets(runs: dict[tuple[str, str, str], Path], domains: list[str], judges: pd.DataFrame, sizes: list[int]) -> pd.DataFrame:
-    """Per task, the MSE of the targets placed (JudgeLinear) with every k-subset of the references as the whole
-    reference set, for k in `sizes` below the number of references, then all of them. Only the subset's theta* and
-    its verdicts are kept.
+    """
+    For every task, places the targets with the selected Pairwise judge (linear conversion, weighted_theta) using each
+    subset of k references in place of all of them, for every k in `sizes` below the number of references and then
+    all of them, and records the MSE. Only the kept references' theta* and the verdicts among kept references and
+    targets are used.
 
-    runs: core_run_dirs' output. judges: the judge of each task, columns domain, semester, judge (stats.best_judges, pairwise).
-    Returns columns domain, semester, judge, judge_rank, baseline, n_refs, k, subset ("|"-joined), linear.
+    Inputs:
+        runs: core_run_dirs' output.
+        domains: the domains, in order; their tasks are the semesters of data/meta/<domain>/fit.yml `top`.
+        judges: the selected pairwise judge of each task (stats.best_judges); uses domain, semester, judge.
+        sizes: the numbers of references kept.
+    Outputs:
+        DataFrame with columns domain, semester, judge, judge_rank, baseline (the Baseline's MSE with every
+        reference), n_refs (the task's references), k, subset (the kept references, "|"-joined) and linear (the
+        MSE); one row per task and reference subset.
     """
     judge_of = judges.set_index(["domain", "semester"]).judge
     rows = []
@@ -153,11 +225,17 @@ def reference_subsets(runs: dict[tuple[str, str, str], Path], domains: list[str]
 
 
 def keep_stronger_or_weaker(subsets: pd.DataFrame) -> pd.DataFrame:
-    """The reference subsets of each task and k split by the mean theta* of the references they keep: the top third
-    (keep "stronger") and the bottom third (keep "weaker"), each with the all-reference set (where the two meet).
+    """
+    Splits the reference subsets of each task and k by the mean theta* of the references they keep: the top third keep
+    the stronger references, the bottom third the weaker; the set of all references is added to both, where the two
+    curves meet.
 
-    subsets: reference_subsets' output.
-    Returns its rows with a `keep` column.
+    Inputs:
+        subsets: reference_subsets' output; uses domain, semester, k, n_refs and subset. The references' theta* come
+            from data/meta/<domain>/models.csv.
+    Outputs:
+        DataFrame with subsets' columns plus theta_kept (the kept references' mean theta*) and keep ("stronger" or
+        "weaker"); the middle third is left out.
     """
     out = []
     for (name, sem), cell in subsets.groupby(["domain", "semester"]):
@@ -173,12 +251,24 @@ def keep_stronger_or_weaker(subsets: pd.DataFrame) -> pd.DataFrame:
 
 def curves_figure(df: pd.DataFrame, key: str, x: str, xlabel: str, xticks: tuple, colours: dict[str, str],
                   markers: dict[str, str], names: dict[str, str], path: str) -> pd.DataFrame:
-    """Figures 19 and 20 (and the per-judge breakdowns): rows = df.row (ordered by judge_rank), one panel per semester,
-    one line per domain: the task's median squared error over the subsets, band 2.5-97.5 percentile, the task's
-    baseline MSE as a dashed line in the domain's colour; log y-axis. The x-axis starts at its first tick.
-    Writes path.{pdf,png,svg}; returns the plotted numbers: row, semester, domain, x, median, lo, hi, baseline.
+    """
+    Draws the MSE against the subset size: one row of panels per value of df.row (ordered by judge_rank), one panel
+    per semester, one line per domain showing the task's median MSE over the subsets with a 2.5-97.5 percentile band,
+    and the task's Baseline MSE as a dashed line in the domain's colour; log y-axis. Sizes below the first tick are
+    left out.
 
-    key: the column holding each subset's MSE. colours, markers, names: domain -> colour, marker, label.
+    Inputs:
+        df: one row per task and subset; uses row, judge_rank, semester, domain, baseline, the column `x` and the
+            column `key`.
+        key: the column holding each subset's MSE.
+        x: the column holding the subset size.
+        xlabel: the x-axis label.
+        xticks: the x-axis ticks; the first and last are its limits.
+        colours, markers, names: domain -> line colour, marker, legend label.
+        path: the output path without extension.
+    Outputs:
+        writes path.png, path.svg and path.pdf; returns the plotted numbers as a DataFrame with columns row, semester,
+        domain, the x column, median, lo, hi and baseline, one row per line point.
     """
     df = df[df[x] >= xticks[0]]
     semesters, ranks = sorted(df.semester.unique()), list(dict.fromkeys(df.sort_values("judge_rank", kind="stable").row))

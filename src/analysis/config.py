@@ -1,4 +1,7 @@
-"""The analysis configuration (scripts/analysis/config.yaml): loading it, and pointing the data readers at its paths."""
+"""
+Loads the analysis configuration (scripts/analysis/config.yaml) and points the readers of transcripts, features and
+embeddings at the paths it names.
+"""
 
 from pathlib import Path
 from typing import Any
@@ -7,19 +10,30 @@ import yaml
 
 
 def load_config(path: str | Path = "scripts/analysis/config.yaml") -> dict[str, Any]:
-    """The configuration as nested dicts and lists, keys as in the file.
+    """
+    Reads the analysis configuration from a YAML file.
 
-    path: the YAML file, relative to the repository root.
+    Inputs:
+        path: the YAML file, relative to the repository root (default scripts/analysis/config.yaml).
+    Outputs:
+        the configuration as nested dicts and lists, keys as in the file.
     """
     with open(path) as f:
         return yaml.safe_load(f)
 
 
 def apply_paths(config: dict[str, Any]) -> None:
-    """Point the readers of transcripts, features and embeddings at the configured checkouts.
+    """
+    Points the readers of the frozen tables, transcripts, features and embeddings at the folders the configuration
+    names, in this process and (through environment variables) in the worker processes it starts. paths.logs is not
+    used here: the judge runs are read from the log folders the judge configs name (logs/...), which is why paths.logs
+    must stay logs/.
 
-    config: the loaded configuration; uses paths.data, paths.features and paths.embeddings. Judge logs are read from
-        the directories the judge configs name (logs/...), so paths.logs is documentation only.
+    Inputs:
+        config: the loaded configuration; uses paths.data, paths.features and paths.embeddings.
+    Outputs:
+        none returned; sets reference.tables.DATA, META (<paths.data>/meta) and FEATURES,
+        protocols.embeddings.EMBEDDINGS, and the environment variables SMALL_JUDGE_DATA and SMALL_JUDGE_EMBEDDINGS.
     """
     import os
 

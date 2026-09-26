@@ -1,8 +1,8 @@
-"""Loading: semester tasks from the frozen tables and the judge outputs already on disk.
-
-Never launches judging. A judge run is one <domain, semester, judge, condition> directory
-under logs/judge/ (pairwise verdicts) or logs/direct*/ (1-10 ratings); its rows are read
-raw here and restricted to the frozen train items by analysis.matching.
+"""
+Reads what the analysis needs from disk: the domain configurations, the semester tasks from the frozen tables, and the
+judge runs already collected in logs/. It never launches judging. A judge run is one folder per domain, semester,
+judge and condition, under logs/judge/ (Pairwise judge verdicts) or logs/direct*/ (Absolute scoring ratings, 1 to 10);
+its rows are read here as logged and cut down to the frozen train items by analysis.matching.
 """
 
 import zipfile
@@ -29,18 +29,20 @@ LOGS = Path("logs")
 
 @dataclass
 class JudgeRun:
-    """One judge's logs for one semester task.
+    """
+    One judge's logs for one task (a domain and semester), as read from disk, with the harness that wrote them.
 
-    protocol   "pairwise" or "direct"
-    judge      the judge's shortname (its data/ directory name, e.g. "gpt-4-0613")
-    condition  "reasoning-shown", "reasoning-hidden", or "reasoning-shown-<k>pq" for a
-               pairwise run on a smaller train set (k items per quartile)
-    harness    the JudgeBT / JudgeDirect that wrote the logs; matching uses it to count
-               the judgments the campaign still lacks
-    table      the raw rows: pairwise -> bench, judge, item, model_left, model_right,
-               pick_left, semester, imported; direct -> bench, judge, item, model, score,
-               semester, epoch (ensemble_runs relies on judge)
-    missing    judgments still unjudged on the train items (0 until matching fills it)
+    Attributes:
+        protocol: "pairwise" (Pairwise judge) or "direct" (Absolute scoring).
+        judge: the judge's short name, its folder name under logs/ and data/ (e.g. "gpt-4-0613"); "ensemble" for a run
+            pooled by analysis.calibration.ensemble_runs.
+        condition: "reasoning-shown", "reasoning-hidden", or "reasoning-shown-<k>pq" for a pairwise run on a smaller
+            train set (k items per difficulty quartile); "core" for a pooled run.
+        harness: the JudgeBT or JudgeDirect that wrote the logs; analysis.matching asks it which judgments are missing.
+        table: the rows as logged. Pairwise, one row per verdict: bench, judge, item, model_left, model_right,
+            pick_left, semester, imported, chars_left, chars_right. Direct, one row per numeric rating (latest retry
+            per transcript and epoch): bench, judge, item, model, score, semester, epoch.
+        missing: the number of judgments still absent on the train items; 0 until analysis.matching sets it.
     """
 
     protocol: str
@@ -52,24 +54,46 @@ class JudgeRun:
 
 
 def domain(name: str) -> DomainConfig:
-    """The domain config for a short name ("science", "math", "coding", "cyber")."""
+    """
+    Loads a domain's configuration from configs/domain/<name>.yml.
+
+    Inputs:
+        name: the domain's code key: "science", "math", "coding" or "cyber".
+    Outputs:
+        the DomainConfig.
+    """
     return DomainConfig.from_cli(Path(f"configs/domain/{name}.yml"))
 
 
 def tasks(dom: DomainConfig, semesters: list[str] | None = None) -> list[Task]:
-    """The semester tasks of a domain from its frozen tables, in roster order.
+    """
+    Builds a domain's semester tasks from its frozen tables (data/meta/<domain>/): for each semester, the references
+    (the previous semester's models, with theta*), the targets (theta hidden), the targets' theta* and the train items.
 
-    semesters: restrict to these (e.g. ["2026-I"]); None means every frozen task.
-    Each Task holds references (theta = theta*), an empty-or-not historical cohort, the
-    targets (theta NaN) and the targets' theta* in `truth`.
+    Inputs:
+        dom: the domain configuration.
+        semesters: the semesters to build (e.g. ["2026-I"]); None builds every semester that has a `<semester>_role`
+            column in the frozen models table.
+    Outputs:
+        list of Task, one per semester in the order given (or the frozen table's column order). Each Task has
+        references (theta = theta*), historical (older models with this task's theta*, possibly empty), test (the
+        targets, theta NaN) and truth (the targets' theta*).
     """
     return [Task.from_semester(s, dom) for s in semesters or semester_names(dom)]
 
 
 def fetched(run_dir: Path) -> bool:
-    """True when every .eval in the directory is a real log. Raises when some are still git-lfs
-    pointer stubs: a skipped run would silently fall back to a worse condition (this happened
-    with the 2026-I math and science reasoning-shown runs), so the caller must pull first."""
+    """
+    Checks that every .eval log in a run folder has been downloaded rather than left as a git-lfs pointer stub. It
+    raises instead of returning False because a skipped run would silently fall back to a worse condition (this
+    happened with the 2026-I Maths and Science reasoning-shown runs), so the caller must pull first.
+
+    Inputs:
+        run_dir: a judge run folder under logs/.
+    Outputs:
+        True when every .eval is a real (zip) log; otherwise raises RuntimeError naming the scoped `git lfs pull`
+        command that fetches the folder.
+    """
     stubs = [p for p in run_dir.glob("*.eval") if not zipfile.is_zipfile(p)]
     if stubs:
         rel = run_dir.relative_to(LOGS) if run_dir.is_relative_to(LOGS) else run_dir
@@ -79,11 +103,17 @@ def fetched(run_dir: Path) -> bool:
 
 
 def pairwise_configs() -> dict[tuple[str, str], tuple[Path, str]]:
-    """Map (judge shortname, pairwise condition hash) -> (judge YAML path, condition label).
+    """
+    Traces pairwise run folders back to the judge configurations that produced them: a run folder is named by the
+    judge's short name and its condition hash, so every YAML in configs/judges/ (reasoning hidden) and
+    configs/judges/reasoning/ (reasoning shown) is indexed by that pair.
 
-    A run directory is named by the judge shortname and the condition hash, so this is how
-    a directory is traced back to the config that produced it. Reasoning-shown configs live
-    in configs/judges/reasoning/; a `train_per_quartile` there marks a smaller train set.
+    Inputs:
+        none.
+    Outputs:
+        dict (judge short name, condition hash) -> (judge YAML path, condition label). The label is
+        "reasoning-hidden", "reasoning-shown", or "reasoning-shown-<k>pq" when a reasoning config sets
+        train_per_quartile = k (a smaller train set).
     """
     out = {}
     for path in sorted(JUDGES.glob("*.yml")):
@@ -97,9 +127,18 @@ def pairwise_configs() -> dict[tuple[str, str], tuple[Path, str]]:
 
 
 def pairwise_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
-    """Every fetched pairwise run for the task whose judge is in the semester's top-3 roster
-    (data/meta/<domain>/fit.yml `top`) and whose condition hash matches a current config.
-    Pilot judges outside the roster and stale conditions are skipped silently."""
+    """
+    Reads every pairwise run on disk for one task whose judge is one of the semester's three candidate judges (the
+    `top` roster in data/meta/<domain>/fit.yml) and whose condition hash matches a current config (pairwise_configs).
+    Folders of pilot judges outside the roster and of stale conditions are skipped silently.
+
+    Inputs:
+        dom: the domain configuration.
+        task: the semester task; its semester selects logs/judge/<domain>/<semester>/<judge>/<condition hash>/.
+    Outputs:
+        list of JudgeRun with protocol "pairwise", one per run folder, verdicts as logged (not yet matched). Raises
+        RuntimeError if a candidate run folder holds unfetched git-lfs stubs (see fetched).
+    """
     configs = pairwise_configs()
     roster = yaml.safe_load((tables.frozen_dir(dom) / "fit.yml").read_text())["top"][task.semester]
     runs = []
@@ -114,12 +153,21 @@ def pairwise_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
 
 
 def direct_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
-    """Every fetched direct run for the task, subject reasoning shown and hidden, for every
-    judge YAML in configs/judges/ whose judge is in the semester's top-3 roster
-    (data/meta/<domain>/fit.yml `top`; file stems are the roster shortnames). The run
-    directories come from JudgeDirect.log_dirs, which hashes the prompts too, so a config with
-    no directory was never run; a run split across bench sets (coding: SWE-bench and
-    Terminal-Bench before AgentBench joined) is read from every directory."""
+    """
+    Reads every Absolute scoring run on disk for one task, with the rated model's reasoning shown and hidden, for each
+    judge YAML in configs/judges/ whose file name is one of the semester's three candidate judges (the `top` roster in
+    data/meta/<domain>/fit.yml). The run folders come from JudgeDirect.log_dirs, whose hash covers the prompts too, so
+    a config without a folder was never run; a run split across bench sets (Coding: SWE-bench and Terminal-Bench
+    before AgentBench joined) is read from every folder and concatenated.
+
+    Inputs:
+        dom: the domain configuration.
+        task: the semester task; uses its semester.
+    Outputs:
+        list of JudgeRun with protocol "direct", at most two per judge (condition "reasoning-shown" and
+        "reasoning-hidden"), ratings as logged (not yet matched). Raises RuntimeError if a run folder holds unfetched
+        git-lfs stubs (see fetched).
+    """
     roster = yaml.safe_load((tables.frozen_dir(dom) / "fit.yml").read_text())["top"][task.semester]
     runs = []
     for path in sorted(JUDGES.glob("*.yml")):
@@ -137,5 +185,13 @@ def direct_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
 
 
 def judge_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
-    """All pairwise then direct runs on disk for the task (see pairwise_runs, direct_runs)."""
+    """
+    Reads every judge run on disk for one task: the pairwise runs, then the Absolute scoring runs.
+
+    Inputs:
+        dom: the domain configuration.
+        task: the semester task.
+    Outputs:
+        list of JudgeRun: pairwise_runs(dom, task) followed by direct_runs(dom, task).
+    """
     return pairwise_runs(dom, task) + direct_runs(dom, task)

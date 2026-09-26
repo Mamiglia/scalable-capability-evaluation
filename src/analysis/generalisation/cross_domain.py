@@ -1,11 +1,11 @@
-"""Transcripts from one domain scored on another domain's capability (Appendix D.5, the numbers behind Figure 18).
-
-For each semester and ordered pair of domains, the source domain's task is rebuilt with every θ* replaced by the scored
-domain's for the same semester: the references' and historical models' θ*, which each protocol fits to, and the
-targets' truth, which the forecast is scored against. Items, transcripts, judge runs and their matching stay the source
-domain's, so calibration.forecasts runs unchanged. Each judge protocol keeps, in every cell of a row, the judge that is
-best on references within the source domain itself, so a row compares like with like. The baseline is the references'
-mean scored-domain θ*, identical to that domain's own, so the diagonal reproduces forecasts.csv (check_diagonal).
+"""
+Transcripts from one domain scored on another domain's capability. For each semester and ordered pair of domains, the
+source domain's task is rebuilt with every θ* replaced by the scored domain's for the same semester (the references'
+and historical models' θ*, which each protocol fits to, and the targets' truth, which the prediction is scored
+against), while items, transcripts, judge runs and their matching stay the source domain's, so calibration.forecasts
+runs unchanged. Each judge protocol keeps, in every cell of a row, the judge that is best on the references within
+the source domain itself, so a row compares like with like. The Baseline is the references' mean scored-domain θ*,
+identical to that domain's own, so the diagonal reproduces forecasts.csv (check_diagonal).
 """
 
 import numpy as np
@@ -19,14 +19,33 @@ from reference import tables
 
 
 def scored_theta(domain: str, semester: str) -> pd.Series:
-    """Every model's θ* on one task of `domain`, from the frozen table; models without one dropped."""
+    """
+    Every model's θ* on one task of a domain, read from the frozen model table (the <semester>_theta column); models
+    without one are dropped.
+
+    Inputs:
+        domain: the domain key whose θ* is used.
+        semester: the task's semester.
+    Outputs:
+        Series of θ*, indexed by model.
+    """
     models, _ = tables.load(loading.domain(domain))
     return models[f"{semester}_theta"].dropna()
 
 
 def relabel(cohort: Cohort, theta: pd.Series, truth: bool = True) -> Cohort:
-    """`cohort` keeping only the models `theta` labels, with their θ* replaced by it (NaN for a test cohort, whose θ is
-    unknown by construction). A transcript cache already read stays with the new cohort, so no log is reread."""
+    """
+    A copy of `cohort` keeping only the models `theta` labels, with their θ* replaced by it (NaN for a target cohort,
+    whose θ is unknown by construction). A transcript cache already read stays with the new cohort, so no log is
+    reread.
+
+    Inputs:
+        cohort: a task's references, historical models or targets.
+        theta: the scored domain's θ*, indexed by model.
+        truth: True to take the θ* from `theta`, False to set it NaN (the targets).
+    Outputs:
+        the relabelled Cohort, with the same items.
+    """
     models = cohort.models[cohort.models.index.isin(theta.index)].copy()
     models["theta"] = theta.reindex(models.index) if truth else np.nan
     swapped = Cohort(models, cohort.items, cohort.semester)
@@ -36,16 +55,35 @@ def relabel(cohort: Cohort, theta: pd.Series, truth: bool = True) -> Cohort:
 
 
 def swap(task: Task, theta: pd.Series) -> Task:
-    """`task` with every θ* replaced by `theta` (references, historical cohort and the targets' truth); models `theta`
-    does not label are dropped from each cohort."""
+    """
+    A copy of `task` with every θ* replaced by `theta`: the references', the historical models' and the targets'
+    truth. Models `theta` does not label are dropped from each cohort and from the truth.
+
+    Inputs:
+        task: the source domain's task.
+        theta: the scored domain's θ* for the same semester (scored_theta).
+    Outputs:
+        the relabelled Task.
+    """
     return Task(task.semester, relabel(task.references, theta), relabel(task.historical, theta),
                 relabel(task.test, theta, truth=False), task.truth.index.to_series().map(theta).dropna().rename("theta"))
 
 
 def forecasts(domains: list[str], semesters: list[str]) -> pd.DataFrame:
-    """One row per (source domain, scored domain, semester, target, protocol, variant, judge): the columns of
-    forecasts.csv plus `scored_domain`; `domain` is the source. Judge runs and transcripts are read once per source
-    domain and semester. About 25 minutes for the four domains and two semesters."""
+    """
+    Every protocol's predictions for every ordered pair of domains and every semester, with the source domain's
+    transcripts and the scored domain's θ*; a pair with no shared labelled targets or references is skipped. Judge
+    runs and transcripts are read once per source domain and semester; the four domains and two semesters take about
+    25 minutes.
+
+    Inputs:
+        domains: the domain keys, used both as sources and as scored domains.
+        semesters: the semesters.
+    Outputs:
+        DataFrame with the columns of forecasts.csv (domain, semester, protocol, variant, judge, condition,
+        judge_loo_mse, model, theta_hat, theta, missing) plus scored_domain, domain being the source; one row per
+        source domain, scored domain, semester, target, protocol, variant, judge and condition.
+    """
     frames = []
     for source in domains:
         dom = loading.domain(source)
@@ -65,9 +103,19 @@ def forecasts(domains: list[str], semesters: list[str]) -> pd.DataFrame:
 
 
 def check_diagonal(cross: pd.DataFrame, forecasts_: pd.DataFrame, variants: dict[str, str], semesters: list[str]) -> str:
-    """Raises unless the diagonal cells (a domain scored on itself) reproduce forecasts.csv's forecast of every target
-    and protocol, judge protocols as each task's best judge on references (so a change in which judge wins is caught
-    too). Returns a one-line summary."""
+    """
+    Checks that the diagonal cells (a domain scored on itself) reproduce forecasts.csv: both tables must have the same
+    rows and the same predicted θ within 1e-3 for every target and protocol, judge protocols as each task's best judge
+    on the references (so a change in which judge wins is caught too); raises AssertionError otherwise.
+
+    Inputs:
+        cross: the output of forecasts.
+        forecasts_: the forecasts table (analysis/forecasts/forecasts.csv).
+        variants: protocol -> its reported variant (config.yaml protocols).
+        semesters: the semesters of forecasts.csv compared.
+    Outputs:
+        str, a one-line summary with the number of rows compared and the largest gap.
+    """
     diagonal = stats.target_errors(cross[cross.domain == cross.scored_domain], variants)
     within = stats.target_errors(forecasts_, variants, tuple(semesters))
     keys = ["domain", "semester", "protocol", "model"]
@@ -81,9 +129,19 @@ def check_diagonal(cross: pd.DataFrame, forecasts_: pd.DataFrame, variants: dict
 
 
 def fixed_judge_rows(cross: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
-    """One forecast per (source domain, scored domain, semester, target, protocol) with its squared error `err` and the
-    baseline's on the same target `base`; judge protocols use, in every cell of a row, the source domain's own best
-    judge on references (the diagonal cell's)."""
+    """
+    One prediction per source domain, scored domain, semester, target and protocol, in the core condition and the
+    reported variant, with its squared error and the Baseline's on the same target. Judge protocols use, in every cell
+    of a row, the source domain's own best judge on the references (the diagonal cell's); targets without a Baseline
+    error are dropped.
+
+    Inputs:
+        cross: the output of forecasts.
+        variants: protocol -> its reported variant (config.yaml protocols).
+    Outputs:
+        the kept rows of `cross` with err (the squared error) and base (the Baseline's squared error on the same
+        target) columns.
+    """
     core = stats.in_variants(stats.core_condition(cross), variants)
     core = core[core.protocol.isin(PROTOCOLS)]
     judged = core.protocol.isin(stats.JUDGED)
@@ -99,9 +157,14 @@ def fixed_judge_rows(cross: pd.DataFrame, variants: dict[str, str]) -> pd.DataFr
 
 
 def cell_errors(rows: pd.DataFrame) -> pd.DataFrame:
-    """Per (source, scored, protocol): n, mse and baseline_mse over the cell's targets, every semester pooled.
+    """
+    Per source domain, scored domain and protocol, the number of targets, the mean squared error and the Baseline's
+    mean squared error over the cell's targets, every semester pooled.
 
-    rows: fixed_judge_rows.
+    Inputs:
+        rows: the output of fixed_judge_rows (domain, scored_domain, protocol, err, base).
+    Outputs:
+        DataFrame with columns source, scored, protocol, n, mse, baseline_mse; one row per cell and protocol.
     """
     pooled = rows.groupby(["domain", "scored_domain", "protocol"]).agg(n=("err", "size"), mse=("err", "mean"),
                                                                         baseline_mse=("base", "mean")).reset_index()
@@ -109,11 +172,17 @@ def cell_errors(rows: pd.DataFrame) -> pd.DataFrame:
 
 
 def pairwise_tests(rows: pd.DataFrame) -> pd.DataFrame:
-    """The Pairwise judge per (source, scored) cell: mse, the baseline's (`baseline`) and the scored domain's own
-    transcripts' (`own`), ratio_own = mse / own, and two-sided paired t-tests over the cell's targets of its squared
-    errors against the own-transcript forecast's (p_own; NaN on the diagonal) and the baseline's (p_baseline).
+    """
+    For the Pairwise judge in each (source, scored) cell: the mean squared error, the Baseline's, and that of the
+    scored domain's own transcripts (over every target of the scored domain's diagonal cell), their ratio, and
+    two-sided paired t-tests over the cell's targets of its squared errors against the own-transcript prediction's
+    (NaN on the diagonal) and against the Baseline's.
 
-    rows: fixed_judge_rows.
+    Inputs:
+        rows: the output of fixed_judge_rows (domain, scored_domain, semester, model, protocol, err, base).
+    Outputs:
+        DataFrame with columns source, scored, mse, baseline, own, ratio_own (mse / own), p_own, p_baseline; one row
+        per cell.
     """
     pairwise = rows[rows.protocol == "pairwise"]
     cells = []

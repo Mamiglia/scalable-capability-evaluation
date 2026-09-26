@@ -1,7 +1,8 @@
-"""Stats: MSE of theta-hat against theta* with a bootstrap interval over targets, pooled over
-semesters and domains; judge summaries (best judge on references, mean over judges); skill
-relative to easy-item prediction and the oracle; and the per-task metrics the figures and
-tables use: raw MSE, delta from easy-item prediction, and the paired-bootstrap z of that delta.
+"""
+Squared-error statistics of the predictions in the forecasts table (analysis/forecasts/forecasts.csv): each judge's
+core-condition run, each task's judge, each target's squared error, and mean squared errors with bootstrap intervals
+over targets, per task and pooled over semesters and domains. Also each prediction set's skill between the Baseline and
+the accuracy oracle, and its error minus the Baseline's on the same targets with a paired-bootstrap z.
 """
 
 import numpy as np
@@ -10,17 +11,27 @@ import pandas as pd
 from configs.logs import logger
 
 KEYS = ["domain", "protocol", "variant", "judge", "condition"]
-BASELINE, ORACLE = "easy_items", "accuracy_hard"
+BASELINE, ORACLE = "easy_items", "accuracy_hard"  # code keys of the Baseline and the accuracy oracle
 JUDGED = ("pairwise", "direct")
 BEST, MEAN = "best judge on references", "mean over judges"
-PROTOCOLS = (BASELINE, "glm_length", "glm_regex", "embedding", "direct", "pairwise")  # every protocol with one forecast per target
+# every protocol with one prediction per target
+PROTOCOLS = (BASELINE, "glm_length", "glm_regex", "embedding", "direct", "pairwise")
 METRICS = ("mse", "delta", "z")
 
 
 def mse_row(g: pd.DataFrame, seed: int = 0, draws: int = 2000) -> dict:
-    """n, mse and a percentile-bootstrap 95% interval (lo, hi) of the mean squared error of
-    g.theta_hat against g.theta, NaN forecasts dropped. The replication unit is the row
-    (one target forecast); callers pool rows only where that is the right unit."""
+    """
+    Mean squared error of the predictions in g against theta*, with a percentile-bootstrap 95% interval that resamples
+    the rows. Each row is taken as one independent prediction of one target; callers pool rows only where that holds.
+
+    Inputs:
+        g: prediction rows; uses theta_hat and theta. Rows where either is NaN are dropped.
+        seed: seed of the bootstrap's random generator.
+        draws: number of bootstrap resamples.
+    Outputs:
+        dict with n (rows scored), mse, lo and hi (the 2.5 and 97.5 percentiles of the resampled means); mse, lo and hi
+        are NaN when no row is scored.
+    """
     err = (g.theta_hat - g.theta).dropna().to_numpy() ** 2
     if len(err) == 0:
         return dict(n=0, mse=np.nan, lo=np.nan, hi=np.nan)
@@ -29,8 +40,17 @@ def mse_row(g: pd.DataFrame, seed: int = 0, draws: int = 2000) -> dict:
 
 
 def condition_rank(condition: str) -> int:
-    """How far a judge run is from the core condition: 0 reasoning-shown on the full train set, 1 reasoning-shown
-    on a smaller train set ("-<k>pq"), 2 reasoning-hidden, 3 not a core candidate (a challenge condition)."""
+    """
+    Ranks a judge run's condition by how far it is from the core condition, reasoning shown on the full train set; lower
+    is closer.
+
+    Inputs:
+        condition: the run's condition name: "reasoning-shown", "reasoning-shown-<k>pq" (k train items per difficulty
+            quartile), "reasoning-hidden", or a challenge condition.
+    Outputs:
+        0 for "reasoning-shown"; 1 for any other name starting "reasoning-shown-" (a smaller train set); 2 for
+        "reasoning-hidden"; 3 for anything else, which is never a core-condition candidate.
+    """
     if condition == "reasoning-shown":
         return 0
     if condition.startswith("reasoning-shown-"):
@@ -39,12 +59,21 @@ def condition_rank(condition: str) -> int:
 
 
 def core_condition(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """The judge rows of the core condition, chosen per judge within a cell (domain, semester,
-    protocol, variant): each judge's closest run to reasoning shown on the full train set (see
-    `condition_rank`) — else its reasoning-shown run on a smaller train set, else its
-    reasoning-hidden run (semesters whose subjects have no reasoning were judged hidden only).
-    Every judge stays in the cell, so "best judge on references" compares all of them; a judge
-    scored below full-train shown is logged. Transcript-protocol rows pass through unchanged."""
+    """
+    Keeps each judge's run closest to the core condition (condition_rank): its reasoning-shown run on the full train
+    set, else its reasoning-shown run on a smaller train set, else its reasoning-hidden run (semesters whose models show
+    no reasoning were judged with reasoning hidden only). Every judge stays in, so the choice of judge compares all of
+    them; each judge scored in a condition other than reasoning shown on the full train set is logged as a warning.
+
+    Inputs:
+        forecasts: the forecasts table (analysis/forecasts/forecasts.csv); uses domain, semester, protocol, variant,
+            judge and condition.
+    Outputs:
+        DataFrame with forecasts' columns: the rows of every protocol other than pairwise and direct unchanged
+        (transcript protocols, the oracle, the pooled ensemble rows), then the pairwise and direct rows of each judge's
+        closest run per (domain, semester, protocol, variant). Pairwise and direct rows of challenge conditions are
+        dropped.
+    """
     judged = forecasts[forecasts.protocol.isin(JUDGED)]
     key = ["domain", "semester", "protocol", "variant", "judge"]
     rank = judged.condition.map(condition_rank).rename("condition_rank")
@@ -57,13 +86,19 @@ def core_condition(forecasts: pd.DataFrame) -> pd.DataFrame:
 
 
 def best_judges(forecasts: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
-    """The judge each task uses: per (domain, semester, protocol), the core-condition run with the lowest reference
-    leave-one-model-out error; a tie keeps the judge that comes first in `forecasts`.
+    """
+    Picks each task's judge: per (domain, semester, judge protocol), the judge whose core-condition run, in the variant
+    the protocol is reported in, has the lowest leave-one-model-out squared error on the references. A tie keeps the
+    judge that comes first in forecasts.
 
-    forecasts: the forecasts table (analysis/forecasts/forecasts.csv).
-    variants: protocol -> the variant it is reported in, e.g. {"pairwise": "linear", "direct": "raw"}; judge protocols
-        not named are left out.
-    Returns one row per (domain, semester, protocol): variant, judge, condition, judge_loo_mse.
+    Inputs:
+        forecasts: the forecasts table (analysis/forecasts/forecasts.csv); uses domain, semester, protocol, variant,
+            judge, condition and judge_loo_mse.
+        variants: protocol -> the variant it is reported in, e.g. {"pairwise": "linear", "direct": "raw"}; a judge
+            protocol not named is left out.
+    Outputs:
+        DataFrame with columns domain, semester, protocol, variant, judge, condition, judge_loo_mse; one row per task
+        and judge protocol.
     """
     core = core_condition(forecasts)
     core = core[core.protocol.isin(JUDGED) & (core.variant == core.protocol.map(variants))]
@@ -73,11 +108,20 @@ def best_judges(forecasts: pd.DataFrame, variants: dict[str, str]) -> pd.DataFra
 
 
 def judge_summaries(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """Two derived judge rows per (domain, semester, judge protocol, variant), on the core
-    condition, condition set to "core": judge BEST = the rows of the judge with the lowest
-    reference leave-one-out MSE that semester (known without target labels; a tie keeps one
-    judge); judge MEAN = the rows of every judge (pooling equal-sized per-judge row sets
-    makes the MSE the mean of the per-judge MSEs)."""
+    """
+    Builds two summary judges per (domain, semester, judge protocol, variant) from the core-condition runs: the best
+    judge on references (lowest leave-one-model-out error on the references, which needs no target's theta*) and the
+    mean over judges (every judge's rows together; with the same number of rows per judge, their pooled mean squared
+    error is the mean of the judges' mean squared errors).
+
+    Inputs:
+        forecasts: the forecasts table (analysis/forecasts/forecasts.csv); uses domain, semester, protocol, variant,
+            judge, condition, model and judge_loo_mse.
+    Outputs:
+        DataFrame with forecasts' columns, pairwise and direct rows only, condition "core": the best judge's rows with
+        judge BEST ("best judge on references"; one row per target, a tie keeping the first judge's row), then every
+        judge's rows with judge MEAN ("mean over judges").
+    """
     core = core_condition(forecasts)
     judged = core[core.protocol.isin(JUDGED)]
     key = ["domain", "semester", "protocol", "variant"]
@@ -87,12 +131,20 @@ def judge_summaries(forecasts: pd.DataFrame) -> pd.DataFrame:
 
 
 def scores(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """One row per domain x semester x protocol x variant x judge x condition (n, missing,
-    mse, lo, hi), plus semester "all" per domain and domain "all" per protocol x variant x
-    judge x condition (pooled over every semester of every domain). The judge summary rows
-    are included with condition "core"; the mean-over-judges rows' interval is NaN because
-    their pooled rows are not independent targets (the unit there is the judge), unlike the
-    best-judge rows, which are one forecast per target like any other protocol."""
+    """
+    Mean squared error of every prediction set in the forecasts table, per task and pooled: one row per (domain,
+    semester, protocol, variant, judge, condition), plus semester "all" per domain (every semester of the domain pooled)
+    and domain "all" (every task pooled), each with a bootstrap interval over targets (mse_row). The summary judges of
+    judge_summaries are included with condition "core"; the mean-over-judges rows get no interval (lo and hi NaN)
+    because their rows are several judges' predictions of the same targets, not independent targets.
+
+    Inputs:
+        forecasts: the forecasts table (analysis/forecasts/forecasts.csv); uses domain, semester, protocol, variant,
+            judge, condition, model, theta_hat, theta, judge_loo_mse and missing.
+    Outputs:
+        DataFrame with columns domain, semester, protocol, variant, judge, condition, n, missing, mse, lo, hi; missing
+        is the run's count of absent judgments, summed over tasks in the pooled rows.
+    """
     rows = []
     for f in (forecasts, judge_summaries(forecasts)):
         for k, g in f.groupby(["semester", *KEYS], sort=False):
@@ -108,10 +160,18 @@ def scores(forecasts: pd.DataFrame) -> pd.DataFrame:
 
 
 def summary(scores: pd.DataFrame) -> pd.DataFrame:
-    """Pooled (semester "all") rows with the domain's easy-item-prediction and oracle MSE
-    alongside and skill = (baseline - mse) / (baseline - oracle): 1 at the oracle, 0 at
-    easy-item prediction, negative below it. For domain "all" the anchors are the
-    domain-"all" rows."""
+    """
+    Adds skill to the pooled rows of a scores table: skill = (Baseline MSE - MSE) / (Baseline MSE - oracle MSE), 1 at
+    the accuracy oracle, 0 at the Baseline and negative when worse than the Baseline. The anchors are the same domain's
+    pooled Baseline and oracle rows (for domain "all", the domain-"all" rows).
+
+    Inputs:
+        scores: the output of scores(); uses domain, semester, protocol and mse, and needs one pooled Baseline
+            (easy_items) and one pooled oracle (accuracy_hard) row per domain.
+    Outputs:
+        DataFrame: the rows with semester "all", with added columns baseline (the domain's Baseline MSE), oracle (its
+        oracle MSE) and skill.
+    """
     pooled = scores[scores.semester == "all"].copy()
     anchors = pooled[pooled.protocol.isin([BASELINE, ORACLE])].pivot(index="domain", columns="protocol", values="mse")
     pooled["baseline"] = pooled.domain.map(anchors[BASELINE])
@@ -121,18 +181,37 @@ def summary(scores: pd.DataFrame) -> pd.DataFrame:
 
 
 def one_per_target(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """The forecast rows with exactly one row per target and condition: transcript protocols
-    as they are, judge protocols as the best judge on references (condition "core"). The
-    mean over judges is excluded because its rows are not one forecast per target."""
+    """
+    Keeps one prediction per target for each protocol, variant and condition: the rows of protocols other than pairwise
+    and direct as they are, and for pairwise and direct the rows of the best judge on references (judge_summaries,
+    condition "core"). The mean over judges is left out because it has several predictions per target.
+
+    Inputs:
+        forecasts: the forecasts table (analysis/forecasts/forecasts.csv); uses the columns core_condition and
+            judge_summaries use.
+    Outputs:
+        DataFrame with forecasts' columns; the pairwise and direct rows have judge BEST ("best judge on references") and
+        condition "core".
+    """
     best = judge_summaries(forecasts)
     return pd.concat([forecasts[~forecasts.protocol.isin(JUDGED)], best[best.judge == BEST]], ignore_index=True)
 
 
 def paired_metrics(errors: pd.DataFrame, seed: int = 0, draws: int = 2000) -> dict:
-    """From aligned squared errors (columns `err_condition`, `err_baseline`, one row per target):
-    n, mse, baseline_mse, delta = mean(condition - baseline), and z = delta / sd of the
-    paired bootstrap of delta (targets resampled with replacement; NaN when the paired
-    differences do not vary)."""
+    """
+    Compares one prediction set's squared errors with the Baseline's on the same targets: the mean difference, and its
+    z, the difference divided by the standard deviation of a paired bootstrap that resamples targets.
+
+    Inputs:
+        errors: one row per target; uses err_condition (the prediction's squared error) and err_baseline (the
+            Baseline's).
+        seed: seed of the bootstrap's random generator.
+        draws: number of bootstrap resamples.
+    Outputs:
+        dict with n, mse (mean of err_condition), baseline_mse (mean of err_baseline), delta (mse - baseline_mse) and z
+        (delta over the bootstrap standard deviation; NaN when the paired differences do not vary). With no rows, n is 0
+        and the rest NaN.
+    """
     c, b = errors.err_condition.to_numpy(float), errors.err_baseline.to_numpy(float)
     if len(c) == 0:
         return dict(n=0, mse=np.nan, baseline_mse=np.nan, delta=np.nan, z=np.nan)
@@ -143,11 +222,18 @@ def paired_metrics(errors: pd.DataFrame, seed: int = 0, draws: int = 2000) -> di
 
 
 def task_metrics(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """One row per (domain, semester) x protocol x variant x judge x condition with the three
-    metrics paired against easy-item prediction on the same targets (one_per_target rows only), plus
-    semester "all" per domain and domain "all" per condition over the pooled targets.
-    Columns: domain, semester, protocol, variant, judge, condition, n, mse, baseline_mse,
-    delta, z. A target the condition did not forecast is dropped from both sides."""
+    """
+    The Baseline-paired metrics of every prediction set, per task and pooled: for each (domain, semester, protocol,
+    variant, judge, condition) of one_per_target, the mean squared error, the Baseline's on the same targets, their
+    difference and its paired-bootstrap z (paired_metrics); plus semester "all" per domain and domain "all" over every
+    task. A target that either side did not predict is dropped from both.
+
+    Inputs:
+        forecasts: the forecasts table (analysis/forecasts/forecasts.csv); uses domain, semester, model, protocol,
+            variant, judge, condition, theta_hat and theta, and the columns one_per_target uses.
+    Outputs:
+        DataFrame with columns domain, semester, protocol, variant, judge, condition, n, mse, baseline_mse, delta, z.
+    """
     frame = one_per_target(forecasts)
     frame = frame.assign(err_condition=(frame.theta_hat - frame.theta) ** 2)
     base = frame[frame.protocol == BASELINE][["domain", "semester", "model", "err_condition"]].rename(columns={"err_condition": "err_baseline"})
@@ -163,18 +249,34 @@ def task_metrics(forecasts: pd.DataFrame) -> pd.DataFrame:
 
 
 def in_variants(table: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
-    """The rows of `table` in the variant `variants` names for their protocol ("-" for protocols it does not name)."""
+    """
+    Keeps each protocol's rows in the variant it is reported in.
+
+    Inputs:
+        table: any table with protocol and variant columns.
+        variants: protocol -> reported variant; a protocol not named keeps only its rows with variant "-".
+    Outputs:
+        the rows of table whose variant is variants[protocol] ("-" for protocols not in variants).
+    """
     return table[[variants.get(p, "-") == v for p, v in zip(table.protocol, table.variant)]]
 
 
 def target_errors(forecasts: pd.DataFrame, variants: dict[str, str], semesters: tuple[str, ...] | None = None,
                   protocols: tuple[str, ...] = PROTOCOLS) -> pd.DataFrame:
-    """One forecast per target and protocol, with its squared error: judge protocols as each task's best judge on
-    references, every protocol in its reported variant; targets without a forecast dropped.
+    """
+    Each target's squared error under each protocol: one prediction per target and protocol, pairwise and direct from
+    each task's best judge on references, every protocol in the variant it is reported in; targets without a prediction
+    or without theta* are dropped.
 
-    variants: protocol -> reported variant, e.g. {"pairwise": "linear", "direct": "raw", "embedding": "full"}.
-    semesters: keep only these semesters (None: all).
-    Returns columns domain, semester, model, protocol, theta_hat, theta, err.
+    Inputs:
+        forecasts: the forecasts table (analysis/forecasts/forecasts.csv).
+        variants: protocol -> reported variant, e.g. {"pairwise": "linear", "direct": "raw", "embedding": "full"}.
+        semesters: keep only these semesters (None: all).
+        protocols: keep only these protocols (default PROTOCOLS: the Baseline, Length, Deterministic features,
+            Embedding, Absolute scoring and Pairwise judge).
+    Outputs:
+        DataFrame with columns domain, semester, model, protocol, theta_hat, theta, err (the squared error); one row per
+        target and protocol.
     """
     f = in_variants(one_per_target(forecasts), variants)
     f = f[f.protocol.isin(protocols)]
@@ -185,24 +287,59 @@ def target_errors(forecasts: pd.DataFrame, variants: dict[str, str], semesters: 
 
 
 def with_baseline(errors: pd.DataFrame) -> pd.DataFrame:
-    """`errors` (target_errors) with a `base` column: the baseline's squared error on the same target."""
+    """
+    Adds to each row of a target_errors table the Baseline's squared error on the same target.
+
+    Inputs:
+        errors: target_errors rows; uses domain, semester, model, protocol and err.
+    Outputs:
+        errors with an added column base (NaN where the Baseline has no row for the target).
+    """
     base = errors[errors.protocol == BASELINE].set_index(["domain", "semester", "model"]).err
     return errors.assign(base=errors.set_index(["domain", "semester", "model"]).index.map(base))
 
 
 def prediction_score(errors: np.ndarray | pd.Series, baseline: np.ndarray | pd.Series) -> np.ndarray | pd.Series:
-    """-log2(error / baseline error): the number of halvings of the error, 0 at the baseline, 1 at half its error."""
+    """
+    Converts squared errors into the number of halvings of the Baseline's error, -log2(error / Baseline error): 0 at the
+    Baseline's error, 1 at half of it, negative above it.
+
+    Inputs:
+        errors: squared errors.
+        baseline: the Baseline's squared errors on the same targets, aligned with errors.
+    Outputs:
+        the scores, of the same type and shape as errors.
+    """
     return -np.log2(errors / baseline)
 
 
 def family(model: pd.Series) -> pd.Series:
-    """The developer prefix of each model name: glm-4.7 -> glm, kimi-k2.5 -> kimi, qwen3-235b -> qwen."""
+    """
+    The developer family of each model, read from the lowercase letters that start its name: glm-4.7 -> glm, kimi-k2.5
+    -> kimi, qwen3-235b -> qwen.
+
+    Inputs:
+        model: model names.
+    Outputs:
+        Series of family names aligned with model (NaN for a name that does not start with a lowercase letter).
+    """
     return model.str.extract(r"^([a-z]+)", expand=False)
 
 
 def best_other_family(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """Like one_per_target, but each target's judge is the best on references among the core-condition judges from
-    another developer than the target, so no model is judged by its own family; targets with no such judge dropped."""
+    """
+    Like one_per_target, but each target's pairwise and direct predictions come from the best judge on references among
+    the core-condition judges of another developer family than the target, so no model is judged by its own family; a
+    target with no such judge has no pairwise or direct row.
+
+    Inputs:
+        forecasts: the forecasts table (analysis/forecasts/forecasts.csv); uses domain, semester, protocol, variant,
+            judge, condition, model and judge_loo_mse.
+    Outputs:
+        DataFrame with forecasts' columns: the rows of protocols other than pairwise and direct unchanged, then one row
+        per (domain, semester, protocol, variant, target) from the chosen judge, with judge "best-other-family" and
+        condition "core".
+    """
     core = core_condition(forecasts)
     judged = core[core.protocol.isin(JUDGED) & (family(core.judge) != family(core.model))]
     key = ["domain", "semester", "protocol", "variant", "model"]

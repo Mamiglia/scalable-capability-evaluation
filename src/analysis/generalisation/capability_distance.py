@@ -1,7 +1,9 @@
-"""Prediction error against how far a target's capability sits above the strongest reference's (Figure 8): each
-domain's targets in equal-count bins of that distance, every protocol's mean squared error per bin with a bootstrap
-interval, the baseline's least-squares line, and per protocol the slope of squared error on distance with its t-test
-(the slopes the text quotes)."""
+"""
+Prediction error against how far a target's capability sits above the strongest reference's. Each domain's targets
+are put in equal-count bins of that distance, and every protocol's mean squared error per bin is given with a
+bootstrap interval; the Baseline's least-squares line of squared error on distance, and per protocol the slope of
+squared error on distance with its t-test, show the trend over the targets.
+"""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,7 +20,15 @@ DISTANCE_LABEL = "θ* above the strongest reference"
 
 
 def distances(errors: pd.DataFrame) -> pd.DataFrame:
-    """`errors` (stats.target_errors) with `above_top`: each target's θ* minus its task's strongest reference's."""
+    """
+    Adds each target's distance above its task's strongest reference: the target's θ* minus the highest θ* among the
+    task's references, read from the frozen model table (the <semester>_role and <semester>_theta columns).
+
+    Inputs:
+        errors: per-target errors from stats.target_errors (domain, semester, model, protocol, theta, err, ...).
+    Outputs:
+        `errors` with an above_top column.
+    """
     top = {}
     for domain, semester in errors.groupby(["domain", "semester"]).groups:
         models, _ = tables.load(loading.domain(domain))
@@ -28,13 +38,33 @@ def distances(errors: pd.DataFrame) -> pd.DataFrame:
 
 
 def with_bins(table: pd.DataFrame, bins: int) -> pd.DataFrame:
-    """`table` with `bin`, 0 to bins - 1: the target's equal-count bin of `above_top` within its domain."""
+    """
+    Adds each row's equal-count bin of distance (above_top) within its domain, cut at the domain's quantiles.
+
+    Inputs:
+        table: rows with domain and above_top (the output of distances).
+        bins: the number of bins per domain (config.yaml generalisation.distance_bins).
+    Outputs:
+        `table` with a bin column, 0 to bins - 1.
+    """
     return table.assign(bin=table.above_top.groupby(table.domain).transform(lambda v: pd.qcut(v, bins, labels=False)))
 
 
 def bin_errors(table: pd.DataFrame, protocols: list[str], draws: int, seed: int) -> pd.DataFrame:
-    """Per domain, bin and series (the baseline and `protocols`): x, the bin's mean distance, n, its mean squared error
-    and lo, hi, the 2.5 and 97.5 percentiles over `draws` resamples of the bin's targets."""
+    """
+    Per domain, bin and series (the Baseline and each protocol), the bin's mean distance, its number of targets, the
+    mean squared error over them and the 2.5 and 97.5 percentiles of that mean over `draws` resamples of the bin's
+    targets.
+
+    Inputs:
+        table: with_bins rows (domain, bin, protocol, above_top, err).
+        protocols: the protocols besides the Baseline.
+        draws: bootstrap resamples per bin and series.
+        seed: the random generator's seed.
+    Outputs:
+        DataFrame with columns domain, bin, protocol, x (the mean distance), n, mean, lo, hi; one row per domain, bin
+        and series.
+    """
     rng = np.random.default_rng(seed)
     rows = []
     binned = table[table.protocol.isin([BASELINE, *protocols])].dropna(subset=["bin"])
@@ -47,9 +77,18 @@ def bin_errors(table: pd.DataFrame, protocols: list[str], draws: int, seed: int)
 
 
 def slope_tests(table: pd.DataFrame, domains: list[str], protocols: list[str]) -> pd.DataFrame:
-    """Per domain and series (the baseline and `protocols`): the least-squares slope of squared error on distance over
-    the domain's targets, its standard error and the two-sided t-test that it is 0 (n - 2 df). Targets share their
-    task's references, so p is optimistic. Columns: domain, protocol, n, slope, se, p."""
+    """
+    Per domain and series (the Baseline and each protocol), the least-squares slope of squared error on distance over
+    the domain's targets, its standard error and the two-sided t-test that it is 0 (n - 2 degrees of freedom).
+    Targets share their task's references, so p is optimistic.
+
+    Inputs:
+        table: rows with domain, protocol, above_top and err (the output of distances or with_bins).
+        domains: domain keys, in order.
+        protocols: the protocols besides the Baseline.
+    Outputs:
+        DataFrame with columns domain, protocol, n, slope, se, p; one row per domain and series.
+    """
     rows = []
     for domain in domains:
         for p in [BASELINE, *protocols]:
@@ -60,7 +99,16 @@ def slope_tests(table: pd.DataFrame, domains: list[str], protocols: list[str]) -
 
 
 def fit_band(x: np.ndarray, y: np.ndarray, xs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """The least-squares line through (x, y) at `xs`, and its 95% confidence half-width."""
+    """
+    The least-squares line of y on x evaluated at `xs`, and the half-width of its 95% confidence band there.
+
+    Inputs:
+        x: the points' x values (distance).
+        y: the points' y values (squared error).
+        xs: where to evaluate the line.
+    Outputs:
+        (the line's values at xs, the band's half-widths at xs), both arrays.
+    """
     X, Xs = np.vander(x, 2), np.vander(xs, 2)
     beta = np.linalg.lstsq(X, y, rcond=None)[0]
     resid, dof = y - X @ beta, len(x) - 2
@@ -70,12 +118,20 @@ def fit_band(x: np.ndarray, y: np.ndarray, xs: np.ndarray) -> tuple[np.ndarray, 
 
 def capability_distance_figure(boxes: pd.DataFrame, table: pd.DataFrame, domains: list[str], protocols: list[str],
                                display: dict) -> plt.Figure:
-    """One panel per domain, each with its own distance axis: per bin, each protocol's mean squared error as a dot over
-    a translucent box of its interval, side by side around the bin's mean distance; the baseline as its least-squares
-    line over the domain's targets, dashed black with its 95% confidence band. The shared squared-error axis holds
-    every box.
+    """
+    Draws one panel per domain with its own distance axis: per bin, each protocol's mean squared error as a dot over a
+    translucent box of its interval, side by side around the bin's mean distance, and the Baseline as its
+    least-squares line over the domain's targets, dashed black with its 95% confidence band. The shared squared-error
+    axis holds every protocol's box.
 
-    boxes: bin_errors rows. table: the per-target rows with_bins returns.
+    Inputs:
+        boxes: bin_errors rows.
+        table: the per-target rows with_bins returns (domain, protocol, above_top, err).
+        domains: domain keys, in panel order.
+        protocols: the protocols drawn, in order.
+        display: config.yaml's display section; uses protocol_names, protocol_colours and domain_names.
+    Outputs:
+        the matplotlib Figure.
     """
     names, colours = display["protocol_names"], display["protocol_colours"]
     fig, axes = plt.subplots(1, len(domains), figsize=(4.4, 1.6), layout="constrained", sharey=True)
@@ -115,8 +171,21 @@ def capability_distance_figure(boxes: pd.DataFrame, table: pd.DataFrame, domains
 
 def caption(boxes: pd.DataFrame, table: pd.DataFrame, slopes: pd.DataFrame, domains: list[str], protocols: list[str],
             display: dict, draws: int) -> str:
-    """The figure's .txt: what it draws, every bin's mean squared error and interval, the baseline's line, and each
-    series' slope test."""
+    """
+    The text of the figure's .txt file: what the figure draws, then per domain the Baseline's line, every bin's mean
+    squared error and interval per protocol, and each series' slope test.
+
+    Inputs:
+        boxes: bin_errors rows.
+        table: with_bins rows.
+        slopes: slope_tests rows.
+        domains: domain keys, in order.
+        protocols: the protocols listed.
+        display: config.yaml's display section; uses protocol_names and domain_names.
+        draws: the number of bootstrap resamples, quoted in the text.
+    Outputs:
+        str, the caption.
+    """
     names = display["protocol_names"]
     sizes = table[table.protocol == BASELINE].groupby(["domain", "bin"]).size()
     lines = []

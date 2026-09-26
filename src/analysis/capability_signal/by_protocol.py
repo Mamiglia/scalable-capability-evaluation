@@ -1,10 +1,11 @@
-"""Squared error and log likelihood ratio of each protocol against the Baseline, for the 16 target models of the main
-analysis: per target model pooled over its domains (Figure 3, Table 6; Figure 21 draws the same figure), and per
-domain (Table 3).
+"""
+Squared error and log likelihood ratio of each protocol against the Baseline for the targets of the main analysis,
+summarised per target model (its squared error averaged over its domains) and per domain, as a figure, a table of
+means and tests, and a caption text.
 
-The squared error is each target's own; the test is the log likelihood ratio of the target's measured θ* under the
-protocol's predictive distribution against the Baseline's (analysis.likelihood_ratio), with a target model (its
-domains averaged) as the unit.
+The squared error is each target's own. The test is the log likelihood ratio of the target's measured θ* under the
+protocol's predictive distribution against the Baseline's (analysis.likelihood_ratio), tested against 0 with a target
+model (its domains averaged) as the unit.
 """
 
 import matplotlib.pyplot as plt
@@ -21,20 +22,37 @@ POOLED = "Pooled"
 
 def chosen_llr(llr: pd.DataFrame, forecasts: pd.DataFrame, variants: dict[str, str],
                semesters: list[str]) -> pd.DataFrame:
-    """The log likelihood ratio rows the tests use: each target's judge the task's best on references (transcript
-    protocols as they are), the figures' predictive shape, `semesters` only; every reference set (dropped).
+    """
+    Selects the log likelihood ratio rows the tests use: for judge protocols only the rows of each task's best judge on
+    references, for transcript protocols every row; only the Student t shape (lr.SHAPE) and only `semesters`. Rows of
+    every reference set are kept (the full set, dropped "-", and each reference left out in turn).
 
-    llr: analysis/forecasts/likelihood_ratio.csv.
+    Inputs:
+        llr: every log likelihood ratio (analysis/forecasts/likelihood_ratio.csv); uses domain, semester, model,
+            protocol, judge and shape.
+        forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv), from which each
+            task's best judge is found.
+        variants: protocol -> the variant it is reported in (config.yaml's protocols).
+        semesters: the semesters to keep.
+    Outputs:
+        the selected rows of `llr`, same columns (domain, semester, model, protocol, judge, dropped, shape, llr); one
+        row per target, protocol and reference set.
     """
     llr = lr.select(llr, lr.chosen_judges(forecasts, variants))
     return llr[(llr["shape"] == lr.SHAPE) & llr.semester.isin(semesters)]
 
 
 def protocol_tests(llr: pd.DataFrame) -> pd.DataFrame:
-    """Per protocol: n, the mean log likelihood ratio (llr), its SE and the two-sided p of the one-sample t-test
-    against 0, a target model (its domains averaged) the unit.
+    """
+    Tests each protocol's mean log likelihood ratio against 0 with a one-sample t-test, a target model (the mean of
+    its rows over domains, per semester) being one unit, and makes the p-value two-sided.
 
-    llr: one reference set's rows (dropped "-"), so the SE is the plain t-test's.
+    Inputs:
+        llr: log likelihood ratio rows of one reference set only (dropped "-"), so the standard error is the plain
+            t-test's with no reference-set part; uses protocol, domain, semester, model, dropped and llr.
+    Outputs:
+        DataFrame with columns protocol, n (target models), llr (mean over target models), se and p (two-sided); one
+        row per protocol present in `llr`.
     """
     tests = lr.pooled_tests(llr, unit=("semester", "model"))
     tests["p"] = 2 * tests.p.clip(upper=1 - tests.p)  # two-sided: pooled_tests gives the upper tail
@@ -42,10 +60,16 @@ def protocol_tests(llr: pd.DataFrame) -> pd.DataFrame:
 
 
 def per_model(errors: pd.DataFrame, protocols: list[str], domains: list[str]) -> pd.DataFrame:
-    """Each target model's squared error averaged over its domains: one row per model, one column per protocol in
-    `protocols`; NaN where the model lacks the protocol in any domain.
+    """
+    Averages each target model's squared error over its domains, per protocol. A model missing a protocol's
+    prediction in any of `domains` gets NaN for that protocol.
 
-    errors: stats.target_errors rows.
+    Inputs:
+        errors: one prediction per target and protocol (stats.target_errors); uses model, protocol, domain and err.
+        protocols: the protocols to return, in column order.
+        domains: the domains a model needs a prediction in for its mean to count.
+    Outputs:
+        DataFrame indexed by model, one column per protocol in `protocols`; one row per target model.
     """
     wide = errors.pivot_table(index="model", columns=["protocol", "domain"], values="err")
     complete = wide.T.groupby(level="protocol").count().T.eq(len(domains))
@@ -53,17 +77,31 @@ def per_model(errors: pd.DataFrame, protocols: list[str], domains: list[str]) ->
 
 
 def two_lines(label: str) -> str:
-    """A tick label broken at its last space."""
+    """
+    Breaks a tick label onto two lines at its last space.
+
+    Inputs:
+        label: the label.
+    Outputs:
+        the label with its last space replaced by a newline (unchanged if it has no space).
+    """
     return "\n".join(label.rsplit(" ", 1))
 
 
 def model_error_figure(pooled: pd.DataFrame, tests: pd.DataFrame, protocols: list[str], display: dict) -> plt.Figure:
-    """Per protocol (the Baseline first), each target model's squared error pooled over domains as a small point, the
-    mean over models as a large circle and its 95% t-interval as a box; stars (or n.s.) from `tests`. The axis holds
-    the middle 95% of the per-model errors; a model beyond it is drawn on the edge.
+    """
+    Draws, per protocol, each target model's squared error averaged over domains as a small jittered point, the mean
+    over models as a large circle and its 95% t-interval as a box, with the significance stars (or n.s.) of the log
+    likelihood ratio test above every protocol but the Baseline. The y axis runs to 1.15 times the 95th percentile of
+    all per-model errors; a model above it is drawn on the top edge and printed.
 
-    pooled: per_model's table. tests: protocol_tests' table. protocols: the protocols drawn, the Baseline first.
-    display: config.yaml's display section (protocol_names, protocol_colours).
+    Inputs:
+        pooled: per_model's table (one row per target model, one column per protocol).
+        tests: protocol_tests' table; uses protocol and p.
+        protocols: the protocols drawn, left to right, the Baseline first.
+        display: config.yaml's display section; uses protocol_names and protocol_colours.
+    Outputs:
+        the matplotlib Figure (not saved).
     """
     names, colours = display["protocol_names"], display["protocol_colours"]
     values = {p: pooled[p].dropna().to_numpy(float) for p in protocols}
@@ -94,12 +132,20 @@ def model_error_figure(pooled: pd.DataFrame, tests: pd.DataFrame, protocols: lis
 
 
 def error_table(pooled: pd.DataFrame, tests: pd.DataFrame, protocols: list[str]) -> pd.DataFrame:
-    """Table 6: per protocol (the Baseline first), the mean over target models of the pooled squared error (mse) with
-    its 95% t-interval (lo, hi) and number of models; for the other protocols the mean paired difference from the
-    Baseline's error (delta) with its paired t-test (delta_t, delta_df, delta_p, two-sided) and the log likelihood
-    ratio test (llr, llr_se, llr_p).
+    """
+    Summarises each protocol's per-model squared errors: their mean with its 95% t-interval, and for every protocol
+    but the Baseline the paired t-test of its errors against the Baseline's and its log likelihood ratio test.
 
-    pooled: per_model's table. tests: protocol_tests' table.
+    Inputs:
+        pooled: per_model's table (one row per target model, one column per protocol); must include the Baseline's
+            column, which the paired differences use.
+        tests: protocol_tests' table; uses protocol, llr, se and p.
+        protocols: the protocols in row order.
+    Outputs:
+        DataFrame with one row per protocol: protocol, mse (mean over target models), lo and hi (its 95% t-interval),
+        models (their number); for protocols other than the Baseline also delta (mean paired difference from the
+        Baseline's error), delta_t, delta_df and delta_p (two-sided paired t-test), llr, llr_se and llr_p (from
+        `tests`). The Baseline's row has NaN in those columns.
     """
     by = tests.set_index("protocol")
     rows = []
@@ -116,7 +162,16 @@ def error_table(pooled: pd.DataFrame, tests: pd.DataFrame, protocols: list[str])
 
 
 def error_lines(table: pd.DataFrame, names: dict[str, str]) -> list[str]:
-    """One caption line per error_table row: every number the figure draws and both tests."""
+    """
+    Writes one caption line per protocol: its mean squared error with the 95% interval and number of models, and for
+    protocols other than the Baseline the log likelihood ratio test and the paired t-test against the Baseline.
+
+    Inputs:
+        table: error_table's output.
+        names: protocol -> display name.
+    Outputs:
+        list of strings, one per row of `table`.
+    """
     lines = []
     for r in table.itertuples():
         entry = (f"{names[r.protocol]}: mean squared error {lr.num(r.mse)} (95% CI {lr.num(r.lo)} to {lr.num(r.hi)}, "
@@ -130,9 +185,16 @@ def error_lines(table: pd.DataFrame, names: dict[str, str]) -> list[str]:
 
 
 def error_caption(table: pd.DataFrame, names: dict[str, str], judges: str) -> str:
-    """The .txt of the error-by-protocol figure: what it draws, the test, then error_lines.
+    """
+    Builds the text written next to the error-by-protocol figure: what the figure draws, which judges are used, how
+    the log likelihood ratio test works, then error_lines.
 
-    judges: the sentence on the judges the judge protocols use.
+    Inputs:
+        table: error_table's output.
+        names: protocol -> display name.
+        judges: the sentence describing the judges the judge protocols use.
+    Outputs:
+        the caption as one string ending in a newline.
     """
     return ("Squared error of each protocol's forecast of θ* for the 16 target models of 2025-II and 2026-I (8 per "
             "semester). Each small point is one target model's squared error averaged over its four domains (Science, "
@@ -146,12 +208,20 @@ def error_caption(table: pd.DataFrame, names: dict[str, str], judges: str) -> st
 
 def domain_table(errors: pd.DataFrame, llr: pd.DataFrame, tests: pd.DataFrame, names: dict[str, str],
                  domain_names: dict[str, str]) -> pd.DataFrame:
-    """Table 3: per protocol, the mean squared error over the targets of each domain and the mean of the four
-    (Pooled), to two decimals, marked */**/*** when the mean log likelihood ratio is positive and its two-sided
-    one-sample t-test significant: per domain over the domain's targets, pooled with protocol_tests' test.
+    """
+    Tabulates each protocol's mean squared error over the targets of each domain, and the mean of the domain means
+    (Pooled), as text to two decimals. A cell gets */**/*** when the mean log likelihood ratio is positive and its
+    two-sided test is significant: per domain a one-sample t-test over the domain's targets, for Pooled the test in
+    `tests` (a target model the unit).
 
-    errors: stats.target_errors rows. llr: the matching rows of one reference set (dropped "-"). tests: protocol_tests
-    of `llr`. names: protocol -> row label, in row order. domain_names: domain -> column label, in column order.
+    Inputs:
+        errors: one prediction per target and protocol (stats.target_errors); uses protocol, domain and err.
+        llr: the matching log likelihood ratio rows of one reference set (dropped "-"); uses protocol, domain and llr.
+        tests: protocol_tests of `llr`; uses protocol, llr and p.
+        names: protocol -> row label, in row order.
+        domain_names: domain -> column label, in column order.
+    Outputs:
+        DataFrame with columns Protocol, Pooled and one per domain label; one row per protocol in `names`.
     """
     def mark(mean: float, p: float) -> str:
         return "" if mean <= 0 else stars(p)

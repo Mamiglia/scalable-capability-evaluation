@@ -1,8 +1,10 @@
-"""The hibayes models of the domain GLM (domain_glm.py): a Gamma GLM of squared forecast error with protocol x domain
-deviations partially pooled per protocol, a random intercept per (target model, domain) cell (every protocol forecasts
-the same target in the same domain, so the cell's distance from the reference mean is shared across its rows) and a
+"""
+The hibayes models of the domain GLM (domain_glm.py): a Gamma GLM of squared prediction error with protocol x domain
+deviations partially pooled per protocol, a random intercept per (target model, domain) cell (every protocol predicts
+the same target in the same domain, so the cell's distance from the references' mean is shared across its rows) and a
 random intercept per judge within judge protocol. With each task's best judge only, the judge term has one level
-("-", pinned to 0) and changes no estimate; its parameters stay so the sampler's draws are the verified run's.
+("-", pinned to 0) and changes no estimate; its parameters are still sampled so that the sampler's random draws, and
+so the reported numbers, stay those of the run they were checked on.
 
 Importing this module registers the two models with hibayes.
 """
@@ -21,13 +23,28 @@ def builder(
     prior_sigma_scale: float = 0.5,
     prior_cell_scale: float = 1.0,
 ) -> Model:
-    """log mu = intercept + protocol_effects[p] + domain_effects[d] + interaction[p, d] + cell_effects[c] + judge_effects[j];
-    obs ~ Gamma(shape[p], shape[p] / mu), one shape per protocol. Protocol index 0 (the Baseline) is the reference
-    level, pinned to 0; domain_effects sum to zero, so the intercept is the grand mean over domains;
+    """
+    Builds the numpyro model of squared error: log mu = intercept + protocol_effects[p] + domain_effects[d] +
+    interaction[p, d] + cell_effects[c] + judge_effects[j], and obs ~ Gamma(shape[p], shape[p] / mu) with one shape
+    per protocol, so mu is the mean. Protocol index 0 (the Baseline) is the reference level, its effect, interaction
+    and sigma_protocol pinned to 0; domain_effects sum to zero, so the intercept is the grand mean over domains;
     interaction[p, d] = sigma_protocol[p] * z, so a protocol's domain deviations share one spread (the
-    (protocol | domain) term). interaction=False drops that term (the additive model of the LOO comparison)."""
+    (protocol | domain) term).
+
+    Inputs:
+        interaction: whether to include the (protocol | domain) term; False gives the additive model the
+            leave-one-out comparison sets against it.
+        prior_intercept_scale: the SD of the intercept's normal prior.
+        prior_effect_scale: the SD of the protocol and domain effects' normal priors.
+        prior_sigma_scale: the scale of the half-normal priors of sigma_protocol and sigma_judge.
+        prior_cell_scale: the scale of the half-normal prior of sigma_cell.
+    Outputs:
+        the model function, which takes hibayes Features (obs, and the index and count of protocol, domain,
+        model_domain and protocol_judge) and samples obs.
+    """
 
     def statistical_model(features: Features) -> None:
+        """The numpyro model over one set of features."""
         check_features(features, ["obs", "protocol_index", "num_protocol", "domain_index", "num_domain", "model_domain_index",
                                   "num_model_domain", "protocol_judge_index", "num_protocol_judge"])
         P, D, C, J = features["num_protocol"], features["num_domain"], features["num_model_domain"], features["num_protocol_judge"]
@@ -65,11 +82,27 @@ def builder(
 
 @model
 def domain_glm(**kwargs) -> Model:
-    """The reported fit: with the (protocol | domain) term."""
+    """
+    The GLM with the (protocol | domain) term, the fit the ratios and contrasts come from; registered with hibayes as
+    domain_glm.
+
+    Inputs:
+        kwargs: the prior scales, as builder's prior_* arguments.
+    Outputs:
+        the model function (builder with interaction=True).
+    """
     return builder(interaction=True, **kwargs)
 
 
 @model
 def domain_glm_additive(**kwargs) -> Model:
-    """protocol + domain only, no (protocol | domain) term: the LOO comparison's alternative."""
+    """
+    The additive GLM, protocol + domain with no (protocol | domain) term, which the leave-one-out comparison sets
+    against the full model; registered with hibayes as domain_glm_additive.
+
+    Inputs:
+        kwargs: the prior scales, as builder's prior_* arguments.
+    Outputs:
+        the model function (builder with interaction=False).
+    """
     return builder(interaction=False, **kwargs)
