@@ -5,16 +5,20 @@ targets, and with one domain's transcripts scored against another domain's theta
 selected with --only.
 
 Writes to <paths.outputs>/generalisation/ (config.yaml):
-    time                 error_over_time.{svg,png,txt} and error_over_time.csv: each task's mean squared error per
+    time                 error_over_time.{svg,png} and error_over_time.csv: each task's mean squared error per
                          protocol with its bootstrap interval, 2024-I to 2026-I
-    reasoning_targets    reasoning_targets.{svg,png,txt}: the Pairwise judge on the Maths 2025-I reasoning targets,
-                         whose references are all non-reasoning models, with and without the targets' reasoning, and
-                         the t-tests between the groups of targets
-    capability_distance  capability_distance.{svg,png,txt}: squared error per bin of the target's distance above the
-                         strongest reference; capability_distance.csv (the bins) and capability_distance_slopes.csv
-                         (the slopes of squared error on distance)
-    frontier             closed_targets.{pdf,png,svg,txt}: closed-source Coding targets, reasoning hidden;
-                         closed_targets_errors.csv, closed_targets_llr.csv
+    reasoning_targets    reasoning_targets.{svg,png}: the Pairwise judge on the Maths 2025-I reasoning targets, whose
+                         references are all non-reasoning models, with and without the targets' reasoning;
+                         reasoning_targets.csv (every target), reasoning_targets_groups.csv (each group's mean and
+                         interval) and reasoning_targets_tests.csv (the t-tests between the groups)
+    capability_distance  capability_distance.{svg,png}: squared error per bin of the target's distance above the
+                         strongest reference; capability_distance.csv (the bins), capability_distance_slopes.csv (the
+                         slopes of squared error on distance) and capability_distance_baseline_line.csv (the
+                         Baseline's line)
+    frontier             closed_targets.{pdf,png,svg}: closed-source Coding targets, reasoning hidden;
+                         closed_targets.csv (each protocol and group's mean change in error and test),
+                         closed_targets_deltas.csv (every target's change), closed_targets_errors.csv,
+                         closed_targets_llr.csv
     cross_domain         cross_domain_errors.csv (every protocol per source and scored domain) and
                          cross_domain_pairwise_tests.csv (the Pairwise judge's paired t-tests per source and scored
                          domain)
@@ -72,7 +76,7 @@ def run_time(config: dict, forecasts: pd.DataFrame, out: Path) -> None:
         out: the output folder (<paths.outputs>/generalisation).
     Outputs:
         in out: error_over_time.csv (per domain, semester and protocol: n, mse, baseline_mse, lo, hi);
-        error_over_time.{svg,png}; error_over_time.txt (the caption with every task's error and interval).
+        error_over_time.{svg,png}.
     """
     domains, display, semester = config["tasks"]["domains"], config["display"], config["generalisation"]["reasoning_semester"]
     draws, seed = config["statistics"]["bootstrap_draws"], config["statistics"]["seed"]
@@ -81,7 +85,6 @@ def run_time(config: dict, forecasts: pd.DataFrame, out: Path) -> None:
     tasks = tasks[tasks.protocol != "glm_length"]  # dropped after the bootstrap, whose draws it moves
     tasks.to_csv(out / "error_over_time.csv", index=False, float_format="%.4f")
     save(time.error_over_time_figure(tasks, domains, PROTOCOLS, display, semester), out / "error_over_time")
-    (out / "error_over_time.txt").write_text(time.caption(tasks, domains, PROTOCOLS, display, draws))
 
 
 def run_reasoning_targets(config: dict, forecasts: pd.DataFrame, out: Path) -> None:
@@ -98,8 +101,9 @@ def run_reasoning_targets(config: dict, forecasts: pd.DataFrame, out: Path) -> N
             pairwise judge's scored run gives the reasoning-shown errors, its reasoning-hidden run the removed ones.
         out: the output folder (<paths.outputs>/generalisation).
     Outputs:
-        in out: reasoning_targets.{svg,png}; reasoning_targets.txt (the caption with every target's theta*, prediction
-        and squared error, each group's mean and interval, and the three tests).
+        in out: reasoning_targets.csv (per target and group: group, model, judge, theta, theta_hat, err);
+        reasoning_targets_groups.csv (per group: n, mean, lo, hi, the 95% t-interval with lo floored at 0);
+        reasoning_targets_tests.csv (per test: test, diff, t, df, p); reasoning_targets.{svg,png}.
     """
     g, variants = config["generalisation"], config["protocols"]
     task = dict(domain=g["reasoning_domain"], semester=g["reasoning_semester"], protocol="pairwise")
@@ -108,8 +112,12 @@ def run_reasoning_targets(config: dict, forecasts: pd.DataFrame, out: Path) -> N
     removed = reasoning_targets.removed(forecasts, **task, variant=variants["pairwise"], judge=judge,
                                         reasoning_models=g["reasoning_targets"])
     tests = reasoning_targets.group_tests(shown, removed)
+    targets = reasoning_targets.target_table(shown, removed, judge)
+    targets.to_csv(out / "reasoning_targets.csv", index=False, float_format="%.4f")
+    reasoning_targets.group_errors(targets).to_csv(out / "reasoning_targets_groups.csv", index=False, float_format="%.4f")
+    pd.DataFrame([dict(test=k, **v) for k, v in tests.items()]).to_csv(
+        out / "reasoning_targets_tests.csv", index=False, float_format="%.4g")
     save(reasoning_targets.reasoning_targets_figure(shown, removed, tests), out / "reasoning_targets")
-    (out / "reasoning_targets.txt").write_text(reasoning_targets.caption(shown, removed, tests, judge))
 
 
 def run_capability_distance(config: dict, forecasts: pd.DataFrame, out: Path) -> None:
@@ -125,9 +133,9 @@ def run_capability_distance(config: dict, forecasts: pd.DataFrame, out: Path) ->
         out: the output folder (<paths.outputs>/generalisation).
     Outputs:
         in out: capability_distance.csv (per domain, bin and protocol: x, the bin's mean distance, n, mean, lo, hi);
-        capability_distance_slopes.csv (per domain and protocol: n, slope, se, p); capability_distance.{svg,png};
-        capability_distance.txt (the caption with every bin, the Baseline's line and each slope test). Raises
-        AssertionError when a bin has fewer than 3 targets.
+        capability_distance_slopes.csv (per domain and protocol: n, slope, se, p); capability_distance_baseline_line.csv
+        (per domain, the Baseline's least-squares line drawn dashed: n, intercept, slope); capability_distance.{svg,png}.
+        Raises AssertionError when a bin has fewer than 3 targets.
     """
     domains, protocols, display = config["tasks"]["domains"], PROTOCOLS, config["display"]
     draws, seed = config["statistics"]["bootstrap_draws"], config["statistics"]["seed"]
@@ -138,10 +146,10 @@ def run_capability_distance(config: dict, forecasts: pd.DataFrame, out: Path) ->
     boxes = capability_distance.bin_errors(table, protocols, draws, seed)
     slopes = capability_distance.slope_tests(table, domains, protocols)
     boxes.to_csv(out / "capability_distance.csv", index=False, float_format="%.4f")
-    slopes.to_csv(out / "capability_distance_slopes.csv", index=False, float_format="%.4g")
+    slopes.drop(columns="intercept").to_csv(out / "capability_distance_slopes.csv", index=False, float_format="%.4g")
+    slopes[slopes.protocol == stats.BASELINE][["domain", "n", "intercept", "slope"]].to_csv(
+        out / "capability_distance_baseline_line.csv", index=False, float_format="%.4f")
     save(capability_distance.capability_distance_figure(boxes, table, domains, protocols, display), out / "capability_distance")
-    (out / "capability_distance.txt").write_text(
-        capability_distance.caption(boxes, table, slopes, domains, protocols, display, draws))
 
 
 def run_frontier(config: dict, forecasts: pd.DataFrame, out: Path) -> None:
@@ -158,8 +166,10 @@ def run_frontier(config: dict, forecasts: pd.DataFrame, out: Path) -> None:
     Outputs:
         in out: closed_targets_errors.csv (per target and protocol, the Baseline included: model, protocol, theta,
         theta_hat, error, group); closed_targets_llr.csv (per target and protocol: model, shape, llr, dropped,
-        protocol, group, domain, semester); closed_targets.{pdf,png,svg}; closed_targets.txt (the caption with every
-        target's change in error and each group's test). Raises AssertionError when the two tasks' references differ.
+        protocol, group, domain, semester); closed_targets.csv (per protocol and group: n, delta, the mean change in
+        squared error from the Baseline's, its 95% t-interval lo and hi, llr, se, p and the mark drawn);
+        closed_targets_deltas.csv (per target and protocol drawn: model, protocol, group, delta);
+        closed_targets.{pdf,png,svg}. Raises AssertionError when the two tasks' references differ.
     """
     f, logs = config["frontier"], Path(config["paths"]["logs"])
     semester, vendors = f["semester"], f["closed_targets"]
@@ -179,9 +189,10 @@ def run_frontier(config: dict, forecasts: pd.DataFrame, out: Path) -> None:
     errors.to_csv(out / "closed_targets_errors.csv", index=False, float_format="%.4f")
     llr.to_csv(out / "closed_targets_llr.csv", index=False, float_format="%.5f")
     deltas, tests = frontier.error_deltas(errors), frontier.group_tests(llr)
+    frontier.group_summary(deltas, tests).to_csv(out / "closed_targets.csv", index=False, float_format="%.4g")
+    deltas[deltas.protocol.isin(frontier.ROWS)][["model", "protocol", "group", "delta"]].to_csv(
+        out / "closed_targets_deltas.csv", index=False, float_format="%.4f")
     save(frontier.frontier_figure(deltas, tests, vendors, config["display"]), out / "closed_targets", ("pdf", "png", "svg"))
-    (out / "closed_targets.txt").write_text(
-        frontier.caption(deltas, tests, config["display"], f["pairwise"]["judge"], f["direct"]["judge"]))
 
 
 def run_cross_domain(config: dict, forecasts: pd.DataFrame, out: Path) -> None:

@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from analysis.likelihood_ratio import num
 from analysis.plots import unclip_markers
 from analysis.stats import BASELINE, with_baseline
 
@@ -136,35 +135,3 @@ def error_over_time_figure(tasks: pd.DataFrame, domains: list[str], protocols: l
                                                                  arrowstyle="-|>", mutation_scale=5, lw=0.6, color="black"))
     return unclip_markers(fig)
 
-
-def caption(tasks: pd.DataFrame, domains: list[str], protocols: list[str], display: dict, draws: int) -> str:
-    """
-    The text of the figure's .txt file: what the figure draws, then for every domain and semester each series' mean
-    squared error and 95% interval.
-
-    Inputs:
-        tasks: task_errors rows.
-        domains: domain keys, in order.
-        protocols: the protocols listed after the Baseline.
-        display: config.yaml's display section; uses protocol_names and domain_names.
-        draws: the number of bootstrap resamples, quoted in the text.
-    Outputs:
-        str, the caption.
-    """
-    names = display["protocol_names"]
-    lines = []
-    for domain in domains:
-        lines.append(f"{display['domain_names'][domain]}:")
-        for semester, g in tasks[tasks.domain == domain].groupby("semester"):
-            rows = g.set_index("protocol")
-            parts = [f"{names[p]} {num(rows.loc[p, 'mse'])} ({num(rows.loc[p, 'lo'])} to {num(rows.loc[p, 'hi'])})"
-                     for p in [BASELINE, *protocols] if p in rows.index]
-            lines.append(f"  {semester} ({int(g.n.iloc[0])} targets): " + "; ".join(parts) + ".")
-    return ("Squared error over target semesters, one panel per domain. Each point is the mean squared error over a "
-            "task's targets for the baseline (grey) and each protocol; the box is its 95% percentile-bootstrap interval "
-            f"over the task's targets ({draws:,} resamples). Science and Maths run from 2024-I to 2026-I; Coding and "
-            "Cyber start at 2025-II, their first semester. Judge protocols use each task's best judge on references. The "
-            "squared-error axis is logarithmic, from 0.01 to 10; points above it are drawn as triangles on its edge. No "
-            "test is drawn per semester: with 8 targets and 7 or 8 references per task it has little power; the protocols "
-            "are tested over all 16 target models of 2025-II and 2026-I in the figure of squared error by protocol."
-            "\n\nMean squared error (95% interval):\n" + "\n".join(lines) + "\n")

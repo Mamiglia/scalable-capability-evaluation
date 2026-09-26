@@ -5,14 +5,19 @@ outputs) is removed, against the full transcript or the Baseline. Covers the Pai
 Deterministic features, Embedding and Absolute scoring; every condition uses the same 40 train items per task
 (config.yaml removal_items), and each change is tested with a paired t-test over the targets, semesters pooled.
 
-Writes to <paths.outputs>/transcript_parts/ (config.yaml); each figure as .pdf, .svg and .png with a .txt of every
-plotted number and its test, and a .csv of the plotted changes:
+Writes to <paths.outputs>/transcript_parts/ (config.yaml) each figure as .pdf, .svg and .png, with its numbers as .csv:
     thirds_removed            Pairwise judge, each transcript third removed, against the full transcript
     channel_shares            each channel's share of the characters the models wrote (the .csv: the shares; no test)
     channels_removed          Pairwise judge, each channel removed, against the full transcript
     thirds_kept_alone         Pairwise judge, each third kept alone, against the Baseline
     thirds_other_protocols    Deterministic features, Embedding and Absolute scoring, each third removed
     channels_other_protocols  the same protocols, each channel removed
+    <name>.csv                    every figure but channel_shares: the plotted changes, one row per domain and row
+                                  label; columns domain, row, estimate, lo, hi (the 95% t-interval), p (the paired
+                                  t-test), with a leading protocol column in the two other-protocol figures
+    <name>_mean_squared_errors.csv  one row per domain (and protocol): the number of targets, the mean squared error of
+                                  the Baseline and of the full transcript, and in thirds_removed the Baseline's mean
+                                  change from the full transcript (the grey point)
     breakdowns/<name>_errors.csv  every target's squared error per condition, the numbers each figure but
                                   channel_shares is drawn from
 
@@ -32,52 +37,8 @@ import pandas as pd
 from analysis import loading, stats
 from analysis.config import apply_paths, load_config
 from analysis.transcript_parts import channels, thirds
-from analysis.transcript_parts.paired_change import (baseline_change, domain_changes, figure, grid, method_text,
-                                                     number_lines, removal_items)
+from analysis.transcript_parts.paired_change import baseline_change, domain_changes, figure, grid, removal_items
 from capability.task import Task
-
-THIRDS_REMOVED = (
-    "Pairwise judge on transcript thirds. Every rendered transcript (reasoning shown) is cut into three equal character "
-    "spans and the judge sees the other two with one third replaced by \"...\". Judges, the best reference judge of each "
-    "cell: Coding 2025-II MiniMax-M1 and 2026-I Kimi-K2-Thinking, Cyber 2025-II DeepSeek-R1 and 2026-I Kimi-K2-Thinking, "
-    "Maths 2025-II DeepSeek-R1 and 2026-I Kimi-K2-Thinking, Science 2025-II MiniMax-M1 and 2026-I MiniMax-M2, each on the "
-    "same 40 train items (10 per difficulty quartile). Every condition is scored on the pairs judged in all four "
-    "conditions of its cell. Grey point: the Baseline's mean change in squared error from the full transcript, "
-    "for scale (untested).")
-THIRDS_KEPT_ALONE = (
-    "Pairwise judge on single transcript thirds. Every rendered transcript (reasoning shown) is cut into three equal "
-    "character spans and the judge sees one third, the others replaced by \"...\". Judges, the best reference judge of "
-    "each cell as in the removal figure; the 2026-I thirds are the 40-item runs. Each condition is scored on the pairs "
-    "judged in it and the full transcript, on the same 40 train items (10 per difficulty quartile).")
-CHANNELS_REMOVED = (
-    "Pairwise judge on transcript channels (reasoning, messages, tool calls with their outputs), 40 train items per "
-    "semester, 2025-II and 2026-I pooled, each semester's best pairwise judge with reasoning shown. Maths and Science "
-    "have no tool calls: the transcript without reasoning is the reasoning-hidden run, and the transcript without "
-    "messages is the reasoning alone.")
-CHANNEL_SHARES = (
-    "Where the models' own words sit in their transcripts, one pie per domain: the share of the characters the models "
-    "themselves wrote (role prefixes removed) in their reasoning, their messages to the user, and their tool calls and "
-    "tool outputs (Tools), over the correct first-attempt transcripts of the references and targets on the channel "
-    "analysis's items (10 per difficulty quartile) of 2025-II and 2026-I. Maths and Science have no tool use.")
-THIRDS_OTHER_PROTOCOLS = (
-    "Transcript thirds for the Deterministic features, Embedding and Absolute scoring protocols. Every rendered "
-    "transcript (reasoning shown) is cut into three equal character spans and one third is removed. Deterministic "
-    "features: the 13 features computed on the cut transcript's text and tool calls, standardised ridge refitted on the "
-    "references' cut transcripts. Embedding: vectors of the cut transcript, ridge refitted on the references' cut "
-    "transcripts. Absolute scoring: the judge of each cell with the lowest reference leave-one-out error rates the cut "
-    "transcripts, calibrated on the references' ratings of the same cut, every condition on the ratings present in "
-    "every condition (the single thirds' ratings included). 2025-II and 2026-I pooled (16 targets per domain), the same "
-    "40 train items (10 per difficulty quartile) as the pairwise removal runs.")
-CHANNELS_OTHER_PROTOCOLS = (
-    "Transcript channels (reasoning, messages, tool calls with their outputs) for the Deterministic features, Embedding "
-    "and Absolute scoring protocols; 2025-II and 2026-I pooled (16 targets per domain), the same 40 train items (10 per "
-    "difficulty quartile) as the pairwise removal runs. Maths and Science have no tool calls: without messages is the "
-    "reasoning alone. Deterministic features and Embedding are refitted on the references' channel-filtered "
-    "transcripts. Embedding: vectors of the transcript rendered without the channel. Deterministic features: the 13 "
-    "features computed on the channel-filtered text (the tool-call count is 0 without tools). Absolute scoring: each "
-    "task's leave-one-out judge re-rated the channel-removed transcripts, on the same 40 train items, recalibrated on "
-    "the same references.")
-
 
 def removal_tasks(config: dict) -> Iterator[tuple[str, Task, set[str]]]:
     """
@@ -157,35 +118,52 @@ def channel_colours(config: dict) -> dict[str, str]:
     return {f"Without {label.lower()}": colour for label, colour in config["display"]["channel_colours"].items()}
 
 
-def publish(out: Path, name: str, fig: plt.Figure, caption: list[str], table: pd.DataFrame,
+def mean_errors(errors: pd.DataFrame, means: pd.DataFrame) -> pd.DataFrame:
+    """
+    Per domain, the number of targets and the mean squared error of the Baseline and of the full transcript.
+
+    Inputs:
+        errors: every target's squared error per condition (domain, semester, condition, model, err); the targets
+            counted are its rows with condition "full".
+        means: domain_changes' second table (columns full and easy, indexed by domain).
+    Outputs:
+        DataFrame with columns domain, targets, mse_baseline, mse_full_transcript; one row per domain of `means`.
+    """
+    targets = errors[errors.condition == "full"].groupby("domain").size()
+    return pd.DataFrame({"domain": means.index, "targets": targets.reindex(means.index).to_numpy(),
+                         "mse_baseline": means.easy.to_numpy(), "mse_full_transcript": means.full.to_numpy()})
+
+
+def publish(out: Path, name: str, fig: plt.Figure, table: pd.DataFrame, domains: pd.DataFrame,
             errors: pd.DataFrame) -> None:
     """
-    Writes one figure with its numbers: the figure as .pdf, .svg and .png, the caption lines as .txt, the plotted
-    changes as .csv and every target's errors under breakdowns/; then closes the figure.
+    Writes one figure with its numbers: the figure as .pdf, .svg and .png, the plotted changes as .csv, the domains'
+    target counts and mean squared errors as a second .csv and every target's errors under breakdowns/; then closes
+    the figure.
 
     Inputs:
         out: the output folder (<paths.outputs>/transcript_parts).
         name: the file stem.
         fig: the figure.
-        caption: the .txt's lines.
         table: the plotted changes (domain, row, estimate, lo, hi, p; a leading protocol column in the other-protocol
             figures).
+        domains: mean_errors' table (a leading protocol column in the other-protocol figures).
         errors: every target's squared error per condition.
     Outputs:
-        in out: <name>.{pdf,svg,png,txt,csv} and breakdowns/<name>_errors.csv.
+        in out: <name>.{pdf,svg,png,csv}, <name>_mean_squared_errors.csv and breakdowns/<name>_errors.csv.
     """
     (out / "breakdowns").mkdir(parents=True, exist_ok=True)
     for suffix in (".pdf", ".svg", ".png"):
         fig.savefig(out / f"{name}{suffix}", dpi=300, bbox_inches="tight")
     plt.close(fig)
-    (out / f"{name}.txt").write_text("\n".join(caption) + "\n")
     table.to_csv(out / f"{name}.csv", index=False)
+    domains.to_csv(out / f"{name}_mean_squared_errors.csv", index=False)
     errors.to_csv(out / "breakdowns" / f"{name}_errors.csv", index=False)
     print("wrote", out / f"{name}.pdf", flush=True)
 
 
 def pairwise_figure(out: Path, name: str, errors: pd.DataFrame, rows: dict[str, str], against: str, removed: bool,
-                 colours: dict[str, str], config: dict, text: str, baseline: bool = False) -> None:
+                 colours: dict[str, str], config: dict, baseline: bool = False) -> None:
     """
     Draws and writes one Pairwise judge figure, one panel per domain: for each row, the mean over the domain's
     targets (semesters pooled) of the change in squared error from the comparison condition, with its 95% t-interval
@@ -198,20 +176,21 @@ def pairwise_figure(out: Path, name: str, errors: pd.DataFrame, rows: dict[str, 
             "full", "easy" (the Baseline) and those in rows.
         rows: row label -> condition.
         against: the comparison condition, "full" (the full transcript) or "easy" (the Baseline).
-        removed: the rows are parts removed rather than kept alone (sets the markers and the caption's wording).
+        removed: the rows are parts removed rather than kept alone (sets the markers).
         colours: domain or row label -> colour.
         config: the analysis configuration; uses display.domain_names.
-        text: the caption's opening sentences.
-        baseline: also draw the Baseline's mean change from the full transcript, for scale.
+        baseline: also draw the Baseline's mean change from the full transcript, for scale, and write it as the
+            baseline_change column of <name>_mean_squared_errors.csv.
     Outputs:
-        in out: <name>.{pdf,svg,png,txt,csv} and breakdowns/<name>_errors.csv (publish).
+        in out: <name>.{pdf,svg,png,csv}, <name>_mean_squared_errors.csv and breakdowns/<name>_errors.csv (publish).
     """
-    names = config["display"]["domain_names"]
     table, means = domain_changes(errors, rows, against)
-    fig = figure(table, list(rows), removed, colours, names, against, baseline_change(errors) if baseline else None)
-    targets = errors[errors.condition == "full"].groupby("domain").size()
-    caption = [f"{text} {method_text(against, removed)}", "", *number_lines(table, means, targets, against, names)]
-    publish(out, name, fig, caption, table, errors)
+    baselines = baseline_change(errors) if baseline else None
+    fig = figure(table, list(rows), removed, colours, config["display"]["domain_names"], against, baselines)
+    domains = mean_errors(errors, means)
+    if baseline:
+        domains = domains.merge(baselines[["domain", "estimate"]].rename(columns={"estimate": "baseline_change"}))
+    publish(out, name, fig, table, domains, errors)
 
 
 def other_protocols(config: dict, variant_prefix: str) -> list[str]:
@@ -234,7 +213,7 @@ def other_protocols(config: dict, variant_prefix: str) -> list[str]:
 
 
 def other_protocols_figure(out: Path, name: str, errors: pd.DataFrame, rows: dict[str, str], colours: dict[str, str],
-                    config: dict, text: str, **layout) -> None:
+                    config: dict, **layout) -> None:
     """
     Draws and writes one figure of the protocols other than the Pairwise judge, a row of domain panels per protocol
     on one shared x scale: for each row label, the mean change in squared error from the full transcript over the
@@ -249,22 +228,21 @@ def other_protocols_figure(out: Path, name: str, errors: pd.DataFrame, rows: dic
         colours: domain or row label -> colour.
         config: the analysis configuration; uses transcript_parts.other_protocols (the row order) and display
             (domain_names, protocol_names).
-        text: the caption's opening sentences.
         layout: passed on to paired_change.grid (alpha, ticks).
     Outputs:
-        in out: <name>.{pdf,svg,png,txt,csv} and breakdowns/<name>_errors.csv (publish); the .csv has a protocol
-        column.
+        in out: <name>.{pdf,svg,png,csv}, <name>_mean_squared_errors.csv and breakdowns/<name>_errors.csv (publish);
+        both tables have a leading protocol column.
     """
     names, labels = config["display"]["domain_names"], config["display"]["protocol_names"]
-    tables, lines = {}, [f"{text} {method_text('full', True)}"]
+    tables, domains = {}, {}
     for protocol in [p for p in config["transcript_parts"]["other_protocols"] if p in set(errors.protocol)]:
         part = errors[errors.protocol == protocol]
         tables[protocol], means = domain_changes(part, rows, "full")
-        targets = part[part.condition == "full"].groupby("domain").size()
-        lines += ["", f"== {labels[protocol]}", "", *number_lines(tables[protocol], means, targets, "full", names)]
+        domains[protocol] = mean_errors(part, means)
     fig = grid({labels[p]: t for p, t in tables.items()}, list(rows), True, colours, names, "full", shared_x=True, **layout)
-    table = pd.concat(tables, names=["protocol"]).reset_index(level=0).reset_index(drop=True)
-    publish(out, name, fig, lines, table, errors)
+    tables, domains = (pd.concat(t, names=["protocol"]).reset_index(level=0).reset_index(drop=True)
+                       for t in (tables, domains))
+    publish(out, name, fig, tables, domains, errors)
 
 
 def thirds_pairwise_errors(config: dict, kept_alone: bool) -> pd.DataFrame:
@@ -304,10 +282,11 @@ def thirds_removed(config: dict, out: Path) -> None:
             display.
         out: the output folder (<paths.outputs>/transcript_parts).
     Outputs:
-        in out: thirds_removed.{pdf,svg,png,txt,csv} and breakdowns/thirds_removed_errors.csv.
+        in out: thirds_removed.{pdf,svg,png,csv}, thirds_removed_mean_squared_errors.csv (with baseline_change) and
+        breakdowns/thirds_removed_errors.csv.
     """
     pairwise_figure(out, "thirds_removed", thirds_pairwise_errors(config, False), third_rows(config, False), "full",
-                    True, config["display"]["domain_colours"], config, THIRDS_REMOVED, baseline=True)
+                    True, config["display"]["domain_colours"], config, baseline=True)
 
 
 def thirds_kept_alone(config: dict, out: Path) -> None:
@@ -320,11 +299,12 @@ def thirds_kept_alone(config: dict, out: Path) -> None:
             display.
         out: the output folder (<paths.outputs>/transcript_parts).
     Outputs:
-        in out: thirds_kept_alone.{pdf,svg,png,txt,csv} and breakdowns/thirds_kept_alone_errors.csv.
+        in out: thirds_kept_alone.{pdf,svg,png,csv}, thirds_kept_alone_mean_squared_errors.csv and
+        breakdowns/thirds_kept_alone_errors.csv.
     """
     rows = third_rows(config, True) | {"Full transcript": "full"}
     pairwise_figure(out, "thirds_kept_alone", thirds_pairwise_errors(config, True), rows, "easy", False,
-                    config["display"]["domain_colours"], config, THIRDS_KEPT_ALONE)
+                    config["display"]["domain_colours"], config)
 
 
 def channels_removed(config: dict, out: Path) -> None:
@@ -339,9 +319,10 @@ def channels_removed(config: dict, out: Path) -> None:
             protocols.pairwise, paths.logs and display.
         out: the output folder (<paths.outputs>/transcript_parts).
     Outputs:
-        in out: channels_removed.{pdf,svg,png,txt,csv} and breakdowns/channels_removed_errors.csv. Reads the train-set
-        runs in logs/judge/<domain>/<semester>/<judge>/ (cut to the removal items) and the channel runs the
-        configs/judges/channels/ configs write; a channel run not on disk is left out.
+        in out: channels_removed.{pdf,svg,png,csv}, channels_removed_mean_squared_errors.csv and
+        breakdowns/channels_removed_errors.csv. Reads the train-set runs in logs/judge/<domain>/<semester>/<judge>/
+        (cut to the removal items) and the channel runs the configs/judges/channels/ configs write; a channel run not
+        on disk is left out.
     """
     spec, logs, frames = config["channels"], Path(config["paths"]["logs"]), []
     for domain, task, keep in removal_tasks(config):
@@ -357,7 +338,7 @@ def channels_removed(config: dict, out: Path) -> None:
         dirs = {c: d for c, d in dirs.items() if d.exists()}
         frames.append(channels.pairwise_errors(domain, task, train, dirs, keep, config["protocols"]["pairwise"]))
     pairwise_figure(out, "channels_removed", pd.concat(frames, ignore_index=True), channel_rows(config), "full", True,
-                    channel_colours(config), config, CHANNELS_REMOVED)
+                    channel_colours(config), config)
 
 
 def channel_shares(config: dict, out: Path) -> None:
@@ -371,24 +352,21 @@ def channel_shares(config: dict, out: Path) -> None:
         out: the output folder (<paths.outputs>/transcript_parts).
     Outputs:
         in out: channel_shares.{pdf,svg,png}; channel_shares.csv (one row per domain, one column per channel, the
-        shares); channel_shares.txt (the caption and the percentages).
+        shares).
     """
     spec = {label: runs[0] for label, runs in config["channels"]["parts"].items()}  # the transcripts with only that channel
-    data, names = Path(config["paths"]["data"]), config["display"]["domain_names"]
+    data = Path(config["paths"]["data"])
     totals = pd.DataFrame(0, index=config["tasks"]["domains"], columns=list(spec))
     for domain, task, keep in removal_tasks(config):
         for label, chars in channels.written_chars(task, keep, spec, data).items():
             totals.loc[domain, label] += chars
     shares = totals.div(totals.sum(axis=1), axis=0)
     out.mkdir(parents=True, exist_ok=True)
-    fig = channels.shares_figure(shares, config["display"]["channel_colours"], names)
+    fig = channels.shares_figure(shares, config["display"]["channel_colours"], config["display"]["domain_names"])
     for suffix in (".pdf", ".svg", ".png"):
         fig.savefig(out / f"channel_shares{suffix}", dpi=300, bbox_inches="tight")
     plt.close(fig)
     shares.to_csv(out / "channel_shares.csv")
-    lines = [f"{names[d]}: " + ", ".join(f"{c} {100 * shares.loc[d, c]:.1f}%" for c in shares.columns) + "."
-             for d in shares.index]
-    (out / "channel_shares.txt").write_text(CHANNEL_SHARES + "\n\n" + "\n".join(lines) + "\n")
     print("wrote", out / "channel_shares.pdf", flush=True)
 
 
@@ -404,8 +382,9 @@ def thirds_other_protocols(config: dict, out: Path) -> None:
             cache, embeddings, forecasts), protocols, removal_items, tasks and display.
         out: the output folder (<paths.outputs>/transcript_parts).
     Outputs:
-        in out: thirds_other_protocols.{pdf,svg,png,txt,csv} and breakdowns/thirds_other_protocols_errors.csv. Reads
-        <paths.cache>/features_thirds.csv and logs/direct_truncated-thirds-*/.
+        in out: thirds_other_protocols.{pdf,svg,png,csv}, thirds_other_protocols_mean_squared_errors.csv and
+        breakdowns/thirds_other_protocols_errors.csv. Reads <paths.cache>/features_thirds.csv and
+        logs/direct_truncated-thirds-*/.
     """
     logs, rows = Path(config["paths"]["logs"]), third_rows(config, False)
     removed, alone = list(rows.values()), list(third_rows(config, True).values())
@@ -418,7 +397,7 @@ def thirds_other_protocols(config: dict, out: Path) -> None:
             else:
                 frames.append(thirds.ridge_errors(protocol, domain, task, keep, ["full", *removed], features))
     other_protocols_figure(out, "thirds_other_protocols", pd.concat(frames, ignore_index=True), rows,
-                           config["display"]["domain_colours"], config, THIRDS_OTHER_PROTOCOLS)
+                           config["display"]["domain_colours"], config)
 
 
 def channels_other_protocols(config: dict, out: Path) -> None:
@@ -433,8 +412,9 @@ def channels_other_protocols(config: dict, out: Path) -> None:
             paths (logs, cache, embeddings, forecasts), protocols, removal_items, tasks and display.
         out: the output folder (<paths.outputs>/transcript_parts).
     Outputs:
-        in out: channels_other_protocols.{pdf,svg,png,txt,csv} and breakdowns/channels_other_protocols_errors.csv.
-        Reads <paths.cache>/features_reasoning_only.csv and logs/direct_channels-*/.
+        in out: channels_other_protocols.{pdf,svg,png,csv}, channels_other_protocols_mean_squared_errors.csv and
+        breakdowns/channels_other_protocols_errors.csv. Reads <paths.cache>/features_reasoning_only.csv and
+        logs/direct_channels-*/.
     """
     logs, tool_domains = Path(config["paths"]["logs"]), config["channels"]["tool_domains"]
     reasoning_only = pd.read_csv(Path(config["paths"]["cache"]) / "features_reasoning_only.csv", dtype={"item": str})
@@ -449,7 +429,7 @@ def channels_other_protocols(config: dict, out: Path) -> None:
                 frames.append(channels.ridge_errors(protocol, domain, task, keep, ["full", *removed], tools, reasoning_only))
     # alpha=1: solid boxes, as in channels_removed
     other_protocols_figure(out, "channels_other_protocols", pd.concat(frames, ignore_index=True), channel_rows(config),
-                           channel_colours(config), config, CHANNELS_OTHER_PROTOCOLS, alpha=1, ticks=[-2, -1, 0, 1, 2])
+                           channel_colours(config), config, alpha=1, ticks=[-2, -1, 0, 1, 2])
 
 
 ANALYSES = {f.__name__: f for f in (thirds_removed, channel_shares, channels_removed, thirds_kept_alone,

@@ -74,19 +74,23 @@ def medians(f: pd.DataFrame, semesters: list[str]) -> pd.Series:
 
 def by_rank(f: pd.DataFrame, semesters: list[str]) -> pd.DataFrame:
     """
-    Each target's squared error with the candidate judge of each rank, averaged over the domains in which the model is
-    a target.
+    Each target's squared error with the candidate judge of each rank, and the Baseline's, averaged over the domains in
+    which the model is a target.
 
     Inputs:
-        f: judge_errors' output; uses semester, task, domain, protocol, rank, model, judge and e.
+        f: judge_errors' output; uses semester, task, domain, protocol, rank, model, judge, e and e_base.
         semesters: the semesters whose targets are kept.
     Outputs:
-        DataFrame with columns protocol, column (the judge's rank as a string, "1" to "3"), model, e (the squared
-        error averaged over the model's domains) and n_domains (their number); one row per protocol, rank and target.
+        DataFrame with columns protocol ("easy_items" for the Baseline), judge_rank (the judge's rank as a string, "1"
+        to "3"; "-" for the Baseline), model, e (the squared error averaged over the model's domains) and n_domains
+        (their number); one row per protocol, rank and target, the Baseline's first.
     """
     g = f[f.semester.isin(semesters)]
-    ranked = g.assign(column=g["rank"].astype(str)).drop_duplicates(["task", "protocol", "column", "model", "judge"])
-    return ranked.groupby(["protocol", "column", "model"], as_index=False).agg(e=("e", "mean"), n_domains=("domain", "nunique"))
+    base = (g.drop_duplicates(["domain", "semester", "model"]).groupby("model", as_index=False)
+            .agg(e=("e_base", "mean"), n_domains=("domain", "nunique")).assign(protocol=stats.BASELINE, judge_rank="-"))
+    ranked = g.assign(judge_rank=g["rank"].astype(str)).drop_duplicates(["task", "protocol", "judge_rank", "model", "judge"])
+    judged = ranked.groupby(["protocol", "judge_rank", "model"], as_index=False).agg(e=("e", "mean"), n_domains=("domain", "nunique"))
+    return pd.concat([base, judged], ignore_index=True)[["protocol", "judge_rank", "model", "e", "n_domains"]]
 
 
 def figure(f: pd.DataFrame, semesters: list[str], names: dict[str, str], colours: dict[str, str], path: str) -> pd.DataFrame:
@@ -103,14 +107,14 @@ def figure(f: pd.DataFrame, semesters: list[str], names: dict[str, str], colours
         path: the output path without extension.
     Outputs:
         writes path.pdf, path.png and path.svg; returns the plotted numbers as a DataFrame with columns protocol,
-        column ("-" for the Baseline, else the judge's rank), n (targets), mean and half (the t-interval's
+        judge_rank ("-" for the Baseline), n (targets), mean, lo and hi (the 95% t-interval) and half (its
         half-width), one row per drawn column.
     """
     t = by_rank(f, semesters)
-    base = f[f.semester.isin(semesters)].drop_duplicates(["domain", "semester", "model"]).groupby("model").e_base.mean()
     judged = [p for p in ("pairwise", "direct") if p in set(f.protocol)]
-    columns = [(stats.BASELINE, "-", "Baseline", base)] + [(p, str(k), label, t[(t.protocol == p) & (t.column == str(k))].set_index("model").e)
-                                                           for p in judged for k, label in ((1, "Strongest ref."), (2, "2nd strongest"), (3, "3rd strongest"))]
+    columns = [(p, k, label, t[(t.protocol == p) & (t.judge_rank == k)].set_index("model").e)
+               for p, k, label in [(stats.BASELINE, "-", "Baseline")]
+               + [(p, str(k), label) for p in judged for k, label in ((1, "Strongest ref."), (2, "2nd strongest"), (3, "3rd strongest"))]]
     rows = []
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(figsize=(2.6, 2.3))
@@ -139,7 +143,7 @@ def figure(f: pd.DataFrame, semesters: list[str], names: dict[str, str], colours
             ax.plot(x + rng.uniform(-0.2, 0.2, len(e)), e, "o", ms=2, mfc=c, mec="none", alpha=0.7, zorder=3)
             ax.plot(x, m, "o", ms=5, mfc=c, mec=c, zorder=4)
             xs.append(x), labels.append(label)
-            rows.append(dict(protocol=p, column=col, n=len(e), mean=m, half=h))
+            rows.append(dict(protocol=p, judge_rank=col, n=len(e), mean=m, lo=m - h, hi=m + h, half=h))
             x += 1
         ax.set_xticks(xs)
         ax.set_xticklabels(labels, rotation=90, ha="center", fontsize=7)

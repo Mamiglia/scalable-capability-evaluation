@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from analysis import likelihood_ratio as lr
 from analysis.capability_signal.by_protocol import two_lines
 from analysis.stats import BASELINE
 
@@ -414,69 +413,3 @@ def contrasts_figure(contrasts: pd.DataFrame, table: pd.DataFrame, protocols: li
     ax.spines["left"].set_bounds(sigma_ticks[0], sigma_ticks[-1])
     ax.text(-0.5, 1.02, "b", transform=ax.transAxes, fontweight="bold")
     return fig
-
-
-def _interval(r) -> str:
-    """
-    Formats an estimate as "median [lo, hi]".
-
-    Inputs:
-        r: a row with ratio, lo and hi.
-    Outputs:
-        the formatted string.
-    """
-    return f"{lr.num(r.ratio)} [{lr.num(r.lo)}, {lr.num(r.hi)}]"
-
-
-def effects_caption(table: pd.DataFrame, protocols: list[str], display: dict) -> str:
-    """
-    Builds the text written next to the ratio figure: what it draws, then per protocol every ratio to the Baseline
-    (pooled and per domain) with its interval, and the protocol's between-domain SD.
-
-    Inputs:
-        table: ratio_table's output.
-        protocols: the protocols listed, in order.
-        display: config.yaml's display section; uses protocol_names and domain_names.
-    Outputs:
-        the caption as one string ending in a newline.
-    """
-    columns = {POOLED: "Pooled", **display["domain_names"]}
-    lines = []
-    for p in protocols:
-        rows = table[table.protocol == p].set_index("domain")
-        s = rows.loc[POOLED]
-        lines.append(f"{display['protocol_names'][p]}: " + "; ".join(f"{columns[d]} {_interval(rows.loc[d])}" for d in columns)
-                     + f"; between-domain SD {lr.num(s.sigma_protocol)} [{lr.num(s.sigma_lo)}, {lr.num(s.sigma_hi)}].")
-    return ("Posterior MSE ratio of each protocol to the Baseline, pooled across domains (filled circles) and per domain "
-            "(open markers), from the hierarchical Gamma GLM of squared error: posterior median [95% credible interval]; "
-            "the dashed line is equal error to the Baseline. The between-domain SD is on the log scale.\n\n"
-            + "\n".join(lines) + "\n")
-
-
-def contrasts_caption(contrasts: pd.DataFrame, table: pd.DataFrame, protocols: list[str], display: dict) -> str:
-    """
-    Builds the text written next to the contrast figure: what its two panels draw, then every contrast (pooled and
-    per domain) with its interval and posterior probability of being below 1, and every protocol's between-domain SD.
-
-    Inputs:
-        contrasts: contrast_table's output.
-        table: ratio_table's output; its pooled rows give the SDs.
-        protocols: the protocols listed, in order.
-        display: config.yaml's display section; uses protocol_names and domain_names.
-    Outputs:
-        the caption as one string ending in a newline.
-    """
-    names, columns = display["protocol_names"], {POOLED: "Pooled", **display["domain_names"]}
-    against = contrasts.against.iloc[0]
-    lines = ["a:"]
-    for p in [p for p in protocols if p != against]:
-        rows = contrasts[contrasts.protocol == p].set_index("domain")
-        lines.append(f"  {names[against]} / {names[p]}: " + "; ".join(
-            f"{columns[d]} {_interval(rows.loc[d])} (P < 1: {lr.num(rows.loc[d].p_below_1)})" for d in columns) + ".")
-    sigma = table[table.domain == POOLED].set_index("protocol")
-    lines += ["b:"] + [f"  {names[p]}: {lr.num(sigma.loc[p].sigma_protocol)} [{lr.num(sigma.loc[p].sigma_lo)}, "
-                       f"{lr.num(sigma.loc[p].sigma_hi)}]." for p in protocols]
-    return (f"a, MSE ratio of the {names[against]} to each other protocol, pooled and per domain, from the same posterior "
-            "draws of the hierarchical Gamma GLM: posterior median [95% credible interval], and the posterior probability "
-            f"that the {names[against]} has the smaller error (P < 1). b, each protocol's between-domain standard deviation "
-            "of log MSE.\n\n" + "\n".join(lines) + "\n")

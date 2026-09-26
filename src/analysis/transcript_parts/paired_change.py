@@ -1,6 +1,6 @@
 """
 The paired change in squared error that every transcript-parts figure draws, the items the cut-transcript conditions
-are judged on (10 per difficulty quartile), and the figure and caption text shared by the thirds and channel analyses.
+are judged on (10 per difficulty quartile), and the figures shared by the thirds and channel analyses.
 
 Each analysis predicts the same targets from transcripts with one part removed or kept alone, next to the full
 transcript (condition "full") and the Baseline ("easy"). A row's change is the mean over a domain's targets of the
@@ -27,8 +27,8 @@ from protocols import embeddings
 from protocols.pairwise.judge import stratified_items
 from protocols.transcript_features.protocol import ALPHAS as FEATURE_ALPHAS
 
-# comparison condition -> (its name in captions, on the x label)
-AGAINST = {"full": ("the full transcript", "full transcript"), "easy": ("the Baseline", "baseline")}
+# comparison condition -> its name on the x label
+AGAINST = {"full": "full transcript", "easy": "baseline"}
 
 
 def removal_items(task: Task, per_quartile: int, seed: int) -> set[str]:
@@ -198,50 +198,6 @@ def baseline_change(errors: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def method_text(against: str, removed: bool) -> str:
-    """
-    The caption sentences saying what a point, a box and a star show.
-
-    Inputs:
-        against: the comparison condition, "full" or "easy" (named through AGAINST).
-        removed: True when the rows remove a part, False when they keep a part alone.
-    Outputs:
-        str, the sentences.
-    """
-    name = AGAINST[against][0]
-    tested = "without that part" if removed else "with only that part"
-    return (f"Each point is the mean over a domain's targets of the change in squared error from {name} (the target's "
-            f"squared error under the condition minus under {name}; below 0 is better than {name}); the box is its 95% "
-            f"t-interval. The dashed line at 0 is {name}. Stars: two-sided paired t-test over the targets of the squared "
-            f"error {tested} against {name}'s (the interval's own test: a box excluding 0 is p < .05). Uncorrected for "
-            "multiple comparisons; * p < .05, ** p < .01, *** p < .001; n.s., not significant.")
-
-
-def number_lines(table: pd.DataFrame, means: pd.DataFrame, targets: pd.Series, against: str,
-                 domain_names: dict[str, str]) -> list[str]:
-    """
-    The caption's list of plotted numbers: per domain, the mean squared error of the Baseline and of the full
-    transcript, then each row's change, interval and p.
-
-    Inputs:
-        table: domain_changes' first table (domain, row, estimate, lo, hi, p).
-        means: domain_changes' second table (columns full and easy, indexed by domain).
-        targets: the number of targets per domain.
-        against: the comparison condition, "full" or "easy".
-        domain_names: domain key -> display name; also the order of the domains.
-    Outputs:
-        list of str: a heading line, then one line per domain.
-    """
-    lines = [f"Change in squared error from {AGAINST[against][0]} (95% interval), p:"]
-    for domain in (d for d in domain_names if d in means.index):
-        cells = [(f"mean squared error: Baseline {means.loc[domain, 'easy']:.2f}, full transcript "
-                  f"{means.loc[domain, 'full']:.2f}")]
-        cells += [f"{r.row} {r.estimate:+.2f} ({r.lo:+.2f} to {r.hi:+.2f}), {lr.p_text(r.p)}"
-                  for r in table[table.domain == domain].itertuples()]
-        lines.append(f"{domain_names[domain]} ({targets[domain]} targets): " + "; ".join(cells) + ".")
-    return lines
-
-
 def draw_row(axes, table: pd.DataFrame, rows: list[str], removed: bool, colours: dict[str, str],
              domain_names: dict[str, str], titles: bool = True, alpha: float | None = None,
              baselines: pd.DataFrame | None = None, span: tuple[float, float] | None = None,
@@ -332,7 +288,7 @@ def figure(table: pd.DataFrame, rows: list[str], removed: bool, colours: dict[st
     fig, axes = plt.subplots(1, len(domains), figsize=(5.2, 1.3 + 0.3 * (len(rows) - 3 + (baselines is not None))),
                              sharey=True, gridspec_kw={"wspace": 0.08})
     draw_row(np.atleast_1d(axes), table, rows, removed, colours, domain_names, baselines=baselines)
-    fig.supxlabel(f"Δ Squared error vs {AGAINST[against][1]}", fontsize=8, y=-0.12)
+    fig.supxlabel(f"Δ Squared error vs {AGAINST[against]}", fontsize=8, y=-0.12)
     return unclip_markers(fig)
 
 
@@ -364,5 +320,5 @@ def grid(tables: dict[str, pd.DataFrame], rows: list[str], removed: bool, colour
         right = max(ax.get_xlim()[1] for ax in axes.flat)
         for ax in axes.flat:
             ax.set_xlim(ax.get_xlim()[0], right)
-    fig.supxlabel(f"Δ Squared error vs {AGAINST[against][1]}", fontsize=8, y=-0.12 / len(tables))
+    fig.supxlabel(f"Δ Squared error vs {AGAINST[against]}", fontsize=8, y=-0.12 / len(tables))
     return unclip_markers(fig)

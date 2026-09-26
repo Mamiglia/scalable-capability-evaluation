@@ -2,7 +2,7 @@
 Shared plotting code: the figure style, protocol and domain names and colours, the axis helpers other figure modules
 import (unclip_markers, ci95, stars), and the prediction figures and tables of the exploratory runner
 scripts/analyses/results.py (forecast_figure, also drawn by scripts/analysis/capability_signal.py; bar_figure,
-semester_table, task_figure, timeline_figure, frontier_figure; reasoning_figure, which nothing calls at present).
+semester_table, task_figure, timeline_figure, frontier_figure).
 Judge protocols are drawn as the best judge on references, in the one variant per protocol the caller chooses.
 matplotlib.use("Agg") below is deliberate: figures go to files, nothing renders inline in an IDE cell.
 """
@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
 
-from analysis.stats import BASELINE, BEST, JUDGED, METRICS, one_per_target
+from analysis.stats import BASELINE, BEST, METRICS, one_per_target
 
 plt.rcParams.update({
     "font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
@@ -682,103 +682,6 @@ def frontier_figure(forecasts: pd.DataFrame, domain: str, variants: dict[str, st
     handles.append(plt.Line2D([], [], color="grey", lw=0.8, ls="--", label=LABELS[BASELINE]))
     fig.legend(handles=handles, loc="outside lower center", ncol=2, frameon=False)
     fix_axes_height(fig, ax)  # the theta panel keeps the shared height; the lower panel is half of it
-    fig.savefig(path, bbox_inches="tight")
-    plt.close(fig)
-
-
-def reasoning_figure(forecasts: pd.DataFrame, domain: str, semester: str, variants: dict[str, str], reasoning: set[str], path,
-                     cut: float = 2.0, mse_cut: float = 400.0) -> None:
-    """
-    Draws one task split by whether each target is a reasoning model, in two panels side by side. Left: the targets in
-    two slots (no reasoning, reasoning), sorted by theta* within a slot, the truth as a short black bar with an open
-    circle (no reasoning) or diamond (reasoning), each TIMELINE protocol's prediction as a filled circle offset inside
-    the target's sub-slot with a thin connector, and the Baseline as a dashed segment per slot. Right: per protocol and
-    group, a bar at the group's MSE as a percentage of the group's Baseline MSE (reasoning hatched), one circle per
-    target at its squared error on the same scale, and a dashed line at 100.
-
-    Inputs:
-        forecasts: the forecasts table (calibration.forecasts rows, every column).
-        domain: the domain's code key.
-        semester: the task's semester.
-        variants: protocol -> the variant to draw.
-        reasoning: names of the target models that reason (show chain of thought).
-        path: the image file to write.
-        cut: the top of the left panel's theta axis; a prediction above it is drawn as a triangle on the cut line and
-            the top tick reads ">cut".
-        mse_cut: the top of the right panel's axis, in percent; a bar or circle above it is marked by a triangle on
-            the cut line and the top tick reads ">mse_cut%".
-    Outputs:
-        the figure, written to path.
-    """
-    f = one_per_target(forecasts)
-    f = f[(f.domain == domain) & (f.semester == semester) & np.array([variants.get(pr, "-") == v for pr, v in zip(f.protocol, f.variant)])]
-    truth = f.drop_duplicates("model").set_index("model").theta
-    groups = [("no reasoning", [m for m in truth.index if m not in reasoning]), ("reasoning", [m for m in truth.index if m in reasoning])]
-    base = float(f[f.protocol == BASELINE].theta_hat.iloc[0])
-    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(4.6, 2.4), layout="constrained", gridspec_kw={"width_ratios": [3, 2]})
-    for gi, (name, models) in enumerate(groups):
-        models = sorted(models, key=lambda m: truth[m])
-        slots = np.linspace(-0.3, 0.3, len(models)) if len(models) > 1 else np.zeros(1)
-        width = (slots[1] - slots[0]) if len(models) > 1 else 0.2
-        offsets = dict(zip(TIMELINE, np.linspace(-0.3 * width, 0.3 * width, len(TIMELINE))))
-        ax.hlines(base, gi - 0.4, gi + 0.4, color="grey", lw=0.8, ls="--", zorder=1)
-        for slot, m in zip(slots, models):
-            xc, t = gi + slot, truth[m]
-            ax.hlines(t, xc - 0.42 * width, xc + 0.42 * width, color=TRUE, lw=0.7, zorder=3)  # the truth level every connector ends on
-            for p in TIMELINE:
-                g = f[(f.protocol == p) & (f.model == m)]
-                if g.empty or not np.isfinite(g.theta_hat.iloc[0]):
-                    continue
-                xi, yi = xc + offsets[p], float(g.theta_hat.iloc[0])
-                if yi > cut:  # off the top: a triangle on the cut line
-                    ax.plot([xi, xi], [t, cut], color=COLORS[p], lw=0.5, alpha=0.6, zorder=2)
-                    ax.scatter(xi, cut, s=18, marker="^", facecolor=COLORS[p], edgecolor="none", zorder=6, clip_on=False)
-                    continue
-                ax.plot([xi, xi], [min(t, yi), max(t, yi)], color=COLORS[p], lw=0.5, alpha=0.6, zorder=2)
-                ax.scatter(xi, yi, s=12, facecolor=COLORS[p], edgecolor="none", zorder=4)
-            ax.scatter(xc, t, s=18 if gi == 0 else 24, marker="o" if gi == 0 else "D", facecolor="white", edgecolor=TRUE, linewidth=0.8, zorder=5)
-    ax.set_xticks([0, 1], [f"{n}\n(n={len(ms)})" for n, ms in groups])
-    ax.set_xlim(-0.6, 1.6)
-    lo = min(f[f.protocol.isin(TIMELINE)].theta_hat.min(), truth.min(), base)
-    ax.set_ylim(lo - 0.2, cut)
-    ticks = [t for t in ax.get_yticks() if ax.get_ylim()[0] <= t < cut] + [cut]
-    ax.set_yticks(ticks, [f"{t:g}" for t in ticks[:-1]] + [f">{cut:g}"])
-    ax.set_ylabel("Model Capability (θ)")
-    ax.text(0, 1.02, f"{DOMAIN_LABELS.get(domain, domain)} {semester}", transform=ax.transAxes, color="grey", ha="left")
-    # right: per protocol and group, the MSE and each target's squared error as % of the group's Baseline MSE
-    err = f.assign(err=(f.theta_hat - f.theta) ** 2, group=f.model.map(lambda m: "reasoning" if m in reasoning else "no reasoning"))
-    base_mse = err[err.protocol == BASELINE].groupby("group").err.mean()  # the group's Baseline MSE
-    err = err.assign(err=100 * err.err / err.group.map(base_mse))  # relative: % of the group's baseline MSE
-    mse = err.groupby(["protocol", "group"]).err.mean()
-    for i, p in enumerate(TIMELINE):
-        for gi, (name, _) in enumerate(groups):
-            xi, v = i + (-0.19 if gi == 0 else 0.19), mse.get((p, name), np.nan)
-            ax2.bar(xi, v, width=0.36, color=COLORS[p], alpha=0.45, hatch=None if gi == 0 else "///", edgecolor="white" if gi else "none", linewidth=0.4)
-            pts = err[(err.protocol == p) & (err.group == name)].err.dropna().to_numpy()  # one solid circle per model
-            pts_in = pts[pts <= mse_cut]
-            ax2.scatter(np.full(len(pts_in), xi) + np.linspace(-0.08, 0.08, len(pts_in)), pts_in, s=12, facecolor=COLORS[p],
-                        edgecolor="black", linewidth=0.4, zorder=5)
-            if (pts > mse_cut).any():
-                ax2.scatter(np.full((pts > mse_cut).sum(), xi), np.full((pts > mse_cut).sum(), mse_cut), s=16, marker="^",
-                            facecolor=COLORS[p], edgecolor="black", linewidth=0.4, zorder=6, clip_on=False)
-    ax2.axhline(100, color="grey", lw=0.8, ls="--", zorder=3)  # both groups' baselines are 100% by construction
-    for i, p in enumerate(TIMELINE):  # bars above the cut: a triangle on the cut line
-        for gi, (name, _) in enumerate(groups):
-            if mse.get((p, name), 0) > mse_cut:
-                ax2.scatter(i + (-0.19 if gi == 0 else 0.19), mse_cut, s=22, marker="^", facecolor=COLORS[p], edgecolor="none", zorder=6, clip_on=False)
-    ax2.set_ylim(0, mse_cut)
-    ticks = [t for t in ax2.get_yticks() if 0 <= t < mse_cut] + [mse_cut]
-    ax2.set_yticks(ticks, [f"{t:g}" for t in ticks[:-1]] + [f">{mse_cut:g}%"])
-    ax2.set_xticks(range(len(TIMELINE)), [LABELS[p] for p in TIMELINE])
-    ax2.tick_params(axis="x", rotation=90)
-    ax2.set_ylabel(METRIC_LABELS["pct"])
-    handles = [plt.Line2D([], [], marker="o", ms=4, ls="", markerfacecolor="white", markeredgecolor=TRUE, label="Target models, no reasoning"),
-               plt.Line2D([], [], marker="D", ms=4, ls="", markerfacecolor="white", markeredgecolor=TRUE, label="Target models, reasoning")]
-    handles += [plt.Line2D([], [], marker="o", ms=4, ls="", color=COLORS[p], label=LABELS[p]) for p in TIMELINE]
-    handles += [plt.Line2D([], [], color="grey", lw=0.8, ls="--", label=LABELS[BASELINE]),
-                plt.Line2D([], [], marker="o", ms=3.5, ls="", color="#888888", markeredgecolor="black", markeredgewidth=0.4, label="one model (squared error)")]
-    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False)
-    fix_axes_height(fig, ax)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 

@@ -8,8 +8,8 @@ Reproduce the paper's figures and tables from the hf data.
     uv run python scripts/analysis/run.py --config my.yaml       # another configuration
 
 Every setting is in scripts/analysis/config.yaml. Outputs go to analysis/: forecasts/ (the two tables every step
-reads), one folder per group with its figures (each with a .txt of every plotted number and its test) and tables,
-and cache/ (expensive intermediates, reused when present; delete it for a clean run). Launches no judging.
+reads), one folder per group with its figures and a CSV of every number they show (with its test),
+and cache/ (expensive intermediates, reused when present; delete it for a clean run).
 
 Figure and table numbers, and the output in analysis/<step>/ behind each:
     capability_signal Figure 3 error_by_protocol, Figure 10 prediction_example, Figure 16 domain_glm_effects, Figure 17
@@ -23,8 +23,6 @@ Figure and table numbers, and the output in analysis/<step>/ behind each:
     sensitivity       Figure 15 judge_choice, Figure 19 item_count, Figure 20 reference_count, Figure 25
                       saturation_boundary, Figure 27 cost, Figure 28 ensemble; Table 8 candidate_judges.csv, Table 10
                       saturation_boundary_pairwise.csv
-Not included:
-Figures 11 to 14 (scripts/analyses/domain_figures.py), Figure 26 (branch prediction-horizon)
 """
 import argparse
 import subprocess

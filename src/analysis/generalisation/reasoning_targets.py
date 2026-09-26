@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
 
-from analysis.likelihood_ratio import num, p_text
 from analysis.plots import ci95, stars, unclip_markers
 
 REMOVED_CONDITION = "reasoning-hidden"  # the judge's run on transcripts with the reasoning removed
@@ -172,38 +171,36 @@ def reasoning_targets_figure(shown: pd.DataFrame, removed: pd.DataFrame, tests: 
     return unclip_markers(fig)
 
 
-def caption(shown: pd.DataFrame, removed: pd.DataFrame, tests: dict[str, dict], judge: str) -> str:
+def target_table(shown: pd.DataFrame, removed: pd.DataFrame, judge: str) -> pd.DataFrame:
     """
-    The text of the figure's .txt file: what the figure draws, each group's mean squared error with its 95% t-interval
-    and every target's θ*, predicted θ and squared error, then the three tests.
+    Every target's θ*, predicted θ and squared error, one row per point drawn: the non-reasoning and reasoning targets
+    with the reasoning shown, and the reasoning targets with it removed.
 
     Inputs:
-        shown: the rows shown returns.
-        removed: the rows removed returns.
-        tests: group_tests' dict.
-        judge: the judge's shortname, quoted in the text.
+        shown: the rows shown returns (model, group, theta, theta_hat, err).
+        removed: the rows removed returns (model, theta, theta_hat, err).
+        judge: the Pairwise judge used in both conditions.
     Outputs:
-        str, the caption.
+        DataFrame with columns group ("non-reasoning", "reasoning" or "reasoning removed"), model, judge, theta,
+        theta_hat, err; sorted by group and theta.
     """
-    def group_lines(title: str, g: pd.DataFrame) -> list[str]:
-        v = g.err.to_numpy(float)
-        return [f"{title} ({len(g)}): mean squared error {num(v.mean())} (95% CI {num(max(v.mean() - ci95(v), 0))} to "
-                f"{num(v.mean() + ci95(v))}).",
-                *[f"  {r.model}: θ* {num(r.theta)}, predicted {num(r.theta_hat)}, squared error {num(r.err)}."
-                  for r in g.sort_values("theta").itertuples()]]
+    rows = pd.concat([shown, removed.assign(group="reasoning removed")], ignore_index=True)
+    rows = rows.assign(judge=judge)[["group", "model", "judge", "theta", "theta_hat", "err"]]
+    return rows.sort_values(["group", "theta"], ignore_index=True)  # the groups' names sort in the figure's order
 
-    lines = [line for group, title in GROUPS.items() for line in group_lines(title, shown[shown.group == group])]
-    lines += group_lines("Reasoning targets, reasoning removed", removed)
-    lines += [""] + [f"{k}: mean squared error difference {num(t['diff'], sign=True)}, t({t['df']:.1f}) = {num(t['t'])}, "
-                     f"{p_text(t['p'])}." for k, t in tests.items()]
-    return ("The Pairwise judge on the Maths 2025-I targets, whose references (the 2024-II roster) are all "
-            f"non-reasoning models; the task's best judge on references ({judge}), shown the targets' reasoning, and "
-            "the same judge's forecasts from transcripts whose reasoning is removed (hollow light-blue diamonds, "
-            "right-hand slot) for the five reasoning targets. The non-reasoning targets carry no reasoning, so their "
-            "forecasts are unchanged and not drawn again. Left: predicted against true capability, the diagonal a "
-            "perfect forecast. Right: each target's squared error, the large marker at the group's mean and the box its "
-            "95% t-interval, floored at 0. The reasoning targets are the five whose transcripts carry a reasoning trace "
-            "(DeepSeek-R1 and MiniMax-M1 always reason; the three Qwen3 models were collected with reasoning enabled). "
-            "Each bracket marks Welch's t-test of squared error against the non-reasoning targets (* p < .05, "
-            "** p < .01, *** p < .001; n.s., not significant), two-sided, uncorrected. The paired t-test of the "
-            "reasoning targets with and without reasoning is reported here, not drawn.\n\n" + "\n".join(lines) + "\n")
+
+def group_errors(targets: pd.DataFrame) -> pd.DataFrame:
+    """
+    Per group, the mean squared error over its targets and the mean's 95% t-interval with its lower end floored at 0,
+    as the figure's boxes draw it.
+
+    Inputs:
+        targets: target_table rows (group, err).
+    Outputs:
+        DataFrame with columns group, n, mean, lo, hi; one row per group, in the figure's order.
+    """
+    rows = []
+    for group, g in targets.groupby("group", sort=False):
+        v = g.err.to_numpy(float)
+        rows.append(dict(group=group, n=len(v), mean=v.mean(), lo=max(v.mean() - ci95(v), 0.0), hi=v.mean() + ci95(v)))
+    return pd.DataFrame(rows)

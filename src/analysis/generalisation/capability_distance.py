@@ -11,7 +11,6 @@ import pandas as pd
 from scipy import stats as scipy_stats
 
 from analysis import loading
-from analysis.likelihood_ratio import num, p_text
 from analysis.plots import unclip_markers
 from analysis.stats import BASELINE
 from reference import tables
@@ -78,23 +77,25 @@ def bin_errors(table: pd.DataFrame, protocols: list[str], draws: int, seed: int)
 
 def slope_tests(table: pd.DataFrame, domains: list[str], protocols: list[str]) -> pd.DataFrame:
     """
-    Per domain and series (the Baseline and each protocol), the least-squares slope of squared error on distance over
-    the domain's targets, its standard error and the two-sided t-test that it is 0 (n - 2 degrees of freedom).
-    Targets share their task's references, so p is optimistic.
+    Per domain and series (the Baseline and each protocol), the least-squares line of squared error on distance over
+    the domain's targets: its slope, the slope's standard error and two-sided t-test that it is 0 (n - 2 degrees of
+    freedom), and its intercept (the Baseline's line is the figure's dashed line). Targets share their task's
+    references, so p is optimistic.
 
     Inputs:
         table: rows with domain, protocol, above_top and err (the output of distances or with_bins).
         domains: domain keys, in order.
         protocols: the protocols besides the Baseline.
     Outputs:
-        DataFrame with columns domain, protocol, n, slope, se, p; one row per domain and series.
+        DataFrame with columns domain, protocol, n, slope, se, p, intercept; one row per domain and series.
     """
     rows = []
     for domain in domains:
         for p in [BASELINE, *protocols]:
             d = table[(table.domain == domain) & (table.protocol == p)].dropna(subset=["err", "above_top"])
             fit = scipy_stats.linregress(d.above_top, d.err)
-            rows.append(dict(domain=domain, protocol=p, n=len(d), slope=fit.slope, se=fit.stderr, p=fit.pvalue))
+            rows.append(dict(domain=domain, protocol=p, n=len(d), slope=fit.slope, se=fit.stderr, p=fit.pvalue,
+                             intercept=fit.intercept))
     return pd.DataFrame(rows)
 
 
@@ -168,51 +169,3 @@ def capability_distance_figure(boxes: pd.DataFrame, table: pd.DataFrame, domains
     fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=3, frameon=False, fontsize=7)
     return unclip_markers(fig)
 
-
-def caption(boxes: pd.DataFrame, table: pd.DataFrame, slopes: pd.DataFrame, domains: list[str], protocols: list[str],
-            display: dict, draws: int) -> str:
-    """
-    The text of the figure's .txt file: what the figure draws, then per domain the Baseline's line, every bin's mean
-    squared error and interval per protocol, and each series' slope test.
-
-    Inputs:
-        boxes: bin_errors rows.
-        table: with_bins rows.
-        slopes: slope_tests rows.
-        domains: domain keys, in order.
-        protocols: the protocols listed.
-        display: config.yaml's display section; uses protocol_names and domain_names.
-        draws: the number of bootstrap resamples, quoted in the text.
-    Outputs:
-        str, the caption.
-    """
-    names = display["protocol_names"]
-    sizes = table[table.protocol == BASELINE].groupby(["domain", "bin"]).size()
-    lines = []
-    for domain in domains:
-        base = table[(table.domain == domain) & (table.protocol == BASELINE)]
-        b1, b0 = np.polyfit(base.above_top, base.err, 1)
-        lines.append(f"{display['domain_names'][domain]}: the baseline's line, squared error = {num(b0)} "
-                     f"{'+' if b1 >= 0 else '−'} {num(abs(b1))} × distance.")
-        for _, g in boxes[boxes.domain == domain].groupby("bin"):
-            row = g.set_index("protocol")
-            lines.append(f"  bin at {num(row.x.iloc[0], sign=True)} ({int(row.n.iloc[0])} targets): " + "; ".join(
-                f"{names[p]} {num(row.loc[p, 'mean'])} ({num(row.loc[p, 'lo'])} to {num(row.loc[p, 'hi'])})"
-                for p in protocols if p in row.index) + ".")
-        for r in slopes[slopes.domain == domain].itertuples():
-            lines.append(f"  slope of squared error on distance, {names[r.protocol]}: {num(r.slope)} (SE {num(r.se)}), "
-                         f"{p_text(r.p)}.")
-    n = int(sizes.groupby("domain").sum().iloc[0])
-    per_bin = f"{sizes.min()}" if sizes.min() == sizes.max() else f"{sizes.min()} to {sizes.max()}"
-    return ("Squared error against how far each target's θ* sits above the strongest reference's, for 2025-II and "
-            f"2026-I, one panel per domain with its own distance axis. Each domain's {n} targets are split into "
-            f"{sizes.index.get_level_values('bin').nunique()} equal-count bins of distance ({per_bin} targets each). In "
-            "each bin, each dot is a protocol's mean squared error over the bin's "
-            "targets, placed side by side around the bin's mean distance, and the box is its 95% percentile-bootstrap "
-            f"interval over those targets ({draws:,} resamples); with 4 targets the intervals are rough. The dashed line "
-            "is the baseline's least-squares line of squared error on distance over the domain's targets, drawn 0.2 "
-            "beyond the outermost bins, with its 95% confidence band. Judge protocols use each task's best judge on "
-            "references. No test is drawn. Listed, not drawn: each series' least-squares slope of squared error on "
-            f"distance over the domain's {n} targets, two-sided t-test on {n - 2} degrees of freedom, uncorrected; "
-            "targets share their task's references, so p is optimistic.\n\nPer domain and bin (mean distance above the "
-            "strongest reference): mean squared error (95% interval):\n" + "\n".join(lines) + "\n")

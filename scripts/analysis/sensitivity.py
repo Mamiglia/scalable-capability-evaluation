@@ -3,17 +3,21 @@ How much the results depend on choices made in the analysis: which judge is used
 references there are, where the saturation boundary is drawn, what each protocol costs, and whether an ensemble of
 judges beats the single selected judge.
 
-Writes to <paths.outputs>/sensitivity/ (config.yaml); each figure as .pdf, .png and .svg with a .txt of its numbers:
+Writes to <paths.outputs>/sensitivity/ (config.yaml); each figure as .pdf, .png and .svg with its numbers as .csv:
     judge_choice            each target's squared error with the strongest, second and third strongest reference as
-                            judge; judge_choice_medians.csv (medians over tasks); candidate_judges.csv (each task's
-                            three candidate judges, ordered by their error on the references)
+                            judge; judge_choice.csv (the plotted means and t-intervals), judge_choice_targets.csv (every
+                            plotted target), judge_choice_medians.csv (medians over tasks), candidate_judges.csv (each
+                            task's three candidate judges, ordered by their error on the references)
     item_count              squared error against the number of judged items, for the selected pairwise and absolute
-                            scoring judges; breakdowns/item_count_{pairwise,absolute}_by_judge for every candidate judge
+                            scoring judges (item_count.csv); breakdowns/item_count_{pairwise,absolute}_by_judge for
+                            every candidate judge
     reference_count         pairwise squared error as the references are cut to the strongest or the weakest few
+                            (reference_count.csv)
     saturation_boundary     each protocol's error relative to the Baseline as the saturation boundary tightens;
                             saturation_boundary.csv (every protocol), saturation_boundary_pairwise.csv (pairwise judge)
-    cost                    squared error against dollar cost per semester
+    cost                    squared error against dollar cost per semester (cost.csv)
     ensemble                the mean prediction of the three candidate judges against the selected judge's
+                            (ensemble.csv)
 The item-count draws, reference subsets, refitted capabilities (theta*), cost curves and ensemble predictions are
 cached in <paths.cache>/ and reused when present; delete them to recompute.
 
@@ -34,18 +38,18 @@ from analysis.sensitivity import cost, ensemble, item_budget, judge_choice, satu
 from reference.freeze import TOP_K
 
 
-def write_txt(path: Path, caption: str, *tables: pd.DataFrame) -> None:
+def write_csv(table: pd.DataFrame, path: Path) -> None:
     """
-    Writes the numbers behind a figure as text: a one-line caption, then each table rounded to four decimals.
+    Writes the numbers behind a figure as a csv, rounded to four decimals (DataFrame.round, half to even: many medians
+    fall exactly halfway, where "%.4f" formatting would round the other way).
 
     Inputs:
-        path: the .txt file to write.
-        caption: what the numbers are.
-        tables: the tables to print, in order.
+        table: the numbers.
+        path: the .csv file to write.
     Outputs:
         path, written.
     """
-    path.write_text(caption + "\n\n" + "\n\n".join(t.round(4).to_string(index=False) for t in tables) + "\n")
+    table.round(4).to_csv(path, index=False)
 
 
 def pairwise_judges(forecasts: pd.DataFrame, config: dict) -> pd.DataFrame:
@@ -88,22 +92,19 @@ def run_judge_choice(config: dict, forecasts: pd.DataFrame, out: Path, cache: Pa
         out: the output folder (<paths.outputs>/sensitivity).
         cache: unused; every sensitivity analysis takes it.
     Outputs:
-        in out: judge_choice.{pdf,png,svg}; judge_choice.txt (the plotted means, every target's error, the medians);
-        judge_choice_medians.csv (median over tasks of the spread across judges, and of the gaps to absolute scoring and
-        the Baseline); candidate_judges.csv (per task and judge protocol, the three candidates from lowest to highest
-        error on the references).
+        in out: judge_choice.{pdf,png,svg}; judge_choice.csv (per protocol and judge rank: n targets, mean, the
+        t-interval's lo, hi and half-width); judge_choice_targets.csv (per protocol, judge rank and target: the plotted
+        squared error e and n_domains, the domains it is averaged over); judge_choice_medians.csv (median over tasks
+        of the spread across judges, and of the gaps to absolute scoring and the Baseline); candidate_judges.csv (per
+        task and judge protocol, the three candidates from lowest to highest error on the references).
     """
     variants, semesters, display = config["protocols"], config["tasks"]["semesters"], config["display"]
     f = judge_choice.judge_errors(forecasts, variants)
     medians = judge_choice.medians(f, semesters)
     medians.to_csv(out / "judge_choice_medians.csv", header=["mse"], float_format="%.3f")
     plotted = judge_choice.figure(f, semesters, display["protocol_names"], display["protocol_colours"], str(out / "judge_choice"))
-    per_target = judge_choice.by_rank(f, semesters)
-    write_txt(out / "judge_choice.txt",
-              f"Squared error per target ({', '.join(semesters)}, mean over its domains) with the judge of each theta* rank "
-              "among the three candidates; mean and 95% t-interval half-width per column (Figure 15); then every target's "
-              "error; then the Appendix D.3 medians over tasks (MSE).",
-              plotted, per_target, medians.rename("mse").reset_index().rename(columns={"index": "median over tasks"}))
+    write_csv(plotted, out / "judge_choice.csv")
+    write_csv(judge_choice.by_rank(f, semesters), out / "judge_choice_targets.csv")
     judge_choice.candidate_judges(forecasts, variants).to_csv(out / "candidate_judges.csv", index=False)
 
 
@@ -119,8 +120,11 @@ def run_item_count(config: dict, forecasts: pd.DataFrame, out: Path, cache: Path
         out: the output folder (<paths.outputs>/sensitivity).
         cache: folder for the per-subset errors, reused when present.
     Outputs:
-        in out: item_count.{pdf,png,svg,txt} for each task's selected judges, and
-        breakdowns/item_count_{pairwise,absolute}_by_judge.{pdf,png,svg,txt} for every candidate judge;
+        in out: item_count.{pdf,png,svg,csv} for each task's selected judges, and
+        breakdowns/item_count_{pairwise,absolute}_by_judge.{pdf,png,svg,csv} for every candidate judge; each csv has
+        one row per plotted point: protocol (item_count) or judge (its theta* rank, the breakdowns), semester, domain,
+        n (judged items), median, lo and hi (2.5 and 97.5 percentiles over the item subsets) and baseline (the
+        Baseline's MSE);
         in cache: item_count_pairwise.csv and item_count_direct.csv (one row per task, judge, subset size and draw).
     """
     budget, display, domains = config["sensitivity"]["item_budget"], config["display"], config["tasks"]["domains"]
@@ -138,13 +142,12 @@ def run_item_count(config: dict, forecasts: pd.DataFrame, out: Path, cache: Path
     shared = dict(x="n", xlabel="Judged items", xticks=(10, 50, 100), colours=display["domain_colours"], markers=display["domain_markers"],
                   names=display["domain_names"])
     table = item_budget.curves_figure(both, key="mse", path=str(out / "item_count"), **shared)
-    write_txt(out / "item_count.txt", "Squared error of the selected judge's predictions against the number of judged items "
-              "(Figure 19): median over random item subsets, 2.5-97.5 percentile band, the task's baseline MSE.", table)
+    write_csv(table.rename(columns={"row": "protocol"}), out / "item_count.csv")
     (out / "breakdowns").mkdir(exist_ok=True)
     for name, df, key in (("pairwise", pair, "linear"), ("absolute", rate, "direct")):
         path = out / "breakdowns" / f"item_count_{name}_by_judge"
         table = item_budget.curves_figure(df.assign(row="Top-" + df.judge_rank.astype(str) + " judge"), key=key, path=str(path), **shared)
-        write_txt(path.with_suffix(".txt"), f"As item_count, {name} judging by each candidate judge (row: its theta* rank).", table)
+        write_csv(table.rename(columns={"row": "judge"}), path.with_suffix(".csv"))
 
 
 def run_reference_count(config: dict, forecasts: pd.DataFrame, out: Path, cache: Path) -> None:
@@ -158,8 +161,10 @@ def run_reference_count(config: dict, forecasts: pd.DataFrame, out: Path, cache:
         out: the output folder (<paths.outputs>/sensitivity).
         cache: folder for the per-subset errors, reused when present.
     Outputs:
-        in out: reference_count.{pdf,png,svg,txt}; in cache: reference_count.csv (one row per task and reference
-        subset).
+        in out: reference_count.{pdf,png,svg}; reference_count.csv (one row per plotted point: references_kept
+        ("Keep stronger" or "Keep weaker"), semester, domain, k (references kept), median, lo and hi (2.5 and 97.5
+        percentiles over the kept subsets) and baseline (the Baseline's MSE with every reference)); in cache:
+        reference_count.csv (one row per task and reference subset).
     """
     display, csv = config["display"], cache / "reference_count.csv"
     if not csv.exists():
@@ -170,9 +175,7 @@ def run_reference_count(config: dict, forecasts: pd.DataFrame, out: Path, cache:
     table = item_budget.curves_figure(ends.assign(row="Keep " + ends.keep), key="linear", x="k", xlabel="Reference models",
                                       xticks=(2, 4, 6, 8), colours=display["domain_colours"], markers=display["domain_markers"],
                                       names=display["domain_names"], path=str(out / "reference_count"))
-    write_txt(out / "reference_count.txt", "Squared error of pairwise judging with k references kept (Figure 20): median over "
-              "the third of the k-subsets keeping the strongest (or weakest) references, 2.5-97.5 percentile band, the task's "
-              "baseline MSE (all references).", table)
+    write_csv(table.rename(columns={"row": "references_kept"}), out / "reference_count.csv")
 
 
 def run_saturation_boundary(config: dict, forecasts: pd.DataFrame, out: Path, cache: Path) -> None:
@@ -188,7 +191,7 @@ def run_saturation_boundary(config: dict, forecasts: pd.DataFrame, out: Path, ca
         out: the output folder (<paths.outputs>/sensitivity).
         cache: folder for the refitted theta*, reused when present.
     Outputs:
-        in out: saturation_boundary.{pdf,png,svg,txt}; saturation_boundary.csv (every protocol's error ratio to the
+        in out: saturation_boundary.{pdf,png,svg}; saturation_boundary.csv (every protocol's error ratio to the
         Baseline per level and domain, with bootstrap intervals); saturation_boundary_pairwise.csv (the pairwise judge's
         ratios and item counts); in cache: saturation_theta.csv.
     """
@@ -203,12 +206,8 @@ def run_saturation_boundary(config: dict, forecasts: pd.DataFrame, out: Path, ca
     table.to_csv(out / "saturation_boundary.csv", index=False, float_format="%.4f")
     pairwise = saturation_boundary.pairwise_table(table, theta, domains, levels, display["domain_names"])
     pairwise.to_csv(out / "saturation_boundary_pairwise.csv", index=False, float_format="%.4f")
-    drawn = display["paper_protocols"]
-    saturation_boundary.figure(table, domains, levels, drawn, display["protocol_names"], display["protocol_colours"],
-                               display["domain_names"], str(out / "saturation_boundary"))
-    write_txt(out / "saturation_boundary.txt", "MSE over the Baseline's MSE on the same targets per saturation level, with its "
-              "bootstrap 95% interval over targets (Figure 25); domain 'all' pools every target (Table 10's pooled row).",
-              table[table.protocol.isin(drawn)].drop(columns="judge"))
+    saturation_boundary.figure(table, domains, levels, display["paper_protocols"], display["protocol_names"],
+                               display["protocol_colours"], display["domain_names"], str(out / "saturation_boundary"))
 
 
 def run_cost(config: dict, forecasts: pd.DataFrame, out: Path, cache: Path) -> None:
@@ -223,7 +222,9 @@ def run_cost(config: dict, forecasts: pd.DataFrame, out: Path, cache: Path) -> N
         out: the output folder (<paths.outputs>/sensitivity).
         cache: folder for the cost curves, reused when present.
     Outputs:
-        in out: cost.{pdf,png,svg,txt}; in cache: cost_curves.csv (judge protocols per item fraction and draw) and
+        in out: cost.{pdf,png,svg}; cost.csv (one row per domain, protocol and item fraction: fraction (empty for
+        the protocols without a judge and for the Baseline, "mean_ref"), cost (mean dollars per semester), mse and its
+        bootstrap 95% interval lo, hi); in cache: cost_curves.csv (judge protocols per item fraction and draw) and
         cost_points.csv (the protocols without a judge).
     """
     c, display, statistics = config["sensitivity"]["cost"], config["display"], config["statistics"]
@@ -237,8 +238,7 @@ def run_cost(config: dict, forecasts: pd.DataFrame, out: Path, cache: Path) -> N
     s = cost.summarise(pd.read_csv(curves_csv), pd.read_csv(points_csv), statistics["seed"], statistics["bootstrap_draws"])
     cost.figure(s, config["tasks"]["domains"], display["paper_protocols"], display["protocol_names"], display["protocol_colours"],
                 display["domain_names"], str(out / "cost"))
-    write_txt(out / "cost.txt", "Per domain: mean cost per semester ($) and MSE over every target with its bootstrap 95% "
-              "interval; judge protocols per fraction of the judged items; mean_ref is the baseline (Figure 27).", s)
+    write_csv(s, out / "cost.csv")
 
 
 def run_ensemble(config: dict, forecasts: pd.DataFrame, out: Path, cache: Path) -> None:
@@ -252,8 +252,9 @@ def run_ensemble(config: dict, forecasts: pd.DataFrame, out: Path, cache: Path) 
         out: the output folder (<paths.outputs>/sensitivity).
         cache: folder for the ensemble predictions, reused when present.
     Outputs:
-        in out: ensemble.{pdf,png,svg,txt}; in cache: ensemble_forecasts.csv (every candidate's prediction per task and
-        target).
+        in out: ensemble.{pdf,png,svg}; ensemble.csv (one row per task: domain, semester, the MSEs baseline, single
+        (the selected judge, named in judge) and ensemble, and difference = ensemble - single); in cache:
+        ensemble_forecasts.csv (every candidate's prediction per task and target).
     """
     display, csv = config["display"], cache / "ensemble_forecasts.csv"
     if not csv.exists():
@@ -262,9 +263,7 @@ def run_ensemble(config: dict, forecasts: pd.DataFrame, out: Path, cache: Path) 
     t = ensemble.task_errors(pd.read_csv(csv, keep_default_na=False, na_values=[""]), pairwise_judges(forecasts, config), TOP_K,
                              config["tasks"]["domains"])
     ensemble.figure(t, config["tasks"]["domains"], display["domain_colours"], display["domain_markers"], display["domain_names"], str(out / "ensemble"))
-    write_txt(out / "ensemble.txt", "Per task, MSE over the targets of the baseline, of the selected pairwise judge and of the "
-              "mean of the three candidates' predictions, on the items all three judged; difference = ensemble - single (Figure 28).",
-              t.assign(difference=t.ensemble - t.single))
+    write_csv(t.assign(difference=t.ensemble - t.single), out / "ensemble.csv")
 
 
 ANALYSES = {"judge_choice": run_judge_choice, "item_count": run_item_count, "reference_count": run_reference_count,

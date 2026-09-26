@@ -14,8 +14,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from analysis import likelihood_ratio as lr
-from analysis.likelihood_ratio import num, p_text
-from analysis.plots import stars
+from analysis.plots import ci95, stars
 from analysis.stats import BASELINE
 from capability.evaluate import forecast
 from capability.task import Task
@@ -186,41 +185,21 @@ def frontier_figure(deltas: pd.DataFrame, tests: pd.DataFrame, vendors: dict[str
     return fig
 
 
-def caption(deltas: pd.DataFrame, tests: pd.DataFrame, display: dict, pairwise_judge: str, direct_judge: str) -> str:
+def group_summary(deltas: pd.DataFrame, tests: pd.DataFrame) -> pd.DataFrame:
     """
-    The text of the figure's .txt file: what the figure draws, then per protocol and group the mean change in squared
-    error with its 95% t-interval, the log likelihood ratio test and its mark, and every target's change.
+    Per protocol and group, the targets' mean change in squared error from the Baseline's with its 95% t-interval (the
+    figure's white circle and box), joined to group_tests' log likelihood ratio test and mark.
 
     Inputs:
-        deltas: error_deltas rows.
-        tests: group_tests rows.
-        display: config.yaml's display section; uses protocol_names.
-        pairwise_judge: the Pairwise judge's shortname, quoted in the text.
-        direct_judge: the Absolute scoring judge's shortname, quoted in the text.
+        deltas: error_deltas rows (protocol, group, delta).
+        tests: group_tests rows (protocol, group, n, llr, se, p, mark).
     Outputs:
-        str, the caption.
+        DataFrame with columns protocol, group, n, delta (the mean change), lo, hi, llr, se, p, mark; one row per
+        protocol of ROWS and group.
     """
-    names = display["protocol_names"]
-    by = tests.set_index(["protocol", "group"])
-    lines = []
+    means = []
     for protocol in ROWS:
-        lines.append(f"{names[protocol]}:")
         for group in ("closed", "open"):
-            e = deltas[(deltas.protocol == protocol) & (deltas.group == group)]
-            mean = e.delta.mean()
-            half = scipy_stats.t.ppf(0.975, len(e) - 1) * e.delta.std(ddof=1) / np.sqrt(len(e))
-            t = by.loc[(protocol, group)]
-            lines.append(f"  {group} ({len(e)} targets): mean change {num(mean, sign=True)} (95% CI {num(mean - half)} to "
-                         f"{num(mean + half)}); mean log likelihood ratio {num(t.llr)} (SE {num(t.se)}), {p_text(t.p)}, "
-                         f"marked {t.mark}; per target " + "; ".join(f"{r.model} {num(r.delta, sign=True)}"
-                                                                       for r in e.itertuples()) + ".")
-    return ("Closed-source targets: each target's squared error minus its baseline error (below 0: better than the "
-            "baseline, the references' mean θ*), reasoning hidden for every model and protocol. Six closed Coding 2026-I "
-            "targets (coloured by developer) and the eight open targets of the same task, both predicted from the same "
-            "eight 2025-II references on the frozen train items. Pairwise judge: "
-            f"{pairwise_judge}, reasoning hidden, linear conversion; Absolute scoring: {direct_judge}, reasoning hidden, "
-            "raw ratings; Embedding: the answer vectors with the reasoning stripped; Deterministic features: the regex "
-            "features of the text without reasoning; both regressions as in the main analysis. The white circle is a "
-            "group's mean and the box its 95% t-interval. Marks: one-sample t-test of the targets' log likelihood ratios "
-            "against the baseline's distribution (full reference set), two-sided, marked only when the mean is positive; "
-            "* p < .05, ** p < .01, *** p < .001, n.s. not significant.\n\n" + "\n".join(lines) + "\n")
+            e = deltas[(deltas.protocol == protocol) & (deltas.group == group)].delta.to_numpy(float)
+            means.append(dict(protocol=protocol, group=group, delta=e.mean(), lo=e.mean() - ci95(e), hi=e.mean() + ci95(e)))
+    return pd.DataFrame(means).merge(tests)[["protocol", "group", "n", "delta", "lo", "hi", "llr", "se", "p", "mark"]]

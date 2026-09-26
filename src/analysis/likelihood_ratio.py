@@ -23,42 +23,6 @@ SHAPE = "t"  # the shape the results use (user's choice, 2026-09-21); "normal" i
 Rule = Callable[[pd.Series, list[str]], pd.Series]  # (references' theta*, models) -> the models' theta-hat
 
 
-TEST_TEXT = ("For each target the log likelihood ratio is log p(θ* | protocol) − log p(θ* | references): each term "
-             "is a Student t distribution with n − 1 degrees of freedom (n = 7 or 8 references per task), centred "
-             "on a forecast fitted on the task's references (for the references' term, their mean θ*) and scaled "
-             "by that forecast's root-mean-square leave-one-model-out error on the references. The mean log "
-             "likelihood ratio over units is tested against 0 with a two-sided t-test. "
-             "Uncorrected for multiple comparisons; * p < .05, ** p < .01, *** p < .001.")
-
-
-def p_text(p: float) -> str:
-    """
-    Formats a p-value for a caption: "p < .001" below 0.001, else three decimals without the leading zero ("p = .012").
-
-    Inputs:
-        p: the p-value.
-    Outputs:
-        the text; "p not computed" when p is NaN or infinite.
-    """
-    if not np.isfinite(p):
-        return "p not computed"
-    return "p < .001" if p < 0.001 else f"p = {p:.3f}".replace("0.", ".", 1)
-
-
-def num(x: float, digits: int = 2, sign: bool = False) -> str:
-    """
-    Formats a number for a caption, with a true minus sign (U+2212) in place of the hyphen.
-
-    Inputs:
-        x: the number.
-        digits: decimals shown.
-        sign: if True, a number that is not negative gets a plus sign.
-    Outputs:
-        the text.
-    """
-    return (f"{x:+.{digits}f}" if sign else f"{x:.{digits}f}").replace("-", "−")
-
-
 def saturated(refs: pd.Series, models: list[str]) -> pd.Series:
     """
     The Baseline's prediction rule: every model is predicted the references' mean theta*.
@@ -396,29 +360,24 @@ def slope_tests(llr: pd.DataFrame, table: pd.DataFrame, distance: str) -> pd.Dat
     return pd.DataFrame([dict(domain=d, protocol=p, **slope_test(rows, x)) for (d, p), rows in keyed.groupby(["domain", "protocol"])])
 
 
-def chosen_judges(forecasts: pd.DataFrame, variants: dict[str, str], other_family: bool = False) -> pd.DataFrame:
+def chosen_judges(forecasts: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
     """
     The judge each target's pairwise and direct predictions come from, among the core-condition runs in the reported
-    variant: by default the task's best judge on references (the lowest leave-one-model-out error on the references, as
-    stats.best_judges picks); with other_family, per target the best among the judges of another developer family than
-    the target (as stats.best_other_family), so no model is judged by its own family.
+    variant: the task's best judge on references (the lowest leave-one-model-out error on the references, as
+    stats.best_judges picks).
 
     Inputs:
         forecasts: the forecasts table (analysis/forecasts/forecasts.csv); uses domain, semester, protocol, variant,
             judge, condition, model and judge_loo_mse.
         variants: protocol -> reported variant; only the judge protocols named here (pairwise, direct) are kept.
-        other_family: if True, pick per target among the judges of another family.
     Outputs:
         DataFrame with columns domain, semester, protocol, model, judge; one row per target and judge protocol, a tie
-        keeping the judge that comes first in forecasts. With other_family, a target with no such judge has no row.
+        keeping the judge that comes first in forecasts.
     """
-    family = stats.family
     core = stats.core_condition(forecasts)
     judged = [p for p in variants if p in ("pairwise", "direct")]
     core = core[core.protocol.isin(judged) & np.array([variants.get(p) == v for p, v in zip(core.protocol, core.variant)])]
     key = ["domain", "semester", "protocol"]
-    if other_family:
-        core, key = core[family(core.judge) != family(core.model)], key + ["model"]
     best = core[core.groupby(key).judge_loo_mse.transform("min") == core.judge_loo_mse]
     return best[["domain", "semester", "protocol", "model", "judge"]].drop_duplicates(["domain", "semester", "protocol", "model"])
 

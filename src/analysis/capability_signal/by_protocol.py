@@ -1,7 +1,7 @@
 """
 Squared error and log likelihood ratio of each protocol against the Baseline for the targets of the main analysis,
-summarised per target model (its squared error averaged over its domains) and per domain, as a figure, a table of
-means and tests, and a caption text.
+summarised per target model (its squared error averaged over its domains) and per domain, as a figure and a table of
+means and tests.
 
 The squared error is each target's own. The test is the log likelihood ratio of the target's measured θ* under the
 protocol's predictive distribution against the Baseline's (analysis.likelihood_ratio), tested against 0 with a target
@@ -159,51 +159,6 @@ def error_table(pooled: pd.DataFrame, tests: pd.DataFrame, protocols: list[str])
                        llr=by.loc[p, "llr"], llr_se=by.loc[p, "se"], llr_p=by.loc[p, "p"])
         rows.append(row)
     return pd.DataFrame(rows)
-
-
-def error_lines(table: pd.DataFrame, names: dict[str, str]) -> list[str]:
-    """
-    Writes one caption line per protocol: its mean squared error with the 95% interval and number of models, and for
-    protocols other than the Baseline the log likelihood ratio test and the paired t-test against the Baseline.
-
-    Inputs:
-        table: error_table's output.
-        names: protocol -> display name.
-    Outputs:
-        list of strings, one per row of `table`.
-    """
-    lines = []
-    for r in table.itertuples():
-        entry = (f"{names[r.protocol]}: mean squared error {lr.num(r.mse)} (95% CI {lr.num(r.lo)} to {lr.num(r.hi)}, "
-                 f"{r.models} models)")
-        if r.protocol != BASELINE:
-            entry += (f"; mean log likelihood ratio {lr.num(r.llr)} (SE {lr.num(r.llr_se)}), {lr.p_text(r.llr_p)}; "
-                      f"squared error minus the Baseline's {lr.num(r.delta, sign=True)}, paired t({r.delta_df:.0f}) = "
-                      f"{lr.num(r.delta_t)}, two-sided {lr.p_text(r.delta_p)}")
-        lines.append(entry + ".")
-    return lines
-
-
-def error_caption(table: pd.DataFrame, names: dict[str, str], judges: str) -> str:
-    """
-    Builds the text written next to the error-by-protocol figure: what the figure draws, which judges are used, how
-    the log likelihood ratio test works, then error_lines.
-
-    Inputs:
-        table: error_table's output.
-        names: protocol -> display name.
-        judges: the sentence describing the judges the judge protocols use.
-    Outputs:
-        the caption as one string ending in a newline.
-    """
-    return ("Squared error of each protocol's forecast of θ* for the 16 target models of 2025-II and 2026-I (8 per "
-            "semester). Each small point is one target model's squared error averaged over its four domains (Science, "
-            "Maths, Coding, Cyber); the large circle is the mean over models and the box its 95% t-interval. "
-            + judges + " Stars test whether a protocol's forecast explains the true θ* better than the "
-            "references' own distribution, with each target model (its four domains averaged) as the unit, 15 degrees "
-            "of freedom. " + lr.TEST_TEXT + " n.s.: not significant. Each protocol's line also gives the two-sided paired "
-            "t-test of the models' squared error against the Baseline's (not drawn).\n\n"
-            + "\n".join(error_lines(table, names)) + "\n")
 
 
 def domain_table(errors: pd.DataFrame, llr: pd.DataFrame, tests: pd.DataFrame, names: dict[str, str],

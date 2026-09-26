@@ -1,7 +1,7 @@
 """
 Draws one target's predictions as the predictive distributions the log likelihood ratio compares: the references' θ*
 at their release dates, the target's true θ*, and from the target's release date each protocol's Student t
-distribution of θ* as a one-sided violin. Also computes the numbers behind the drawing and writes its caption text.
+distribution of θ* as a one-sided violin. Also computes the numbers behind the drawing.
 """
 
 from pathlib import Path
@@ -63,9 +63,9 @@ def example_distributions(forecasts: pd.DataFrame, variants: dict[str, str], dom
             a transcript protocol).
     Outputs:
         tuple (refs, values): refs, the references' θ* indexed by model; values, a DataFrame with one row per
-        protocol (the Baseline first) and columns protocol, judge ("-" for the Baseline and transcript protocols),
-        theta (the target's θ*), forecast, spread, squared_error, log_lr (0 for the Baseline) and references (their
-        number).
+        protocol (the Baseline first) and columns domain, semester, target, protocol, judge ("-" for the Baseline and
+        transcript protocols), theta (the target's θ*), forecast, spread, squared_error, log_lr (0 for the Baseline)
+        and references (their number).
     """
     task = loading.tasks(loading.domain(domain), [semester])[0]
     refs, truth, df = task.references.theta, float(task.truth[target]), len(task.references.theta) - 1
@@ -85,8 +85,9 @@ def example_distributions(forecasts: pd.DataFrame, variants: dict[str, str], dom
                                                                  feature.get_features(task.test)]))
             spreads[p], judges[p] = (float(rule(refs, [target]).iloc[0]), float(np.sqrt(lr.loo_mse(rule, refs)))), "-"
     log_p = {p: float(scipy_stats.t.logpdf(truth, df, c, s)) for p, (c, s) in spreads.items()}
-    values = pd.DataFrame([dict(protocol=p, judge=judges[p], theta=truth, forecast=c, spread=s, squared_error=(c - truth) ** 2,
-                                log_lr=log_p[p] - log_p[BASELINE], references=len(refs)) for p, (c, s) in spreads.items()])
+    values = pd.DataFrame([dict(domain=domain, semester=semester, target=target, protocol=p, judge=judges[p], theta=truth,
+                                forecast=c, spread=s, squared_error=(c - truth) ** 2, log_lr=log_p[p] - log_p[BASELINE],
+                                references=len(refs)) for p, (c, s) in spreads.items()])
     return refs, values
 
 
@@ -153,34 +154,3 @@ def prediction_example_figure(values: pd.DataFrame, refs: pd.Series, dates: dict
               *(f"{names[p]}, log LR {log_lr[p]:.2f}".replace("-", "−") for p in protocols)]
     fig.legend(handles=handles, labels=labels, loc="outside lower center", ncol=2, frameon=False)
     return unclip_markers(fig)
-
-
-def example_caption(values: pd.DataFrame, domain_name: str, semester: str, target: str, names: dict[str, str]) -> str:
-    """
-    Builds the text written next to the prediction example figure: what it draws, which judges the judge protocols
-    use, then per protocol its prediction, spread, squared error and (except for the Baseline) log likelihood ratio.
-
-    Inputs:
-        values: example_distributions' values.
-        domain_name: the domain's display name.
-        semester: the task's semester.
-        target: the target model.
-        names: protocol -> display name.
-    Outputs:
-        the caption as one string ending in a newline.
-    """
-    by = values.set_index("protocol")
-    n = int(values.references.iloc[0])
-    lines = [f"{names[p]}: forecast {lr.num(r.forecast)}, spread {lr.num(r.spread)}, squared error {lr.num(r.squared_error)}"
-             + ("" if p == BASELINE else f", log likelihood ratio {lr.num(r.log_lr)}") + "." for p, r in by.iterrows()]
-    return (f"What one target's forecast looks like: {target} in {domain_name} {semester}, true θ* {lr.num(by.theta.iloc[0])}. "
-            f"Grey markers are the task's {n} references at their release dates; the black marker is the target's true θ* "
-            "at its release date. From that date each forecast is drawn as the distribution the log likelihood ratio uses: "
-            f"a Student t with {n - 1} degrees of freedom, centred on the forecast (the line across the violin) and scaled "
-            "by the forecast rule's root-mean-square leave-one-model-out error on the references (its spread). Grey: the "
-            "Baseline, the references' mean θ*; each protocol in its colour (judge protocols: the task's best judge on "
-            f"references, {', '.join(f'{names[p]} {j}' for p, j in by.judge.items() if j != '-')}). Every violin has the "
-            "same width per unit of density, so a narrower distribution is wider at its peak; each is cut 3 spreads from "
-            "its forecast or at the axis. The black line at θ* runs to the widest violin: where it crosses each violin's "
-            "edge is that distribution's density at the truth, and a protocol's log likelihood ratio is the log of its "
-            "density there over the Baseline's.\n\n" + "\n".join(lines) + "\n")

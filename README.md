@@ -23,8 +23,8 @@ uv run python scripts/analysis/run.py                # about three hours; --list
 ```
 
 Outputs land in `analysis/`: `forecasts/` (every protocol's forecast of every target, and the log
-likelihood ratios), then one folder per question the paper asks, each with its figures (and a
-`.txt` of every plotted number and its test) and tables: `capability_signal/` (is there capability information
+likelihood ratios), then one folder per question the paper asks, each with its figures and a CSV of every
+number they show (with its test): `capability_signal/` (is there capability information
 in saturated transcripts?), `transcript_parts/` (where in the transcript?), `generalisation/`
 (beyond the reference models?) and `sensitivity/` (how much do the analysis choices matter?).
 `run.py`'s docstring maps each output to its figure or table. Every setting is in
