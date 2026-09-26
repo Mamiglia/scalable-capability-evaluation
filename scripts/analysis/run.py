@@ -10,15 +10,18 @@ Every setting is in scripts/analysis/config.yaml. Outputs go to analysis/: forec
 reads), one folder per group with its figures (each with a .txt of every plotted number and its test) and tables,
 and cache/ (expensive intermediates, reused when present; delete it for a clean run). Launches no judging.
 
-Where each paper figure and table comes from (docs/manuscript_draft.pdf numbering):
-    capability_signal Figure 3 (error_by_protocol), Figure 10 (prediction_example), Figure 16 (domain_glm_effects),
-                      Figure 17 (domain_glm_contrasts), Figure 21 (no_self_judging); Tables 3, 6, 9
-    transcript_parts  Figure 4 (thirds_removed), Figure 5 (channels_removed, channel_shares), Figure 22
-                      (thirds_kept_alone), Figure 23 (thirds_other_protocols), Figure 24 (channels_other_protocols)
-    generalisation    Figure 6 (time), Figure 7 (reasoning_targets), Figure 8 (capability_distance), Figure 9
-                      (frontier), Figure 18 numbers and the Appendix D.5 tests (cross_domain); Table 7
-    sensitivity       Figure 15 (judge_choice), Figure 19 (item_count), Figure 20 (reference_count), Figure 25
-                      (saturation_boundary), Figure 27 (cost), Figure 28 (ensemble); Tables 8, 10
+Where each paper figure and table comes from (docs/manuscript_draft.pdf numbering; files in analysis/<step>/):
+    capability_signal Figure 3 error_by_protocol, Figure 10 prediction_example, Figure 16 domain_glm_effects, Figure 17
+                      domain_glm_contrasts, Figure 21 no_self_judging; Table 3 error_by_domain.csv, Table 6
+                      error_by_protocol.csv, Table 9 domain_glm_ratios.csv
+    transcript_parts  Figure 4 thirds_removed, Figure 5 channel_shares and channels_removed, Figure 22 thirds_kept_alone,
+                      Figure 23 thirds_other_protocols, Figure 24 channels_other_protocols
+    generalisation    Figure 6 error_over_time, Figure 7 reasoning_targets, Figure 8 capability_distance, Figure 9
+                      closed_targets, the numbers of Figure 18 and the Appendix D.5 tests cross_domain_*.csv; Table 7
+                      error_over_time.csv
+    sensitivity       Figure 15 judge_choice, Figure 19 item_count, Figure 20 reference_count, Figure 25
+                      saturation_boundary, Figure 27 cost, Figure 28 ensemble; Table 8 candidate_judges.csv, Table 10
+                      saturation_boundary_pairwise.csv
 Not here: Figures 11 to 14 (scripts/analyses/domain_figures.py), Figure 26 (branch prediction-horizon), and the drawing
 of Figure 18.
 """
