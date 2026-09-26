@@ -41,13 +41,20 @@ def direct_judges(forecasts: Path) -> pd.Series:
     return f.loc[f.groupby(["domain", "semester"]).judge_loo_mse.idxmin()].set_index(["domain", "semester"]).judge
 
 
+def published_ratings(condition: str, domain: str, semester: str, judge: str) -> pd.DataFrame:
+    """The audited ratings of a published direct challenge run, e.g. condition "channels-drop-reasoning" or
+    "truncated-thirds-23": logs/direct_<condition>/<domain>/<semester>/<judge>/<hash>/ratings.csv (generality-labs/judging)."""
+    (path,) = Path("logs", f"direct_{condition}", domain, semester, judge).glob("*/ratings.csv")
+    return pd.read_csv(path, dtype={"item": str})
+
+
 def on_items(cohort, keep: set[str]):
     """`cohort` restricted to the train items in `keep`."""
     return replace(cohort, items=cohort.items[cohort.items.item.astype(str).isin(keep)])
 
 
 DOMAIN_TITLES = {"science": "Science", "math": "Maths", "coding": "Coding", "cyber": "Cyber"}  # the paper's domain order
-FINAL = Path.home() / "Documents/AIS/LASR/manuscript/final_figs"  # the manuscript's final figures
+FINAL = Path("analysis/results/figures/paper")  # the paper figures and their .txt captions
 # the final figures' names and the caption sentences that differ between the two
 FINAL_NAMES = {"only": "kept_alone", "without": "removed"}
 # what a condition is compared with -> (in captions, on the x label): the full transcript or easy-item prediction
@@ -253,6 +260,7 @@ def caption_lines(stats: pd.DataFrame, fulls: pd.DataFrame, targets: pd.Series, 
 
 def save(fig: plt.Figure, out: Path, name: str, final: str | None) -> None:
     """The figure as .png and .svg under `out`, and under FINAL when `final` names it."""
+    FINAL.mkdir(parents=True, exist_ok=True)
     for folder, stem in [(out, name)] + ([(FINAL, final)] if final else []):
         for suffix in (".png", ".svg", ".pdf"):
             fig.savefig(folder / f"{stem}{suffix}", dpi=300, bbox_inches="tight")

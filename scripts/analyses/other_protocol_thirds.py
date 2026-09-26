@@ -10,7 +10,7 @@ Deterministic features: the 13 features (as other_protocol_channels.py) extracte
 onto the structured messages (src/challenges/channels/features.py --thirds -> positions/features_thirds.csv);
 standardised ridge refitted per condition.
 Absolute scoring: the main analysis's direct judge of each cell (lowest reference leave-one-out error) rates the cut transcripts of the 40 items
-(src/challenges/truncation prepare/run thirds-<kept>, artifacts/direct-judging-thirds/); every condition, the full
+(src/challenges/truncation prepare/run thirds-<kept>, published as logs/direct_truncated-thirds-<kept>/); every condition, the full
 transcript included, is calibrated on the ratings judged in all four conditions of its cell (protocols.direct_judge
 .scoring.calibrate, as challenges/truncation/compare_truncation.py). 2025-II and
 2026-I pooled (16 targets per domain), the 40 train items of the pairwise removal runs
@@ -18,13 +18,10 @@ transcript included, is calibrated on the ratings judged in all four conditions 
 Statistics and figure: analysis.challenges.contributions (paired change in squared error from the full transcript,
 two-sided paired t-test and t-interval).
 
-Run from the repo root (needs the T7 data and embeddings):
-  SMALL_JUDGE_DATA=/Volumes/T7/small-judge-remote/data \\
-  SMALL_JUDGE_EMBEDDINGS=/Volumes/T7/small-judge-remote/transcript-embeddings \\
+Run from the repo root (reads data/ and transcript-embeddings/, or SMALL_JUDGE_DATA / SMALL_JUDGE_EMBEDDINGS):
   uv run python scripts/analyses/other_protocol_thirds.py [--redraw]
 """
 import argparse
-import json
 import os
 from pathlib import Path
 
@@ -40,10 +37,7 @@ from analysis import loading
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
 from analysis.challenges.signal_glm import DOMAIN_COLORS
-from challenges.truncation.compare_truncation import baseline_ratings
-from challenges.truncation.run import THIRDS_ROOT
 from protocols import embeddings
-from protocols.direct_judge.judge import from_logs
 from protocols.direct_judge.scoring import calibrate
 from protocols.transcript_features.features import FEATURE_SETS
 from protocols.transcript_features.protocol import ALPHAS as FEATURE_ALPHAS
@@ -100,33 +94,28 @@ def compute(protocols, conditions=CONDITIONS) -> pd.DataFrame:
 
 
 def direct_errors() -> pd.DataFrame:
-    """Absolute scoring's squared error per cell and condition, on the (model, bench, item) ratings in every condition."""
-    key, errors = ["model", "bench", "item"], []
-    cells = sorted(p.parent.relative_to(THIRDS_ROOT / "inputs").parts[:3] for p in THIRDS_ROOT.glob("inputs/*/*/*/thirds-23"))
-    loo = contributions.direct_judges(FORECASTS)
-    cells = [(d, j, s) for d, j, s in cells if loo.get((d, s)) == j]  # a cell rated by more than one judge keeps the main analysis's
-    assert len(cells) == len(DOMAINS) * len(SEMESTERS), cells
-    for domain, judge, semester in cells:
-        runs, jobs = {}, {}
-        for condition in CONDITIONS[1:]:
-            name = f"{domain}/{judge}/{semester}/{condition}"
-            jobs[condition] = json.loads((THIRDS_ROOT / "inputs" / name / "job.json").read_text())
-            effective = THIRDS_ROOT / "effective" / name  # consolidate.py: the run's logs plus recollected ratings
-            runs[condition] = (from_logs(effective) if effective.is_dir()
-                               else pd.read_csv(THIRDS_ROOT / "results" / name / "ratings.csv", dtype={"item": str}))
-        runs["full"] = pd.read_csv(baseline_ratings(domain, judge, semester), dtype={"item": str})
-        refs, truth = pd.Series(jobs["thirds-23"]["references"]), pd.Series(jobs["thirds-23"]["truth"])
-        assert all(pd.Series(j["truth"]).equals(truth) and pd.Series(j["references"]).equals(refs) for j in jobs.values())
-        common = runs["thirds-23"][key]
-        for ratings in runs.values():
-            common = common.merge(ratings[key].drop_duplicates())
-        for condition, ratings in runs.items():
-            theta = calibrate(ratings.merge(common), refs).reindex(truth.index)
-            errors.append(pd.DataFrame({"protocol": "direct", "domain": domain, "semester": semester, "condition": condition,
-                                        "model": truth.index, "err": ((theta - truth) ** 2).to_numpy()}))
-        errors.append(pd.DataFrame({"protocol": "direct", "domain": domain, "semester": semester, "condition": "easy",
-                                    "model": truth.index, "err": ((refs.mean() - truth) ** 2).to_numpy()}))
-        print(domain, semester, judge, "direct:", len(common), "ratings in every condition", flush=True)
+    """Absolute scoring's squared error per cell and condition, on the (model, bench, item) ratings in every condition:
+    the main analysis's judge of each cell, its published thirds runs (logs/direct_truncated-thirds-<kept>/) and its
+    full-transcript run as the main analysis loads it (loading.direct_runs)."""
+    key, errors, loo = ["model", "bench", "item"], [], contributions.direct_judges(FORECASTS)
+    for domain in DOMAINS:
+        for semester in SEMESTERS:
+            judge = loo[domain, semester]
+            (task,) = loading.tasks(loading.domain(domain), [semester])
+            refs, truth = task.references.theta, task.truth
+            runs = {c: contributions.published_ratings(f"truncated-{c}", domain, semester, judge) for c in CONDITIONS[1:]}
+            (full,) = [r for r in loading.direct_runs(loading.domain(domain), task) if r.judge == judge and r.condition == "reasoning-shown"]
+            runs["full"] = full.table.assign(item=full.table.item.astype(str))
+            common = runs["thirds-23"][key]
+            for ratings in runs.values():
+                common = common.merge(ratings[key].drop_duplicates())
+            for condition, ratings in runs.items():
+                theta = calibrate(ratings.merge(common), refs).reindex(truth.index)
+                errors.append(pd.DataFrame({"protocol": "direct", "domain": domain, "semester": semester, "condition": condition,
+                                            "model": truth.index, "err": ((theta - truth) ** 2).to_numpy()}))
+            errors.append(pd.DataFrame({"protocol": "direct", "domain": domain, "semester": semester, "condition": "easy",
+                                        "model": truth.index, "err": ((refs.mean() - truth) ** 2).to_numpy()}))
+            print(domain, semester, judge, "direct:", len(common), "ratings in every condition", flush=True)
     return pd.concat(errors, ignore_index=True)
 
 

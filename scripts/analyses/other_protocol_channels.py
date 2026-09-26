@@ -16,20 +16,16 @@ no tool calls, so reasoning is kept alone and removed and messages removed (= th
 Statistics and figure: analysis.challenges.contributions (paired change in squared error from the full transcript;
 one-sided log likelihood ratio tests).
 
-Run from the repo root (needs the T7 data and embeddings):
-  SMALL_JUDGE_DATA=/Volumes/T7/small-judge-remote/data \\
-  SMALL_JUDGE_EMBEDDINGS=/Volumes/T7/small-judge-remote/transcript-embeddings \\
+Run from the repo root (reads data/ and transcript-embeddings/, or SMALL_JUDGE_DATA / SMALL_JUDGE_EMBEDDINGS):
   uv run python scripts/analyses/other_protocol_channels.py [--redraw]
 """
 import argparse
-import json
 import os
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 from sklearn.linear_model import RidgeCV
 from sklearn.pipeline import make_pipeline
@@ -38,8 +34,6 @@ from sklearn.preprocessing import StandardScaler
 from analysis import loading
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
-from challenges.truncation.compare_truncation import baseline_ratings, truncated_ratings
-from challenges.truncation.run import CHANNELS_ROOT
 from protocols.direct_judge.scoring import calibrate
 from capability.task import Cohort
 from protocols import embeddings
@@ -100,18 +94,15 @@ def feature_rows(condition: str, cohort: Cohort, reasoning_only: pd.DataFrame) -
 
 def direct_errors() -> pd.DataFrame:
     """Absolute scoring: each task's leave-one-out judge re-rated the channel-removed transcripts
-    (src/challenges/truncation/run.py, artifacts/direct-judging-channels, collected on the full train set, scored
-    on the 40 removal items like the other protocols); every condition and the full transcript recalibrated on the same references, as
-    compare_truncation.py pairs them. Removal runs only."""
+    (published as logs/direct_channels-<spec>/, collected on the full train set, scored on the 40 removal items like
+    the other protocols); every condition and the full transcript recalibrated on the same references. Removal runs only."""
     rows, loo = [], contributions.direct_judges(FORECASTS)
     for domain in DOMAINS:
         for semester in SEMESTERS:
             judge = loo[domain, semester]  # a cell staged for more than one judge keeps the main analysis's
-            name = f"{domain}/{judge}/{semester}/channels-drop-reasoning"
-            payload = json.loads((CHANNELS_ROOT / "inputs" / name / "job.json").read_text())
-            refs, truth = pd.Series(payload["references"]), pd.Series(payload["truth"])
             # the full transcript as the main analysis loads it (loading.direct_runs); every condition on its items
             (task,) = loading.tasks(loading.domain(domain), [semester])
+            refs, truth = task.references.theta, task.truth
             (run,) = [r for r in loading.direct_runs(loading.domain(domain), task) if r.judge == judge and r.condition == "reasoning-shown"]
             full = run.table.assign(item=run.table.item.astype(str))
             full = full[full.item.isin(contributions.removal_items(task))]  # the 40 items every other protocol here uses
@@ -119,8 +110,7 @@ def direct_errors() -> pd.DataFrame:
                 if condition == "full":
                     ratings = full
                 else:
-                    name = f"{domain}/{judge}/{semester}/channels-{condition}"
-                    ratings, _ = truncated_ratings(json.loads((CHANNELS_ROOT / "inputs" / name / "job.json").read_text()), name, CHANNELS_ROOT)
+                    ratings = contributions.published_ratings(f"channels-{condition}", domain, semester, judge)
                     ratings = ratings.assign(item=ratings.item.astype(str)).merge(full[["model", "bench", "item"]].drop_duplicates())
                 theta = calibrate(ratings, refs).reindex(truth.index)
                 rows.append(pd.DataFrame({"protocol": "direct", "domain": domain, "semester": semester, "condition": condition,
