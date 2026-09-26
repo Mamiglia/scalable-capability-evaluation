@@ -272,3 +272,69 @@ lines = [f"{label(p)}: forecast {lr.num(r.forecast)}, spread {lr.num(r.spread)},
     "similar amounts in opposite directions, and the Pairwise judge's narrower distribution puts more density on it.\n\n"
     + "\n".join(lines) + "\n")
 print("wrote", FINAL / "prediction_example.txt")
+
+
+# %% simplified reasoning for Absolute scoring: its best judge on references, reasoning shown
+from scipy import stats as scipy_stats  # noqa: E402
+
+from analysis.plots import ci95  # noqa: E402
+
+direct_judge = lr.chosen_judges(forecasts, VARIANTS).query(
+    "domain == 'math' and semester == '2025-I' and protocol == 'direct'").judge.iloc[0]
+direct_2025 = gen.reasoning_rows(rows).query("domain == 'math' and protocol == 'direct'")
+direct_err = direct_2025.set_index("model").err
+is_reasoning = direct_err.index.isin(gen.REASONING_2025_I)
+direct_welch = scipy_stats.ttest_ind(direct_err[is_reasoning], direct_err[~is_reasoning], equal_var=False)
+save(gen.reasoning_pairwise_figure(rows, metric="error", tests=[(0, 1, float(direct_welch.pvalue))], protocol="direct"),
+     "simplified_reasoning_direct_error", final="simplified_reasoning_direct")
+direct_lines = []
+for group, title in {"non-reasoning": "Non-reasoning targets", "reasoning": "Reasoning targets"}.items():
+    g = direct_2025[direct_2025.group == group].sort_values("theta")
+    v = g.err.to_numpy(float)
+    direct_lines.append(f"{title} ({len(g)}): mean squared error {lr.num(v.mean())} (95% CI "
+                        f"{lr.num(max(v.mean() - ci95(v), 0))} to {lr.num(v.mean() + ci95(v))}).")
+    direct_lines += [f"  {r.model}: θ* {lr.num(r.theta)}, predicted {lr.num(r.theta_hat)}, squared error {lr.num(r.err)}."
+                     for r in g.itertuples()]
+direct_test = (f"Reasoning minus non-reasoning targets: mean squared error difference "
+               f"{lr.num(direct_err[is_reasoning].mean() - direct_err[~is_reasoning].mean(), sign=True)}, "
+               f"t({direct_welch.df:.1f}) = {lr.num(direct_welch.statistic)}, {lr.p_text(direct_welch.pvalue)}.")
+print(direct_test)
+(FINAL / "simplified_reasoning_direct.txt").write_text(
+    "As the simplified reasoning figure, for Absolute scoring: the task's best judge on references "
+    f"({direct_judge}, raw scores), shown the targets' reasoning. Left: predicted against true capability, the "
+    "diagonal a perfect forecast. Right: each target's squared error, the large marker at the group's mean and the "
+    "box its 95% t-interval, floored at 0. The bracket is Welch's t-test of squared error, reasoning against "
+    "non-reasoning targets (* p < .05, ** p < .01, *** p < .001; n.s., not significant), two-sided.\n\n"
+    + "\n".join(direct_lines + ["", direct_test]) + "\n")
+
+# fig 7 for Absolute scoring: the same judge's reasoning-removed forecasts added (reasoning targets only)
+direct_removed = forecasts.query("domain == 'math' and semester == '2025-I' and protocol == 'direct' and "
+                                 "variant == @VARIANTS['direct'] and condition == 'reasoning-hidden' and judge == @direct_judge")
+direct_removed_err = direct_removed.set_index("model").eval("(theta_hat - theta) ** 2")
+reasoning_targets = [m for m in direct_err.index if m in gen.REASONING_2025_I]
+removed_welch = scipy_stats.ttest_ind(direct_removed_err[reasoning_targets], direct_err[~is_reasoning], equal_var=False)
+removed_paired = scipy_stats.ttest_rel(direct_removed_err[reasoning_targets], direct_err[reasoning_targets])
+save(gen.reasoning_pairwise_figure(rows, metric="error", removed=direct_removed, protocol="direct",
+                                   tests=[(0, 1, float(direct_welch.pvalue)), (0, 2, float(removed_welch.pvalue))]),
+     "simplified_reasoning_removed_direct_error", final="simplified_reasoning_removed_direct")
+v = direct_removed_err[reasoning_targets].to_numpy(float)
+removed_direct_lines = [f"Reasoning targets, reasoning removed ({len(v)}): mean squared error {lr.num(v.mean())} (95% CI "
+                        f"{lr.num(max(v.mean() - ci95(v), 0))} to {lr.num(v.mean() + ci95(v))})."]
+removed_direct_lines += [f"  {x.model}: θ* {lr.num(x.theta)}, predicted {lr.num(x.theta_hat)}, squared error "
+                         f"{lr.num((x.theta_hat - x.theta) ** 2)}." for x in
+                         direct_removed[direct_removed.model.isin(reasoning_targets)].sort_values("theta").itertuples()]
+removed_direct_tests = [
+    f"Reasoning targets with reasoning removed minus non-reasoning targets: mean squared error difference "
+    f"{lr.num(v.mean() - direct_err[~is_reasoning].mean(), sign=True)}, t({removed_welch.df:.1f}) = "
+    f"{lr.num(removed_welch.statistic)}, {lr.p_text(removed_welch.pvalue)}.",
+    f"Reasoning targets, reasoning removed minus shown: mean squared error difference "
+    f"{lr.num((direct_removed_err[reasoning_targets] - direct_err[reasoning_targets]).mean(), sign=True)}, "
+    f"t({removed_paired.df:.0f}) = {lr.num(removed_paired.statistic)}, {lr.p_text(removed_paired.pvalue)}."]
+print("\n".join(removed_direct_tests))
+(FINAL / "simplified_reasoning_removed_direct.txt").write_text(
+    "As the simplified reasoning figure for Absolute scoring, with the same judge's forecasts from transcripts whose "
+    "reasoning is removed (hollow diamonds, right-hand slot; the reasoning shown filled) for the five "
+    "reasoning targets. The non-reasoning targets carry no reasoning, so their forecasts are unchanged and not drawn "
+    "again. Each bracket is Welch's t-test of squared error against the non-reasoning targets (* p < .05, ** p < .01, "
+    "*** p < .001; n.s., not significant), two-sided, uncorrected.\n\n"
+    + "\n".join(direct_lines + removed_direct_lines + ["", direct_test] + removed_direct_tests) + "\n")

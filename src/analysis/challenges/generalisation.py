@@ -94,7 +94,7 @@ def cut_axis(values: np.ndarray, keep: float = 0.9, margin: float = 0.15) -> tup
     return padded_axis(np.array([lo, hi]), margin)
 
 
-BASELINE_COLOUR, BASELINE_LABEL = "#9a9a9a", "Saturated-item prediction"
+BASELINE_COLOUR, BASELINE_LABEL = "#9a9a9a", "Baseline"
 ERROR_LABEL = "Squared error"
 
 
@@ -767,12 +767,15 @@ REASONING_STYLE = {"non-reasoning": dict(marker="o", face="#9a9a9a", edge="#3333
                    # beside a reasoning-removed slot: the judge's dark shade shown, its light shade removed
                    "shown": dict(marker="D", face="#90afd5", edge="#2260ab", mean="#2260ab"),
                    "removed": dict(marker="D", face="#b4d0f0", edge="#6aa1e2", mean="#6aa1e2")}
+# Absolute scoring's reasoning targets, in its green; reasoning removed in the same green, hollow
+REASONING_DIRECT = dict(marker="D", face="#a4e0ca", edge="#1baf7a", mean="#1baf7a")
 
 
 def reasoning_pairwise_figure(table: pd.DataFrame, domain: str = "math", metric: str = "score",
                               removed: pd.DataFrame | None = None,
-                              tests: list[tuple[int, int, float]] | None = None) -> plt.Figure:
-    """The pairwise judge alone on one domain's 2025-I targets, whose references are all
+                              tests: list[tuple[int, int, float]] | None = None,
+                              protocol: str = "pairwise") -> plt.Figure:
+    """The pairwise judge (or `protocol`, e.g. "direct", reasoning shown only) alone on one domain's 2025-I targets, whose references are all
     non-reasoning models, in the layout of the manuscript's simplified_reasoning.svg. Left: predicted
     against true capability on ordinary outside axes, the diagonal a perfect forecast, each group
     labelled beside its points. Right: one small marker per target and a large one at the group's
@@ -789,10 +792,12 @@ def reasoning_pairwise_figure(table: pd.DataFrame, domain: str = "math", metric:
     assert metric in ("score", "error"), metric
     assert removed is None or metric == "error", "the reasoning-removed slot is drawn in squared error only"
     assert not tests or metric == "error", "brackets are drawn in squared error only"
+    styles = REASONING_STYLE if protocol == "pairwise" else {
+        **REASONING_STYLE, "reasoning": REASONING_DIRECT, "shown": REASONING_DIRECT, "removed": REASONING_DIRECT}
     t = reasoning_rows(table)
     t = t[t.domain == domain]
-    judge = with_baseline(t[t.protocol.isin(["pairwise", BASELINE])]).dropna(subset=["base"])
-    judge = judge[judge.protocol == "pairwise"].assign(score=lambda d: score(d.err, d.base))
+    judge = with_baseline(t[t.protocol.isin([protocol, BASELINE])]).dropna(subset=["base"])
+    judge = judge[judge.protocol == protocol].assign(score=lambda d: score(d.err, d.base))
     value = "score" if metric == "score" else "err"
     wide = removed is not None  # a third slot on the right needs room for its tick label
     fig, (left, right) = plt.subplots(1, 2, figsize=(3.8 if wide else 3.1, 1.5), layout="constrained",
@@ -801,7 +806,7 @@ def reasoning_pairwise_figure(table: pd.DataFrame, domain: str = "math", metric:
     left.plot([-reach, reach], [-reach, reach], color="grey", lw=0.8, zorder=1)
     rng = np.random.default_rng(0)
     for i, group in enumerate(("non-reasoning", "reasoning")):
-        g, st = judge[judge.group == group], REASONING_STYLE["shown" if wide and group == "reasoning" else group]
+        g, st = judge[judge.group == group], styles["shown" if wide and group == "reasoning" else group]
         left.scatter(g.theta, g.theta_hat, s=22, marker=st["marker"], facecolor=st["face"], edgecolor=st["edge"],
                      linewidths=0.7, zorder=3, clip_on=False)
         name = "Non-reasoning\ntargets" if group == "non-reasoning" else "Reasoning\ntargets"
@@ -820,7 +825,7 @@ def reasoning_pairwise_figure(table: pd.DataFrame, domain: str = "math", metric:
         right.scatter([i], [v.mean()], s=34, marker=st["marker"], color=st["mean"], linewidths=0, zorder=5)
         print(f"reasoning_pairwise_figure {metric}: {domain} {group} mean {v.mean():.2f}, n = {len(v)}")
     if removed is not None:  # hollow, in their own colour: the reasoning targets with their reasoning removed
-        st = REASONING_STYLE["removed"]
+        st = styles["removed"]
         r = removed[(removed.domain == domain) & removed.model.isin(REASONING_2025_I)]
         left.scatter(r.theta, r.theta_hat, s=22, marker="D", facecolor="white", edgecolor=st["edge"],
                      linewidths=0.7, zorder=3, clip_on=False)

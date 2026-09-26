@@ -674,7 +674,7 @@ def appendix_error_figure(table: pd.DataFrame) -> plt.Figure:
             ax.set_ylabel("Squared error")
         ax.set_title("Pooled" if domain == POOLED else DOMAIN_LABELS[domain], loc="left", fontsize=7, fontweight="bold", pad=3)
     handles = [plt.Line2D([], [], color="0.45" if p == BASELINE else COLORS[p], marker="o", ms=4, lw=0,
-                          label="Saturated-item prediction" if p == BASELINE else LABELS[p]) for p in protocols]
+                          label="Baseline" if p == BASELINE else LABELS[p]) for p in protocols]
     fig.legend(handles=handles, loc="outside upper center", ncol=5, frameon=False, handletextpad=0.3, columnspacing=0.8)
     return fig
 

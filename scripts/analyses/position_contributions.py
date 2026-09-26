@@ -17,6 +17,7 @@ Marks: one-sided log likelihood ratio tests (src/analysis/challenges/likelihood_
 unique estimate, the full transcript against the transcript without the third.
 Run from the repo root: uv run python scripts/analyses/position_contributions.py
 """
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -47,6 +48,12 @@ RUNS = {"coding": {"2025-II": ("minimax-m1", "24d6cc32", WHOLE_REMOVED), "2026-I
         "cyber": {"2025-II": ("deepseek-r1-0528", "24d6cc32", WHOLE_REMOVED), "2026-I": ("kimi-k2-thinking", "24d6cc32", WHOLE_REMOVED)},
         "math": {"2025-II": ("deepseek-r1-0528", "24d6cc32", WHOLE_REMOVED), "2026-I": ("kimi-k2-thinking", "24d6cc32", WHOLE_REMOVED)},
         "science": {"2025-II": ("minimax-m1", "24d6cc32", WHOLE_REMOVED), "2026-I": ("minimax-m2", "66c170cd", FORTY_REMOVED)}}
+# the same judges for each third kept alone; their kept-alone runs are on the 40-item config where the removal runs are
+# not (Maths, Coding and Cyber 2026-I Kimi-K2-Thinking), each scored against the full-transcript run of RUNS
+KEPT = ("1", "2", "3")
+WHOLE_KEPT, FORTY_KEPT = {k: WHOLE_TRAIN[k] for k in KEPT}, {k: FORTY_ITEMS[k] for k in KEPT}
+KEPT_RUNS = {domain: {semester: (judge, full, WHOLE_KEPT if semester == "2025-II" else FORTY_KEPT)
+                      for semester, (judge, full, _) in cells.items()} for domain, cells in RUNS.items()}
 KEY = ["bench", "item", "model_left", "model_right"]
 DRAWS, SEED = 2000, 0
 
@@ -56,9 +63,9 @@ plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], 
                      "axes.spines.right": False, "svg.fonttype": "none"})
 
 
-def runs_for(domain, semester, keep):
+def runs_for(domain, semester, keep, runs_map=RUNS):
     """Condition -> verdicts on the `keep` items, every condition cut to the rows judged in all of them."""
-    judge, full, hashes = RUNS[domain][semester]
+    judge, full, hashes = runs_map[domain][semester]
     dirs = {"full": full} | hashes
     runs = {}
     for name, digest in dirs.items():
@@ -78,15 +85,15 @@ def stars(p):
     return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
 
 
-def domain_stats(domain):
+def domain_stats(domain, runs_map=RUNS):
     """Per third: singular (score alone) and unique (reduction without it) estimates, intervals and tests."""
     errors, coverage, models, llrs = {}, [], {}, []
-    for semester in RUNS[domain]:
+    for semester in runs_map[domain]:
         (task,) = loading.tasks(loading.domain(domain), [semester])
         refs, targets, truth = task.references.theta, list(task.test.models.index), task.truth
         keep = contributions.removal_items(task)
-        runs, common = runs_for(domain, semester, keep)
-        coverage.append({"domain": domain, "semester": semester, "judge": RUNS[domain][semester][0],
+        runs, common = runs_for(domain, semester, keep, runs_map)
+        coverage.append({"domain": domain, "semester": semester, "judge": runs_map[domain][semester][0],
                          "targets": len(truth), "common_pairs": common})
         for name, verdicts in runs.items():
             theta = judges.pairwise_theta(verdicts, refs, targets, "linear", None).reindex(truth.index)
@@ -95,7 +102,7 @@ def domain_stats(domain):
                         .pipe(lambda d: d[d["shape"] == lr.SHAPE]).assign(domain=domain, semester=semester, condition=name))
         errors[semester, "easy"] = ((refs.mean() - truth) ** 2).to_numpy()
         models[semester] = list(truth.index)
-    semesters = list(RUNS[domain])
+    semesters = list(runs_map[domain])
     names = [n for s, n in errors if s == semesters[0] and all((t, n) in errors for t in semesters)]
     llr = pd.concat(llrs, ignore_index=True).query("condition in @names")
     pooled = {n: np.concatenate([errors[s, n] for s in semesters]) for n in names}
@@ -110,11 +117,13 @@ def domain_stats(domain):
     draws = [score({s: rng.integers(0, size[s], size[s]) for s in semesters}) for _ in range(DRAWS)]
     rows = []
     for label, (alone, without) in POSITIONS.items():
-        if alone in point:  # the kept-alone runs are not read (REMOVED)
+        if alone in point:  # the kept-alone runs are read only with KEPT_RUNS
             only = [d[alone] for d in draws]
             rows.append({"position": label, "measure": "singular", "run": f"thirds-{alone}", "estimate": point[alone],
                          "lo": np.percentile(only, 2.5), "hi": np.percentile(only, 97.5),
                          "p": contributions.llr_p(llr, alone)})
+        if without not in point:  # KEPT_RUNS: no removal runs
+            continue
         drops = [d["full"] - d[without] for d in draws]
         rows.append({"position": label, "measure": "unique", "run": f"thirds-{without}",
                      "estimate": point["full"] - point[without],
@@ -128,8 +137,27 @@ def domain_stats(domain):
     return table, full, pd.DataFrame(coverage), long, llr
 
 
+def kept_alone(errors: pd.DataFrame | None = None):
+    """The appendix figure: each third kept alone (KEPT_RUNS) and the full transcript, tested against the baseline
+    (sufficiency). `errors`: the saved position_kept_alone_errors.csv, to redraw without reading the logs."""
+    if errors is None:
+        errors = pd.concat([domain_stats(domain, KEPT_RUNS)[3] for domain in KEPT_RUNS], ignore_index=True)
+        errors.to_csv(OUT / "position_kept_alone_errors.csv", index=False)
+    contributions.save_figures(
+        errors, POSITIONS | contributions.FULL_ROW, DOMAIN_COLORS, OUT, "position_kept_alone", final="transcript_thirds",
+        measures=("only",), only_against="easy",
+        caption="Pairwise judge on single transcript thirds. Every rendered transcript (reasoning shown) is cut into three "
+                "equal character spans and the judge sees one third, the others replaced by \"...\". Judges, the best "
+                "reference judge of each cell as in the removal figure; the 2026-I thirds are the 40-item runs. Each "
+                "condition is scored on the pairs judged in it and the full transcript, on the same 40 train items "
+                "(10 per difficulty quartile).")
+
+
 if __name__ == "__main__":  # importable, so a side analysis can redraw these estimates without recomputing them
     OUT.mkdir(parents=True, exist_ok=True)
+    if "--kept-alone" in sys.argv:
+        kept_alone()
+        raise SystemExit(0)
     stats, fulls, coverage, errors, llrs = [], [], [], [], []
     for domain in RUNS:
         table, full, seen, long, llr = domain_stats(domain)
