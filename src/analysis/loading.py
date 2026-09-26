@@ -130,7 +130,11 @@ def direct_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
             if not run_dir.is_dir() or not fetched(run_dir):
                 continue
             label = "reasoning-hidden" if hidden else "reasoning-shown"
-            runs.append(JudgeRun("direct", path.stem, label, harness, direct_from_logs(run_dir)))
+            table = direct_from_logs(run_dir)
+            if dom.name == "coding" and not hidden:  # CORRECTION: SWE-bench + Terminal-Bench sit in a sibling run dir
+                siblings = [d for d in Path(run_dir).parent.iterdir() if d.is_dir() and d != Path(run_dir) and any(d.glob("*.eval"))]
+                table = pd.concat([table, *[direct_from_logs(d) for d in siblings]], ignore_index=True)
+            runs.append(JudgeRun("direct", path.stem, label, harness, table))
     return runs
 
 

@@ -65,7 +65,8 @@ def prices() -> dict[str, tuple[float, float, float]]:
 def run_cost(run_dir: Path, table: dict) -> tuple[float, int]:
     """(dollars, input tokens) over every log of the run dir."""
     dollars, tokens = 0.0, 0
-    for f in run_dir.glob("*.eval"):
+    files = Path(run_dir).parent.glob("*/*.eval") if "logs/direct/coding" in str(run_dir) else Path(run_dir).glob("*.eval")  # CORRECTION
+    for f in files:
         for model, u in (read_eval_log(str(f), header_only=True).stats.model_usage or {}).items():
             inp, cached, out = table[PROXY.get(model, model.removeprefix("openrouter/"))]
             cache = u.input_tokens_cache_read or 0
