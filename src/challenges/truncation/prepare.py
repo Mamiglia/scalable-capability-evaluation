@@ -26,7 +26,7 @@ from judge.dataset import DIRECT_USER_PROMPT, MIN_RESPONSE_CHARS, cut as cut_tex
 from protocols.direct_judge import JudgeDirect
 from protocols.direct_judge import judge as judge_module
 from reference import tables
-from analysis.challenges.contributions import removal_items
+from analysis.transcript_parts.paired_change import removal_items
 from challenges.truncation.run import cut_fields, root
 
 REPO = Path(__file__).resolve().parents[3]
@@ -134,8 +134,8 @@ def prepare(domain_name, judge_name, semester, cut):
     rated = {(f"{r.bench}/{r.model}", r.item): r._asdict() for r in ratings.itertuples(index=False)}
     assert set(rated) <= set(expected), "rating export outside the retained set"
     if thirds:  # thirds conditions judge only the removal analysis's 40 stratified train items per task
-        keep = removal_items(task)
-        assert len(keep) == 40  # matched by item id alone, as contributions.on_items does (math aime2025/aime2026 share ids)
+        keep = removal_items(task, 10, 0)  # 10 items per difficulty quartile, seed 0
+        assert len(keep) == 40  # matched by item id alone, as paired_change.on_items does (math aime2025/aime2026 share ids)
         expected = {key: value for key, value in expected.items() if key[1] in keep}
         rated = {key: value for key, value in rated.items() if key[1] in keep}
     tasks, reused, audit, observed, excluded = [], [], [], set(), []
