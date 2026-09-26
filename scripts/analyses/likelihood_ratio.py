@@ -76,6 +76,7 @@ for name in DOMAINS:
 llr = pd.concat(frames, ignore_index=True)[["domain", "semester", "model", "protocol", "judge", "shape", "dropped", "llr"]]
 llr.to_csv(OUT / "likelihood_ratio.csv", index=False, float_format="%.5f")
 if transfer:
+    (OUT / "cross_domain").mkdir(parents=True, exist_ok=True)
     pd.concat(transfer, ignore_index=True)[llr.columns].to_csv(OUT / "cross_domain" / "transfer_likelihood_ratio.csv",
                                                                index=False, float_format="%.5f")
 
