@@ -95,3 +95,18 @@ def feature_table(cohort: Cohort, *, reasoning: str = "visible") -> pd.DataFrame
                   if isinstance(path := cohort.models.loc[model, f"path_{bench}"], str)]
         rows.append(pd.concat(frames).mean() if frames else pd.Series(np.nan, index=COLUMNS))
     return pd.DataFrame(rows, index=cohort.models.index, columns=COLUMNS, dtype=float)
+
+
+def rows_table(cohort: Cohort, rows: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """feature_table from per-transcript rows (path, item, correct, `columns`) rather than glm_features/: one
+    row per model of the cohort, the mean over its correct transcripts on the cohort's items."""
+    out = []
+    for model in cohort.models.index:
+        frames = []
+        for bench, ids in cohort.items.groupby("bench").item:
+            if isinstance(path := cohort.models.loc[model, f"path_{bench}"], str):
+                pick = rows[(rows.path == path) & rows.correct & rows.item.isin(set(map(str, ids)))]
+                frames.append(pick[columns])
+        table = pd.concat(frames) if frames else pd.DataFrame(columns=columns)
+        out.append(table.mean() if len(table) else pd.Series(np.nan, index=columns))
+    return pd.DataFrame(out, index=cohort.models.index, columns=columns, dtype=float)

@@ -22,8 +22,7 @@ Retained sets, exclusion masks (context preflight of the full-transcript campaig
 cohorts are exactly the published full-transcript campaigns'. Inputs shorter than the limit render
 identically and reuse the full-transcript rating; every cut transcript is verified to be a prefix
 (head) or suffix (tail) of the full one. Published under `direct_truncated-<head|tail>-4000/` in the
-judging repo. Pairwise truncation (2,000 per transcript, `judge_truncated-...`) waits for the pairwise
-cyber and coding baselines. `artifacts/.../superseded-char-limits/` keeps an earlier head-only
+judging repo. Pairwise truncation is under `judge_truncated-<head|tail|ends>-2000/` (see below). `artifacts/.../superseded-char-limits/` keeps an earlier head-only
 2,000 / 8,000 freeze that predates this design.
 
 ## Baselines
@@ -47,3 +46,18 @@ unusable judgments → `prepare_publication.py` stages the condition under `publ
 for the `logs/` repo → `compare_truncation.py` writes the matched full-vs-truncated table to
 `comparison/`. `sweep_status.py` reports progress; `self_check.py` exercises `run.py` without API calls.
 Only logs with status success count anywhere (eval_set leaves error logs beside successful retries).
+
+## Pairwise truncation
+
+Twelve conditions collected 2026-09-15/16 with the stock pairwise path, no separate harness:
+`uv run evaluate configs/domain/<domain>.yml --protocol chars --judge configs/judges/truncated/<judge>-<mode>-2000.yml --semester <semester>`,
+2,000 characters per transcript (two transcripts per prompt, so the same ~4k judge budget as direct),
+head, tail and ends. The frozen `<semester>_train` column fixes the items, so the truncated runs
+share every pair and item with the reasoning-on full-transcript baselines (`logs/judge/<domain>/...
+/24d6cc32`, full train set). Judges: MiniMax-M1 (coding 2025-II) and Kimi-K2-Thinking (coding 2026-I),
+the best pairwise judges by baseline MSE; Qwen3-235B-A22B (cyber 2025-II) and Kimi-K2-Thinking
+(cyber 2026-I), matching the direct truncation judges. Logs and per-mode READMEs with the MSE table
+are in the judging repo under `judge_truncated-<mode>-2000/`.
+
+Position windows and channel ablations of the same baselines (research question 2, where the signal
+sits): `configs/judges/windowed/`, `configs/judges/channels/`, design under `docs/superpowers/specs/`.

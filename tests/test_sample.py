@@ -234,3 +234,57 @@ class TestStripThink:
 
     def test_format_content_str_content_stripped(self):
         assert format_content("<think>x</think>Y", include_reasoning=False) == "Y"
+
+
+class TestChannels:
+    """A channel spec keeps or drops one of reasoning, text, calls and outputs; tools is calls with outputs."""
+
+    turns = [
+        ChatMessageAssistant(
+            content=[ContentReasoning(type="reasoning", reasoning="Plan"), ContentText(type="text", text="Looking")],
+            tool_calls=[ToolCall(id="1", function="bash", arguments={"cmd": "ls"})]),
+        ChatMessageTool(content="file.txt", tool_call_id="1", function="bash"),
+        ChatMessageAssistant(content=[ContentReasoning(type="reasoning", reasoning="Done"),
+                                      ContentText(type="text", text="ANSWER: file.txt")]),
+    ]
+
+    def render(self, channels):
+        return format_message(self.turns, channels=channels)
+
+    def test_full_is_unchanged(self):
+        assert self.render("") == format_message(self.turns)
+
+    def test_only_one_channel(self):
+        reasoning = self.render("only-reasoning")
+        assert "Plan" in reasoning and "Done" in reasoning
+        assert "Looking" not in reasoning and "bash" not in reasoning and "file.txt" not in reasoning
+        text = self.render("only-text")
+        assert "Looking" in text and "ANSWER" in text and "THOUGHT" not in text and "Tool" not in text
+        tools = self.render("only-tools")
+        assert "[Tool Call: bash" in tools and "[Tool Output (bash)]: file.txt" in tools
+        assert "Plan" not in tools and "Looking" not in tools and "ANSWER" not in tools
+        calls = self.render("only-calls")
+        assert "[Tool Call: bash" in calls and "Tool Output" not in calls and "Plan" not in calls and "Looking" not in calls
+        outputs = self.render("only-outputs")
+        assert "[Tool Output (bash)]: file.txt" in outputs and "Tool Call" not in outputs and "ANSWER" not in outputs
+
+    def test_drop_one_channel(self):
+        assert "THOUGHT" not in self.render("drop-reasoning") and "Looking" in self.render("drop-reasoning")
+        assert "Looking" not in self.render("drop-text") and "Plan" in self.render("drop-text")
+        dropped = self.render("drop-tools")
+        assert "Tool" not in dropped and "Plan" in dropped and "Looking" in dropped
+        no_outputs = self.render("drop-outputs")
+        assert "[Tool Call: bash" in no_outputs and "Tool Output" not in no_outputs and "Plan" in no_outputs
+
+    def test_empty_turns_vanish(self):
+        """A turn with nothing left in it is not shown as an empty role line."""
+        assert "[Tool]" not in self.render("only-text")
+        assert not any(line.strip() == "[Assistant]:" for line in self.render("only-tools").splitlines())
+
+    def test_reasoning_hidden_beats_channels(self):
+        assert "THOUGHT" not in format_message(self.turns, include_reasoning=False, channels="only-reasoning")
+
+    def test_bad_spec(self):
+        import pytest
+        with pytest.raises(ValueError):
+            self.render("only-images")

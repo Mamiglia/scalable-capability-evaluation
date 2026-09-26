@@ -62,7 +62,8 @@ class Task:
 
     @property
     def train(self) -> Cohort:
-        """The labelled union of references and history, for supervised protocol fitting."""
+        """The labelled union of references and history: which transcripts exist. Protocols fit on
+        the references only (protocols.Protocol.__call__)."""
         models = pd.concat([self.references.models, self.historical.models], verify_integrity=True)
         return Cohort(models, self.references.items, self.semester)
 

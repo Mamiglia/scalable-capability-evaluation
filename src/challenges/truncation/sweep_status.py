@@ -3,11 +3,15 @@ import json
 from pathlib import Path
 from inspect_ai.log import read_eval_log, read_eval_log_sample_summaries
 
-REPO = Path(__file__).resolve().parents[3]
-ROOT = REPO / "artifacts/direct-judging-truncation"  # frozen inputs, logs, results
-for summary in json.loads((ROOT / "sweep-summary.json").read_text()):
-    condition = f"{summary['domain']}/{summary['judge']}/{summary['semester']}/{summary['truncate']}-{summary['max_length']}"
-    status = ROOT / "results" / condition / "status.json"
+from challenges.truncation.run import CHANNELS_ROOT, ROOT
+
+for summary in [s for r in (ROOT, CHANNELS_ROOT) if (r / "sweep-summary.json").exists()
+                for s in json.loads((r / "sweep-summary.json").read_text())]:
+    cut = summary.get("condition") or f"{summary['truncate']}-{summary['max_length']}"
+    condition = f"{summary['domain']}/{summary['judge']}/{summary['semester']}/{cut}"
+    if summary["status"] != "prepared":
+        continue
+    status = (CHANNELS_ROOT if cut.startswith("channels-") else ROOT) / "results" / condition / "status.json"
     state = json.loads(status.read_text()) if status.exists() else {"status": "not started"}
     rated = done = errors = 0
     for path in Path(state.get("log_dir", "/nonexistent")).glob("*.eval"):

@@ -5,7 +5,10 @@ from inspect_ai.model import ChatMessage
 from inspect_ai.dataset import Sample
 from inspect_ai.scorer import value_to_float
 
+from configs.judge import CHANNELS, parse_channels
 from configs.logs import logger
+
+ALL_CHANNELS = frozenset(CHANNELS)
 
 # CORRECT/"C" -> 1, INCORRECT/"I" -> 0, numbers -> themselves, unparseable -> 0.
 _score_to_float = value_to_float()
@@ -73,58 +76,66 @@ def format_text(text: str) -> str:
     return strip_think(text)
 
 
-def format_content(content: Any, include_reasoning: bool = True) -> str:
+def format_content(content: Any, include_reasoning: bool = True, shown: frozenset[str] = ALL_CHANNELS) -> str:
     """
     Format content blocks (text, reasoning, image, audio, video, etc.) into readable string.
 
-    Non-text modalities become a placeholder: the judge only ever sees text.
+    Non-text modalities become a placeholder: the judge only ever sees text. ``shown`` is the
+    set of channels rendered (configs.judge.CHANNELS): text blocks and placeholders are the
+    "text" channel, reasoning blocks the "reasoning" channel.
     """
     if isinstance(content, str):
-        return format_text(content)
+        return format_text(content) if "text" in shown else ""
     if not isinstance(content, list):
-        return str(content)
+        return str(content) if "text" in shown else ""
 
     texts = []
     for block in content:
         b_type = getattr(block, "type", None)
         if b_type == "text":
-            text_val = getattr(block, "text", "")
-            texts.append(format_text(str(text_val) if text_val is not None else ""))
+            if "text" in shown:
+                text_val = getattr(block, "text", "")
+                texts.append(format_text(str(text_val) if text_val is not None else ""))
         elif b_type == "reasoning":
-            if include_reasoning and (rendered := format_reasoning(block)):
+            if include_reasoning and "reasoning" in shown and (rendered := format_reasoning(block)):
                 texts.append(rendered)
         elif b_type in PLACEHOLDER_BLOCKS:
             # No way to show media to the judge, so just record that it was there. TODO
-            texts.append(PLACEHOLDER_BLOCKS[b_type])
+            if "text" in shown:
+                texts.append(PLACEHOLDER_BLOCKS[b_type])
         else:
             raise TypeError(f"Unsupported content block type: {b_type!r}")
     return "\n".join(texts)
 
 
-def format_single_message(msg: ChatMessage | str | Any, include_reasoning: bool = True) -> str:
+def format_single_message(msg: ChatMessage | str | Any, include_reasoning: bool = True,
+                          shown: frozenset[str] = ALL_CHANNELS) -> str:
     """
-    Format a single message (assistant, user, system, or tool).
+    Format a single message (assistant, user, system, or tool). Tool calls are the "calls"
+    channel of ``shown``, tool outputs the "outputs" channel.
     """
     if isinstance(msg, str):
-        return msg
+        return msg if "text" in shown else ""
 
     parts = []
-    content_str = format_content(getattr(msg, "content", ""), include_reasoning=include_reasoning)
-
-    # Handle tool output role
+    # Handle tool output role: its content is the tool's output, the "outputs" channel
     if getattr(msg, "role", None) == "tool":
+        if "outputs" not in shown:
+            return ""
+        content_str = format_content(getattr(msg, "content", ""), include_reasoning=include_reasoning)
         func = getattr(msg, "function", "tool")
         err = getattr(msg, "error", None)
         err_msg = getattr(err, "message", str(err)) if err else ""
         err_str = f" (Error: {err_msg})" if err else ""
         return f"[Tool Output ({func}){err_str}]: {content_str}"
 
+    content_str = format_content(getattr(msg, "content", ""), include_reasoning=include_reasoning, shown=shown)
     if content_str:
         parts.append(content_str)
 
     # Handle tool calls on assistant messages
     tool_calls = getattr(msg, "tool_calls", None)
-    if tool_calls:
+    if tool_calls and "calls" in shown:
         tc_strs = []
         for call in tool_calls:
             func = getattr(call, "function", "tool")
@@ -135,23 +146,29 @@ def format_single_message(msg: ChatMessage | str | Any, include_reasoning: bool 
     return "\n".join(parts)
 
 
-def format_message(msg: ChatMessage | list[ChatMessage] | str | Any, include_reasoning: bool = True) -> str:
+def format_message(msg: ChatMessage | list[ChatMessage] | str | Any, include_reasoning: bool = True,
+                   channels: str = "") -> str:
     """
     Format the message object or list of messages into a readable string.
     Supports single messages, message sequences (transcripts), tool calls, and tool outputs.
+    ``channels`` ("only-<c>" / "drop-<c>", see configs.judge.parse_channels) renders part of the
+    transcript; a turn it leaves empty is skipped, while the full rendering keeps every turn as before.
     """
+    shown = parse_channels(channels)
     if not isinstance(msg, list):
-        return format_single_message(msg, include_reasoning=include_reasoning)
+        return format_single_message(msg, include_reasoning=include_reasoning, shown=shown)
 
     formatted_msgs = []
     for m in msg:
         role = getattr(m, "role", "message").capitalize()
-        fmt = format_single_message(m, include_reasoning=include_reasoning)
+        fmt = format_single_message(m, include_reasoning=include_reasoning, shown=shown)
+        if channels and not fmt:
+            continue
         formatted_msgs.append(f"[{role}]: {fmt}")
     return "\n\n".join(formatted_msgs)
 
 
-def extract_transcript(sample: Sample, include_reasoning: bool = True) -> str:
+def extract_transcript(sample: Sample, include_reasoning: bool = True, channels: str = "") -> str:
     """
     Extract the complete response transcript from a sample,
     supporting both single message outputs and multi-turn agent histories with tool calls.
@@ -170,12 +187,12 @@ def extract_transcript(sample: Sample, include_reasoning: bool = True) -> str:
                 continue
             turns.append(m)
         if turns:
-            return format_message(turns, include_reasoning=include_reasoning)
-        return format_message(messages, include_reasoning=include_reasoning)
+            return format_message(turns, include_reasoning=include_reasoning, channels=channels)
+        return format_message(messages, include_reasoning=include_reasoning, channels=channels)
 
     # Fallback to output.choices[0].message
     if hasattr(sample, "output") and sample.output and getattr(sample.output, "choices", None):
-        return format_message(sample.output.choices[0].message, include_reasoning=include_reasoning)
+        return format_message(sample.output.choices[0].message, include_reasoning=include_reasoning, channels=channels)
 
     return ""
 

@@ -45,8 +45,10 @@ class EmbeddingRegression(TabularRegression):
     """Fit reference embeddings to theta*, predict target theta* (protocol name "embedding")."""
 
     def __init__(self, variant: str = "full"):
-        """variant: "full" (reasoning included) or "answer" (reasoning stripped)."""
-        assert variant in VARIANTS, variant
+        """variant: "full" (reasoning included), "answer" (reasoning stripped) or "channels-<spec>" (the transcript
+        rendered with JudgeConfig.channels = <spec>) or "thirds-<kept>" (the full transcript cut to the kept thirds), both
+        src/challenges/channels/embed.py."""
+        assert variant in VARIANTS or variant.startswith(("channels-", "thirds-")), variant
         self.variant = variant
         super().__init__("embedding", [], RidgeCV(alphas=ALPHAS))
 

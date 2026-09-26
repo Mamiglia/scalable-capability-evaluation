@@ -111,12 +111,12 @@ def test_glm_variants_fit_references_only_and_reset_between_cohorts(tmp_path):
     test = cohort(tmp_path / "test", {"t": np.nan, "empty": np.nan}, {"t": ["a" * 1023]})
     length, regex, structure = [TranscriptRegression(variant=v) for v in ("length", "regex", "structure")]
     length_x, regex_x, structure_x = length.get_features(train), regex.get_features(train), structure.get_features(train)
-    assert "hedging" not in length_x and "hedging" in regex_x and "log_tool_calls" not in regex_x
+    assert "hedging" not in length_x and "hedging" in regex_x and "log_tool_calls" in regex_x and "log_tool_calls" not in length_x
     pd.testing.assert_frame_equal(regex_x[length_x.columns], length_x)
     pd.testing.assert_frame_equal(structure_x[regex_x.columns], regex_x)
     assert structure_x.loc["a", "log_tool_calls"] == 0.
     assert structure_x["transition__equation__equation"].isna().all()  # no RST labels merged into these CSVs
-    assert [len(FEATURE_SETS[v]) for v in ("length", "regex", "structure")] == [3, 12, 24]
+    assert [len(FEATURE_SETS[v]) for v in ("length", "regex", "structure")] == [3, 13, 24]
     assert TranscriptRegression(variant="regex", reasoning="hidden").name == "glm_regex_reasoning-hidden"
     length.fit(train)
     result = length.predict(test)

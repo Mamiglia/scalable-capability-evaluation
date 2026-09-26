@@ -8,12 +8,9 @@ sees exactly the protocol's legitimate input.
 """
 
 import pandas as pd
-from inspect_ai.log import read_eval_log_sample_summaries
 
 from analysis.loading import JudgeRun
 from capability.task import Cohort, Task
-from configs.paths import is_successful_eval
-from evals.transcripts import read_header
 
 
 def eligible(cohorts: list[Cohort]) -> set[tuple[str, str, str]]:
@@ -37,11 +34,7 @@ def match_pairwise(run: JudgeRun, task: Task) -> JudgeRun:
     """
     verdicts = run.table.merge(task.references.items[["bench", "item"]]).sort_values("imported", kind="stable")
     run.table = verdicts.drop_duplicates(["bench", "item", "model_left", "model_right"], keep="first")
-    done: dict[str, set[str]] = {}  # task name ("bench/major|minor") -> judged item ids
-    for p in run.harness.log_dir(task.semester).glob("*.eval"):
-        if is_successful_eval(p):
-            done.setdefault(read_header(p).eval.task, set()).update(
-                str(s.id).rsplit("_", 1)[0] for s in read_eval_log_sample_summaries(str(p)))  # id = "<item>_<order>"
+    done = run.harness.judged_samples(run.harness.log_dir(task.semester))
     run.missing = sum(len(t.dataset) for t in run.harness.tasks(task.references, task.test, done))
     return run
 

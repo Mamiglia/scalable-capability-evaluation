@@ -117,22 +117,25 @@ def test_task_unites_only_labelled_past_models_on_shared_first_attempts(historic
     assert rebuilt.train.theta.to_dict() == {"r0": 1., "r1": 2., "h": 0.}
 
 
-def test_regression_fits_preprocessing_and_coefficients_on_the_union(historical_task):
+def test_regression_fits_preprocessing_and_coefficients_on_references_only(historical_task):
     task = historical_task
     task.historical.models.loc["no-transcripts"] = {"theta": 42., "path_b": np.nan}
     regression = TabularRegression("chars", ["chars"], make_pipeline(StandardScaler(), Ridge(alpha=1.)))
     prediction = regression(task)
     # Rendered lengths include the 13-character "[Assistant]: " prefix.
-    # x = log(2) * [6, 7, 8], y = [0, 1, 2]; ridge slope shrinks by 3/4.
-    assert regression.estimator[0].mean_[0] == pytest.approx(7 * np.log(2))
-    assert regression.estimator[0].n_samples_seen_ == 3
+    # references x = log(2) * [7, 8], y = [1, 2] (h at 6 is history, not fitted); ridge slope 1/3 on z = +-1,
+    # and the target at 9 log(2) sits at z = 3.
+    assert regression.estimator[0].mean_[0] == pytest.approx(7.5 * np.log(2))
+    assert regression.estimator[0].n_samples_seen_ == 2
     assert prediction["t"] == pytest.approx(2.5)
+    task.historical.models.theta = 1000.  # history never enters the fit
+    pd.testing.assert_series_equal(regression(task), prediction)
     task.truth[:] = -1000
     task.test.models.theta = -1000
     pd.testing.assert_series_equal(regression(task), prediction)
 
 
-def test_direct_ratings_cover_the_union_and_calibrate_on_its_labels(historical_task, tmp_path, monkeypatch):
+def test_direct_ratings_cover_references_and_calibrate_on_their_labels(historical_task, tmp_path, monkeypatch):
     domain = DomainConfig(name="toy", benches=[DomainBench(bench="b")])
     domain.task = lambda bench: SimpleNamespace(name="b")
     judge = JudgeDirect(DirectJudgeConfig(name="j", judge=ModelConfig(name="j", slug="mockllm/model"), log_dir=tmp_path), domain)
@@ -146,9 +149,9 @@ def test_direct_ratings_cover_the_union_and_calibrate_on_its_labels(historical_t
 
     monkeypatch.setattr(judge, "scores", scores)
     prediction = judge(historical_task)
-    assert [t.name for t in built] == ["b/r0", "b/r1", "b/h", "b/t"]
+    assert [t.name for t in built] == ["b/r0", "b/r1", "b/t"]
     assert all([sample.id for sample in t.dataset] == ["easy"] for t in built)
-    assert prediction.to_dict() == {"t": pytest.approx(3.)}  # reference-only fit would predict 1.5
+    assert prediction.to_dict() == {"t": pytest.approx(1.5)}  # a fit on the union would predict 3
 
 
 def test_pairwise_uses_only_references_when_history_expands(historical_task, tmp_path, monkeypatch):
