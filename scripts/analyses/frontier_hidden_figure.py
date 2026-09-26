@@ -8,7 +8,8 @@ eight 2025-II references on the 100 frozen train items:
   Embeddings        Qwen3-Embedding-8B "answer" vectors (reasoning stripped), ridge as the main analysis
   Deterministic     13 regex features, "hidden" view (text only), ridge as the main analysis
 Box: mean and its 95% t-interval over a group's targets. Marks: one-sample t-test of the targets' log likelihood
-ratios against the baseline (src/analysis/challenges/likelihood_ratio.py), per protocol and group.
+ratios against the baseline (src/analysis/challenges/likelihood_ratio.py), per protocol and group, two-sided, marked
+only when the mean is positive (as Table 3).
 
 Writes analysis/results/frontier_hidden/{frontier_hidden_errors,frontier_hidden_llr}.csv and
 analysis/results/figures/paper/frontier.{pdf,png,svg}. Run from the repo root:
@@ -98,9 +99,11 @@ llr.to_csv(OUT / "frontier_hidden_llr.csv", index=False, float_format="%.5f")
 # each target's error minus its own baseline error: 0 = no better than the baseline
 base = raw[raw.protocol == "Baseline"].set_index(["group", "model"]).error
 delta = raw.assign(error=raw.error - raw.set_index(["group", "model"]).index.map(base).to_numpy())
-p_value = {key: float(lr.pooled_tests(g).p.iloc[0]) for key, g in llr.groupby(["protocol", "group"])}  # mean LLR > 0
+tests = {key: lr.pooled_tests(g).iloc[0] for key, g in llr.groupby(["protocol", "group"])}
+p_value = {key: 2 * min(t.p, 1 - t.p) for key, t in tests.items()}  # two-sided: pooled_tests gives the upper tail
+positive = {key: t.llr > 0 for key, t in tests.items()}
 for (protocol, group), p in p_value.items():
-    print(f"LLR {protocol:24s} {group:6s} mean {llr[(llr.protocol == protocol) & (llr.group == group)].llr.mean():+.2f}  p = {p:.4f}")
+    print(f"LLR {protocol:24s} {group:6s} mean {tests[protocol, group].llr:+.2f}  p = {p:.4f}")
 print(delta.groupby(["protocol", "group"]).error.agg(["median", "mean", "count"]).unstack("group").round(2).to_string())
 
 plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial"], "font.size": 8, "axes.labelsize": 8,
@@ -122,7 +125,7 @@ for i, protocol in enumerate(ROWS):
                    lw=0, zorder=2, clip_on=False)
         ax.scatter([mean], [y], s=70, facecolor="white", edgecolor="#333333", lw=1.2, zorder=3, clip_on=False)
         p = p_value[(protocol, group)]
-        mark = "***" if p < .001 else "**" if p < .01 else "*" if p < .05 else "n.s."
+        mark = "n.s." if not positive[(protocol, group)] else "***" if p < .001 else "**" if p < .01 else "*" if p < .05 else "n.s."
         ax.text(6.5, y, mark, va="center", ha="left", fontsize=7 if mark != "n.s." else 6,
                 color="#555555" if group == "closed" else "#a6a6a6", clip_on=False)
     yticks.append(-(i * 3 + 0.525))
