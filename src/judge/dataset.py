@@ -23,13 +23,16 @@ ROLE_PREFIX = re.compile(r"^\[[^\]\n]+\]: ", re.M)  # "[Assistant]: ", "[User]: 
 
 
 ENDS_SEPARATOR = "\n...\n"  # marks an elided piece of a transcript (ends, thirds)
+# Told to the judge only when transcripts are cut to thirds; no braces (the prompt is str.format-ed).
+THIRDS_NOTE = ('Parts of either transcript may have been redacted; a redacted span is shown as "...". '
+               "Judge only what is shown and do not hold a gap against a transcript.\n\n")
 
 
 def cut(text: str, max_len: int, truncate: str = "head") -> str:
     """The max_len characters a judge sees of a longer transcript: its prefix (head), suffix (tail),
     or first and last max_len/2 with ENDS_SEPARATOR between (ends). Shorter transcripts are unchanged.
     thirds-<kept> ignores max_len: the text is split into three equal character spans and only the named
-    ones are shown, each run of dropped spans replaced by one ENDS_SEPARATOR (as on main)."""
+    ones are shown, each run of dropped spans replaced by one ENDS_SEPARATOR."""
     if not TRUNCATE_MODES.fullmatch(truncate):
         raise ValueError(f"truncate must match {TRUNCATE_MODES.pattern}, got {truncate!r}")
     if truncate.startswith("thirds-"):
@@ -86,7 +89,7 @@ USER_PROMPT = """Input question:
 
 ---
 
-Which of the two transcripts is from the more capable model? Answer in the instructed format.
+{note}Which of the two transcripts is from the more capable model? Answer in the instructed format.
 """
 
 OPTIONS_BLOCK = """Multiple choice options as shown to Model {n}:
@@ -152,11 +155,15 @@ def responses_to_sample(
         target: which position holds the more capable model ('1' or '2').
         format_str: prompt template to fill.
         max_len: maximum characters kept per transcript.
-        truncate: which end of a longer transcript is kept, head or tail.
+        truncate: a TRUNCATE_MODES cut; thirds modes also add THIRDS_NOTE to the prompt.
         window: keep-k/n or drop-k/n, a fraction of each transcript by characters, cut before max_len.
     """
     assert first.id == second.id, "Sample IDs must match for comparison."
-    assert first.question == second.question, "Sample inputs must match for comparison."
+    # Same item under two scaffolds (the Epoch SWE-bench import omits our "Please solve..." line): one prompt is a
+    # suffix of the other. Show the longer one in both orders so the pair's two samples share a question.
+    question = max(first.question, second.question, key=len)
+    assert question.endswith(first.question) and question.endswith(second.question), \
+        "Sample inputs must match for comparison."
 
     text_1 = cut(window_text(first.text, window), max_len, truncate)
     text_2 = cut(window_text(second.text, window), max_len, truncate)
@@ -164,11 +171,12 @@ def responses_to_sample(
     return Sample(
         id=f"{first.id}_{target}",
         input=format_str.format(
-            question=first.question,
+            question=question,
             options_1=format_options(first.options, 1),
             options_2=format_options(second.options, 2),
             transcript_1=text_1,
             transcript_2=text_2,
+            note=THIRDS_NOTE if truncate.startswith("thirds-") else "",
         ),
         target=target,
         # Length is itself a signal: record what the judge actually saw (``chars_*`` are the
@@ -178,8 +186,8 @@ def responses_to_sample(
             "chars_2": len(text_2),
             "response_chars_1": response_chars(text_1),
             "response_chars_2": response_chars(text_2),
-            "truncated_1": len(first.text) > max_len,
-            "truncated_2": len(second.text) > max_len,
+            "truncated_1": text_1 != first.text,
+            "truncated_2": text_2 != second.text,
         },
     )
 

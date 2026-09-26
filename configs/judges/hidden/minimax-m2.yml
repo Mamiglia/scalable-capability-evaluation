@@ -1,0 +1,7 @@
+# Reasoning-hidden twin of configs/judges/reasoning/minimax-m2.yml: identical condition except include_reasoning (the subjects'
+# reasoning blocks are stripped); full train set, nothing truncated, a pair too long for the judge's context is left unscored.
+name: minimax-m2
+include_reasoning: false
+judge: configs/models/minimax/minimax-m2.yml
+max_length: 100000000
+_kwargs: {fail_on_error: false, max_tokens: 32768}

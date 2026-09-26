@@ -39,7 +39,7 @@ uv run collect \
   --message-limit "${MESSAGE_LIMIT:-200}" \
   --max-tokens "${MAX_TOKENS:-32768}" \
   --fail-on-error "${FAIL_ON_ERROR:-0.1}" \
-  -b configs/bench/terminal_bench_2_1.yml \
+  -b "${BENCH:-configs/bench/terminal_bench_2_1.yml}" \
   -m "${models[@]}" \
   -n "${EPOCHS:-1}" \
   --log-dir "${LOG_DIR:-data}" \

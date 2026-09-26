@@ -1,6 +1,6 @@
 ---
 name: judge-logs
-description: Handling the logs/ repo of judge runs - layout, where a judging campaign's verdicts land, resuming, moving stale/invalid verdicts, and committing/pushing to the LASR-G5/judging HF repo. Use whenever the user works with logs/, judge eval-sets, verdict logs, or rankings - launching or resuming a judging run, finding which dir a run wrote to, cleaning up after data/ transcripts changed, or syncing logs/.
+description: Handling the logs/ repo of judge runs - layout, where a judging campaign's verdicts land, resuming, moving stale/invalid verdicts, and committing/pushing to the generality-labs/judging HF repo. Use whenever the user works with logs/, judge eval-sets, verdict logs, or rankings - launching or resuming a judging run, finding which dir a run wrote to, cleaning up after data/ transcripts changed, or syncing logs/.
 ---
 
 # Handling logs/ (judge runs)
@@ -41,7 +41,7 @@ and say so in the commit message. Unusable verdicts (serving defects) go to `log
 
 ## Syncing
 
-`logs/` is its own git repo → `https://huggingface.co/datasets/LASR-G5/judging`, git-LFS on
+`logs/` is its own git repo → `https://huggingface.co/datasets/generality-labs/judging`, git-LFS on
 `*.eval`. Git is the only transport (no `hf upload`). No parent pin exists, so an unpushed
 commit lives only on this machine: commit + push after every judging campaign and every
 legacy/invalid move. Commit messages name the campaign or the move and its reason.

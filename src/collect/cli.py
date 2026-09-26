@@ -8,6 +8,7 @@ from inspect_ai import eval_set
 
 from collect.tasks import agentbench_compat  # noqa: F401  (side effect: drop AgentBench cpuset pin)
 from collect.tasks import harbor_compat  # noqa: F401  (side effect: relax Harbor compose)
+from collect.tasks import openrouter_compat  # noqa: F401  (side effect: Anthropic cache markers, flaky-400 retries)
 from collect.runner import eval_runner
 from configs import ModelConfig, TaskConfig, flag_parse, kv_pair
 from configs.logs import log_to, logger

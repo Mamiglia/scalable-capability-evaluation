@@ -1,0 +1,16 @@
+# Pinned to Anthropic first-party. Thinking is off unless enabled on this model - enabled explicitly
+# (adaptive; OpenRouter maps reasoning.enabled). Prompt caching: inspect's OpenRouter provider inserts
+# the cache_control markers; verify per-turn cache reads with src/challenges/frontier/cache_check.py
+# before a full run (claude-opus-4.7 cached only the static prefix, collection_runs.md 2026-08-31).
+name: anthropic/claude-opus-4.8
+release_date: '2026-05-27'
+model_args:
+  provider:
+    only:
+    - anthropic
+    allow_fallbacks: false
+generate_args:
+  extra_body:
+    reasoning:
+      enabled: true
+  max_tokens: 128000

@@ -40,7 +40,10 @@ def judge_task(
     log_major = read_header(major_path)
     log_minor = read_header(minor_path)
 
-    if log_major.eval.task.rsplit("/", 1)[-1] != log_minor.eval.task.rsplit("/", 1)[-1]:
+    # The Epoch AI import (data/swe_bench_mini/6d369262) keeps its source task name; the items are the mini subset's.
+    same_task = {"swe_bench_verified": "swe_bench_verified_mini"}
+    names = [same_task.get(n, n) for n in (log_major.eval.task.rsplit("/", 1)[-1], log_minor.eval.task.rsplit("/", 1)[-1])]
+    if names[0] != names[1]:
         raise ValueError(
             f"The two logs must be from the same task, got {log_major.eval.task!r} "
             f"({major_path}) and {log_minor.eval.task!r} ({minor_path})"

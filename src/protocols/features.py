@@ -99,3 +99,7 @@ from protocols.transcript_features.protocol import TranscriptRegression  # noqa:
 
 for variant in ("length", "regex", "structure"):
     PROTOCOLS[f"glm_{variant}"] = TranscriptRegression(variant=variant)
+
+from protocols.embeddings import EmbeddingRegression  # noqa: E402  (subclasses TabularRegression)
+
+PROTOCOLS["embedding"] = EmbeddingRegression()  # the "answer" variant is an analysis condition (analysis.calibration), not a CLI protocol

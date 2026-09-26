@@ -12,6 +12,7 @@ data/meta/<domain>/eval_<name>.csv (gitignored).
 """
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -77,11 +78,14 @@ def main() -> int:
     parser.add_argument("--direct-judge", nargs="+", default=[], type=Path,
                         help="judge yml(s) -> direct_judge_<name> protocols (1–10 ratings, reasoning shown)")
     parser.add_argument("--semester", nargs="+", default=None, help="default: every semester task")
+    parser.add_argument("--truncate", help="override the --judge configs' truncate, e.g. thirds-13 (src/challenges/thirds)")
     args = parser.parse_args()
     domain = DomainConfig.from_cli(args.domain)
 
     # JudgeBT, JudgeCalibrated and JudgeLinear read the same run dir, so the judging happens once.
-    judges = [cls(JudgeConfig.from_cli(path), domain) for path in args.judge for cls in (JudgeBT, JudgeCalibrated, JudgeLinear)]
+    override = {"truncate": args.truncate} if args.truncate else {}  # replace() re-runs the config's validation
+    judges = [cls(replace(JudgeConfig.from_cli(path), **override), domain)
+              for path in args.judge for cls in (JudgeBT, JudgeCalibrated, JudgeLinear)]
     judges += [JudgeDirect(DirectJudgeConfig.from_cli(path), domain) for path in args.direct_judge]
     protocols = [PROTOCOLS[name] for name in args.protocol or PROTOCOLS] + judges
 

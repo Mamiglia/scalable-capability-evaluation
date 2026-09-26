@@ -11,7 +11,7 @@ from configs.model import ModelConfig
 
 FULL_LENGTH = 262144  # the untruncated default; a smaller max_length is a truncation condition
 # head/tail/ends keep max_length chars of a longer transcript; thirds-<kept> shows only the named equal character
-# thirds of every transcript ("..." where a third is dropped), max_length ignored (src/challenges/thirds on main)
+# thirds of every transcript ("..." where a third is dropped), max_length ignored (src/challenges/thirds)
 TRUNCATE_MODES = re.compile(r"head|tail|ends|thirds-(1|2|3|12|13|23)")
 CHANNELS = ("reasoning", "text", "calls", "outputs")  # what a rendered transcript is made of: CoT blocks, assistant prose, tool calls, tool outputs
 CHANNEL_GROUPS = {"tools": ("calls", "outputs")}  # a spec name standing for several channels
@@ -45,7 +45,7 @@ class JudgeConfig(DraccusConfig):
     include_reasoning: bool = False  # show the models' reasoning blocks to the judge
     include_reverse: bool = True  # judge every pair in both shown orders (position bias)
     max_length: int = FULL_LENGTH  # chars kept per transcript; two must fit the judge's context with its output
-    truncate: str = "head"  # which max_length chars to keep when a transcript is longer: head (prefix), tail (suffix) or ends (both halves, "..." between)
+    truncate: str = "head"  # head (prefix), tail (suffix), ends (both halves, "..." between) of max_length chars, or thirds-<kept> (TRUNCATE_MODES)
     window: str = ""  # a fraction of each transcript by characters, keep-k/n (show only the k-th n-th) or drop-k/n (hide it); applied before max_length
     channels: str = ""  # only-<c> shows one channel of the transcript, drop-<c> hides it: reasoning, text, calls, outputs or tools (calls and outputs)
     temperature: float = 0.0

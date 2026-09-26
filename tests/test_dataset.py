@@ -298,6 +298,24 @@ def test_cut_modes():
     import pytest
     with pytest.raises(ValueError):
         cut(text, 10, "middle")
+    # thirds: equal character spans [0:33] [33:66] [66:100], max_len ignored, one separator per run of dropped spans
+    assert cut(text, 10, "thirds-1") == text[:33] + ENDS_SEPARATOR
+    assert cut(text, 10, "thirds-2") == ENDS_SEPARATOR + text[33:66] + ENDS_SEPARATOR
+    assert cut(text, 10, "thirds-3") == ENDS_SEPARATOR + text[66:]
+    assert cut(text, 10, "thirds-12") == text[:66] + ENDS_SEPARATOR
+    assert cut(text, 10, "thirds-13") == text[:33] + ENDS_SEPARATOR + text[66:]
+    assert cut(text, 10, "thirds-23") == ENDS_SEPARATOR + text[33:]
+    with pytest.raises(ValueError):
+        cut(text, 10, "thirds-21")
+
+
+def test_responses_to_sample_thirds_note():
+    from judge.dataset import THIRDS_NOTE
+    res = responses_to_sample(transcript("A" * 90, pad=False), transcript("B" * 90, pad=False), truncate="thirds-12")
+    assert "A" * 60 + "\n...\n\n\n---" in res.input and "B" * 60 + "\n...\n" in res.input
+    assert res.input.index(THIRDS_NOTE) < res.input.index("Which of the two")
+    assert res.metadata["truncated_1"] and res.metadata["truncated_2"] and res.metadata["chars_1"] == 65
+    assert THIRDS_NOTE not in responses_to_sample(transcript("x"), transcript("y")).input
 
 
 def test_window_modes():

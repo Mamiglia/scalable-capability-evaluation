@@ -5,6 +5,7 @@ from pathlib import Path
 from inspect_ai import Task, eval_set
 from inspect_ai.model import CachePolicy
 
+from collect.tasks import openrouter_compat  # noqa: F401  (side effect: retry OpenRouter's flaky 400s)
 from configs.judge import JudgeConfig
 from configs.logs import log_to, logger
 from model import Model

@@ -1,0 +1,13 @@
+# CODING + the frontier subsets: coding.yml's three benches plus the two subset hashes that hold the
+# off-roster frontier models (src/challenges/frontier/). Same `name` per bench, so each pair pools as
+# one bench. Its frozen tables live in data/meta/coding_frontier/, DERIVED from data/meta/coding/ by
+# `src/challenges/frontier/integrate.py` (never by `uv run reference`): coding's tables unchanged,
+# plus the frontier models as extra 2026-I targets with theta* from local_fit on the collected HARD
+# items, and the original 2026-I targets' role blanked. Evaluate with `--semester 2026-I`.
+name: coding_frontier
+benches:
+  - bench: configs/bench/swe-bench-mini.yml
+  - bench: configs/bench/terminal_bench_2_1.yml
+  - bench: configs/bench/agent_bench_os.yml
+  - bench: configs/bench/swe-bench-mini-frontier.yml
+  - bench: configs/bench/terminal_bench_2_1_frontier.yml
