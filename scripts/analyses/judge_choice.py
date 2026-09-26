@@ -233,7 +233,7 @@ def box_figure(f: pd.DataFrame, out: Path):
     rng = np.random.default_rng(0)
     xs, labels, x = [], [], 0
     base = f[f.semester.isin(BOX_SEMESTERS)].drop_duplicates(["domain", "semester", "model"]).groupby("model").e_base.mean()
-    columns = [("baseline", "-", "Reference mean", base)] + [(p, "loo" if kind == "pick" else str(key), label, None)
+    columns = [("baseline", "-", "Baseline", base)] + [(p, "loo" if kind == "pick" else str(key), label, None)
                                                           for p in VARIANT for kind, key, label in BOX_COLUMNS]
     for p, col, label, e in columns:
         if e is None:
