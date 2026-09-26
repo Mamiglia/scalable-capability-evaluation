@@ -90,7 +90,7 @@ def compute() -> tuple[pd.DataFrame, pd.DataFrame]:
                 if (run := loo_pick(runs, task, protocol)) is None:
                     print("no", protocol, "run", name, sem, file=sys.stderr)
                     continue
-                dollars, tokens = run_cost(run.harness.log_dir(sem), table)
+                dollars, tokens = map(sum, zip(*(run_cost(d, table) for d in (run.harness.log_dirs(sem) if run.protocol == "direct" else [run.harness.log_dir(sem)]))))
                 embed_tokens = tokens if protocol == "direct" else embed_tokens
                 items = run.table[["bench", "item"]].drop_duplicates().reset_index(drop=True)
                 for frac in FRACTIONS:

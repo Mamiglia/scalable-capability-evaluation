@@ -50,6 +50,7 @@ OUT = Path("analysis/judge/judge_ensemble")
 DOMAINS = ["science", "math", "coding", "cyber"]
 CONDITIONS = ["24d6cc32", "66c170cd"]
 KEY = ["bench", "item", "model_left", "model_right"]
+FORECASTS = Path("analysis/results/forecasts.csv")  # the main analysis: its judge_loo_mse picks the judge in use
 
 
 def estimators(v: pd.DataFrame, refs: pd.Series, targets: list[str], prior: tuple[float, float]) -> dict[str, pd.Series]:
@@ -131,22 +132,31 @@ def diagnostics(v: pd.DataFrame, f: pd.DataFrame) -> None:
     print(pd.DataFrame(out).set_index(cells).round(2).to_string())
 
 
+def loo_judges() -> pd.DataFrame:
+    """The judge the main analysis uses per task: lowest reference leave-one-out MSE of the pairwise linear
+    estimator, on each judge's closest run to reasoning shown on the full train set (stats.core_condition)."""
+    from analysis.stats import core_condition
+    f = core_condition(pd.read_csv(FORECASTS))
+    f = f[(f.protocol == "pairwise") & (f.variant == "linear")].drop_duplicates(["domain", "semester", "judge"])
+    return f.loc[f.groupby(["domain", "semester"]).judge_loo_mse.idxmin(), ["domain", "semester", "judge"]].rename(columns={"judge": "judges"})
+
+
 def compare(mse: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     """JudgeLinear: the ensemble = mean of the three judges' forecasts (the best and cheapest way to combine them)
-    against the judge in use today, the top-1 reference, on the same items. Prints both per task and the paired
+    against the judge the main analysis uses (loo_judges: lowest reference leave-one-out error), on the same items. Prints both per task and the paired
     difference (N = 14 tasks; the mean and its CI). Returns (one row per task: squared error and score of the top-1
     judge and of the ensemble, x position; the task's mean_ref MSE), which plots.judge_ensemble.figure draws."""
     cells = ["domain", "semester"]
     lin = mse[mse.estimator == "linear"].merge(mse[mse.estimator == "mean_ref"][[*cells, "se"]].rename(columns={"se": "baseline"}))
     lin = lin.assign(score=(100 - 100 * lin.se / lin.baseline).clip(lower=0))
     ens = lin[(lin.method == "mean") & (lin.k == 3)]
-    top1 = lin[lin.method == "single"].merge(ens.assign(judges=ens.judges.str.split("|").str[0])[[*cells, "judges"]])  # fit.yml order: top-1 first
+    top1 = lin[lin.method == "single"].merge(loo_judges())
     tasks = ens[cells].assign(order=ens.domain.map({n.lower(): i for i, n in enumerate(DOMAIN)})).sort_values(["order", "semester"])
     tasks["x"] = np.arange(len(tasks)) + tasks.order * 0.6  # a gap between domains
     both = tasks.merge(top1[[*cells, "judges", "se", "score"]]).merge(ens[[*cells, "se", "score"]], on=cells, suffixes=("_top1", "_ens"))
     delta = both.score_ens - both.score_top1
     half = t.ppf(0.975, len(delta) - 1) * delta.sem()
-    print("\nJudgeLinear, top-1 judge vs the 3-judge mean of forecasts (theta MSE and prediction score, same items)")
+    print("\nJudgeLinear, leave-one-out judge vs the 3-judge mean of forecasts (theta MSE and prediction score, same items)")
     print(both.drop(columns=["order", "x"]).assign(delta=delta).round(2).to_string(index=False))
     print(f"MSE mean {both.se_top1.mean():.2f} -> {both.se_ens.mean():.2f}, median {both.se_top1.median():.2f} -> {both.se_ens.median():.2f}; "
           f"score {delta.mean():+.1f} +- {half:.1f} points (legacy) (t 95% CI, N = {len(delta)} tasks), ensemble better in {(delta > 0).sum()}/{len(delta)}")
