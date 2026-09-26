@@ -1,0 +1,47 @@
+# hibayes pipeline for the signal GLM. Rows are written by scripts/analyses/signal_glm.py.
+data_loader:
+  paths:
+    extracted_data:
+      - analysis/results/signal_glm/rows.csv
+
+data_process:
+  processors:
+    - extract_observed_feature: {feature_name: y}
+    - extract_features:
+        categorical_features: [protocol, domain, model_domain, protocol_judge]  # random intercepts per (target model, domain) cell and per judge within protocol
+        reference_categories: {protocol_judge: "-"}  # "-" = no judge, pinned to 0
+        category_order:
+          protocol: [easy_items, glm_length, glm_regex, embedding, direct, pairwise]  # first = reference level
+          domain: [science, math, coding, cyber]
+
+model:
+  path: scripts/analyses/signal_glm/model.py
+  models:  # m2 first (the reported fit), m1 second (the LOO comparison)
+    - name: signal_gamma_model
+      config:
+        link_function: identity  # coefficients are read on the log scale by the runner
+        main_effect_params: [protocol_effects, sigma_protocol, sigma_cell, sigma_judge, shape]
+        fit: {samples: 2000, warmup: 1000, chains: 4, seed: 0, target_accept: 0.95}
+    - name: signal_gamma_additive
+      config:
+        link_function: identity
+        main_effect_params: [protocol_effects, sigma_cell, sigma_judge, shape]
+        fit: {samples: 2000, warmup: 1000, chains: 4, seed: 0, target_accept: 0.95}
+
+check:
+  checkers:
+    - prior_predictive_check: {num_samples: 200}
+    - divergences
+    - r_hat  # reports fail on the pinned reference levels (NaN r_hat); the runner checks the free parameters
+    - ess_bulk
+    - ess_tail
+    - posterior_predictive_plot: {interactive: false, kind: cumulative, num_samples: 200}
+
+communicate:
+  communicators:
+    - summary_table: {vars: [protocol_effects, domain_effects, sigma_protocol, sigma_cell, sigma_judge, judge_effects, shape]}
+    - trace_plot: {vars: [protocol_effects, sigma_protocol, sigma_cell], best_model: false}
+
+platform:
+  device_type: cpu
+  chain_method: parallel
