@@ -1,5 +1,5 @@
 """Freeze matched direct inputs for <domain>/<judge>/<semester>/<head|tail|ends>-<max_length> or
-.../channels-<only|drop>-<channel>; no API calls.
+.../channels-<only|drop>-<channel> or .../thirds-<kept> (kept character thirds, on the 40 removal items per task); no API calls.
 
 A condition reuses the full-transcript campaign's exact retained inputs, exclusions, references and
 target truth, re-rendered with JudgeConfig.max_length (characters kept per transcript) or JudgeConfig.channels
@@ -26,6 +26,7 @@ from judge.dataset import DIRECT_USER_PROMPT, MIN_RESPONSE_CHARS, cut as cut_tex
 from protocols.direct_judge import JudgeDirect
 from protocols.direct_judge import judge as judge_module
 from reference import tables
+from analysis.challenges.contributions import removal_items
 from challenges.truncation.run import cut_fields, root
 
 REPO = Path(__file__).resolve().parents[3]
@@ -110,6 +111,7 @@ def retained(sources, judge_name, semester, train):
 def prepare(domain_name, judge_name, semester, cut):
     fields = cut_fields(cut)
     channels = "channels" in fields
+    thirds = fields.get("truncate", "").startswith("thirds-")
     sources = stage_source(domain_name)
     source = sources[0]
     config = DirectJudgeConfig.from_cli(source / "configs" / f"{judge_name}.yml")
@@ -131,6 +133,11 @@ def prepare(domain_name, judge_name, semester, cut):
     assert ratings.epoch.eq(1).all() and ratings.semester.eq(semester).all()
     rated = {(f"{r.bench}/{r.model}", r.item): r._asdict() for r in ratings.itertuples(index=False)}
     assert set(rated) <= set(expected), "rating export outside the retained set"
+    if thirds:  # thirds conditions judge only the removal analysis's 40 stratified train items per task
+        keep = removal_items(task)
+        assert len(keep) == 40  # matched by item id alone, as contributions.on_items does (math aime2025/aime2026 share ids)
+        expected = {key: value for key, value in expected.items() if key[1] in keep}
+        rated = {key: value for key, value in rated.items() if key[1] in keep}
     tasks, reused, audit, observed, excluded = [], [], [], set(), []
     for t in truncated.tasks(task.references, task.test):
         assert t.metadata["include_reasoning"] is True and t.metadata["max_length"] == max_length and t.metadata["truncate"] == mode
@@ -156,6 +163,13 @@ def prepare(domain_name, judge_name, semester, cut):
                 if sample.metadata["response_chars"] < MIN_RESPONSE_CHARS:
                     excluded.append({"task": t.name, "item": str(sample.id), "response_chars": sample.metadata["response_chars"]})
                     continue
+            elif thirds:
+                assert text == cut_text(full_text, max_length, mode) and not unchanged, key  # every transcript loses a third
+                assert not sample.metadata["truncated"], key  # the flag records max_length cuts only
+                was_cut = False
+                if sample.metadata["response_chars"] < MIN_RESPONSE_CHARS:  # as pairwise thirds drop such pairs
+                    excluded.append({"task": t.name, "item": str(sample.id), "response_chars": sample.metadata["response_chars"]})
+                    continue
             else:
                 assert text == cut_text(full_text, max_length, mode), key  # deterministic cut of the full transcript
                 was_cut = len(full_text) > max_length
@@ -175,7 +189,8 @@ def prepare(domain_name, judge_name, semester, cut):
     # A channel condition drops inputs it leaves (nearly) empty, and the renderer drops a transcript it leaves empty entirely.
     missing = set(expected) - observed - {(row["task"], row["item"]) for row in excluded}
     excluded += [{"task": name, "item": item, "response_chars": 0} for name, item in sorted(missing)] if channels else []
-    assert channels or observed == set(expected)
+    assert channels or thirds or observed == set(expected)
+    assert not thirds or observed | {(row["task"], row["item"]) for row in excluded} == set(expected)
     assert len(observed) + len(excluded) == len(expected)
     assert len(reused) + sum(len(t["samples"]) for t in tasks) == len(observed)
     changed = sum(row["changed"] for row in audit)
@@ -223,13 +238,12 @@ def prepare(domain_name, judge_name, semester, cut):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("conditions", nargs="+", help="<domain>/<judge>/<semester>/<head|tail|ends>-<max_length chars> or .../channels-<only|drop>-<channel>")
+    parser.add_argument("conditions", nargs="+", help="<domain>/<judge>/<semester>/<head|tail|ends>-<max_length chars>, .../channels-<only|drop>-<channel> or .../thirds-<kept>")
     args = parser.parse_args()
-    for sweep_root in {root(c) for c in args.conditions}:
-        summaries = [prepare(*c.split("/")) for c in args.conditions if root(c) == sweep_root]
-        path = sweep_root / "sweep-summary.json"
+    key = lambda s: (s["domain"], s["judge"], s["semester"], s.get("condition") or f"{s.get('truncate')}-{s['max_length']}")
+    for condition in args.conditions:  # merged into the root's sweep summary one by one, so a crash keeps earlier conditions
+        summary = prepare(*condition.split("/"))
+        path = root(condition) / "sweep-summary.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         previous = json.loads(path.read_text()) if path.exists() else []
-        key = lambda s: (s["domain"], s["judge"], s["semester"], s.get("condition") or f"{s.get('truncate')}-{s['max_length']}")
-        keys = {key(s) for s in summaries}
-        path.write_text(json.dumps([s for s in previous if key(s) not in keys] + summaries, indent=2) + "\n")
+        path.write_text(json.dumps([s for s in previous if key(s) != key(summary)] + [summary], indent=2) + "\n")

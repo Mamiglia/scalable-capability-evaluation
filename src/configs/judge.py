@@ -62,8 +62,8 @@ class JudgeConfig(DraccusConfig):
     def __post_init__(self):
         if isinstance(self.judge, (str, Path)):
             self.judge = ModelConfig.from_cli(self.judge)
-        if self.truncate not in ("head", "tail", "ends"):
-            raise ValueError(f"truncate must be head, tail or ends, got {self.truncate!r}")
+        if not TRUNCATE_MODES.fullmatch(self.truncate):
+            raise ValueError(f"truncate must match {TRUNCATE_MODES.pattern}, got {self.truncate!r}")
         if self.window:
             parse_window(self.window)
         parse_channels(self.channels)

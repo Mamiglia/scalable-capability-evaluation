@@ -26,8 +26,17 @@ from eval_edits import stamp_edit
 
 
 CUT_WORDS = {"head": "first {n}", "tail": "last {n}", "ends": "first and last {n} ('...' between)"}
+THIRD_NAMES = {"1": "first", "2": "middle", "3": "last"}
 CHANNEL_NAMES = {"reasoning": "reasoning", "text": "assistant text", "calls": "tool calls", "outputs": "tool outputs",
                  "tools": "tool calls and tool outputs"}
+
+
+def thirds_words(mode):
+    """Plain description of a thirds mode: thirds-23 -> "without the first third", thirds-2 -> "only the middle third"."""
+    kept = mode.removeprefix("thirds-")
+    if len(kept) == 1:
+        return f"only the {THIRD_NAMES[kept]} third"
+    return f"without the {THIRD_NAMES[({'1', '2', '3'} - set(kept)).pop()]} third"
 
 
 def channel_words(spec):
@@ -80,9 +89,19 @@ def prepare(condition):
     payload = json.loads((inputs / "job.json").read_text())
     domain, judge, max_length, mode = payload["domain"], payload["judge"], payload["max_length"], payload["truncate"]
     channels = payload.get("channels")
-    label = f"channels_{channels}" if channels else f"truncated_{mode}_{max_length}_chars"
+    thirds = mode.startswith("thirds-")
+    label = f"channels_{channels}" if channels else f"truncated_{mode}" if thirds else f"truncated_{mode}_{max_length}_chars"
     view = {"channels": channels} if channels else {}
-    if channels:
+    if thirds:
+        shown = thirds_words(mode)
+        judgment_input = (f"Each rendered transcript split into three equal character spans and shown {shown} (JudgeConfig.truncate={mode}, "
+                          f"judge.dataset.cut; each run of dropped spans replaced by '\\n...\\n'); calibration and target transcripts alike; "
+                          f"subject reasoning visible; only the 40 removal-analysis train items per task (10 per difficulty quartile, "
+                          f"stratified_items seed 0); inputs left under 20 characters of model-written text excluded "
+                          f"({len(payload['excluded'])}); retained set and exclusions otherwise identical to the full-transcript campaign.")
+        unchanged_reason = "unused: every thirds input differs from the full transcript"
+        edit_reason = f"Label the {mode} condition ({shown}) and recompute score summaries."
+    elif channels:
         shown = channel_words(channels)
         judgment_input = (f"Each transcript rendered with {shown} (JudgeConfig.channels={channels}); inputs the filter leaves unchanged "
                           f"reuse their full-transcript ratings; inputs left under 20 characters of model-written text are excluded "
@@ -217,7 +236,7 @@ def prepare(condition):
         "judgment_input": judgment_input,
         "truncated_inputs": sum(row["truncated"] for row in payload["audit"]),
         **({"changed_inputs": sum(row["changed"] for row in payload["audit"]), "excluded_inputs": payload["excluded"],
-            "missing_forecasts": predictions.index[predictions.isna()].tolist()} if channels else {}),
+            "missing_forecasts": predictions.index[predictions.isna()].tolist()} if channels or thirds else {}),
         "calibration": "previous-semester references only", "ratings": len(ratings),
         "retained_judgments": sum(len(ids) for ids in expected.values()), "declared_failures": audit.get("declared_failures", []),
         "archived_attempts": archive_records,
@@ -228,13 +247,16 @@ def prepare(condition):
                f"{judge}, {domain}, {payload['semester']}; `channels: {channels}` (same filter on calibration and target transcripts). "
                f"{len(ratings)} audited ratings on the full-transcript campaign's retained set less {len(payload['excluded'])} inputs the filter leaves under 20 characters, "
                f"including {len(payload['reused_ratings'])} verified identical-input reuses of inputs the filter leaves unchanged.\n\n") if channels else (
+               f"# Direct judging: transcripts {'showing ' if shown.startswith('only') else ''}{shown}\n\n"
+               f"{judge}, {domain}, {payload['semester']}; `truncate: {mode}` (three equal character spans of the rendered transcript, same cut on calibration and target transcripts). "
+               f"{len(ratings)} audited ratings on the full-transcript campaign's retained set restricted to the 40 removal-analysis train items per task.\n\n") if thirds else (
                f"# Direct judging: transcripts truncated to their {CUT_WORDS[mode]} characters\n\n"
                f"{judge}, {domain}, {payload['semester']}; `max_length: {max_length}`, `truncate: {mode}` (characters kept per transcript, same limit on calibration and target transcripts). "
                f"{len(ratings)} audited ratings on the full-transcript campaign's retained set, including {len(payload['reused_ratings'])} verified identical-input reuses of inputs shorter than the limit.\n\n")
     (stage / "README.md").write_text(heading +
         "The condition hash and log metadata separate it from the full-transcript run. "
-        f"`condition.json` records the config, {'channel' if channels else 'truncation'} label, source revisions, provider audit, and reuse provenance.\n\n"
-        f"All inputs, final ratings, provider pins, cache origins, and sample identities were checked. {len(failures)} explicitly recorded exhausted ratings remain missing after two same-config recollections; see `declared_failures` in `condition.json`. "
+        f"`condition.json` records the config, {'channel' if channels else 'thirds' if thirds else 'truncation'} label, source revisions, provider audit, and reuse provenance.\n\n"
+        f"All inputs, final ratings, provider pins, cache origins, and sample identities were checked. {len(failures)} explicitly recorded unusable ratings remain missing after two same-config recollections; see `declared_failures` in `condition.json`. "
         "Publication copies carry edit stamps; original transcripts and API traces are preserved.\n")
     result = {"condition": condition, "domain": domain, "judge": judge, "stage": str(stage), "destination": str(destination),
               "logs": len(records), "ratings": len(ratings), "retained_judgments": sum(len(ids) for ids in expected.values()),

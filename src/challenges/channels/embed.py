@@ -1,6 +1,6 @@
 """Embed channel-filtered transcripts with Qwen3-Embedding-8B, as the embedding protocol reads them.
 
-    uv run python src/challenges/channels/embed.py plan --out jobs.json [--thirds] # laptop: which logs, items, variants
+    uv run python src/challenges/channels/embed.py plan --out jobs.json [--thirds [kept]] # laptop: which logs, items, variants
     python src/challenges/channels/embed.py run jobs.json --out DIR --shard k/n      # GPU: download and embed
     python src/challenges/channels/embed.py check DIR REFERENCE_DIR                 # compare a "full" re-embedding
 
@@ -9,7 +9,7 @@ extract_transcript text, tokenised without truncation, 8,192-token chunks with 2
 ending in <|endoftext|>, last-token pooled, L2-normalised, token-weighted mean, float16. A variant
 "channels-<spec>" renders the transcript with JudgeConfig.channels = <spec> (reasoning shown); "thirds-<kept>" renders it
 as "full" does and cuts it with judge.dataset.cut(truncate="thirds-<kept>"), the cut of the pairwise thirds runs (plan
---thirds for the removal variants); "full" is the existing
+--thirds for the removal variants thirds-23/13/12, --thirds kept for the kept-alone thirds-1/2/3); "full" is the existing
 variant, re-embedded only to check that this runner reproduces the published vectors. Output:
 <out>/<log path without .eval>.<variant>.npz with the arrays analysis.embeddings reads. Samples: the frozen train items
 of the semesters the plan covers, first attempts only.
@@ -37,18 +37,17 @@ SPECS = ["drop-reasoning", "drop-text", "drop-calls", "drop-outputs", "drop-tool
 # domain -> (semesters, channel specs to embed)
 PLAN = {"coding": (["2025-II", "2026-I"], SPECS), "cyber": (["2025-II", "2026-I"], SPECS),
         "math": (["2025-II", "2026-I"], ["only-reasoning"]), "science": (["2025-II", "2026-I"], ["only-reasoning"])}
-THIRDS = ["thirds-23", "thirds-13", "thirds-12"]  # each third removed; the kept-alone thirds are not embedded
-THIRDS_PLAN = {domain: (["2025-II", "2026-I"], THIRDS) for domain in PLAN}
+THIRDS = {"removed": ["thirds-23", "thirds-13", "thirds-12"], "kept": ["thirds-1", "thirds-2", "thirds-3"]}
 
 
-def plan(out: Path, thirds: bool = False) -> None:
+def plan(out: Path, thirds: str | None = None) -> None:
     """One job per collection log the planned cohorts read: its train items and the variants to embed."""
     import pandas as pd
 
     from analysis import loading
 
     jobs: dict[str, dict] = {}
-    for domain, (semesters, specs) in (THIRDS_PLAN if thirds else PLAN).items():
+    for domain, (semesters, specs) in (PLAN if thirds is None else {d: (s, THIRDS[thirds]) for d, (s, _) in PLAN.items()}).items():
         for semester in semesters:
             (task,) = loading.tasks(loading.domain(domain), [semester])
             models = pd.concat([task.train.models, task.test.models])
@@ -204,7 +203,7 @@ def check(new_root: Path, reference_root: Path) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("plan"); p.add_argument("--out", type=Path, required=True); p.add_argument("--thirds", action="store_true")
+    p = sub.add_parser("plan"); p.add_argument("--out", type=Path, required=True); p.add_argument("--thirds", nargs="?", const="removed", choices=list(THIRDS))
     r = sub.add_parser("run"); r.add_argument("jobs", type=Path); r.add_argument("--out", type=Path, required=True)
     r.add_argument("--shard", default="0/1"); r.add_argument("--variants", nargs="*"); r.add_argument("--limit-samples", type=int, default=0)
     r.add_argument("--revision", required=True, help="generality-labs/benchmarks revision the frozen tables point at (git -C data rev-parse HEAD)")

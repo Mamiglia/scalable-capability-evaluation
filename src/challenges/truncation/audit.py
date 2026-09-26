@@ -233,7 +233,7 @@ def audit(domain, log_dir=None):
             header = read_eval_log(path, header_only=True)
             sample = read_eval_log_sample(path, row["item"], 1, resolve_attachments=True)
             check(header.eval.task == row["task"] and header.eval.model == slug, "failed retry identity", row)
-            check(sample.output.stop_reason == "max_tokens" and not sample.output.completion, "failed retry outcome", row)
+            check(parse_direct_judge_output(sample.output.completion)[0] is None, "failed retry outcome", row)  # no rating: cut off, empty, or no ANSWER line
             check(sha(sample.input) == all_inputs[(row["task"], row["item"])]["truncated_sha256"], "failed retry input", row)
     recollect = [row for row in recollect if (row["task"], row["item"]) not in declared_keys]
     report = {"condition": condition, "domain": domain, "judge": judge, "semester": semester, "truncate": mode, "max_length": max_length,

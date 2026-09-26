@@ -33,7 +33,7 @@ from judge.task import judge_task
 from protocols.pairwise.protocol import PairwiseBT
 from reference.tables import DATA
 
-VERDICT_COLUMNS = ["bench", "judge", "item", "model_left", "model_right", "pick_left", "semester", "imported"]
+VERDICT_COLUMNS = ["bench", "judge", "item", "model_left", "model_right", "pick_left", "semester", "imported", "chars_left", "chars_right"]
 IMPORTED = " (imported)"  # task-name suffix of a log imported from an older campaign
 
 
@@ -58,7 +58,9 @@ def from_logs(log_dir: str | Path) -> pd.DataFrame:
             left, right = (major, minor) if target == "1" else (minor, major)
             rows.append(dict(bench=bench, judge=log.eval.model, item=item, model_left=left, model_right=right,
                              pick_left=float(answer == "1"), semester=md.get("semester") or "",
-                             imported=log.eval.task.endswith(IMPORTED)))
+                             imported=log.eval.task.endswith(IMPORTED),
+                             # shown lengths (slot 1 is the left transcript), recorded by judge.dataset
+                             chars_left=(s.metadata or {}).get("chars_1"), chars_right=(s.metadata or {}).get("chars_2")))
     return pd.DataFrame(rows, columns=VERDICT_COLUMNS)
 
 

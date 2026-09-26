@@ -76,6 +76,8 @@ class JudgeDirect(DirectRegression):
         directory = "direct" if self.config.include_reasoning else "direct_reasoning-hidden"
         if self.config.condition_label:  # e.g. direct_truncated-tail-4000, direct_channels-only-tools
             directory += f"_{self.config.condition_label}"
+        if self.config.truncate.startswith("thirds-"):  # direct_truncated-thirds-23; pairwise thirds stay in logs/judge/ (main)
+            directory += f"_truncated-{self.config.truncate}"
         return (self.config.log_dir / directory / self.domain.name / semester
                 / self.config.judge.shortname.lower() / condition_hash)
 
