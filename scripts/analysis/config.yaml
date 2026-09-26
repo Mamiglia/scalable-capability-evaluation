@@ -84,7 +84,6 @@ frontier:                             # closed-source targets against the open o
                    gpt-5: OpenAI, gpt-5.6-sol: OpenAI, gemini-3.5-flash: Google}
 
 sensitivity:
-  judge_runs: [24d6cc32, 66c170cd]    # the pairwise core runs (full train set, then 10 items per quartile)
   item_budget: {sizes: [3, 6, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100], draws: 30, seed: 0}
   reference_budget: {sizes: [2, 4, 6]}
   saturation_levels: [3, 4, 5, 6, 7, 8, all]
@@ -93,6 +92,25 @@ sensitivity:
     draws: 30
     embedding_price: 0.01             # $ per million tokens, qwen/qwen3-embedding-8b
     proxies: {openai-api/runpod/NousResearch/Nous-Hermes-2-Yi-34B: qwen/qwen3-32b}   # judges without a list price
+    seed: 0                           # the random item subsets of the curves
+    # OpenRouter list prices, $ per million tokens [input, cached input, output] (cached = input where no cache price is
+    # listed), from openrouter.ai/api/v1/models on 2026-09-26; the same as the prices the paper's costs used
+    prices:
+      deepseek/deepseek-r1-0528: [0.5, 0.35, 2.15]
+      deepseek/deepseek-v3.2: [0.269, 0.1345, 0.4]
+      meta-llama/llama-3.3-70b-instruct: [0.1, 0.1, 0.32]
+      microsoft/phi-4: [0.07, 0.07, 0.14]
+      minimax/minimax-m1: [0.4, 0.4, 2.2]
+      minimax/minimax-m2: [0.3, 0.3, 1.2]
+      moonshotai/kimi-k2-thinking: [0.6, 0.15, 2.5]
+      openai/gpt-3.5-turbo: [0.5, 0.5, 1.5]
+      openai/gpt-4: [30.0, 30.0, 60.0]
+      openai/gpt-4-turbo: [10.0, 10.0, 30.0]
+      openai/gpt-4o-2024-05-13: [5.0, 5.0, 15.0]
+      qwen/qwen-2.5-72b-instruct: [0.36, 0.36, 0.4]
+      qwen/qwen3-235b-a22b: [0.455, 0.455, 1.82]
+      qwen/qwen3-32b: [0.08, 0.08, 0.28]
+      z-ai/glm-4.7: [0.6, 0.11, 2.2]
 
 domain_glm:                           # the hierarchical Gamma GLM of Appendix D.4 (hibayes)
   protocols: [easy_items, glm_length, glm_regex, embedding, direct, pairwise]   # the baseline first: reference level
