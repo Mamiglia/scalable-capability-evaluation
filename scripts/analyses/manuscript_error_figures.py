@@ -1,11 +1,10 @@
-"""The manuscript figures with squared error in place of the prediction score, into draft3_se, and the
-split total/unique channel and thirds figures (prediction score) next to the draft2 figures.
+"""The manuscript figures with squared error in place of the prediction score.
 
 Squared error on the axes; figure one's and the time figure's stars are the log likelihood ratio
 against the references' distribution (src/analysis/challenges/likelihood_ratio.py), boxes and bars
-each protocol's own 95% interval. Figure one and the time figure also go to final_figs. The
+each protocol's own 95% interval. The paper figures and their captions go to analysis/results/figures/paper. The
 channel/thirds figures still test the error with a part alone against the baseline's error. Figures whose
-y-axis is not a score (the distance and reasoning scatters, in theta) are copied unchanged.
+y-axis is not a score (the distance and reasoning scatters, in theta) stay as generalisation.py draws them.
 
 Reads analysis/results/forecasts.csv and the figures the channel and thirds scripts write
 (scripts/analyses/channel_contributions.py, position_contributions.py): run those first.
@@ -14,7 +13,6 @@ Run: PYTHONPATH=src uv run python scripts/analyses/manuscript_error_figures.py
 
 # %% settings
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -25,17 +23,15 @@ from scipy import stats as scipy_stats
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)
-os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
-os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/transcript-embeddings")
 
 from analysis.challenges import generalisation as gen  # noqa: E402
 from analysis.challenges import likelihood_ratio as lr  # noqa: E402
 
-MANUSCRIPT = Path.home() / "Documents/AIS/LASR/manuscript"
-SCORE_DIR, ERROR_DIR, FINAL = MANUSCRIPT / "draft2_score", MANUSCRIPT / "draft3_se", MANUSCRIPT / "final_figs"
-ERROR_DIR.mkdir(parents=True, exist_ok=True)
-VARIANTS = {"pairwise": "linear", "direct": "raw", "embedding": "full"}  # as figure one
 RESULTS = Path("analysis/results/figures")
+ERROR_DIR, FINAL = RESULTS / "error", RESULTS / "paper"  # every figure drawn here; the paper's, with captions
+ERROR_DIR.mkdir(parents=True, exist_ok=True)
+FINAL.mkdir(parents=True, exist_ok=True)
+VARIANTS = {"pairwise": "linear", "direct": "raw", "embedding": "full"}  # as figure one
 
 forecasts = pd.read_csv("analysis/results/forecasts.csv")
 rows = gen.rows(forecasts, VARIANTS)
@@ -44,19 +40,13 @@ llr = llr[llr["shape"] == lr.SHAPE]
 
 
 def save(fig, name: str, folder: Path = ERROR_DIR, final: str | None = None) -> None:
-    """Into `folder` as `name`, and into final_figs as `final` when given."""
+    """Into `folder` as `name`, and into FINAL as `final` when given."""
     for ext in ("svg", "png"):
         fig.savefig(folder / f"{name}.{ext}", dpi=300, bbox_inches="tight")
         if final:
             fig.savefig(FINAL / f"{final}.{ext}", dpi=300, bbox_inches="tight")
     plt.close(fig)
     print("wrote", folder / f"{name}.svg", *([FINAL / f"{final}.svg"] if final else []))
-
-
-def copy(source: Path, name: str, folder: Path = ERROR_DIR) -> None:
-    for ext in ("svg", "png"):
-        shutil.copyfile(source.with_suffix(f".{ext}"), folder / f"{name}.{ext}")
-    print("copied", folder / f"{name}.svg")
 
 
 # %% squared error: figure one, time, simplified reasoning
@@ -137,19 +127,6 @@ caption = ("Squared error over target semesters, one panel per domain. Each poin
 
 print("wrote", FINAL / "signal_by_protocol.txt", FINAL / "time_generalisation.txt")
 
-
-# %% the channel and thirds figures, split into total above unique, in both metrics
-copy(RESULTS / "channels/channel_contributions_split_error.png", "fig_channels_error")
-copy(RESULTS / "positions/position_contributions_split_error.png", "fig_thirds_error")
-copy(RESULTS / "channels/channel_shares.png", "channel_shares")
-copy(RESULTS / "channels/channel_shares.png", "channel_shares", FINAL)
-copy(RESULTS / "channels/channel_contributions_split_score.png", "fig_channels_split", SCORE_DIR)
-copy(RESULTS / "positions/position_contributions_split_score.png", "fig_thirds_split", SCORE_DIR)
-
-# %% no score on the axis: copied unchanged
-copy(RESULTS / "generalisation/distance_above_top_binned.png", "capability_generalisation")
-copy(RESULTS / "generalisation/reasoning_2025-I_scatter_math.png", "reasoning_2025-I_scatter_math")
-copy(RESULTS / "generalisation/reasoning_2025-I_scatter_math.png", "reasoning_2025-I_scatter_math", FINAL)
 
 # captions for the reasoning-target and channel-share figures (no tests: descriptive values only)
 reasoning = gen.reasoning_rows(rows)

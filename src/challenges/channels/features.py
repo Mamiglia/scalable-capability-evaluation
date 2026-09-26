@@ -2,7 +2,7 @@
 Deterministic features protocol (scripts/analyses/other_protocol_channels.py), and of transcripts with one
 third removed (--thirds, for scripts/analyses/other_protocol_thirds.py).
 
-    SMALL_JUDGE_DATA=/Volumes/T7/small-judge-remote/data uv run python src/challenges/channels/features.py [--thirds] [--out CSV]
+    uv run python src/challenges/channels/features.py [--thirds] [--out CSV]
 
 glm_features/ holds two views per transcript, "visible" (messages + reasoning) and "hidden" (messages
 only); the other channel views derive from them except the reasoning alone, extracted here: every

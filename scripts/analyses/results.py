@@ -5,7 +5,7 @@ or cell by cell (`# %%`) in PyCharm / VS Code after the cells above it. State li
 module-level names each cell defines. Never launches judging: judge runs are read from logs/
 and what a campaign still lacks is reported in the `missing` column.
 
-Transcript logs and embeddings are read from the T7 volume unless SMALL_JUDGE_DATA and
+Transcript logs and embeddings are read from data/ and transcript-embeddings/ unless SMALL_JUDGE_DATA and
 SMALL_JUDGE_EMBEDDINGS say otherwise; the frozen tables always come from data/meta.
 
 Design: docs/superpowers/specs/2026-09-15-results-analysis-design.md
@@ -21,8 +21,6 @@ import pandas as pd
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)  # every path in src/ is repo-relative
-os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
-os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/transcript-embeddings")
 
 from analysis import calibration, loading, matching, plots, stats  # noqa: E402  (after the env is set)
 

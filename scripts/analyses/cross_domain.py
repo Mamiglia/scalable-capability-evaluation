@@ -2,7 +2,7 @@
 matrix per protocol, and the maths/science -> coding/cyber comparison.
 
 Cell script: `PYTHONPATH=src uv run python scripts/analyses/cross_domain.py`. Reads the judge logs
-and transcripts the results runner reads (T7 volume) and launches no judging. The diagonal is
+and transcripts the results runner reads (data/) and launches no judging. The diagonal is
 checked against analysis/results/forecasts.csv, which it must reproduce.
 
 Design: docs/superpowers/specs/2026-09-17-generalisation-design.md
@@ -18,8 +18,6 @@ import pandas as pd
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)
-os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
-os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/transcript-embeddings")
 
 from analysis.challenges import cross_domain as cd  # noqa: E402  (after the env is set)
 
@@ -74,6 +72,26 @@ transfer_llr = pd.read_csv(OUT / "transfer_likelihood_ratio.csv")
 transfer_tests = lr.pooled_tests(transfer_llr[transfer_llr["shape"] == lr.SHAPE], unit=("semester", "model"))
 transfer_tests.to_csv(OUT / "transfer_llr_tests.csv", index=False, float_format="%.4g")
 print(transfer_tests.round(4).to_string(index=False))
+
+# %% appendix D.5: pairwise judging per (source, scored) cell against the scored domain's own transcripts and the
+# baseline, paired t-tests over the cell's 16 targets (the numbers behind the cross-domain transfer figure)
+import numpy as np  # noqa: E402
+from scipy import stats as scipy_stats  # noqa: E402
+
+pairwise = cd.fixed_judge_rows(forecasts, VARIANTS)
+pairwise = pairwise[pairwise.protocol == "pairwise"]
+cells = []
+for scored, g in pairwise.groupby("scored_domain"):
+    own_err = g[g.domain == scored].set_index(["semester", "model"]).err
+    for source, h in g.groupby("domain"):
+        h = h.set_index(["semester", "model"])
+        cells.append(dict(source=source, scored=scored, mse=h.err.mean(), baseline=h.base.mean(), own=own_err.mean(),
+                          ratio_own=h.err.mean() / own_err.mean(),
+                          p_own=np.nan if source == scored else scipy_stats.ttest_rel(h.err, own_err.reindex(h.index)).pvalue,
+                          p_baseline=scipy_stats.ttest_rel(h.err, h.base).pvalue))
+cells = pd.DataFrame(cells)
+cells.to_csv(OUT / "transfer_pairwise_tests.csv", index=False, float_format="%.4g")
+print(cells.round(3).to_string(index=False))
 
 # %% figures
 for ext in ("png", "svg"):

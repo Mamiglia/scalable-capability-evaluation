@@ -8,7 +8,7 @@ and its own ratings no longer calibrate anything). The judge choice is unchanged
 transcript protocols and the saturated-item prediction. Stars: the log likelihood ratio rows in
 analysis/results/likelihood_ratio.csv whose dropped reference is the judge.
 
-Writes final_figs/signal_by_protocol_judge_not_reference.{svg,png}; reads logs/, launches nothing.
+Writes analysis/results/figures/paper/signal_by_protocol_judge_not_reference.{svg,png}; reads logs/, launches nothing.
 Run: PYTHONPATH=src uv run python scripts/analyses/judge_not_reference.py
 """
 
@@ -23,14 +23,14 @@ import pandas as pd
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)
-os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
 
 from analysis import loading, matching, stats  # noqa: E402
 from analysis.challenges import generalisation as gen  # noqa: E402
 from analysis.challenges import likelihood_ratio as lr  # noqa: E402
 from analysis.challenges import signal_glm as sg  # noqa: E402
 
-FINAL = Path.home() / "Documents/AIS/LASR/manuscript/final_figs"
+FINAL = Path("analysis/results/figures/paper")  # the paper figures and their .txt captions
+FINAL.mkdir(parents=True, exist_ok=True)
 VARIANTS = {"pairwise": "linear", "direct": "raw", "embedding": "full"}  # as figure one
 SEMESTERS = ["2025-II", "2026-I"]
 
