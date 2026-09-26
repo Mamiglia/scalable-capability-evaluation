@@ -35,6 +35,7 @@ from analysis.stats import core_condition  # noqa: E402
 
 FORECASTS = Path("analysis/results/forecasts.csv")
 OUT = Path("analysis/judge/judge_choice")
+OUT.parent.mkdir(parents=True, exist_ok=True)
 VARIANT = {"pairwise": "linear", "direct": "raw"}
 RANK_COLOR = {1: "#1f63b6", 2: "#7f9cc4", 3: "#b8b5ab"}  # judge rank by theta* among the references
 

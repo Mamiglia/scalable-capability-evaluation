@@ -35,6 +35,7 @@ from protocols.pairwise.bradley_terry import rank  # noqa: E402
 from protocols.pairwise.linear import weighted_theta  # noqa: E402
 
 OUT = Path("analysis/judge/reference_count_effect")
+OUT.parent.mkdir(parents=True, exist_ok=True)
 SIZES = [2, 4, 6]
 KEYS = ["linear", "bt", "mean_sub"]
 

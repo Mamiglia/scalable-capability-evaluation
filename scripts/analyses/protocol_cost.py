@@ -39,6 +39,7 @@ from protocols import PROTOCOLS
 warnings.filterwarnings("ignore")
 logger.setLevel(logging.ERROR)
 OUT = Path("analysis/judge/protocol_cost")
+OUT.parent.mkdir(parents=True, exist_ok=True)
 DOMAINS = ["science", "math", "coding", "cyber"]
 VARIANT = {"pairwise": "linear", "direct": "raw", "embedding": "full", "glm_regex": "-"}
 SERIES = {"pairwise": ("Pairwise judging", "#2a78d6"), "direct": ("Absolute scoring", "#eb6834"),

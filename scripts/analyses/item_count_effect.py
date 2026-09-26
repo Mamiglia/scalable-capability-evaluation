@@ -43,6 +43,7 @@ from protocols.pairwise.linear import weighted_theta
 warnings.filterwarnings("ignore")
 logger.setLevel(logging.ERROR)
 OUT = Path("analysis/judge/item_count_effect")
+OUT.parent.mkdir(parents=True, exist_ok=True)
 FORECASTS = Path("analysis/results/forecasts.csv")  # scripts/analyses/results.py
 DOMAINS = ["science", "math", "coding", "cyber"]
 COLOR = {"science": "#2a78d6", "math": "#eb6834", "coding": "#1baf7a", "cyber": "#4a3aa7"}  # as in reasoning_effect.py

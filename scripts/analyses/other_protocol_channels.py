@@ -42,6 +42,7 @@ from protocols.transcript_features.protocol import ALPHAS as FEATURE_ALPHAS
 from protocols.transcript_features.reader import feature_table, rows_table
 
 OUT = Path("analysis/results/figures/channels")
+OUT.mkdir(parents=True, exist_ok=True)
 # the results' forecasts, for the judge each cell uses (lowest reference leave-one-out error); point it at a rerun's
 FORECASTS = Path(os.environ.get("SMALL_JUDGE_FORECASTS", "analysis/results/forecasts.csv"))
 REASONING_ONLY = OUT / "features_only_reasoning.csv"  # src/challenges/channels/features.py
