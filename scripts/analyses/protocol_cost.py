@@ -101,7 +101,7 @@ def compute() -> tuple[pd.DataFrame, pd.DataFrame]:
                 dirs = run.harness.log_dirs(sem) if run.protocol == "direct" else [run.harness.log_dir(sem)]
                 dollars, tokens = map(sum, zip(*(run_cost(d, table) for d in dirs)))
                 embed_tokens = tokens if protocol == "direct" else embed_tokens
-                items = run.table[["bench", "item"]].drop_duplicates().reset_index(drop=True)
+                items = run.table[["bench", "item"]].drop_duplicates().sort_values(["bench", "item"]).reset_index(drop=True)  # draws independent of log order
                 for frac in FRACTIONS:
                     n = max(3, round(frac * len(items)))
                     err = []

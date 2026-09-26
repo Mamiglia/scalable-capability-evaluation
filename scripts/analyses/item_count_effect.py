@@ -73,7 +73,7 @@ def compute() -> pd.DataFrame:
                     continue
                 v = from_logs(run).sort_values("imported", kind="stable").drop_duplicates(["bench", "item", "model_left", "model_right"])
                 v = v.merge(task.references.items[["bench", "item"]])
-                items = v[["bench", "item"]].drop_duplicates().reset_index(drop=True)
+                items = v[["bench", "item"]].drop_duplicates().sort_values(["bench", "item"]).reset_index(drop=True)  # draws independent of log order
                 for n in [s for s in SIZES if s < len(items)] + [len(items)]:
                     for draw in range(1 if n == len(items) else DRAWS):
                         keep = items.iloc[rng.choice(len(items), n, replace=False)]
@@ -111,7 +111,7 @@ def compute_direct() -> pd.DataFrame:
                 refs, targets = task.references.theta, task.truth.index
                 r = pd.concat([direct_logs(d) for d in runs], ignore_index=True).merge(task.references.items[["bench", "item"]])
                 r = r[(r.semester == sem) & r.model.isin(refs.index.union(targets))]
-                items = r[["bench", "item"]].drop_duplicates().reset_index(drop=True)
+                items = r[["bench", "item"]].drop_duplicates().sort_values(["bench", "item"]).reset_index(drop=True)  # draws independent of log order
                 baseline = score(PROTOCOLS["mean_ref"](task), task.truth)["mse"]
                 for n in [s for s in SIZES if s < len(items)] + [len(items)]:
                     for draw in range(1 if n == len(items) else DRAWS):
