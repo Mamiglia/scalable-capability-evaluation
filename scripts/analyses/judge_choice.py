@@ -35,7 +35,6 @@ from analysis.stats import core_condition  # noqa: E402
 
 FORECASTS = Path("analysis/results/forecasts.csv")
 OUT = Path("analysis/judge/judge_choice")
-OUT.parent.mkdir(parents=True, exist_ok=True)
 VARIANT = {"pairwise": "linear", "direct": "raw"}
 RANK_COLOR = {1: "#1f63b6", 2: "#7f9cc4", 3: "#b8b5ab"}  # judge rank by theta* among the references
 
@@ -62,17 +61,6 @@ def load() -> pd.DataFrame:
     # a judge's rank by theta* among the judges of the same task and protocol (1 = strongest)
     f["rank"] = f.groupby(["task", "protocol"]).judge_theta.rank(ascending=False, method="dense").astype(int)
     return f.dropna(subset=["score"])
-
-
-def medians(f: pd.DataFrame) -> pd.Series:
-    """Appendix D.3, over the 2025-II and 2026-I tasks: the median across tasks of the range of pairwise MSE over the
-    three judges, and of the gap from pairwise judging (mean MSE over judges) to absolute scoring and to the baseline."""
-    f = f[f.semester.isin(BOX_SEMESTERS)]
-    t = f.groupby(["task", "protocol", "judge"]).agg(mse=("e", "mean"), base=("e_base", "mean")).reset_index()
-    spread = t.groupby(["task", "protocol"]).mse.agg(lambda x: x.max() - x.min()).unstack()
-    mse, base = t.groupby(["task", "protocol"]).mse.mean().unstack(), t.groupby("task").base.first()
-    return pd.Series({"pairwise judge range": spread.pairwise.median(), "absolute scoring - pairwise": (mse.direct - mse.pairwise).median(),
-                      "baseline - pairwise": (base - mse.pairwise).median()})
 
 
 def per_task(f: pd.DataFrame) -> pd.DataFrame:
@@ -245,7 +233,7 @@ def box_figure(f: pd.DataFrame, out: Path):
     rng = np.random.default_rng(0)
     xs, labels, x = [], [], 0
     base = f[f.semester.isin(BOX_SEMESTERS)].drop_duplicates(["domain", "semester", "model"]).groupby("model").e_base.mean()
-    columns = [("baseline", "-", "Baseline", base)] + [(p, "loo" if kind == "pick" else str(key), label, None)
+    columns = [("baseline", "-", "Reference mean", base)] + [(p, "loo" if kind == "pick" else str(key), label, None)
                                                           for p in VARIANT for kind, key, label in BOX_COLUMNS]
     for p, col, label, e in columns:
         if e is None:
@@ -307,9 +295,6 @@ def main():
     figure(t, OUT)
     gap_figure(f, OUT.with_name(OUT.name + "_gap"))
     box = box_figure(f, OUT.with_name(OUT.name + "_box"))
-    m = medians(f)
-    m.to_csv(OUT.with_name(OUT.name + "_medians.csv"), header=["mse"], float_format="%.3f")
-    print("\nmedian over the 2025-II and 2026-I tasks (appendix D.3):\n" + m.round(2).to_string())
     print("\nsquared error per target (2025-II + 2026-I, mean over domains), mean ± t95 CI over targets:")
     print(box.groupby(["protocol", "column"]).e.apply(ci, 2).to_string())
 

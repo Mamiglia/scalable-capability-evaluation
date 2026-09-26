@@ -39,7 +39,6 @@ from protocols import PROTOCOLS
 warnings.filterwarnings("ignore")
 logger.setLevel(logging.ERROR)
 OUT = Path("analysis/judge/protocol_cost")
-OUT.parent.mkdir(parents=True, exist_ok=True)
 DOMAINS = ["science", "math", "coding", "cyber"]
 VARIANT = {"pairwise": "linear", "direct": "raw", "embedding": "full", "glm_regex": "-"}
 SERIES = {"pairwise": ("Pairwise judging", "#2a78d6"), "direct": ("Absolute scoring", "#eb6834"),
@@ -66,7 +65,7 @@ def prices() -> dict[str, tuple[float, float, float]]:
 def run_cost(run_dir: Path, table: dict) -> tuple[float, int]:
     """(dollars, input tokens) over every log of the run dir."""
     dollars, tokens = 0.0, 0
-    for f in Path(run_dir).glob("*.eval"):
+    for f in run_dir.glob("*.eval"):
         for model, u in (read_eval_log(str(f), header_only=True).stats.model_usage or {}).items():
             inp, cached, out = table[PROXY.get(model, model.removeprefix("openrouter/"))]
             cache = u.input_tokens_cache_read or 0
@@ -98,10 +97,9 @@ def compute() -> tuple[pd.DataFrame, pd.DataFrame]:
                 if (run := loo_pick(runs, task, protocol)) is None:
                     print("no", protocol, "run", name, sem, file=sys.stderr)
                     continue
-                dirs = run.harness.log_dirs(sem) if run.protocol == "direct" else [run.harness.log_dir(sem)]
-                dollars, tokens = map(sum, zip(*(run_cost(d, table) for d in dirs)))
+                dollars, tokens = run_cost(run.harness.log_dir(sem), table)
                 embed_tokens = tokens if protocol == "direct" else embed_tokens
-                items = run.table[["bench", "item"]].drop_duplicates().sort_values(["bench", "item"]).reset_index(drop=True)  # draws independent of log order
+                items = run.table[["bench", "item"]].drop_duplicates().reset_index(drop=True)
                 for frac in FRACTIONS:
                     n = max(3, round(frac * len(items)))
                     err = []

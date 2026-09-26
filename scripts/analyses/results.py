@@ -5,7 +5,7 @@ or cell by cell (`# %%`) in PyCharm / VS Code after the cells above it. State li
 module-level names each cell defines. Never launches judging: judge runs are read from logs/
 and what a campaign still lacks is reported in the `missing` column.
 
-Transcript logs and embeddings are read from data/ and transcript-embeddings/ unless SMALL_JUDGE_DATA and
+Transcript logs and embeddings are read from the T7 volume unless SMALL_JUDGE_DATA and
 SMALL_JUDGE_EMBEDDINGS say otherwise; the frozen tables always come from data/meta.
 
 Design: docs/superpowers/specs/2026-09-15-results-analysis-design.md
@@ -21,6 +21,8 @@ import pandas as pd
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)  # every path in src/ is repo-relative
+os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
+os.environ.setdefault("SMALL_JUDGE_EMBEDDINGS", "/Volumes/T7/small-judge-remote/transcript-embeddings")
 
 from analysis import calibration, loading, matching, plots, stats  # noqa: E402  (after the env is set)
 
@@ -77,15 +79,6 @@ for metric in stats.METRICS:
 print(plots.semester_table(metrics, "mse", VARIANTS).round(3).to_string())
 
 # %% figures: forecasts of the best condition, bars, timelines, frontier; each as svg and png
-# stars: the log likelihood ratio against the references' distribution, from analysis/results/likelihood_ratio.csv,
-# which scripts/analyses/likelihood_ratio.py writes from these forecasts: rerun it, then this cell, when they change
-from analysis.challenges import likelihood_ratio as lr  # noqa: E402
-
-if not (OUT / "likelihood_ratio.csv").exists():  # a first run: likelihood_ratio.py reads the forecasts written above
-    print("no likelihood_ratio.csv yet: run scripts/analyses/likelihood_ratio.py, then this cell, for these figures")
-    sys.exit(0)
-llr = lr.select(pd.read_csv(OUT / "likelihood_ratio.csv"), lr.chosen_judges(forecasts, VARIANTS))
-llr = llr[llr["shape"] == lr.SHAPE]
 pooled = plots.chosen(metrics, VARIANTS)
 pooled = pooled[(pooled.domain == "all") & (pooled.semester == "all") & pooled.protocol.isin(plots.CONDITIONS)]
 best = pooled.sort_values("mse").iloc[0]
@@ -100,11 +93,11 @@ for ext in ("svg", "png"):
         plots.frontier_figure(forecasts, name, VARIANTS, FIG / "frontier" / f"all8_{name}.{ext}", top=8)
         for metric in ("mse", "delta", "pct"):
             plots.timeline_figure(metrics, name, VARIANTS, FIG / "timelines" / f"timeline_{metric}_{name}.{ext}",
-                                  scores=scores, metric=metric, forecasts=forecasts, llr=llr)
+                                  scores=scores, metric=metric, forecasts=forecasts)
     semesters = sorted({sem for _, sem in tasks})
     for metric in (*stats.METRICS, "pct"):
-        plots.bar_figure(metrics, metric, VARIANTS, FIG / "bars" / f"bars_{metric}.{ext}", llr=llr)
+        plots.bar_figure(metrics, metric, VARIANTS, FIG / "bars" / f"bars_{metric}.{ext}")
         for sem in semesters:
-            plots.bar_figure(metrics, metric, VARIANTS, FIG / "bars" / f"bars_{metric}_{sem}.{ext}", semester=sem, llr=llr)
+            plots.bar_figure(metrics, metric, VARIANTS, FIG / "bars" / f"bars_{metric}_{sem}.{ext}", semester=sem)
 print("best condition:", best.protocol, best.variant, "pooled mse", round(best.mse, 3))
 print("wrote", {sub.name: len(list(sub.iterdir())) for sub in FIG.iterdir() if sub.is_dir()})

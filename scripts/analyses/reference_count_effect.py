@@ -2,7 +2,7 @@
 
     uv run python scripts/analyses/reference_count_effect.py [--recompute] [--last K]
 
-Same verdicts and prediction score as item_count_effect.py (the main analysis's judge, lowest reference leave-one-out error, reasoning shown, all judged
+Same verdicts and prediction score as item_count_effect.py (the top-1 reference as judge, reasoning shown, all judged
 train items). For k in 2, 4, 6 and all references, EVERY k-subset of the references is taken as the whole reference
 set: only its theta* and its verdicts (subset-vs-subset for the calibration, target-vs-subset for the placement) are
 kept, and the targets are placed by JudgeLinear (`linear`, the figure) and pinned BT (`bt`). `mean_sub` is the
@@ -24,7 +24,7 @@ import pandas as pd
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
-from item_count_effect import CONDITIONS, DOMAINS, loo_judges, plot  # noqa: E402
+from item_count_effect import CONDITIONS, DOMAINS, plot  # noqa: E402
 
 from capability.evaluate import score  # noqa: E402
 from capability.task import Task  # noqa: E402
@@ -35,7 +35,6 @@ from protocols.pairwise.bradley_terry import rank  # noqa: E402
 from protocols.pairwise.linear import weighted_theta  # noqa: E402
 
 OUT = Path("analysis/judge/reference_count_effect")
-OUT.parent.mkdir(parents=True, exist_ok=True)
 SIZES = [2, 4, 6]
 KEYS = ["linear", "bt", "mean_sub"]
 
@@ -48,20 +47,19 @@ def forecasts(verdicts: pd.DataFrame, refs: pd.Series, targets: list[str]) -> di
 
 
 def judged():
-    """Per domain and semester: the task, its mean_ref MSE, the main analysis's judge and its verdicts on the train items."""
-    loo = loo_judges("pairwise", "linear").set_index(["domain", "semester"]).judge
+    """Per domain and semester: the task, its mean_ref MSE, the top-1 judge and its verdicts on the train items."""
     for name in DOMAINS:
         domain = DomainConfig.from_cli(Path(f"configs/domain/{name}.yml"))
         top = yaml.safe_load(Path(f"data/meta/{name}/fit.yml").read_text())["top"]
         for sem, judges in top.items():
-            judge, task = loo[(name, sem)], Task.from_semester(sem, domain)
+            judge, task = judges[0].lower(), Task.from_semester(sem, domain)
             run = next((p for c in CONDITIONS if (p := Path("logs/judge", name, sem, judge, c)).exists()), None)
             if run is None:
                 print("missing", name, sem, judge, file=sys.stderr)
                 continue
             v = from_logs(run).sort_values("imported", kind="stable").drop_duplicates(["bench", "item", "model_left", "model_right"])
             print(name, sem, judge, file=sys.stderr)
-            yield dict(domain=name, semester=sem, judge=judge, judge_rank=[j.lower() for j in judges].index(judge) + 1, baseline=score(PROTOCOLS["mean_ref"](task), task.truth)["mse"]), \
+            yield dict(domain=name, semester=sem, judge=judge, judge_rank=1, baseline=score(PROTOCOLS["mean_ref"](task), task.truth)["mse"]), \
                 task, v.merge(task.references.items[["bench", "item"]])
 
 
@@ -98,7 +96,7 @@ def main() -> int:
     if "--recompute" in sys.argv or not csv.exists():
         compute().to_csv(csv, index=False, float_format="%.4f")
     df = pd.read_csv(csv)
-    df = removed(df)  # one judge per task, the main analysis's
+    df = removed(df[df.judge_rank == 1])  # the strongest judge only
     df["score"] = 100 - 100 * df.linear / df.baseline
     cells = ["domain", "semester"]
     for key in KEYS:

@@ -2,8 +2,7 @@
 
     uv run python scripts/analyses/item_count_effect.py [--recompute] [--last K] [--direct | --both]
     # --last K: only the last K semesters (files tagged _lastK); --direct: direct judging by the top-1 judge (files tagged _direct);
-    # --both: the judge the main analysis uses (lowest reference leave-one-out error, per protocol), a Pairwise row and an
-    #   Absolute (direct) row, squared error, from the two cached tables (files tagged _both)
+    # --both: the top-1 judge, a Pairwise row and an Absolute (direct) row, squared error, from the two cached tables (files tagged _both)
 
 Judges = the top-3 references of each semester (data/meta/<domain>/fit.yml `top`, one figure row per rank), subjects' reasoning shown
 (logs/judge/<domain>/<sem>/<judge>/{24d6cc32,66c170cd}, first that exists). For n in 3, 6, 10, 20, ... up to the
@@ -34,8 +33,7 @@ from configs.domain import DomainConfig
 from configs.logs import logger
 from palette import DOMAIN  # domain markers, scripts/analyses/palette.py
 from protocols import PROTOCOLS
-from configs.judge import DirectJudgeConfig
-from protocols.direct_judge import JudgeDirect, from_logs as direct_logs
+from protocols.direct_judge import from_logs as direct_logs
 from protocols.direct_judge.scoring import calibrate
 from protocols.pairwise import from_logs
 from protocols.pairwise.linear import weighted_theta
@@ -43,8 +41,6 @@ from protocols.pairwise.linear import weighted_theta
 warnings.filterwarnings("ignore")
 logger.setLevel(logging.ERROR)
 OUT = Path("analysis/judge/item_count_effect")
-OUT.parent.mkdir(parents=True, exist_ok=True)
-FORECASTS = Path("analysis/results/forecasts.csv")  # scripts/analyses/results.py
 DOMAINS = ["science", "math", "coding", "cyber"]
 COLOR = {"science": "#2a78d6", "math": "#eb6834", "coding": "#1baf7a", "cyber": "#4a3aa7"}  # as in reasoning_effect.py
 CONDITIONS = ["24d6cc32", "66c170cd"]
@@ -73,7 +69,7 @@ def compute() -> pd.DataFrame:
                     continue
                 v = from_logs(run).sort_values("imported", kind="stable").drop_duplicates(["bench", "item", "model_left", "model_right"])
                 v = v.merge(task.references.items[["bench", "item"]])
-                items = v[["bench", "item"]].drop_duplicates().sort_values(["bench", "item"]).reset_index(drop=True)  # draws independent of log order
+                items = v[["bench", "item"]].drop_duplicates().reset_index(drop=True)
                 for n in [s for s in SIZES if s < len(items)] + [len(items)]:
                     for draw in range(1 if n == len(items) else DRAWS):
                         keep = items.iloc[rng.choice(len(items), n, replace=False)]
@@ -84,42 +80,31 @@ def compute() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def loo_judges(protocol: str, variant: str) -> pd.DataFrame:
-    """(domain, semester, judge): the judge the main analysis uses per task, the lowest reference leave-one-out MSE
-    of the protocol's variant on each judge's core-condition run (stats.core_condition), as in judge_ensemble.py."""
-    from analysis.stats import core_condition
-    f = core_condition(pd.read_csv(FORECASTS))
-    f = f[(f.protocol == protocol) & (f.variant == variant)].drop_duplicates(["domain", "semester", "judge"])
-    return f.loc[f.groupby(["domain", "semester"]).judge_loo_mse.idxmin(), ["domain", "semester", "judge"]]
-
-
 def compute_direct() -> pd.DataFrame:
-    """The same subsampling for direct judging: each top-3 reference's 1-10 ratings (logs/direct/<domain>/<sem>/<judge>/),
+    """The same subsampling for direct judging: the top-1 reference's 1-10 ratings (logs/direct/<domain>/<sem>/<judge>/),
     mean rating -> theta* calibrated on the references (protocols.direct_judge.scoring.calibrate, as in protocol_compare.py)."""
     rows, rng = [], np.random.default_rng(0)
     for name in DOMAINS:
         domain = DomainConfig.from_cli(Path(f"configs/domain/{name}.yml"))
         top = yaml.safe_load(Path(f"data/meta/{name}/fit.yml").read_text())["top"]
         for sem, judges in top.items():
-            task = Task.from_semester(sem, domain)
-            for judge_rank, judge in enumerate((j.lower() for j in judges), 1):
-                config = DirectJudgeConfig.from_cli(Path(f"configs/judges/{judge}.yml"))
-                runs = JudgeDirect(config, domain, include_reasoning=True).log_dirs(sem)  # every bench set's directory
-                if not runs:
-                    print("missing", name, sem, judge, file=sys.stderr)
-                    continue
-                refs, targets = task.references.theta, task.truth.index
-                r = pd.concat([direct_logs(d) for d in runs], ignore_index=True).merge(task.references.items[["bench", "item"]])
-                r = r[(r.semester == sem) & r.model.isin(refs.index.union(targets))]
-                items = r[["bench", "item"]].drop_duplicates().sort_values(["bench", "item"]).reset_index(drop=True)  # draws independent of log order
-                baseline = score(PROTOCOLS["mean_ref"](task), task.truth)["mse"]
-                for n in [s for s in SIZES if s < len(items)] + [len(items)]:
-                    for draw in range(1 if n == len(items) else DRAWS):
-                        keep = items.iloc[rng.choice(len(items), n, replace=False)]
-                        theta_hat = calibrate(r.merge(keep), anchors=refs).reindex(targets)
-                        rows.append(dict(domain=name, semester=sem, judge=judge, judge_rank=judge_rank, n_judged=len(items), n=n, draw=draw,
-                                         baseline=baseline, direct=score(theta_hat, task.truth)["mse"]))
-                print(name, sem, judge, len(items), "items", file=sys.stderr)
+            judge, task = judges[0].lower(), Task.from_semester(sem, domain)
+            runs = sorted(Path("logs/direct", name, sem, judge).glob("*"))
+            if not runs:
+                print("missing", name, sem, judge, file=sys.stderr)
+                continue
+            refs, targets = task.references.theta, task.truth.index
+            r = direct_logs(runs[0]).merge(task.references.items[["bench", "item"]])
+            r = r[(r.semester == sem) & r.model.isin(refs.index.union(targets))]
+            items = r[["bench", "item"]].drop_duplicates().reset_index(drop=True)
+            baseline = score(PROTOCOLS["mean_ref"](task), task.truth)["mse"]
+            for n in [s for s in SIZES if s < len(items)] + [len(items)]:
+                for draw in range(1 if n == len(items) else DRAWS):
+                    keep = items.iloc[rng.choice(len(items), n, replace=False)]
+                    theta_hat = calibrate(r.merge(keep), anchors=refs).reindex(targets)
+                    rows.append(dict(domain=name, semester=sem, judge=judge, judge_rank=1, n_judged=len(items), n=n, draw=draw,
+                                     baseline=baseline, direct=score(theta_hat, task.truth)["mse"]))
+            print(name, sem, judge, len(items), "items", file=sys.stderr)
     return pd.DataFrame(rows)
 
 
@@ -168,7 +153,7 @@ def plot(df: pd.DataFrame, key: str = "linear", tag: str = "", x: str = "n", xla
     else:
         ax.set_ylim(0, 100), ax.set_yticks([0, 50, 100])
     fig.supxlabel(xlabel, fontsize=8, y=0.11 - 0.45 / fig.get_figheight())  # just under the tick labels, whatever the row count
-    handles = [plt.Line2D([], [], color=COLOR[name.lower()], lw=1, marker=marker, ms=2.5, mfc="white", mew=0.7, label={"math": "Maths"}.get(name.lower(), name.capitalize()))
+    handles = [plt.Line2D([], [], color=COLOR[name.lower()], lw=1, marker=marker, ms=2.5, mfc="white", mew=0.7, label=name.capitalize())
                for name, marker in DOMAIN.items() if name.lower() in set(df.domain)]
     if mse:
         handles.append(plt.Line2D([], [], color="#9a9a9a", lw=0.7, ls="--", label="Baseline"))
@@ -181,10 +166,10 @@ def plot(df: pd.DataFrame, key: str = "linear", tag: str = "", x: str = "n", xla
 
 
 def main() -> int:
-    if "--both" in sys.argv:  # the main analysis's judge under both protocols, one row each, from the two cached tables
+    if "--both" in sys.argv:  # the top-1 judge under both protocols, one row each, from the two cached tables
         pair, rate = pd.read_csv(OUT.with_suffix(".csv")), pd.read_csv(OUT.with_name(OUT.name + "_direct").with_suffix(".csv"))
-        df = pd.concat([pair.merge(loo_judges("pairwise", "linear")).assign(row="Pairwise", mse=lambda d: d.linear, judge_rank=1),
-                        rate.merge(loo_judges("direct", "raw")).assign(row="Absolute", mse=lambda d: d.direct, judge_rank=2)])
+        df = pd.concat([pair[pair.judge_rank == 1].assign(row="Pairwise", mse=lambda d: d.linear),
+                        rate.assign(row="Absolute", mse=lambda d: d.direct)])
         plot(df, key="mse", out=OUT.with_name(OUT.name + "_both"), mse=True)
         return 0
     direct = "--direct" in sys.argv  # direct judging (top-1 judge) instead of pairwise (top-3 judges)
