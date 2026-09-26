@@ -1,14 +1,20 @@
-"""Results analysis of the forecasting task: every protocol against the easy-item prediction
-baseline and the accuracy oracle, per domain and semester
-(docs/superpowers/specs/2026-09-15-results-analysis-design.md).
+"""The paper's analyses: every protocol's forecast of every target against the Baseline (the references' mean theta*).
+scripts/analysis/run.py runs them in order, with the settings in scripts/analysis/config.yaml.
 
-One module per step, chained by the cell runner scripts/analyses/results.py:
-    loading      semester tasks from the frozen tables; verdict and rating tables from logs/
-    matching     restrict judge tables to the frozen train items and count what is unjudged
-    baselines    easy-item prediction and the accuracy oracle
-    embeddings   ridge on mean transcript embeddings
-    calibration  every signal -> theta-hat on the theta* scale (the forecasts table)
-    stats        MSE per domain x semester, pooled rows, judge summaries, floor and oracle
-    plots        the two results figures
-    challenges/  truncation, hidden reasoning, ... reuse the same steps on their own logs
+Shared machinery:
+    config            loads config.yaml and points the data readers at its paths
+    loading           tasks from the frozen tables; verdict and rating tables from logs/
+    matching          judge tables restricted to the frozen train items
+    judges            verdicts and ratings to theta-hat; the reference leave-one-out error that picks a judge
+    baselines         the Baseline and the accuracy oracle
+    calibration       every protocol's forecast of a task (the forecasts table)
+    stats             the core condition, best_judges (the judge each task uses), per-target errors
+    likelihood_ratio  each target's log likelihood ratio against the Baseline, and its t-tests
+    plots             figure style shared by every group
+
+One subpackage per question the paper asks:
+    capability_signal  do saturated transcripts carry capability information?
+    transcript_parts   where in the transcript is it?
+    generalisation     does it hold beyond the reference models?
+    sensitivity        how much do the analysis choices matter?
 """

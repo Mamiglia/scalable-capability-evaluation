@@ -10,7 +10,6 @@ wheels/
 # Virtual environments
 .venv
 .python-version
-uv.lock
 .env
 .agents
 .codex
