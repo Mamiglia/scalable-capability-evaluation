@@ -32,8 +32,8 @@ COLORS = {"glm_length": "#f1a48a", "glm_regex": "#eb6834", "embedding": "#4a3aa7
 DOMAIN_COLORS = {"science": "#cc79a7", "math": "#d55e00", "coding": "#6a3d9a", "cyber": "#c9a800"}
 DOMAIN_MARKERS = {"science": "o", "math": "s", "coding": "^", "cyber": "D"}
 
-PROTOCOLS = [BASELINE, *CONDITIONS]  # the baseline first: it is the reference level everywhere
-PAPER_PROTOCOLS = [p for p in CONDITIONS if p != "glm_length"]  # Length alone is a diagnostic, not a paper protocol: results figures leave it out
+PAPER_PROTOCOLS = [p for p in CONDITIONS if p != "glm_length"]  # Length alone is a diagnostic, not a paper protocol
+PROTOCOLS = [BASELINE, *PAPER_PROTOCOLS]  # the GLM's levels (Appendix D.4), the baseline first: the reference level everywhere
 DOMAINS = ["science", "math", "coding", "cyber"]
 SEMESTERS = ("2025-II", "2026-I")  # the semesters every domain has: a balanced design needs no semester term
 POOLED = "all"

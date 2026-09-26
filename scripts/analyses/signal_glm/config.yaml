@@ -11,7 +11,7 @@ data_process:
         categorical_features: [protocol, domain, model_domain, protocol_judge]  # random intercepts per (target model, domain) cell and per judge within protocol
         reference_categories: {protocol_judge: "-"}  # "-" = no judge, pinned to 0
         category_order:
-          protocol: [easy_items, glm_length, glm_regex, embedding, direct, pairwise]  # first = reference level
+          protocol: [easy_items, glm_regex, embedding, direct, pairwise]  # first = reference level
           domain: [science, math, coding, cyber]
 
 model:
