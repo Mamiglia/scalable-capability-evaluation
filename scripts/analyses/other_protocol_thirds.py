@@ -36,12 +36,13 @@ from sklearn.linear_model import RidgeCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from analysis import embeddings, loading
+from analysis import loading
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
 from analysis.challenges.signal_glm import DOMAIN_COLORS
 from challenges.truncation.compare_truncation import baseline_ratings
 from challenges.truncation.run import THIRDS_ROOT
+from protocols import embeddings
 from protocols.direct_judge.judge import from_logs
 from protocols.direct_judge.scoring import calibrate
 from protocols.transcript_features.features import FEATURE_SETS

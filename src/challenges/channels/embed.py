@@ -11,7 +11,7 @@ ending in <|endoftext|>, last-token pooled, L2-normalised, token-weighted mean, 
 as "full" does and cuts it with judge.dataset.cut(truncate="thirds-<kept>"), the cut of the pairwise thirds runs (plan
 --thirds for the removal variants thirds-23/13/12, --thirds kept for the kept-alone thirds-1/2/3); "full" is the existing
 variant, re-embedded only to check that this runner reproduces the published vectors. Output:
-<out>/<log path without .eval>.<variant>.npz with the arrays analysis.embeddings reads. Samples: the frozen train items
+<out>/<log path without .eval>.<variant>.npz with the arrays protocols.embeddings reads. Samples: the frozen train items
 of the semesters the plan covers, first attempts only.
 """
 

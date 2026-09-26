@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, "src")
-from analysis.embeddings import EmbeddingRegression  # noqa: E402
+from protocols.embeddings import EmbeddingRegression  # noqa: E402
 from capability.evaluate import forecast  # noqa: E402
 from capability.task import Task  # noqa: E402
 from configs.domain import DomainConfig  # noqa: E402
@@ -78,7 +78,7 @@ errors = pd.DataFrame(rows)
 from sklearn.linear_model import RidgeCV  # noqa: E402
 from sklearn.pipeline import make_pipeline  # noqa: E402
 from sklearn.preprocessing import StandardScaler  # noqa: E402
-from analysis import embeddings as emb  # noqa: E402
+from protocols import embeddings as emb  # noqa: E402
 from analysis.challenges import likelihood_ratio as lr  # noqa: E402
 from protocols.transcript_features.features import FEATURE_SETS  # noqa: E402
 from protocols.transcript_features.protocol import ALPHAS as FEATURE_ALPHAS  # noqa: E402

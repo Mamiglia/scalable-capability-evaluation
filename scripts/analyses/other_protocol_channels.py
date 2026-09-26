@@ -35,13 +35,14 @@ from sklearn.linear_model import RidgeCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from analysis import embeddings, loading
+from analysis import loading
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
 from challenges.truncation.compare_truncation import baseline_ratings, truncated_ratings
 from challenges.truncation.run import CHANNELS_ROOT
 from protocols.direct_judge.scoring import calibrate
 from capability.task import Cohort
+from protocols import embeddings
 from protocols.transcript_features.features import FEATURE_SETS
 from protocols.transcript_features.protocol import ALPHAS as FEATURE_ALPHAS
 from protocols.transcript_features.reader import feature_table, rows_table
