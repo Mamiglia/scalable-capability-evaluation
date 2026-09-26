@@ -3,7 +3,7 @@
     uv run python scripts/analysis/run.py                        # everything, about three hours
     uv run python scripts/analysis/run.py --list                 # the steps and what each makes
     uv run python scripts/analysis/run.py --from generalisation  # resume at a step
-    uv run python scripts/analysis/run.py --only signal          # one step
+    uv run python scripts/analysis/run.py --only capability_signal   # one step
     uv run python scripts/analysis/run.py --config my.yaml       # another configuration
 
 Every setting is in scripts/analysis/config.yaml. Outputs go to analysis/: forecasts/ (the two tables every step
@@ -11,7 +11,7 @@ reads), one folder per group with its figures (each with a .txt of every plotted
 and cache/ (expensive intermediates, reused when present; delete it for a clean run). Launches no judging.
 
 Where each paper figure and table comes from (docs/manuscript_draft.pdf numbering):
-    signal            Figure 3 (error_by_protocol), Figure 10 (prediction_example), Figure 16 (domain_glm_effects),
+    capability_signal Figure 3 (error_by_protocol), Figure 10 (prediction_example), Figure 16 (domain_glm_effects),
                       Figure 17 (domain_glm_contrasts), Figure 21 (no_self_judging); Tables 3, 6, 9
     transcript_parts  Figure 4 (thirds_removed), Figure 5 (channels_removed, channel_shares), Figure 22
                       (thirds_kept_alone), Figure 23 (thirds_other_protocols), Figure 24 (channels_other_protocols)
@@ -31,7 +31,7 @@ ROOT = HERE.parents[1]
 STEPS = [
     ("forecasts", "forecasts.py", "analysis/forecasts: forecasts.csv, likelihood_ratio.csv"),
     ("features", "features.py", "per-transcript features of the thirds and channel conditions (analysis/cache)"),
-    ("signal", "signal.py", "analysis/signal: is there capability information in saturated transcripts?"),
+    ("capability_signal", "capability_signal.py", "analysis/capability_signal: is there capability information in saturated transcripts?"),
     ("transcript_parts", "transcript_parts.py", "analysis/transcript_parts: where in the transcript is it?"),
     ("generalisation", "generalisation.py", "analysis/generalisation: does it hold beyond the reference models?"),
     ("sensitivity", "sensitivity.py", "analysis/sensitivity: how much do the analysis choices matter?"),
@@ -51,5 +51,6 @@ if __name__ == "__main__":
     steps = [s for s in STEPS if (args.only is None or s[0] in args.only) and names.index(s[0]) >= names.index(args.start or names[0])]
     for step, runner, what in steps:
         print(f"== {step}: {what}", flush=True)
-        if subprocess.run([sys.executable, str(HERE / runner), "--config", args.config], cwd=ROOT).returncode:
+        # -P: the runner's own folder is not put first on the import path
+        if subprocess.run([sys.executable, "-P", str(HERE / runner), "--config", args.config], cwd=ROOT).returncode:
             raise SystemExit(f"{step} failed; resume with --from {step}")

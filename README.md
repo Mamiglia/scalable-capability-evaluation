@@ -6,6 +6,26 @@ is a weaker model, calibrated on earlier models and applied to this semester's?
 
 Built on [Inspect AI](https://inspect.aisi.org.uk/). Python ≥ 3.13, [`uv`](https://github.com/astral-sh/uv).
 
+## Reproduce the paper
+
+Every figure and table of the paper comes from `scripts/analysis/run.py`, from the published
+[generality-labs](https://huggingface.co/generality-labs) datasets; nothing is judged or paid for.
+
+```bash
+uv sync
+git submodule update --init data                     # the frozen tables, at the pinned revision
+uv run python scripts/analysis/fetch_data.py         # transcripts, judge logs, features, embeddings (~40 GB)
+uv run python scripts/analysis/run.py                # about three hours; --list shows the steps
+```
+
+Outputs land in `analysis/`: `forecasts/` (every protocol's forecast of every target, and the log
+likelihood ratios), then one folder per question the paper asks, each with its figures (and a
+`.txt` of every plotted number and its test) and tables: `capability_signal/` (is there capability information
+in saturated transcripts?), `transcript_parts/` (where in the transcript?), `generalisation/`
+(beyond the reference models?) and `sensitivity/` (how much do the analysis choices matter?).
+`run.py`'s docstring maps each output to its figure or table. Every setting is in
+`scripts/analysis/config.yaml`; the code is in `src/analysis/` (one subpackage per question).
+
 ## Methodology
 
 **Capability is the latent θ of an item response model.** Following Epoch AI / Artificial
@@ -125,7 +145,8 @@ src/
   configs/      draccus config dataclasses and the two content hashes
 data/           git submodule synced to Hugging Face: collected logs + frozen tables
 logs/           judge runs, its own git repo synced to Hugging Face; logs/judge/ = one eval_set per <domain, semester, judge, condition>
-scripts/        experiment helpers and analyses; nothing in src/ depends on them
+  analysis/     the paper's analyses: shared machinery, and capability_signal/, transcript_parts/, generalisation/, sensitivity/
+scripts/        experiment helpers; scripts/analysis/ runs the paper's analyses (run.py, config.yaml), scripts/analyses/ is exploratory
 ```
 
 Two content hashes decide where things live. `configs/paths.py:hash_task_args` hashes a bench's

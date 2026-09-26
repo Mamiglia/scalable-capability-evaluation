@@ -8,7 +8,15 @@ paths:
   embeddings: transcript-embeddings   # generality-labs/transcript-embeddings: per-transcript vectors
   forecasts: analysis/forecasts       # forecasts.csv and likelihood_ratio.csv, which every group reads
   cache: analysis/cache               # expensive intermediate tables, reused when present
-  outputs: analysis                   # one folder per group: signal, transcript_parts, generalisation, sensitivity
+  model_configs: configs/models       # the models' release dates (the prediction example)
+  outputs: analysis                   # one folder per group: capability_signal, transcript_parts, generalisation, sensitivity
+
+# the published datasets and the revisions the paper's numbers were computed from (scripts/analysis/fetch_data.py)
+data_sources:
+  data: {repo: generality-labs/benchmarks, revision: 0609b361e51aa58b06ac780d230f88fe67658c4d}
+  logs: {repo: generality-labs/judging, revision: 061577335dc7092822eb7c0c4df27093b7beefcb}
+  features: {repo: generality-labs/glm_features, revision: 8edc75e7a46ef8171040261e7a67ea2f40e2bf89}
+  embeddings: {repo: generality-labs/transcript-embeddings, revision: 001cf012261f205bc965f46825aff452f4f386d9}
 
 tasks:
   domains: [science, math, coding, cyber]                      # the paper's order
@@ -44,31 +52,36 @@ thirds:
   kept_alone_hashes: {2025-II: full_train, 2026-I: forty_items}   # the kept-alone runs of the same judges
 
 channels:
-  # channel -> (kept alone, removed); the figure draws the tool calls and outputs together as Tools
-  parts: {CoT: [only-reasoning, drop-reasoning], Messages: [only-text, drop-text], Tool calls: [only-calls, drop-calls],
-          Tool outputs: [only-outputs, drop-outputs], Tools: [only-tools, drop-tools]}
-  drawn: [CoT, Messages, Tools]
+  # channel -> (run with only that channel, run without it); Tools is the tool calls with their outputs
+  parts: {Reasoning: [only-reasoning, drop-reasoning], Messages: [only-text, drop-text], Tools: [only-tools, drop-tools]}
   tool_domains: [coding, cyber]
-  # coding and cyber: the judge's channel runs (configs/judges/channels/); maths and science: the reasoning-dropped run
+  # coding and cyber: the judge's channel runs (configs/judges/channels/) beside its full-transcript run; maths and
+  # science: the reasoning-dropped run
   runs:
-    coding:  {2025-II: {judge: minimax-m1},       2026-I: {judge: kimi-k2-thinking}}
-    cyber:   {2025-II: {judge: deepseek-r1-0528}, 2026-I: {judge: kimi-k2-thinking}}
+    coding:  {2025-II: {judge: minimax-m1, full: 24d6cc32},       2026-I: {judge: kimi-k2-thinking, full: 24d6cc32}}
+    cyber:   {2025-II: {judge: deepseek-r1-0528, full: 24d6cc32}, 2026-I: {judge: kimi-k2-thinking, full: 24d6cc32}}
     math:    {2025-II: {judge: deepseek-r1-0528, full: 24d6cc32, drop-reasoning: 7ea04f2b},
               2026-I: {judge: kimi-k2-thinking, full: 24d6cc32, drop-reasoning: 7ea04f2b}}
     science: {2025-II: {judge: minimax-m1, full: 24d6cc32, drop-reasoning: 7ea04f2b},
               2026-I: {judge: minimax-m2, full: 24d6cc32, drop-reasoning: 7ea04f2b}}
+
+transcript_parts:
+  other_protocols: [glm_regex, embedding, direct]   # the rows of the other-protocol thirds and channel figures
+
+prediction_example: {domain: cyber, semester: 2025-II, target: minimax-m2, protocols: [pairwise, glm_regex]}
 
 generalisation:
   distance_bins: 4                    # equal-count bins of targets per domain (capability distance)
   reasoning_semester: 2025-I          # reasoning targets predicted from non-reasoning references (Maths)
   reasoning_domain: math
   reasoning_targets: [deepseek-r1-0528, minimax-m1, qwen3-235b-a22b, qwen3-30b-a3b, qwen3-32b]
-  transfer: [[math, coding], [math, cyber], [science, coding], [science, cyber]]   # scored on another domain
 
-frontier:
+frontier:                             # closed-source targets against the open ones of the same task, reasoning hidden
   semester: 2026-I
-  pairwise: {judge: kimi-k2-thinking, condition: 9c1d3abb}        # reasoning hidden
-  direct: {judge: deepseek-v3.2, condition: 9d52d41c}             # reasoning hidden
+  domains: {closed: coding_frontier, open: coding}
+  pairwise: {judge: kimi-k2-thinking, condition: 9c1d3abb, log_dir: judge}
+  direct: {judge: deepseek-v3.2, condition: 9d52d41c, log_dir: direct_reasoning-hidden}
+  views: {embedding: answer, glm_regex: hidden}                  # the reasoning-stripped transcript views
   closed_targets: {claude-opus-4.7: Anthropic, claude-opus-4.8: Anthropic, claude-fable-5: Anthropic,
                    gpt-5: OpenAI, gpt-5.6-sol: OpenAI, gemini-3.5-flash: Google}
 
@@ -88,11 +101,18 @@ domain_glm:                           # the hierarchical Gamma GLM of Appendix D
   error_floor: 1.0e-6
   priors: {intercept_scale: 2.0, effect_scale: 1.0, sigma_scale: 0.5, cell_scale: 1.0}
   sampler: {samples: 2000, warmup: 1000, chains: 4, seed: 0, target_accept: 0.95}
+  contrast_against: pairwise          # the protocol every other protocol's error ratio is contrasted with
 
 display:
+  paper_protocols: [glm_regex, embedding, direct, pairwise]   # the protocols the paper's figures show (Length is a diagnostic)
   protocol_names: {easy_items: Baseline, glm_length: Length, glm_regex: Deterministic features, embedding: Embedding,
                    direct: Absolute scoring, pairwise: Pairwise judge}
+  table_protocol_names: {easy_items: Baseline protocol, glm_regex: Deterministic features, embedding: Embedding,
+                         direct: Absolute scoring, pairwise: Pairwise judging}   # Table 3's rows, as printed
   domain_names: {science: Science, math: Maths, coding: Coding, cyber: Cyber}
   protocol_colours: {glm_regex: "#eb6834", embedding: "#4a3aa7", direct: "#1baf7a", pairwise: "#2a78d6",
-                     glm_length: "#f1a48a"}
+                     glm_length: "#f1a48a", easy_items: "#9a9a9a"}
+  domain_colours: {science: "#cc79a7", math: "#d55e00", coding: "#6a3d9a", cyber: "#c9a800"}        # transcript parts
+  domain_line_colours: {science: "#2a78d6", math: "#eb6834", coding: "#1baf7a", cyber: "#4a3aa7"}   # sensitivity curves
+  channel_colours: {Reasoning: "#4a3aa7", Messages: "#eda100", Tools: "#1baf7a"}
   domain_markers: {science: o, math: s, coding: "^", cyber: D}

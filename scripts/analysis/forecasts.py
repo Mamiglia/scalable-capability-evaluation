@@ -22,6 +22,7 @@ import pandas as pd
 from analysis import calibration, loading, matching, stats
 from analysis import likelihood_ratio as lr
 from analysis.config import apply_paths, load_config
+from capability.evaluate import semester_names
 from protocols import PROTOCOLS
 from protocols.embeddings import EmbeddingRegression
 
@@ -30,13 +31,13 @@ def forecasts_table(domains: list[str], semesters: list[str]) -> pd.DataFrame:
     """Every protocol's forecast of every target, for every judge run and variant.
 
     domains: domain names (configs/domain/<name>.yml).
-    semesters: the target semesters to forecast.
+    semesters: the target semesters to forecast; a domain is forecast on those of them it has.
     """
     frames = []
     for name in domains:
         dom = loading.domain(name)
         protocols = calibration.transcript_protocols(dom)
-        for task in loading.tasks(dom, semesters):
+        for task in loading.tasks(dom, [s for s in semesters if s in semester_names(dom)]):
             runs = [matching.match(run, task) for run in loading.judge_runs(dom, task)]
             frames.append(calibration.forecasts(dom, task, protocols, runs))
             print(name, task.semester, "forecasts done", flush=True)
@@ -57,7 +58,7 @@ def likelihood_ratio_table(forecasts: pd.DataFrame, domains: list[str], semester
     for name in domains:
         dom = loading.domain(name)
         features = {"glm_regex": PROTOCOLS["glm_regex"], "embedding": EmbeddingRegression(variants["embedding"])}
-        for task in loading.tasks(dom, semesters):
+        for task in loading.tasks(dom, [s for s in semesters if s in semester_names(dom)]):
             refs, truth = task.references.theta, task.truth
             rules = {(p, "-"): lr.feature_rule(f.estimator, pd.concat([f.get_features(task.references), f.get_features(task.test)]))
                      for p, f in features.items()}
