@@ -63,6 +63,17 @@ def load() -> pd.DataFrame:
     return f.dropna(subset=["score"])
 
 
+def medians(f: pd.DataFrame) -> pd.Series:
+    """Appendix D.3, over the 2025-II and 2026-I tasks: the median across tasks of the range of pairwise MSE over the
+    three judges, and of the gap from pairwise judging (mean MSE over judges) to absolute scoring and to the baseline."""
+    f = f[f.semester.isin(BOX_SEMESTERS)]
+    t = f.groupby(["task", "protocol", "judge"]).agg(mse=("e", "mean"), base=("e_base", "mean")).reset_index()
+    spread = t.groupby(["task", "protocol"]).mse.agg(lambda x: x.max() - x.min()).unstack()
+    mse, base = t.groupby(["task", "protocol"]).mse.mean().unstack(), t.groupby("task").base.first()
+    return pd.Series({"pairwise judge range": spread.pairwise.median(), "absolute scoring - pairwise": (mse.direct - mse.pairwise).median(),
+                      "baseline - pairwise": (base - mse.pairwise).median()})
+
+
 def per_task(f: pd.DataFrame) -> pd.DataFrame:
     g = f.groupby(["domain", "semester", "task", "protocol", "judge"], sort=False)
     t = g.agg(n=("score", "size"), score=("score", "mean"), mse=("e", "mean"), judge_theta=("judge_theta", "first"),
@@ -295,6 +306,9 @@ def main():
     figure(t, OUT)
     gap_figure(f, OUT.with_name(OUT.name + "_gap"))
     box = box_figure(f, OUT.with_name(OUT.name + "_box"))
+    m = medians(f)
+    m.to_csv(OUT.with_name(OUT.name + "_medians.csv"), header=["mse"], float_format="%.3f")
+    print("\nmedian over the 2025-II and 2026-I tasks (appendix D.3):\n" + m.round(2).to_string())
     print("\nsquared error per target (2025-II + 2026-I, mean over domains), mean ± t95 CI over targets:")
     print(box.groupby(["protocol", "column"]).e.apply(ci, 2).to_string())
 
