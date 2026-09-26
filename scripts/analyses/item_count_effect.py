@@ -34,7 +34,8 @@ from configs.domain import DomainConfig
 from configs.logs import logger
 from palette import DOMAIN  # domain markers, scripts/analyses/palette.py
 from protocols import PROTOCOLS
-from protocols.direct_judge import from_logs as direct_logs
+from configs.judge import DirectJudgeConfig
+from protocols.direct_judge import JudgeDirect, from_logs as direct_logs
 from protocols.direct_judge.scoring import calibrate
 from protocols.pairwise import from_logs
 from protocols.pairwise.linear import weighted_theta
@@ -101,12 +102,13 @@ def compute_direct() -> pd.DataFrame:
         for sem, judges in top.items():
             task = Task.from_semester(sem, domain)
             for judge_rank, judge in enumerate((j.lower() for j in judges), 1):
-                runs = sorted(Path("logs/direct", name, sem, judge).glob("*"))
+                config = DirectJudgeConfig.from_cli(Path(f"configs/judges/{judge}.yml"))
+                runs = JudgeDirect(config, domain, include_reasoning=True).log_dirs(sem)  # every bench set's directory
                 if not runs:
                     print("missing", name, sem, judge, file=sys.stderr)
                     continue
                 refs, targets = task.references.theta, task.truth.index
-                r = pd.concat([direct_logs(x) for x in runs if any(x.glob("*.eval"))], ignore_index=True).merge(task.references.items[["bench", "item"]])  # CORRECTION: every run dir
+                r = pd.concat([direct_logs(d) for d in runs], ignore_index=True).merge(task.references.items[["bench", "item"]])
                 r = r[(r.semester == sem) & r.model.isin(refs.index.union(targets))]
                 items = r[["bench", "item"]].drop_duplicates().reset_index(drop=True)
                 baseline = score(PROTOCOLS["mean_ref"](task), task.truth)["mse"]

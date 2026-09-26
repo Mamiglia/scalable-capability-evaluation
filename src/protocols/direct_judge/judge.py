@@ -14,6 +14,7 @@ so log reading and calibration are usable independently of collection.
 from dataclasses import replace
 from pathlib import Path
 import hashlib
+from itertools import combinations
 
 import numpy as np
 import pandas as pd
@@ -68,9 +69,10 @@ class JudgeDirect(DirectRegression):
         return {self.domain.task(bench).name: bench.direct_system_prompt or self.config.system_prompt
                 for bench in self.domain.benches}
 
-    def log_dir(self, semester: str) -> Path:
+    def log_dir(self, semester: str, benches: set[str] | None = None) -> Path:
+        """The run directory, hashed over the prompts of `benches` (default: every bench of the domain)."""
         prompts = tuple((name, Path(prompt).read_text(encoding="utf-8"))
-                        for name, prompt in sorted(self._prompts().items()))
+                        for name, prompt in sorted(self._prompts().items()) if benches is None or name in benches)
         condition = (self.config.condition_hash, prompts)
         condition_hash = hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
         directory = "direct" if self.config.include_reasoning else "direct_reasoning-hidden"
@@ -80,6 +82,15 @@ class JudgeDirect(DirectRegression):
             directory += f"_truncated-{self.config.truncate}"
         return (self.config.log_dir / directory / self.domain.name / semester
                 / self.config.judge.shortname.lower() / condition_hash)
+
+    def log_dirs(self, semester: str) -> list[Path]:
+        """Every existing run directory of this config for the semester, full bench set first. The hash covers the
+        domain's bench prompts, so a bench added after a run (coding's agent_bench_os) starts a new directory while
+        the earlier benches' ratings stay under the hash of the smaller bench set (coding: 1a2c14b2 holds SWE-bench
+        and Terminal-Bench, f8860e9c AgentBench)."""
+        names = sorted(self._prompts())
+        subsets = [set(c) for k in range(len(names), 0, -1) for c in combinations(names, k)]
+        return [d for d in dict.fromkeys(self.log_dir(semester, s) for s in subsets) if d.is_dir()]
 
     def tasks(self, train: Cohort, test: Cohort) -> list[Task]:
         """One task per <bench, model>, on that model's correct first-attempt train items."""

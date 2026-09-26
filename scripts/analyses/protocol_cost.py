@@ -65,8 +65,7 @@ def prices() -> dict[str, tuple[float, float, float]]:
 def run_cost(run_dir: Path, table: dict) -> tuple[float, int]:
     """(dollars, input tokens) over every log of the run dir."""
     dollars, tokens = 0.0, 0
-    files = Path(run_dir).parent.glob("*/*.eval") if "logs/direct/coding" in str(run_dir) else Path(run_dir).glob("*.eval")  # CORRECTION
-    for f in files:
+    for f in Path(run_dir).glob("*.eval"):
         for model, u in (read_eval_log(str(f), header_only=True).stats.model_usage or {}).items():
             inp, cached, out = table[PROXY.get(model, model.removeprefix("openrouter/"))]
             cache = u.input_tokens_cache_read or 0
@@ -98,7 +97,8 @@ def compute() -> tuple[pd.DataFrame, pd.DataFrame]:
                 if (run := loo_pick(runs, task, protocol)) is None:
                     print("no", protocol, "run", name, sem, file=sys.stderr)
                     continue
-                dollars, tokens = run_cost(run.harness.log_dir(sem), table)
+                dirs = run.harness.log_dirs(sem) if run.protocol == "direct" else [run.harness.log_dir(sem)]
+                dollars, tokens = map(sum, zip(*(run_cost(d, table) for d in dirs)))
                 embed_tokens = tokens if protocol == "direct" else embed_tokens
                 items = run.table[["bench", "item"]].drop_duplicates().reset_index(drop=True)
                 for frac in FRACTIONS:

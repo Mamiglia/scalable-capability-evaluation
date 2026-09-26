@@ -5,6 +5,7 @@ under logs/judge/ (pairwise verdicts) or logs/direct*/ (1-10 ratings); its rows 
 raw here and restricted to the frozen train items by analysis.matching.
 """
 
+import os
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,11 +60,13 @@ def domain(name: str) -> DomainConfig:
 def tasks(dom: DomainConfig, semesters: list[str] | None = None) -> list[Task]:
     """The semester tasks of a domain from its frozen tables, in roster order.
 
-    semesters: restrict to these (e.g. ["2026-I"]); None means every frozen task.
+    semesters: restrict to these (e.g. ["2026-I"]); None means every frozen task, or those of them
+    SMALL_JUDGE_SEMESTERS names (space-separated, e.g. "2025-I 2025-II 2026-I").
     Each Task holds references (theta = theta*), an empty-or-not historical cohort, the
     targets (theta NaN) and the targets' theta* in `truth`.
     """
-    return [Task.from_semester(s, dom) for s in semesters or semester_names(dom)]
+    only = os.environ.get("SMALL_JUDGE_SEMESTERS", "").split()
+    return [Task.from_semester(s, dom) for s in semesters or [s for s in semester_names(dom) if not only or s in only]]
 
 
 def fetched(run_dir: Path) -> bool:
@@ -117,8 +120,9 @@ def direct_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
     """Every fetched direct run for the task, subject reasoning shown and hidden, for every
     judge YAML in configs/judges/ whose judge is in the semester's top-3 roster
     (data/meta/<domain>/fit.yml `top`; file stems are the roster shortnames). The run
-    directory comes from JudgeDirect.log_dir, which hashes the prompts too, so a config whose
-    directory does not exist was never run."""
+    directories come from JudgeDirect.log_dirs, which hashes the prompts too, so a config with
+    no directory was never run; a run split across bench sets (coding: SWE-bench and
+    Terminal-Bench before AgentBench joined) is read from every directory."""
     roster = yaml.safe_load((tables.frozen_dir(dom) / "fit.yml").read_text())["top"][task.semester]
     runs = []
     for path in sorted(JUDGES.glob("*.yml")):
@@ -126,14 +130,11 @@ def direct_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
             continue
         for hidden in (False, True):
             harness = JudgeDirect(DirectJudgeConfig.from_cli(path), dom, include_reasoning=not hidden)
-            run_dir = harness.log_dir(task.semester)
-            if not run_dir.is_dir() or not fetched(run_dir):
+            run_dirs = [d for d in harness.log_dirs(task.semester) if fetched(d)]
+            if not run_dirs:
                 continue
             label = "reasoning-hidden" if hidden else "reasoning-shown"
-            table = direct_from_logs(run_dir)
-            if dom.name == "coding" and not hidden:  # CORRECTION: SWE-bench + Terminal-Bench sit in a sibling run dir
-                siblings = [d for d in Path(run_dir).parent.iterdir() if d.is_dir() and d != Path(run_dir) and any(d.glob("*.eval"))]
-                table = pd.concat([table, *[direct_from_logs(d) for d in siblings]], ignore_index=True)
+            table = pd.concat([direct_from_logs(d) for d in run_dirs], ignore_index=True)
             runs.append(JudgeRun("direct", path.stem, label, harness, table))
     return runs
 
