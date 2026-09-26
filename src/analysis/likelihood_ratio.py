@@ -230,8 +230,8 @@ def chosen_judges(forecasts: pd.DataFrame, variants: dict[str, str], other_famil
     """(domain, semester, protocol, model, judge): the judge each target's forecast comes from, in the
     core condition. By default the task's best judge on references (the results' choice); with
     `other_family`, the best among judges from another developer than the target
-    (signal_glm.best_other_family), so no model is judged by its own lineage."""
-    from analysis.challenges.signal_glm import family
+    (stats.best_other_family), so no model is judged by its own lineage."""
+    family = stats.family
     core = stats.core_condition(forecasts)
     judged = [p for p in variants if p in ("pairwise", "direct")]
     core = core[core.protocol.isin(judged) & np.array([variants.get(p) == v for p, v in zip(core.protocol, core.variant)])]

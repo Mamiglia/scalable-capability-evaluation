@@ -13,6 +13,7 @@ KEYS = ["domain", "protocol", "variant", "judge", "condition"]
 BASELINE, ORACLE = "easy_items", "accuracy_hard"
 JUDGED = ("pairwise", "direct")
 BEST, MEAN = "best judge on references", "mean over judges"
+PROTOCOLS = (BASELINE, "glm_length", "glm_regex", "embedding", "direct", "pairwise")  # every protocol with one forecast per target
 METRICS = ("mse", "delta", "z")
 
 
@@ -53,6 +54,22 @@ def core_condition(forecasts: pd.DataFrame) -> pd.DataFrame:
         logger.warning("%s %s %s/%s %s: no full-train reasoning-shown run, scoring its %s run",
                        row.domain, row.semester, row.protocol, row.variant, row.judge, row.condition)
     return pd.concat([forecasts[~forecasts.protocol.isin(JUDGED)], core.drop(columns="condition_rank")], ignore_index=True)
+
+
+def best_judges(forecasts: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
+    """The judge each task uses: per (domain, semester, protocol), the core-condition run with the lowest reference
+    leave-one-model-out error; a tie keeps the judge that comes first in `forecasts`.
+
+    forecasts: the forecasts table (analysis/forecasts/forecasts.csv).
+    variants: protocol -> the variant it is reported in, e.g. {"pairwise": "linear", "direct": "raw"}; judge protocols
+        not named are left out.
+    Returns one row per (domain, semester, protocol): variant, judge, condition, judge_loo_mse.
+    """
+    core = core_condition(forecasts)
+    core = core[core.protocol.isin(JUDGED) & (core.variant == core.protocol.map(variants))]
+    key = ["domain", "semester", "protocol"]
+    best = core[core.groupby(key).judge_loo_mse.transform("min") == core.judge_loo_mse]
+    return best.drop_duplicates(key)[[*key, "variant", "judge", "condition", "judge_loo_mse"]].reset_index(drop=True)
 
 
 def judge_summaries(forecasts: pd.DataFrame) -> pd.DataFrame:
@@ -143,3 +160,52 @@ def task_metrics(forecasts: pd.DataFrame) -> pd.DataFrame:
     for k, g in paired.groupby(KEYS[1:], sort=False):
         rows.append(dict(zip(KEYS[1:], k), domain="all", semester="all", **paired_metrics(g)))
     return pd.DataFrame(rows)[["domain", "semester", *KEYS[1:], "n", "mse", "baseline_mse", "delta", "z"]]
+
+
+def in_variants(table: pd.DataFrame, variants: dict[str, str]) -> pd.DataFrame:
+    """The rows of `table` in the variant `variants` names for their protocol ("-" for protocols it does not name)."""
+    return table[[variants.get(p, "-") == v for p, v in zip(table.protocol, table.variant)]]
+
+
+def target_errors(forecasts: pd.DataFrame, variants: dict[str, str], semesters: tuple[str, ...] | None = None,
+                  protocols: tuple[str, ...] = PROTOCOLS) -> pd.DataFrame:
+    """One forecast per target and protocol, with its squared error: judge protocols as each task's best judge on
+    references, every protocol in its reported variant; targets without a forecast dropped.
+
+    variants: protocol -> reported variant, e.g. {"pairwise": "linear", "direct": "raw", "embedding": "full"}.
+    semesters: keep only these semesters (None: all).
+    Returns columns domain, semester, model, protocol, theta_hat, theta, err.
+    """
+    f = in_variants(one_per_target(forecasts), variants)
+    f = f[f.protocol.isin(protocols)]
+    if semesters is not None:
+        f = f[f.semester.isin(semesters)]
+    f = f.dropna(subset=["theta_hat", "theta"])
+    return f.assign(err=(f.theta_hat - f.theta) ** 2)[["domain", "semester", "model", "protocol", "theta_hat", "theta", "err"]]
+
+
+def with_baseline(errors: pd.DataFrame) -> pd.DataFrame:
+    """`errors` (target_errors) with a `base` column: the baseline's squared error on the same target."""
+    base = errors[errors.protocol == BASELINE].set_index(["domain", "semester", "model"]).err
+    return errors.assign(base=errors.set_index(["domain", "semester", "model"]).index.map(base))
+
+
+def prediction_score(errors: np.ndarray | pd.Series, baseline: np.ndarray | pd.Series) -> np.ndarray | pd.Series:
+    """-log2(error / baseline error): the number of halvings of the error, 0 at the baseline, 1 at half its error."""
+    return -np.log2(errors / baseline)
+
+
+def family(model: pd.Series) -> pd.Series:
+    """The developer prefix of each model name: glm-4.7 -> glm, kimi-k2.5 -> kimi, qwen3-235b -> qwen."""
+    return model.str.extract(r"^([a-z]+)", expand=False)
+
+
+def best_other_family(forecasts: pd.DataFrame) -> pd.DataFrame:
+    """Like one_per_target, but each target's judge is the best on references among the core-condition judges from
+    another developer than the target, so no model is judged by its own family; targets with no such judge dropped."""
+    core = core_condition(forecasts)
+    judged = core[core.protocol.isin(JUDGED) & (family(core.judge) != family(core.model))]
+    key = ["domain", "semester", "protocol", "variant", "model"]
+    best = judged.loc[judged.groupby(key).judge_loo_mse.transform("min") == judged.judge_loo_mse].drop_duplicates(key)
+    return pd.concat([forecasts[~forecasts.protocol.isin(JUDGED)], best.assign(judge="best-other-family", condition="core")],
+                     ignore_index=True)

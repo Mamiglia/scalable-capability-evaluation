@@ -984,7 +984,7 @@ def prediction_example_figure(forecasts: pd.DataFrame, variants: dict[str, str],
     import matplotlib.dates as mdates
 
     from analysis import loading
-    from analysis.challenges import likelihood_ratio as lr
+    from analysis import likelihood_ratio as lr
     from protocols.embeddings import EmbeddingRegression
     from analysis.stats import core_condition
     from protocols import PROTOCOLS

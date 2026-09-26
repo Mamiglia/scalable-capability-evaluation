@@ -1,16 +1,14 @@
 """Deterministic transcript features of the reasoning channel alone, for the channel ablation of the
-Deterministic features protocol (scripts/analyses/other_protocol_channels.py), and of transcripts with one
-third removed (--thirds, for scripts/analyses/other_protocol_thirds.py).
-
-    uv run python src/challenges/channels/features.py [--thirds] [--out CSV]
+Deterministic features protocol, and of transcripts with one third removed or kept alone, for the thirds ablation.
+Run through scripts/analysis/features.py.
 
 glm_features/ holds two views per transcript, "visible" (messages + reasoning) and "hidden" (messages
 only); the other channel views derive from them except the reasoning alone, extracted here: every
 assistant message reduced to its reasoning blocks, no tool calls, then protocols.transcript_features
 .features.extract_features. Rows: the correct first attempts of the references' and targets' train
-items of 2025-II and 2026-I in every domain; columns path (the data/ log), item, correct, FEATURES.
+items of the given semesters and domains; columns path (the data/ log), item, correct, FEATURES.
 
---thirds cuts as the pairwise and Embedding thirds runs do (judge.dataset.cut, thirds-<kept>): the rendered
+The thirds view cuts as the pairwise and Embedding thirds runs do (judge.dataset.cut, thirds-<kept>): the rendered
 transcript (evals.sample.extract_transcript) is split into three equal character spans and the characters of the
 removed span are dropped from every text and reasoning block they fall in, a tool call dropped when its rendered
 call starts there; the features are then extracted from the cut messages. Rows gain a condition column: full
@@ -18,27 +16,18 @@ call starts there; the features are then extracted from the cut messages. Rows g
 alone (thirds-1, thirds-2, thirds-3).
 """
 
-import argparse
-import sys
 import zipfile
 from concurrent.futures import ProcessPoolExecutor
-from pathlib import Path
 
 import pandas as pd
 from inspect_ai.log import EvalSample
 
-ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "src"))
+from analysis import loading
+from evals.sample import PLACEHOLDER_BLOCKS, extract_score, extract_transcript, format_reasoning, format_single_message, format_text
+from protocols.transcript_features.features import FEATURES, extract_features
+from protocols.transcript_features.reader import MEMBER
+from reference import tables
 
-from analysis import loading  # noqa: E402
-from evals.sample import PLACEHOLDER_BLOCKS, extract_score, extract_transcript, format_reasoning, format_single_message, format_text  # noqa: E402
-from protocols.transcript_features.features import FEATURES, extract_features  # noqa: E402
-from protocols.transcript_features.reader import MEMBER  # noqa: E402
-from reference.tables import DATA  # noqa: E402
-
-DOMAINS, SEMESTERS = ("science", "math", "coding", "cyber"), ("2025-II", "2026-I")
-OUT = ROOT / "analysis/results/figures/channels/features_only_reasoning.csv"
-THIRDS_OUT = ROOT / "analysis/results/figures/positions/features_thirds.csv"
 THIRDS = ("full", "thirds-23", "thirds-13", "thirds-12", "thirds-1", "thirds-2", "thirds-3")  # removed, then kept alone
 THOUGHT_START = "<THOUGHT_START>\n "  # evals.sample.format_reasoning's prefix before the reasoning text
 
@@ -120,7 +109,7 @@ def extract_thirds(job: tuple[str, set[str]]) -> list[dict]:
     """extract for every THIRDS condition: one row per first attempt on `items` and condition."""
     path, items = job
     rows = []
-    with zipfile.ZipFile(DATA / path) as archive:
+    with zipfile.ZipFile(tables.DATA / path) as archive:
         for name in archive.namelist():
             if not (m := MEMBER.match(name)) or int(m[2]) != 1 or m[1] not in items:
                 continue
@@ -138,7 +127,7 @@ def extract(job: tuple[str, set[str]]) -> list[dict]:
     """Feature rows of the first attempts on `items` in the log at `path` (relative to data/)."""
     path, items = job
     rows = []
-    with zipfile.ZipFile(DATA / path) as archive:
+    with zipfile.ZipFile(tables.DATA / path) as archive:
         for name in archive.namelist():
             if not (m := MEMBER.match(name)) or int(m[2]) != 1 or m[1] not in items:
                 continue
@@ -150,11 +139,11 @@ def extract(job: tuple[str, set[str]]) -> list[dict]:
     return rows
 
 
-def jobs() -> list[tuple[str, set[str]]]:
-    """(log path, train item ids) per log of every reference and target of the two semesters."""
+def jobs(domains: list[str], semesters: list[str]) -> list[tuple[str, set[str]]]:
+    """(log path, train item ids) per transcript log of every reference and target of the given tasks."""
     wanted: dict[str, set[str]] = {}
-    for domain in DOMAINS:
-        for semester in SEMESTERS:
+    for domain in domains:
+        for semester in semesters:
             (task,) = loading.tasks(loading.domain(domain), [semester])
             for cohort in (task.references, task.test):
                 for bench, ids in cohort.items.groupby("bench").item:
@@ -164,26 +153,17 @@ def jobs() -> list[tuple[str, set[str]]]:
     return sorted(wanted.items())
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--out", type=Path)
-    parser.add_argument("--thirds", action="store_true", help="features of the transcripts with one third removed")
-    parser.add_argument("--workers", default=6, type=int)
-    args = parser.parse_args()
-    out = args.out or (THIRDS_OUT if args.thirds else OUT)
-    todo = jobs()
-    print(f"{len(todo)} logs", flush=True)
-    rows = []
-    with ProcessPoolExecutor(args.workers) as pool:
-        for i, part in enumerate(pool.map(extract_thirds if args.thirds else extract, todo), start=1):
+def feature_rows(view: str, domains: list[str], semesters: list[str], workers: int = 6) -> pd.DataFrame:
+    """The features of every correct first attempt of the given tasks' references and targets in one view.
+
+    view: "reasoning_only" (every assistant message cut to its reasoning) or "thirds" (one row per THIRDS condition).
+    Returns columns path, item, correct, [condition,] FEATURES.
+    """
+    assert view in ("reasoning_only", "thirds"), view
+    todo, rows = jobs(domains, semesters), []
+    with ProcessPoolExecutor(workers) as pool:
+        for i, part in enumerate(pool.map(extract_thirds if view == "thirds" else extract, todo), start=1):
             rows.extend(part)
             if i % 25 == 0:
-                print(f"{i}/{len(todo)} logs, {len(rows)} rows", flush=True)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    columns = ["path", "item", "correct", *(["condition"] if args.thirds else []), *FEATURES]
-    pd.DataFrame(rows, columns=columns).to_csv(out, index=False)
-    print(out, len(rows), "rows")
-
-
-if __name__ == "__main__":
-    main()
+                print(f"{view}: {i}/{len(todo)} logs, {len(rows)} rows", flush=True)
+    return pd.DataFrame(rows, columns=["path", "item", "correct", *(["condition"] if view == "thirds" else []), *FEATURES])

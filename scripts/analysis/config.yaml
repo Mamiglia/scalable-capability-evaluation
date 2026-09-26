@@ -1,0 +1,98 @@
+# Every setting of the paper's analysis. Runners (scripts/analysis/*.py) read this file and pass the values to
+# src/analysis as arguments; nothing else sets them. Paths are relative to the repository root.
+
+paths:
+  data: data                          # generality-labs/benchmarks: frozen tables (meta/) and transcripts
+  logs: logs                          # generality-labs/judging; must stay logs/: the judge configs name their log dirs
+  features: glm_features              # generality-labs/glm_features: per-transcript deterministic features
+  embeddings: transcript-embeddings   # generality-labs/transcript-embeddings: per-transcript vectors
+  forecasts: analysis/forecasts       # forecasts.csv and likelihood_ratio.csv, which every group reads
+  cache: analysis/cache               # expensive intermediate tables, reused when present
+  outputs: analysis                   # one folder per group: signal, transcript_parts, generalisation, sensitivity
+
+tasks:
+  domains: [science, math, coding, cyber]                      # the paper's order
+  semesters: [2025-II, 2026-I]                                 # the main analysis: 16 targets per domain
+  all_semesters: [2024-I, 2024-II, 2025-I, 2025-II, 2026-I]    # the time figure and Table 8
+
+# the variant each protocol is reported in (pairwise: verdicts to theta by the linear calibration; direct: mean raw
+# rating; embedding: vectors of the whole transcript)
+protocols: {pairwise: linear, direct: raw, embedding: full}
+
+# the 40 train items (10 per difficulty quartile) the thirds and channel analyses judge
+removal_items: {per_quartile: 10, seed: 0}
+
+statistics:
+  predictive_shape: t                 # Student t with n - 1 degrees of freedom for the log likelihood ratio
+  alpha: 0.05
+  bootstrap_draws: 2000
+  seed: 0
+
+# the pairwise judge runs each transcript-parts analysis reads: domain -> semester -> judge and condition hashes
+# (logs/judge/<domain>/<semester>/<judge>/<hash>); the judge is each task's best judge on references
+thirds:
+  hashes:
+    full_train: {"1": 66f9615b, "2": 574946b9, "3": e4d05a32, "12": b8f67d26, "13": 9d38c63d, "23": 97b40582}
+    forty_items: {"1": 8311027f, "2": f2b0de83, "3": 04e3f7ec, "12": e5f74d2a, "13": 4e2e8bc9, "23": 03c21282}
+  # position -> (kept alone, kept when the position is removed)
+  positions: {First third: ["1", "23"], Middle third: ["2", "13"], Last third: ["3", "12"]}
+  runs:   # judge, full-transcript hash, which thirds hashes the removal runs use
+    coding:  {2025-II: [minimax-m1, 24d6cc32, full_train],       2026-I: [kimi-k2-thinking, 24d6cc32, full_train]}
+    cyber:   {2025-II: [deepseek-r1-0528, 24d6cc32, full_train], 2026-I: [kimi-k2-thinking, 24d6cc32, full_train]}
+    math:    {2025-II: [deepseek-r1-0528, 24d6cc32, full_train], 2026-I: [kimi-k2-thinking, 24d6cc32, full_train]}
+    science: {2025-II: [minimax-m1, 24d6cc32, full_train],       2026-I: [minimax-m2, 66c170cd, forty_items]}
+  kept_alone_hashes: {2025-II: full_train, 2026-I: forty_items}   # the kept-alone runs of the same judges
+
+channels:
+  # channel -> (kept alone, removed); the figure draws the tool calls and outputs together as Tools
+  parts: {CoT: [only-reasoning, drop-reasoning], Messages: [only-text, drop-text], Tool calls: [only-calls, drop-calls],
+          Tool outputs: [only-outputs, drop-outputs], Tools: [only-tools, drop-tools]}
+  drawn: [CoT, Messages, Tools]
+  tool_domains: [coding, cyber]
+  # coding and cyber: the judge's channel runs (configs/judges/channels/); maths and science: the reasoning-dropped run
+  runs:
+    coding:  {2025-II: {judge: minimax-m1},       2026-I: {judge: kimi-k2-thinking}}
+    cyber:   {2025-II: {judge: deepseek-r1-0528}, 2026-I: {judge: kimi-k2-thinking}}
+    math:    {2025-II: {judge: deepseek-r1-0528, full: 24d6cc32, drop-reasoning: 7ea04f2b},
+              2026-I: {judge: kimi-k2-thinking, full: 24d6cc32, drop-reasoning: 7ea04f2b}}
+    science: {2025-II: {judge: minimax-m1, full: 24d6cc32, drop-reasoning: 7ea04f2b},
+              2026-I: {judge: minimax-m2, full: 24d6cc32, drop-reasoning: 7ea04f2b}}
+
+generalisation:
+  distance_bins: 4                    # equal-count bins of targets per domain (capability distance)
+  reasoning_semester: 2025-I          # reasoning targets predicted from non-reasoning references (Maths)
+  reasoning_domain: math
+  reasoning_targets: [deepseek-r1-0528, minimax-m1, qwen3-235b-a22b, qwen3-30b-a3b, qwen3-32b]
+  transfer: [[math, coding], [math, cyber], [science, coding], [science, cyber]]   # scored on another domain
+
+frontier:
+  semester: 2026-I
+  pairwise: {judge: kimi-k2-thinking, condition: 9c1d3abb}        # reasoning hidden
+  direct: {judge: deepseek-v3.2, condition: 9d52d41c}             # reasoning hidden
+  closed_targets: {claude-opus-4.7: Anthropic, claude-opus-4.8: Anthropic, claude-fable-5: Anthropic,
+                   gpt-5: OpenAI, gpt-5.6-sol: OpenAI, gemini-3.5-flash: Google}
+
+sensitivity:
+  judge_runs: [24d6cc32, 66c170cd]    # the pairwise core runs (full train set, then 10 items per quartile)
+  item_budget: {sizes: [3, 6, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100], draws: 30, seed: 0}
+  reference_budget: {sizes: [2, 4, 6]}
+  saturation_levels: [3, 4, 5, 6, 7, 8, all]
+  cost:
+    fractions: [0.1, 0.2, 0.3, 0.5, 0.7, 1.0]
+    draws: 30
+    embedding_price: 0.01             # $ per million tokens, qwen/qwen3-embedding-8b
+    proxies: {openai-api/runpod/NousResearch/Nous-Hermes-2-Yi-34B: qwen/qwen3-32b}   # judges without a list price
+
+domain_glm:                           # the hierarchical Gamma GLM of Appendix D.4 (hibayes)
+  protocols: [easy_items, glm_length, glm_regex, embedding, direct, pairwise]   # the baseline first: reference level
+  error_floor: 1.0e-6
+  priors: {intercept_scale: 2.0, effect_scale: 1.0, sigma_scale: 0.5, cell_scale: 1.0}
+  sampler: {samples: 2000, warmup: 1000, chains: 4, seed: 0, target_accept: 0.95}
+
+display:
+  protocol_names: {easy_items: Baseline, glm_length: Length, glm_regex: Deterministic features, embedding: Embedding,
+                   direct: Absolute scoring, pairwise: Pairwise judge}
+  domain_names: {science: Science, math: Maths, coding: Coding, cyber: Cyber}
+  protocol_colours: {glm_regex: "#eb6834", embedding: "#4a3aa7", direct: "#1baf7a", pairwise: "#2a78d6",
+                     glm_length: "#f1a48a"}
+  domain_markers: {science: o, math: s, coding: "^", cyber: D}

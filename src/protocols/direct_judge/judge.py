@@ -28,7 +28,7 @@ from configs.paths import is_successful_eval
 from evals.transcripts import read_header
 from judge.run import run_tasks
 from protocols.direct_judge.protocol import DirectRegression
-from reference.tables import DATA
+from reference import tables
 
 SCORE_COLUMNS = ["bench", "judge", "item", "model", "score", "semester", "epoch"]
 
@@ -106,7 +106,7 @@ class JudgeDirect(DirectRegression):
                     from judge.task import direct_judge_task
 
                     task = direct_judge_task(
-                        DATA / cohort.models.loc[model, f"path_{name}"], items=items,
+                        tables.DATA / cohort.models.loc[model, f"path_{name}"], items=items,
                         system_prompt=system_prompt,
                         max_length=self.config.max_length, include_reasoning=self.config.include_reasoning,
                         truncate=self.config.truncate, window=self.config.window, channels=self.config.channels,

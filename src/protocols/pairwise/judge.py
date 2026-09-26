@@ -31,7 +31,7 @@ from evals.transcripts import read_header
 from judge.run import run_tasks
 from judge.task import judge_task
 from protocols.pairwise.protocol import PairwiseBT
-from reference.tables import DATA
+from reference import tables
 
 VERDICT_COLUMNS = ["bench", "judge", "item", "model_left", "model_right", "pick_left", "semester", "imported", "chars_left", "chars_right"]
 IMPORTED = " (imported)"  # task-name suffix of a log imported from an older campaign
@@ -109,7 +109,7 @@ class JudgeBT(PairwiseBT):
                 if not items:
                     continue
                 task = judge_task(
-                    DATA / train.models.loc[major, f"path_{name}"], DATA / cohort.models.loc[minor, f"path_{name}"],
+                    tables.DATA / train.models.loc[major, f"path_{name}"], tables.DATA / cohort.models.loc[minor, f"path_{name}"],
                     system_prompt=bench.system_prompt or self.config.system_prompt,
                     max_length=self.config.max_length,
                     include_reverse=self.config.include_reverse,

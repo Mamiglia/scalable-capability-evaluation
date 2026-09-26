@@ -238,7 +238,7 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
         ax.scatter(xs, ys, s=18, facecolor=DOMAIN_COLORS[d], edgecolor="black", linewidth=0.4, zorder=5)
     ax.axhline(place[baseline], color="grey", lw=0.8, ls="--", zorder=0)
     # significance: the log likelihood ratio against the references' distribution, one unit per task
-    from analysis.challenges import likelihood_ratio as lr
+    from analysis import likelihood_ratio as lr
     shown = llr.merge(tasks[["domain", "semester"]].drop_duplicates()) if llr is not None else pd.DataFrame(columns=["protocol"])
     for p, mean in means.items():
         rows = shown[shown.protocol == p]
@@ -389,7 +389,7 @@ def timeline_figure(metrics: pd.DataFrame, domain: str, variants: dict[str, str]
     offsets = dict(zip(TIMELINE, np.linspace(-0.09, 0.09, len(TIMELINE))))  # slight x offset per approach
     task_p = None
     if llr is not None:
-        from analysis.challenges import likelihood_ratio as lr
+        from analysis import likelihood_ratio as lr
         task_p = lr.task_tests(llr[llr.domain == domain]).set_index(["protocol", "semester"]).p
     errors = None
     if forecasts is not None:  # per-target squared errors, paired with the prediction from saturated items's on the same targets
@@ -651,3 +651,8 @@ def reasoning_figure(forecasts: pd.DataFrame, domain: str, semester: str, varian
     fix_axes_height(fig, ax)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
+
+
+def stars(p: float, not_significant: str = "") -> str:
+    """The significance mark of a p-value: *** p < .001, ** p < .01, * p < .05, else `not_significant`."""
+    return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else not_significant

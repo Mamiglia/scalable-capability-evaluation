@@ -5,7 +5,6 @@ under logs/judge/ (pairwise verdicts) or logs/direct*/ (1-10 ratings); its rows 
 raw here and restricted to the frozen train items by analysis.matching.
 """
 
-import os
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,13 +59,11 @@ def domain(name: str) -> DomainConfig:
 def tasks(dom: DomainConfig, semesters: list[str] | None = None) -> list[Task]:
     """The semester tasks of a domain from its frozen tables, in roster order.
 
-    semesters: restrict to these (e.g. ["2026-I"]); None means every frozen task, or those of them
-    SMALL_JUDGE_SEMESTERS names (space-separated, e.g. "2025-I 2025-II 2026-I").
+    semesters: restrict to these (e.g. ["2026-I"]); None means every frozen task.
     Each Task holds references (theta = theta*), an empty-or-not historical cohort, the
     targets (theta NaN) and the targets' theta* in `truth`.
     """
-    only = os.environ.get("SMALL_JUDGE_SEMESTERS", "").split()
-    return [Task.from_semester(s, dom) for s in semesters or [s for s in semester_names(dom) if not only or s in only]]
+    return [Task.from_semester(s, dom) for s in semesters or semester_names(dom)]
 
 
 def fetched(run_dir: Path) -> bool:
