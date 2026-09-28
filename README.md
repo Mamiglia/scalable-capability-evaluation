@@ -11,9 +11,7 @@ Built on [Inspect AI](https://inspect.aisi.org.uk/). Python ≥ 3.13, [`uv`](htt
 The paper's figures and tables come from `scripts/analysis/run.py`, from the published
 [generality-labs](https://huggingface.co/generality-labs) datasets; nothing is judged or paid for. Not included:
 Figures 11 to 14 (the data appendix, `scripts/analyses/domain_figures.py`), Figure 26 (prediction horizon, branch
-`prediction-horizon`), the drawing of Figure 18 (its numbers and tests are in `analysis/generalisation/`), and the
-Embedding rows of Figures 23 and 24, whose vectors of the cut transcripts are not yet on
-generality-labs/transcript-embeddings (those figures are drawn without them).
+`prediction-horizon`) and the drawing of Figure 18 (its numbers and tests are in `analysis/generalisation/`).
 
 ```bash
 uv sync

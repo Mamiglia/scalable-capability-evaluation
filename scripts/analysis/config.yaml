@@ -16,7 +16,7 @@ data_sources:
   data: {repo: generality-labs/benchmarks, revision: 0609b361e51aa58b06ac780d230f88fe67658c4d}
   logs: {repo: generality-labs/judging, revision: 061577335dc7092822eb7c0c4df27093b7beefcb}
   features: {repo: generality-labs/glm_features, revision: 8edc75e7a46ef8171040261e7a67ea2f40e2bf89}
-  embeddings: {repo: generality-labs/transcript-embeddings, revision: 001cf012261f205bc965f46825aff452f4f386d9}
+  embeddings: {repo: generality-labs/transcript-embeddings, revision: 498844f92ae8834564f2e6b7bdf477ab190e38e8}
 
 tasks:
   domains: [science, math, coding, cyber]

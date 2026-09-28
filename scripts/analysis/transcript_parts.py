@@ -193,25 +193,6 @@ def pairwise_figure(out: Path, name: str, errors: pd.DataFrame, rows: dict[str, 
     publish(out, name, fig, table, domains, errors)
 
 
-def other_protocols(config: dict, variant_prefix: str) -> list[str]:
-    """
-    Lists the protocols the other-protocol figures draw (transcript_parts.other_protocols), without Embedding when
-    paths.embeddings holds no vectors of the cut transcripts (not yet published on
-    generality-labs/transcript-embeddings).
-
-    Inputs:
-        config: the analysis configuration; uses transcript_parts.other_protocols and paths.embeddings.
-        variant_prefix: "thirds-" or "channels-", the embedding variants looked for (files *.<prefix>*.npz).
-    Outputs:
-        list of protocol keys; prints a note when Embedding is dropped.
-    """
-    protocols = list(config["transcript_parts"]["other_protocols"])
-    if "embedding" in protocols and not any(Path(config["paths"]["embeddings"]).rglob(f"*.{variant_prefix}*.npz")):
-        print(f"no {variant_prefix}* embedding vectors in {config['paths']['embeddings']}: drawn without Embedding", flush=True)
-        protocols.remove("embedding")
-    return protocols
-
-
 def other_protocols_figure(out: Path, name: str, errors: pd.DataFrame, rows: dict[str, str], colours: dict[str, str],
                     config: dict, **layout) -> None:
     """
@@ -389,7 +370,7 @@ def thirds_other_protocols(config: dict, out: Path) -> None:
     logs, rows = Path(config["paths"]["logs"]), third_rows(config, False)
     removed, alone = list(rows.values()), list(third_rows(config, True).values())
     features = pd.read_csv(Path(config["paths"]["cache"]) / "features_thirds.csv", dtype={"item": str})
-    judges, frames, protocols = direct_judges(config), [], other_protocols(config, "thirds-")
+    judges, frames, protocols = direct_judges(config), [], config["transcript_parts"]["other_protocols"]
     for domain, task, keep in removal_tasks(config):
         for protocol in protocols:
             if protocol == "direct":
@@ -418,7 +399,7 @@ def channels_other_protocols(config: dict, out: Path) -> None:
     """
     logs, tool_domains = Path(config["paths"]["logs"]), config["channels"]["tool_domains"]
     reasoning_only = pd.read_csv(Path(config["paths"]["cache"]) / "features_reasoning_only.csv", dtype={"item": str})
-    judges, frames, protocols = direct_judges(config), [], other_protocols(config, "channels-")
+    judges, frames, protocols = direct_judges(config), [], config["transcript_parts"]["other_protocols"]
     for domain, task, keep in removal_tasks(config):
         tools = domain in tool_domains
         removed = list(channel_rows(config, tools).values())
