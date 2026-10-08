@@ -22,7 +22,8 @@ import pandas as pd
 
 from capability.evaluate import score
 from capability.task import Task
-from challenges.thirds.runs import KEPT, LOO, RUNS, harnesses
+from challenges.thirds.runs import LOO, RUNS, harnesses
+from configs.domain import DomainConfig
 from configs.logs import logger
 from protocols import PROTOCOLS
 from protocols.pairwise import from_logs
@@ -51,11 +52,26 @@ def forecast(cls, task: Task, v: pd.DataFrame) -> pd.Series:
     return p.predict(task.test)
 
 
+def run_dirs(domain: str, semester: str) -> list[tuple[str, dict[str, Path]]]:
+    """(judge label, condition -> run dir) per RUNS/LOO judge. A `-full` judge also gets `<stem>+40`: its 100-item dirs
+    with the missing conditions taken from the 40-item twin (wave 2 of the LOO judges ran on 40 items), so every
+    condition is scored on the rows common to all of them, i.e. the 40 items."""
+    out = []
+    for stem in sorted({RUNS[domain, semester], LOO[domain, semester]}):
+        dirs = {c: h.log_dir(semester) for c, h in harnesses(domain, semester, stem)[1].items()}
+        out.append((stem, dirs))
+        if stem.endswith("-full"):
+            twin = {c: h.log_dir(semester) for c, h in harnesses(domain, semester, stem.removesuffix("-full"))[1].items()}
+            extra = {c: twin[c] for c, d in dirs.items() if not any(d.glob("*.eval")) and any(twin[c].glob("*.eval"))}
+            if extra:
+                out.append((f"{stem}+40", dirs | extra))
+    return out
+
+
 def compute() -> pd.DataFrame:
     rows = []
-    for (domain, semester), stem in sorted({*RUNS.items(), *LOO.items()}):
-        dom, runs = harnesses(domain, semester, stem)
-        dirs = {c: h.log_dir(semester) for c, h in runs.items()}
+    for (domain, semester), stem, dirs in [(k, s, d) for k in sorted(RUNS) for s, d in run_dirs(*k)]:
+        dom = DomainConfig.from_cli(Path(f"configs/domain/{domain}.yml"))
         vs = {c: verdicts(d) for c, d in dirs.items() if any(d.glob("*.eval"))}
         if "full" not in vs or len(vs) == 1:
             print("skip", domain, semester, stem, "conditions on disk:", sorted(vs), file=sys.stderr)
@@ -77,7 +93,9 @@ def plot(df: pd.DataFrame, metric: str = "linear") -> None:
     plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "legend.fontsize": 7, "xtick.labelsize": 7,
                          "ytick.labelsize": 7, "svg.fonttype": "none"})
     df = df[df.targets == "all"]
-    df = df[[LOO[d, s] == j for d, s, j in zip(df.domain, df.semester, df.judge)]]
+    # the LOO judge per domain x semester, preferring its `+40` row (the only one with the single-third conditions)
+    df = df[[j.removesuffix("+40") == LOO[d, s] for d, s, j in zip(df.domain, df.semester, df.judge)]]
+    df = df.sort_values("judge").groupby(["domain", "semester", "condition"]).last().reset_index()
     fig, axes = plt.subplots(1, 4, figsize=(3.6, 1.5), sharey=True, gridspec_kw={"wspace": 0.15})
     for ax, (name, color) in zip(axes, COLOR.items()):
         d = df[df.domain == name]
