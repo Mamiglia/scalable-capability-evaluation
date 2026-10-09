@@ -2208,8 +2208,8 @@ wheels = [
 
 [[package]]
 name = "inspect-evals"
-version = "0.20.0"
-source = { git = "https://github.com/UKGovernmentBEIS/inspect_evals.git?rev=main#360484a06383f9260279938262d78ed646ddbca1" }
+version = "0.18.1.dev27+gb943de689"
+source = { git = "https://github.com/UKGovernmentBEIS/inspect_evals.git?rev=b943de6895ea2e8fa77383228d589b4f9bcd93ca#b943de6895ea2e8fa77383228d589b4f9bcd93ca" }
 dependencies = [
     { name = "backoff" },
     { name = "datasets" },
@@ -5355,7 +5355,7 @@ requires-dist = [
     { name = "hibayes", git = "https://github.com/UKGovernmentBEIS/hibayes" },
     { name = "ijson", specifier = ">=3.5.1" },
     { name = "inspect-ai", specifier = ">=0.3.249" },
-    { name = "inspect-evals", git = "https://github.com/UKGovernmentBEIS/inspect_evals.git?rev=main" },
+    { name = "inspect-evals", git = "https://github.com/UKGovernmentBEIS/inspect_evals.git?rev=b943de6895ea2e8fa77383228d589b4f9bcd93ca" },
     { name = "inspect-harbor", specifier = ">=0.7.4" },
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
