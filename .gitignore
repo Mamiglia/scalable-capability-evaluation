@@ -38,3 +38,5 @@ AGENTS.md
 CLAUDE.md
 HANDOFF*.md
 docs/
+/scripts/interactive_viewer/
+/analysis_check/
