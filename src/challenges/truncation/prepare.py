@@ -118,7 +118,7 @@ def prepare(domain_name, judge_name, semester, cut):
     prompt = (source / "prompt.txt").read_text()
     domain = DomainConfig.from_cli(f"configs/domain/{domain_name}.yml")
     task = Task.from_semester(semester, domain)
-    items = pd.read_csv(tables.META / domain_name / "items.csv", dtype={"item": str})
+    items = tables.load(domain)[1]
     train = set(map(tuple, items.loc[items[f"{semester}_train"], ["bench", "item"]].astype(str).to_numpy()))
     expected, jobs, source_hashes = retained(sources, judge_name, semester, train)
     assert all(h["prompt_sha256"] == sha(prompt) for h in source_hashes.values())

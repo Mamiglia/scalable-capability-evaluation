@@ -4,7 +4,8 @@
 
 --protocol selects entries of protocols.PROTOCOLS (default: all). --judge adds pairwise
 judging; --direct-judge adds direct ratings calibrated on reference + historical capability.
-Both take judge YAMLs and collect missing judgments on demand. --semester restricts the tasks.
+Both take judge YAMLs and score the judgments already in logs/; --collect also judges what is missing
+(paid API calls). --semester restricts the tasks.
 
 Scores are per semester and pooled over all semesters ("all"; valid because every local fit
 shares the global item scale): MSE in theta units. The per-target forecasts go to
@@ -60,6 +61,7 @@ def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "", semester_
     tasks = [Task.from_semester(s, domain) for s in semester_list or semester_names(domain)]
     forecasts = pd.concat([forecast(task, protocol) for task in tasks], ignore_index=True)
     if name:
+        tables.frozen_dir(domain).mkdir(parents=True, exist_ok=True)
         forecasts.to_csv(tables.frozen_dir(domain) / f"eval_{name}.csv", index=False, float_format="%.4f")
 
     scores = []
@@ -78,6 +80,7 @@ def main() -> int:
     parser.add_argument("--direct-judge", nargs="+", default=[], type=Path,
                         help="judge yml(s) -> direct_judge_<name> protocols (1–10 ratings, reasoning shown)")
     parser.add_argument("--semester", nargs="+", default=None, help="default: every semester task")
+    parser.add_argument("--collect", action="store_true", help="judge missing pairs / ratings (paid API calls)")
     parser.add_argument("--truncate", help="override the --judge configs' truncate, e.g. thirds-13 (src/challenges/thirds)")
     args = parser.parse_args()
     domain = DomainConfig.from_cli(args.domain)
@@ -87,6 +90,8 @@ def main() -> int:
     judges = [cls(replace(JudgeConfig.from_cli(path), **override), domain)
               for path in args.judge for cls in (JudgeBT, JudgeCalibrated, JudgeLinear)]
     judges += [JudgeDirect(DirectJudgeConfig.from_cli(path), domain) for path in args.direct_judge]
+    for judge in judges:
+        judge.collect = args.collect
     protocols = [PROTOCOLS[name] for name in args.protocol or PROTOCOLS] + judges
 
     scores = [evaluate(domain, protocol, protocol.name, args.semester).assign(protocol=protocol.name) for protocol in protocols]

@@ -2,7 +2,7 @@
 
     uv run python scripts/analyses/judge_ensemble.py [--recompute]
 
-Judges = the top-3 references of each semester (data/meta/<domain>/fit.yml `top`), subjects' reasoning shown
+Judges = the top-3 references of each semester (data/meta/<domain>/fit.yml, tables.fit_settings `top`), subjects' reasoning shown
 (logs/judge/<domain>/<sem>/<judge>/{24d6cc32,66c170cd}, first that exists), restricted to the train items ALL three
 judged, so a single judge and an ensemble see the same items. For every non-empty subset of the judges the targets
 are placed by three estimators (JudgeLinear `linear`, pinned BT `bt`, JudgeCalibrated `cal`) after combining the
@@ -28,7 +28,6 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
-import yaml
 from scipy.stats import t
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -43,6 +42,7 @@ from protocols.pairwise.bradley_terry import rank
 from protocols.pairwise.calibrated import JudgeCalibrated, estimate_all, loo, shrink
 from protocols.pairwise.linear import weighted_theta
 from reference.freeze import TOP_K
+from reference import tables
 
 warnings.filterwarnings("ignore")
 logger.setLevel(logging.ERROR)
@@ -73,7 +73,7 @@ def compute() -> tuple[pd.DataFrame, pd.DataFrame]:
     forecasts, verdicts = [], []
     for name in DOMAINS:
         domain = DomainConfig.from_cli(Path(f"configs/domain/{name}.yml"))
-        top = yaml.safe_load(Path(f"data/meta/{name}/fit.yml").read_text())["top"]
+        top = tables.fit_settings(name)["top"]
         for sem, judges in top.items():
             task = Task.from_semester(sem, domain)
             refs, targets = task.references.theta, list(task.test.models.index)

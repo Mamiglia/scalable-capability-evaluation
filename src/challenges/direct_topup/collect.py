@@ -24,6 +24,7 @@ from judge.run import run_tasks
 from judge.task import direct_judge_task
 from protocols.direct_judge import JudgeDirect
 from protocols.direct_judge.judge import from_logs
+from reference import tables
 from reference.tables import DATA
 
 # declared failure: 32k output cap exhausted three times in the hidden-reasoning sweep
@@ -46,7 +47,7 @@ def main(gaps_csv: Path, judges: list[str], run: bool) -> int:
         assert log_dir.is_dir(), log_dir
         rated = from_logs(log_dir)
         done = set(zip(rated.model, rated.bench, rated["item"]))
-        models = pd.read_csv(f"data/meta/{domain}/models.csv", dtype=str).set_index("model")
+        models = tables.load(domain)[0]
         prompts = jd._prompts()
         tasks, wanted = [], set()
         for (model, bench), rows in group.groupby(["model", "bench"]):

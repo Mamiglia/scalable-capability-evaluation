@@ -4,7 +4,7 @@ semester, accuracy heatmap.
     uv run python scripts/figures/domain_figures.py science
     uv run python scripts/figures/domain_figures.py science math coding cyber   # + joined analysis/{benchmarks,theta_release}
 
-Reads data/meta/<domain>/{models,items,responses}.csv (release dates: configs/models/*/*.yml), writes
+Reads the frozen tables (reference.tables) (release dates: configs/models/*/*.yml), writes
 analysis/<domain>/{theta,theta_release,difficulty,wright,accuracy}.{png,svg}. The figures: plots/domains.py.
 """
 
@@ -16,6 +16,7 @@ import yaml
 
 from plots.domains import (SEMESTERS, accuracy_figure, benchmarks_figure, difficulty_figure, release_figure,
                            theta_figure, wright_figure)
+from reference import tables
 
 
 def release_dates() -> pd.Series:
@@ -29,10 +30,8 @@ def release_dates() -> pd.Series:
 def main(domains: list[str]) -> int:
     loaded, dates = {}, release_dates()
     for domain in domains:
-        root = Path("data/meta") / domain
-        models = pd.read_csv(root / "models.csv", index_col="model")
-        items = pd.read_csv(root / "items.csv", dtype={"item": str})
-        responses = pd.read_csv(root / "responses.csv", dtype={"item": str})
+        models, items = tables.load(domain)
+        responses = tables.load_responses(domain)
         semesters = [s for s in SEMESTERS if s in set(models.semester.dropna())]
         out = Path("analysis") / domain
         out.mkdir(parents=True, exist_ok=True)

@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
 from capability.evaluate import semester_names
 from capability.task import Task
@@ -101,7 +100,7 @@ def pairwise_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
     (data/meta/<domain>/fit.yml `top`) and whose condition hash matches a current config.
     Pilot judges outside the roster and stale conditions are skipped silently."""
     configs = pairwise_configs()
-    roster = yaml.safe_load((tables.frozen_dir(dom) / "fit.yml").read_text())["top"][task.semester]
+    roster = tables.fit_settings(dom)["top"][task.semester]
     runs = []
     for run_dir in sorted((LOGS / "judge" / dom.name / task.semester).glob("*/*/")):
         judge, condition = run_dir.parts[-2], run_dir.parts[-1]
@@ -121,7 +120,7 @@ def direct_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
     directory does not exist was never run; a run split across bench sets (coding: SWE-bench and
     Terminal-Bench before agent_bench_os joined) is read from every directory, the full bench set's
     rating winning where two directories rate the same (model, bench, item)."""
-    roster = yaml.safe_load((tables.frozen_dir(dom) / "fit.yml").read_text())["top"][task.semester]
+    roster = tables.fit_settings(dom)["top"][task.semester]
     runs = []
     for path in sorted(JUDGES.glob("*.yml")):
         if path.stem not in roster:

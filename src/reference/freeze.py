@@ -2,7 +2,7 @@
 
     uv run reference configs/domain/science.yml [--train 25] [--force]
 
-Written once to data/meta/<domain>/ and committed there (a refit is `--force` + a new commit,
+Written once to data/meta/ (reference.tables) and committed there (a refit is `--force` + a new commit,
 only once the domain's collection is complete). `build` runs the steps in order:
 
 1. RESPONSES  every successful log of the domain -> one row per (bench, model, item, repeat)
@@ -18,7 +18,7 @@ only once the domain's collection is complete). `build` runs the steps in order:
       global fit. Older models are fitted separately on the same HARD set, preserving the original
       reference/target fit. Historical models without HARD responses are reported and left unlabelled.
       Every task's theta* is on the global scale; another task's labels are never substituted.
-4. WRITE      models.csv, items.csv, responses.csv (the fit input), fit.yml (settings + provenance).
+4. WRITE      this domain's rows of data/meta/{samples,items,models,tasks,task_items}.csv, <domain>/fit.yml.
 
 The frozen columns a consumer needs are listed in reference.tables, which reads them back.
 """
@@ -36,7 +36,8 @@ from configs.logs import logger
 from evals.responses import eval_logs, repeat0_paths, responses as read_responses
 from irt.data import encode
 from irt.fitting import fit
-from reference.tables import DATA, frozen_dir, load, load_semesters
+from reference import tables
+from reference.tables import DATA, frozen_dir, load, load_responses, load_semesters, to_long
 
 TOP_K = 3  # reference models that define the EASY set
 
@@ -187,21 +188,23 @@ def semester_task(semester: str, references: list[str], targets: list[str], hist
 
 # ----------------------------------------------------------------------------- build
 
-def write(out: Path, models: pd.DataFrame, items: pd.DataFrame, responses: pd.DataFrame, settings: dict) -> None:
-    """Step 4: the frozen tables."""
+def write(out: Path, models: pd.DataFrame, items: pd.DataFrame, responses: pd.DataFrame, logs: pd.DataFrame,
+          settings: dict) -> None:
+    """Step 4: this domain's rows of the long tables (reference.tables), replacing its old ones (an added
+    cohort included: re-derive it after a refit), and <domain>/fit.yml."""
+    logs = logs.assign(path=[str(Path(p).relative_to(DATA)) for p in logs.path])
+    for table, rows in to_long(models, items, responses, logs).items():
+        tables.write(table, settings["domain"], rows)
+    tables.write_paper()
     out.mkdir(parents=True, exist_ok=True)
-    models.to_csv(out / "models.csv", float_format="%.4f")
-    items.to_csv(out / "items.csv", index=False, float_format="%.4f")
-    fit_input = responses[["bench", "item", "model", "repeat", "correct"]]
-    fit_input.sort_values(["bench", "item", "model", "repeat"]).to_csv(out / "responses.csv", index=False)
     (out / "fit.yml").write_text(yaml.safe_dump(settings, sort_keys=False))
-    logger.info("wrote %s", out)
+    logger.info("wrote %s and the long tables in %s", out, out.parent)
 
 
 def changes(domain: DomainConfig) -> list[str]:
     """What differs between the collected logs / roster and the frozen tables. Cheap: reads no log contents."""
     models, _ = load(domain)
-    frozen = pd.read_csv(frozen_dir(domain) / "responses.csv", dtype={"item": str})
+    frozen = load_responses(domain)
     logs = eval_logs(domain)
     found = []
     now, then = set(logs.model), set(frozen.model)
@@ -229,7 +232,7 @@ def changes(domain: DomainConfig) -> list[str]:
 def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, force=False) -> None:
     """Freeze a domain: steps 1-4 of the module docstring."""
     out = frozen_dir(domain)
-    if (out / "models.csv").exists() and not force:
+    if tables.frozen(domain) and not force:
         found = changes(domain)
         for line in found:
             logger.warning("since the freeze: %s", line)
@@ -249,7 +252,8 @@ def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, for
     logger.info("global 2PL fit: NUTS, %d warmup + %d samples (minutes)...", warmup, samples)
     models, items = global_fit(responses, warmup, samples, seed)
     models.insert(0, "semester", models.index.map(semester_of))
-    models = models.join(repeat0_paths(eval_logs(domain), DATA))
+    logs = eval_logs(domain)
+    models = models.join(repeat0_paths(logs, DATA))
 
     # 3. One task per semester from the second on.
     top_per_semester = {}
@@ -267,7 +271,7 @@ def build(domain: DomainConfig, train=25, warmup=1000, samples=1000, seed=0, for
     # 4. Write.
     settings = dict(domain=domain.name, date=datetime.date.today().isoformat(), warmup=warmup, samples=samples,
                     seed=seed, train_per_quartile=train, top_k=TOP_K, top=top_per_semester)
-    write(out, models, items, responses, settings)
+    write(out, models, items, responses, logs, settings)
 
 
 def main() -> int:

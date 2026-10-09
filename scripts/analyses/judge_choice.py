@@ -29,6 +29,7 @@ from scipy import stats as st
 sys.path.insert(0, str(Path(__file__).parent))
 from analysis.stats import core_condition  # noqa: E402
 from plots.judge_choice import box_figure, figure, gap_figure  # noqa: E402
+from reference import tables
 
 FORECASTS = Path("analysis/results/forecasts.csv")
 OUT = Path("analysis/judge/judge_choice")
@@ -37,7 +38,7 @@ VARIANT = {"pairwise": "linear", "direct": "raw"}
 
 def references(domain: str, semester: str) -> pd.Series:
     """theta* of the semester's references, indexed by model shortname."""
-    m = pd.read_csv(f"data/meta/{domain}/models.csv", index_col="model")
+    m = tables.load(domain)[0]
     return m.loc[m[f"{semester}_role"] == "reference", f"{semester}_theta"]
 
 

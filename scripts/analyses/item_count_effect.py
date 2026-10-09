@@ -4,7 +4,7 @@
     # --last K: only the last K semesters (files tagged _lastK); --direct: direct judging by the top-1 judge (files tagged _direct);
     # --both: the top-1 judge, a Pairwise row and an Absolute (direct) row, squared error, from the two cached tables (files tagged _both)
 
-Judges = the top-3 references of each semester (data/meta/<domain>/fit.yml `top`, one figure row per rank), subjects' reasoning shown
+Judges = the top-3 references of each semester (data/meta/<domain>/fit.yml, tables.fit_settings `top`, one figure row per rank), subjects' reasoning shown
 (logs/judge/<domain>/<sem>/<judge>/{24d6cc32,66c170cd}, first that exists). For n in 3, 6, 10, 20, ... up to the
 number of judged train items, DRAWS random subsets of n (bench, item)s are taken from the judged verdicts, and
 the targets are placed from those verdicts alone by the per-bench calibration (JudgeLinear). MSE over all targets
@@ -21,7 +21,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
 from capability.evaluate import score
 from capability.task import Task
@@ -34,6 +33,7 @@ from protocols.direct_judge import JudgeDirect, from_logs as direct_logs
 from protocols.direct_judge.scoring import calibrate
 from protocols.pairwise import from_logs
 from protocols.pairwise.linear import weighted_theta
+from reference import tables
 
 warnings.filterwarnings("ignore")
 logger.setLevel(logging.ERROR)
@@ -53,7 +53,7 @@ def compute() -> pd.DataFrame:
     rows, rng = [], np.random.default_rng(0)
     for name in DOMAINS:
         domain = DomainConfig.from_cli(Path(f"configs/domain/{name}.yml"))
-        top = yaml.safe_load(Path(f"data/meta/{name}/fit.yml").read_text())["top"]
+        top = tables.fit_settings(name)["top"]
         for sem, judges in top.items():
             task = Task.from_semester(sem, domain)
             baseline = score(PROTOCOLS["mean_ref"](task), task.truth)["mse"]
@@ -81,7 +81,7 @@ def compute_direct() -> pd.DataFrame:
     rows, rng = [], np.random.default_rng(0)
     for name in DOMAINS:
         domain = DomainConfig.from_cli(Path(f"configs/domain/{name}.yml"))
-        top = yaml.safe_load(Path(f"data/meta/{name}/fit.yml").read_text())["top"]
+        top = tables.fit_settings(name)["top"]
         for sem, judges in top.items():
             judge, task = judges[0].lower(), Task.from_semester(sem, domain)
             runs = JudgeDirect(DirectJudgeConfig.from_cli(Path(f"configs/judges/{judge}.yml")), domain).log_dirs(sem)

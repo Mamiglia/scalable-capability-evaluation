@@ -25,6 +25,7 @@ from inspect_ai.log import read_eval_log, read_eval_log_sample_summaries
 
 from capability.task import Cohort
 from configs.domain import DomainConfig
+from configs.logs import logger
 from configs.judge import JudgeConfig
 from configs.paths import is_successful_eval
 from evals.transcripts import read_header
@@ -73,6 +74,8 @@ def stratified_items(items: pd.DataFrame, per_quartile: int, seed: int = 0) -> s
 
 
 class JudgeBT(PairwiseBT):
+    collect = True  # judge what the run dir lacks; False: score the verdicts on record only (no API calls)
+
     def __init__(self, config: JudgeConfig, domain: DomainConfig):
         self.config, self.domain = config, domain
         self.name = f"judge_{config.judge.shortname.lower()}"
@@ -150,7 +153,9 @@ class JudgeBT(PairwiseBT):
         # after an eval_set kwarg tweak, a refrozen train set only adds its new items, and an order that errored
         # is judged again on its own.
         todo = self.tasks(train, test, self.judged_samples(log_dir))
-        if todo:
+        if todo and not self.collect:
+            logger.warning("%s %s: %d tasks not judged yet, skipped (collect is off)", self.name, test.semester, len(todo))
+        elif todo:
             if not run_tasks(todo, self.config, log_dir):
                 raise RuntimeError(f"judge run failed in {log_dir}")
         return log_dir

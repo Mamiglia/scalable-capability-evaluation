@@ -30,8 +30,8 @@ def test_freeze_extends_labels_without_changing_reference_fit(tmp_path, monkeypa
     rows = [dict(bench="b", model=m, item=i, repeat=0, correct=(i == "easy" and m not in {"h0", "h1"}), guess=0.)
             for m in names for i in ("easy", "hard") if m != "missing" or i == "easy"]
     responses = pd.DataFrame(rows)
-    items = pd.DataFrame({"bench": "b", "item": ["easy", "hard"], "a": [1., 2.], "b": [3., 4.], "guess": [0., .25]})
-    models = pd.DataFrame({"global_theta": [100., 90., 80., 2., 1., 3., 4., 5., 6., 1000.]}, index=names)
+    items = pd.DataFrame({"bench": "b", "item": ["easy", "hard"], "a": [1., 2.], "b": [3., 4.], "guess": [0., .25], "a_sd": .1, "b_sd": .1})
+    models = pd.DataFrame({"global_theta": [100., 90., 80., 2., 1., 3., 4., 5., 6., 1000.], "global_theta_sd": .1}, index=names)
     models.index.name = "model"
     logs = pd.DataFrame([dict(bench="b", model=m, repeat=0, path=f"data/b/{m}/0/run.eval") for m in names])
     monkeypatch.setattr(tables, "META", tmp_path)

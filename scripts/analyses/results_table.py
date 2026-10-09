@@ -15,12 +15,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from analysis import stats
+from reference import tables
 
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("analysis/results/tables/results_table.xlsx")
 DOMS = [("science", ["2024-I", "2024-II", "2025-I", "2025-II", "2026-I"]), ("math", ["2024-I", "2024-II", "2025-I", "2025-II", "2026-I"]),
@@ -43,8 +43,8 @@ def build_rows(f: pd.DataFrame) -> list[dict]:
                          values=[mse(sub[(sub.domain == d) & (sub.semester == s)]) for d, s in COLS] + [mse(sub)]))
     frozen = {}
     for d, ss in DOMS:
-        m = pd.read_csv(f"data/meta/{d}/models.csv", index_col=0)
-        top = yaml.safe_load(open(f"data/meta/{d}/fit.yml"))["top"]
+        m = tables.load(d)[0]
+        top = tables.fit_settings(d)["top"]
         for s in ss:
             refs = m.loc[m[f"{s}_role"] == "reference", f"{s}_theta"]
             tg = m.loc[m[f"{s}_role"] == "target", f"{s}_theta"]

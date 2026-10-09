@@ -1,5 +1,5 @@
 # SWE-bench Verified mini, frontier subset: the 40 instances a judge or a theta* fit needs on the
-# 2026-I task (13 train EASY + 27 HARD of data/meta/coding/items.csv, frozen 2026-09-15). Same
+# 2026-I task (13 train EASY + 27 HARD of the coding freeze of 2026-09-15, data/meta/task_items.csv). Same
 # solver, prompts, images and scorer as swe-bench-mini.yml; only the id filter differs
 # (src/collect/tasks/subset.py), so ids are identical and the two hashes pool as one bench -- hence
 # `name` is kept. The subset is a *task argument*, so the run is a full run. For expensive

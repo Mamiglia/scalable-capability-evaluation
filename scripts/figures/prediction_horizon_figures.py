@@ -24,6 +24,7 @@ from analysis.challenges import likelihood_ratio as lr
 from plots.generalisation import BASELINE_COLOUR
 from plots.signal_glm import COLORS
 from plots.results import unclip_markers
+from reference import tables
 
 OUT = Path("artifacts/prediction-horizon")
 MAIN = Path("../small-judge-remote")
@@ -60,7 +61,7 @@ def rows() -> pd.DataFrame:
     """One row per (task, target): theta, theta_hat, the baseline, distance above the
     strongest reference, and both squared errors."""
     meta = pd.read_csv(OUT / "meta/science/models.csv", index_col="model")
-    frozen = pd.read_csv(MAIN / "data/meta/science/models.csv", index_col="model")
+    frozen = tables.load("science")[0]
     forecasts = pd.read_csv(MAIN / "analysis/results/forecasts.csv")
     chosen = lr.chosen_judges(forecasts[forecasts.domain == "science"], {"pairwise": "linear"})
     core = forecasts.merge(chosen, on=["domain", "semester", "protocol", "model", "judge"])

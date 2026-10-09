@@ -1,5 +1,5 @@
 # Terminal-Bench 2.1, frontier subset: the 82 tasks a judge or a theta* fit needs on the 2026-I task
-# (22 train EASY + 60 HARD of data/meta/coding/items.csv, frozen 2026-09-15). Same pinned ref, same
+# (22 train EASY + 60 HARD of the coding freeze of 2026-09-15, data/meta/task_items.csv). Same pinned ref, same
 # prompts and scorer as terminal_bench_2_1.yml; only the id filter differs (src/collect/tasks/subset.py),
 # so sample ids are identical and the two hashes pool as one bench (hle_gold.yml precedent) -- hence
 # `name` is kept. The subset is a *task argument*, so the run is a full run (`--sample_id` logs never count).

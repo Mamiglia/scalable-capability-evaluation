@@ -3,7 +3,7 @@
     PYTHONPATH=src uv run python scripts/analyses/model_report.py kimi-k2.6            # substring of a data/ shortname
     PYTHONPATH=src uv run python scripts/analyses/model_report.py kimi-k2.6 --pairs    # + per-reference win rates (reads judge logs)
 
-Reads data/meta/<domain>/{models,items,responses}.csv and analysis/results/forecasts.csv (scripts/analyses/results.py):
+Reads the frozen tables (reference.tables) and analysis/results/forecasts.csv (scripts/analyses/results.py):
 core condition, pairwise "linear", direct "raw", embedding "full". Per forecast the prediction score
 S = -log2(e / e_base) against the reference-mean constant (e = squared error in theta). Writes to
 analysis/models/<model>/:
@@ -30,6 +30,7 @@ from plots.style import HEAT, INK, INK2, MUTED, PALETTE, WIDE, legend, save, sty
 import matplotlib.pyplot as plt  # noqa: E402
 
 from analysis.stats import BASELINE, ORACLE, core_condition  # noqa: E402
+from reference import tables  # noqa: E402
 
 DOMAINS = ["science", "math", "coding", "cyber"]
 FORECASTS = Path("analysis/results/forecasts.csv")
@@ -45,10 +46,10 @@ ACCENT = PALETTE[1]
 def resolve(query: str) -> str:
     names = set()
     for d in DOMAINS:
-        names |= set(pd.read_csv(f"data/meta/{d}/models.csv").model)
+        names |= set(tables.load(d)[0].index)
     hits = sorted(n for n in names if query.lower() in n.lower())
     if len(hits) != 1:
-        sys.exit(f"{query!r} matches {hits or 'nothing'} in data/meta/*/models.csv")
+        sys.exit(f"{query!r} matches {hits or 'nothing'} in the frozen models tables")
     return hits[0]
 
 
@@ -66,13 +67,13 @@ def capability(model: str) -> tuple[pd.DataFrame, dict]:
     """One row per domain (capability.csv) and the per-domain context the figure draws (cohort theta*, accuracy)."""
     rows, ctx = [], {}
     for d in DOMAINS:
-        models = pd.read_csv(f"data/meta/{d}/models.csv", index_col="model")
+        models = tables.load(d)[0]
         if model not in models.index or (sem := task_of(models, model)) is None:
             continue
         theta, role = models[f"{sem}_theta"], models[f"{sem}_role"]
         refs, targets = theta[role == "reference"].dropna(), theta[role == "target"].dropna()
-        items = pd.read_csv(f"data/meta/{d}/items.csv")
-        resp = pd.read_csv(f"data/meta/{d}/responses.csv").query("repeat == 0").merge(items[["bench", "item", f"{sem}_set"]])
+        items = tables.load(d)[1]
+        resp = tables.load_responses(d).query("repeat == 0").merge(items[["bench", "item", f"{sem}_set"]])
         cohort = resp[resp.model.isin(targets.index)]
         acc = {}
         for bench, g in resp[resp.model == model].groupby("bench"):

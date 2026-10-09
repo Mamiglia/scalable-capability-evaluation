@@ -46,6 +46,7 @@ from family_bias import DOMAINS, MIN_VERDICTS, OUT as FB_OUT, RUN, family, relat
 from plots.style import INK2, MUTED, PALETTE, SEQ, save, style  # noqa: E402
 
 import matplotlib.pyplot as plt  # noqa: E402
+from reference.tables import load_responses
 
 numpyro.set_host_device_count(2)
 OUT = Path("analysis/judge/judge_glm")
@@ -59,8 +60,8 @@ SD: dict[str, float] = {}  # covariate -> sd used for standardisation, filled by
 
 
 def correctness(v: pd.DataFrame, side: str) -> np.ndarray:
-    """Mean correct over the repeats of (item, model_<side>), from data/meta/<domain>/responses.csv."""
-    r = pd.concat([pd.read_csv(f"data/meta/{dom}/responses.csv", dtype={"item": str}).assign(domain=dom) for dom in DOMAINS])
+    """Mean correct over the repeats of (item, model_<side>), from the frozen responses (reference.tables)."""
+    r = pd.concat([load_responses(dom).assign(domain=dom) for dom in DOMAINS])
     c = r.groupby(["domain", "bench", "item", "model"]).correct.mean()
     return c.reindex(pd.MultiIndex.from_arrays([v.domain, v.bench, v.item.astype(str), v[f"model_{side}"]])).to_numpy()
 

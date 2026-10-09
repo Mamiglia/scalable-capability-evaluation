@@ -2,7 +2,7 @@
 
     uv run python scripts/analyses/reasoning_effect.py [--recompute]
 
-Judge = the top reference of each semester (data/meta/<domain>/fit.yml `top[0]`). Pairwise JudgeLinear theta-hat
+Judge = the top reference of each semester (data/meta/<domain>/fit.yml, tables.fit_settings `top[0]`). Pairwise JudgeLinear theta-hat
 from logs/judge/<domain>/<sem>/<judge>/<cond>/: reasoning shown = 24d6cc32 (or 66c170cd, the 40-item 2026-I
 subset) vs hidden = 9c1d3abb (coding, cyber) or the reasoning-off campaign 7ea04f2b (science, math); both
 conditions are scored on the (bench, item)s judged in both. MSE is reported as % of the mean_ref baseline
@@ -20,7 +20,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
-import yaml
 
 from capability.evaluate import score
 from capability.task import Task
@@ -30,6 +29,7 @@ from plots.palette import DOMAIN  # domain markers, scripts/analyses/palette.py
 from protocols import PROTOCOLS
 from protocols.pairwise import from_logs
 from protocols.pairwise.linear import JudgeLinear
+from reference import tables
 
 
 warnings.filterwarnings("ignore")
@@ -61,7 +61,7 @@ def compute() -> pd.DataFrame:
     rows = []
     for name in COLOR:
         domain = DomainConfig.from_cli(Path(f"configs/domain/{name}.yml"))
-        top = yaml.safe_load(Path(f"data/meta/{name}/fit.yml").read_text())["top"]
+        top = tables.fit_settings(name)["top"]
         for sem, judges in top.items():
             judge_dir = Path("logs/judge", name, sem, judges[0].lower())
             on, off = first_dir(judge_dir, SHOWN), first_dir(judge_dir, HIDDEN)

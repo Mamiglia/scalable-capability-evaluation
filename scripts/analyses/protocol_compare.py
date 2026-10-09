@@ -2,7 +2,7 @@
 
     uv run python scripts/analyses/protocol_compare.py [--recompute]
 
-Judge = the top reference of each semester (data/meta/<domain>/fit.yml `top[0]`), subjects' reasoning shown.
+Judge = the top reference of each semester (data/meta/<domain>/fit.yml, tables.fit_settings `top[0]`), subjects' reasoning shown.
 Pairwise: JudgeLinear on logs/judge/<domain>/<sem>/<judge>/{24d6cc32,66c170cd,7ea04f2b} (first that exists; 2024
 semesters have no reasoning models, so the reasoning-off run is the same condition). Direct: DirectRegression on
 logs/direct/<domain>/<sem>/<judge>/. Length+prose: PROTOCOLS["glm_regex"] (glm_features/, generality-labs/glm_features).
@@ -22,7 +22,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import yaml
 
 from capability.evaluate import score
 from capability.task import Task
@@ -33,6 +32,7 @@ from protocols.direct_judge import DirectRegression
 from protocols.direct_judge import from_logs as direct_logs
 from protocols.pairwise import from_logs as pair_logs
 from protocols.pairwise.linear import JudgeLinear
+from reference import tables
 
 warnings.filterwarnings("ignore")
 logger.setLevel(logging.ERROR)
@@ -64,7 +64,7 @@ def compute() -> pd.DataFrame:
     rows = []
     for name in DOMAINS:
         domain = DomainConfig.from_cli(Path(f"configs/domain/{name}.yml"))
-        top = yaml.safe_load(Path(f"data/meta/{name}/fit.yml").read_text())["top"]
+        top = tables.fit_settings(name)["top"]
         for sem, judges in top.items():
             judge = judges[0].lower()
             task = Task.from_semester(sem, domain)

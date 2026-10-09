@@ -8,7 +8,7 @@ GPU job (scripts/embeddings/embed.sub). For every successful collection log
 data/<bench>/<hash>/<model>/<repeat>/*.eval (all repeats) and every text variant it writes
 <out>/<bench>/<hash>/<model>/<repeat>/<log>.<variant>.npz (arrays: see protocols.embeddings).
 Existing files are skipped, so a re-run only fills gaps. Samples are restricted to the items of the
-frozen tables that use the bench (data/meta/*/items.csv, e.g. HLE's gold science+math subset);
+frozen tables that use the bench (data/meta/full/items.csv, e.g. HLE's gold science+math subset);
 a bench absent from every frozen table, or --all-items, embeds every sample.
 
 Text: evals.sample.extract_transcript (the judge-visible transcript), tokenised without truncation,
@@ -66,25 +66,17 @@ INCLUDE_REASONING = {"full": True, "answer": False}
 
 
 def frozen_items(data: Path) -> dict[str, set[str]]:
-    """bench -> item ids that appear in any frozen items.csv."""
-    found: dict[str, set[str]] = {}
-    for csv in sorted((data / "meta").glob("*/items.csv")):
-        table = pd.read_csv(csv, dtype={"item": str})
-        if os.environ.get("EMBED_TRAIN_ONLY"):  # ponytail: only what protocols.embeddings reads (train items); such
-            table = table[table.filter(regex="_train$").any(axis=1)]  # files are partial -> keep them out of the HF cache
-        for bench, ids in table.groupby("bench").item:
-            found.setdefault(bench, set()).update(ids)
-    return found
+    """bench -> item ids that appear in the frozen full/items.csv."""
+    table = pd.read_csv(data / "meta" / "full" / "items.csv", dtype={"item": str})
+    if os.environ.get("EMBED_TRAIN_ONLY"):  # ponytail: only what protocols.embeddings reads (train items); such
+        table = pd.read_csv(data / "meta" / "full" / "task_items.csv", dtype={"item": str}).query("train")  # files are partial -> keep them out of the HF cache
+    return {bench: set(ids) for bench, ids in table.groupby("bench").item}
 
 
 def referenced_logs(data: Path) -> set[str]:
-    """Relative log paths in any frozen models.csv path_<bench> column: the logs the protocols read."""
-    found: set[str] = set()
-    for csv in sorted((data / "meta").glob("*/models.csv")):
-        table = pd.read_csv(csv)
-        for column in table.filter(like="path_"):
-            found.update(table[column].dropna().astype(str))
-    return found
+    """Relative repeat-0 log paths in the frozen full/samples.csv: the logs the protocols read."""
+    samples = pd.read_csv(data / "meta" / "full" / "samples.csv", usecols=["repeat", "log"], dtype={"log": str})
+    return set(samples[samples.repeat == 0].log.dropna())
 
 
 def chunk(ids: list[int], size: int, overlap: int, max_chunks: int) -> list[list[int]]:

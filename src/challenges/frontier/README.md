@@ -7,8 +7,8 @@ coding domain at the smallest cost that still serves the study: only the items a
 ## Items
 
 Per bench, the **2026-I train set** (the EASY items every protocol judges, AGENTS.md rule 1) **∪ the
-2026-I HARD set** (what `reference.freeze.local_fit` scores θ* on), from the frozen
-`data/meta/coding/items.csv` (2026-09-15). `agent_bench_os` is skipped.
+2026-I HARD set** (what `reference.freeze.local_fit` scores θ* on), from the
+coding freeze (2026-09-15; now `data/meta/task_items.csv`). `agent_bench_os` is skipped.
 
 | bench | train (EASY) | HARD | items | hash dir |
 | --- | --- | --- | --- | --- |
@@ -112,10 +112,10 @@ output assumed 3× with thinking on.
 
 ## Integration (2026-09-18)
 
-`integrate.py --write` derives `data/meta/coding_frontier/` from `data/meta/coding/` (frozen tables untouched):
+`integrate.py --write` adds the `frontier` cohort to coding's rows of `data/meta/full/` (roster rows untouched; read as domain `coding_frontier`):
 the four models become extra **2026-I targets** with θ* from `reference.freeze.local_fit` on their scored 2026-I HARD
 responses (a, b, guess pinned to the global fit; unscored/refused samples excluded), the original 2026-I targets'
-role blanked, `responses.csv` extended. `configs/domain/coding_frontier.yml` lists both hashes of each bench.
+role blanked in that view, their samples added to `samples.csv`. `configs/domain/coding_frontier.yml` lists both hashes of each bench.
 
 | model | scored / HARD responses | θ* (2026-I refs span -1.22 .. 0.72) |
 | --- | --- | --- |

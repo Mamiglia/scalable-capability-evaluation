@@ -24,6 +24,7 @@ from inspect_ai.log import read_eval_log_sample_summaries
 from capability.task import Cohort
 from configs.domain import DomainConfig
 from configs.judge import JudgeConfig
+from configs.logs import logger
 from configs.paths import is_successful_eval
 from evals.transcripts import read_header
 from judge.run import run_tasks
@@ -58,6 +59,8 @@ def from_logs(log_dir: str | Path) -> pd.DataFrame:
 
 
 class JudgeDirect(DirectRegression):
+    collect = True  # judge what the run dir lacks; False: score the ratings on record only (no API calls)
+
     def __init__(self, config: JudgeConfig, domain: DomainConfig, *, include_reasoning: bool = True):
         # Keep reasoning visible by default when reusing pairwise configs; experiments
         # can explicitly hide it. Copy so the effective setting enters the run hash.
@@ -121,7 +124,9 @@ class JudgeDirect(DirectRegression):
         tasks = self.tasks(train, test)
         done = {read_header(p).eval.task for p in log_dir.glob("*.eval") if is_successful_eval(p)}
         todo = [task for task in tasks if task.name not in done]
-        if todo:
+        if todo and not self.collect:
+            logger.warning("%s %s: %d tasks not judged yet, skipped (collect is off)", self.name, test.semester, len(todo))
+        elif todo:
             if not run_tasks(todo, self.config, log_dir):
                 raise RuntimeError(f"direct judge run failed in {log_dir}")
         return log_dir

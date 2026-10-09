@@ -1,20 +1,21 @@
-"""Derive data/meta/coding_frontier/ from data/meta/coding/: the frontier models as extra 2026-I targets.
+"""Add the `frontier` cohort to the frozen coding tables: the frontier models as extra 2026-I targets.
 
     PYTHONPATH=src .venv/bin/python src/challenges/frontier/integrate.py [--write]
 
-The frozen coding tables stay untouched (a refreeze would reshuffle the train set). Here:
-- models.csv  = coding's rows, the original 2026-I targets' role blanked, unrostered coding models named
-                by --extra (default claude-opus-4.7, gemini-3.5-flash) made targets on their full-bench
-                logs (theta* from coding's own responses), plus one row per frontier model: paths to its subset logs, `2026-I_role = target`, theta* from
-                `reference.freeze.local_fit` on the 2026-I HARD items it answered (a, b, guess pinned
-                to the global fit, so theta* lands on the same scale as everyone else's).
-- items.csv   = coding's (same train set, same HARD set).
-- responses.csv = coding's plus the frontier models' rows; unscored samples (refusals, errors,
-                cancelled) are dropped, not counted wrong (`evals.responses` would count them wrong).
-- fit.yml     = coding's plus provenance.
+coding's own fit stays untouched (a refreeze would reshuffle the train set, and drops this cohort:
+rerun this after one). Rows written to the long tables (reference.tables), domain coding:
+- tasks       2026-I targets with cohort = frontier: unrostered coding models named by --extra (default
+              claude-opus-4.7, gemini-3.5-flash, gpt-5) on their full-bench logs, and the frontier models,
+              theta* from `reference.freeze.local_fit` on the 2026-I HARD items they answered (a, b, guess
+              pinned to the global fit, so theta* lands on the same scale as everyone else's).
+- models      one row per frontier model, no theta_global (it is not in coding's fit).
+- samples     the frontier models' scored responses on their subset logs; unscored samples (refusals,
+              errors, cancelled) are dropped, not counted wrong (`evals.responses` would count them wrong).
+- coding/fit.yml  `cohorts.frontier`: provenance.
 
-Then `uv run evaluate configs/domain/coding_frontier.yml --semester 2026-I ...` scores protocols on the
-frontier targets alone, against the same references and items as the coding 2026-I task.
+The domain name coding_frontier reads coding with this cohort as the 2026-I targets (tables.COHORTS), so
+`uv run evaluate configs/domain/coding_frontier.yml --semester 2026-I ...` scores protocols on the frontier
+targets alone, against the same references and items as the coding 2026-I task.
 """
 
 import argparse
@@ -28,10 +29,9 @@ import yaml
 from configs.paths import is_successful_eval
 from evals.sample import extract_score
 from inspect_ai.log import read_eval_log_sample_summaries
+from reference import tables
 from reference.freeze import local_fit
 
-SOURCE = Path("data/meta/coding")
-OUT = Path("data/meta/coding_frontier")
 SEMESTER = "2026-I"
 SUBSETS = {"terminal_bench_2_1": "0af2ba2c", "swe_bench_mini": "2d1e487f"}
 # GPT-5.x from the Epoch AI SWE-bench import (collection_runs.md 2026-09-16): swe_bench_mini only, 46 of the 50 items
@@ -75,10 +75,9 @@ def main() -> int:
                     help="unrostered coding models (full-bench logs) to add as targets too, theta* from coding's responses")
     args = ap.parse_args()
 
-    models = pd.read_csv(SOURCE / "models.csv", index_col="model")
-    items = pd.read_csv(SOURCE / "items.csv", dtype={"item": str})
-    responses = pd.read_csv(SOURCE / "responses.csv", dtype={"item": str})
-    settings = yaml.safe_load((SOURCE / "fit.yml").read_text())
+    models, items = tables.load("coding")
+    responses = tables.load_responses("coding")
+    settings = tables.fit_settings("coding")
 
     logs = frontier_logs()
     new = pd.concat([responses_of(m, l) for m, l in logs.items()], ignore_index=True)
@@ -95,33 +94,27 @@ def main() -> int:
     print(f"\n{SEMESTER} theta* (references span {refs.min():.2f} .. {refs.max():.2f}):")
     print(theta.round(3).to_string())
 
-    out_models = models.copy()
-    out_models.loc[out_models[f"{SEMESTER}_role"] == "target", f"{SEMESTER}_role"] = ""
-    for m in extra:  # unrostered coding models -> targets, on their full-bench logs already in the table
-        out_models.loc[m, [f"{SEMESTER}_role", f"{SEMESTER}_theta", f"{SEMESTER}_theta_sd"]] = \
-            ["target", theta.loc[m, "theta"], theta.loc[m, "theta_sd"]]
-    for m, l in logs.items():
-        row = {c: "" if c.endswith("_role") else float("nan") for c in models.columns}
-        row.update({f"path_{b}": str(p.relative_to("data")) for b, p in l.items()})
-        row.update({"semester": "", f"{SEMESTER}_role": "target",
-                    f"{SEMESTER}_theta": theta.loc[m, "theta"], f"{SEMESTER}_theta_sd": theta.loc[m, "theta_sd"]})
-        out_models.loc[m] = pd.Series(row)
-    out_responses = pd.concat([responses, new[["bench", "item", "model", "repeat", "correct"]]], ignore_index=True)
-    settings = {**settings, "domain": "coding_frontier", "derived_from": "coding",
-                "derived_at": datetime.date.today().isoformat(),
-                "frontier_targets": sorted(logs), "extra_targets": extra, "epoch_import_targets": EPOCH[2], "frontier_hashes": SUBSETS,
-                "note": "coding's frozen tables + frontier models as extra 2026-I targets (theta* = local_fit on "
-                        "their scored 2026-I HARD responses); original 2026-I targets' role blanked; unscored "
-                        "(refused) samples excluded from responses.csv"}
+    targets = sorted(logs) + extra
+    cohort = pd.DataFrame(dict(semester=SEMESTER, model=targets, role="target", cohort="frontier",
+                               theta=theta.loc[targets, "theta"].values, theta_sd=theta.loc[targets, "theta_sd"].values))
+    added = pd.DataFrame(dict(model=sorted(logs), semester=None, theta_global=float("nan"), theta_global_sd=float("nan")))
+    paths = pd.DataFrame([dict(bench=b, model=m, repeat=0, log=str(p.relative_to("data"))) for m, l in logs.items() for b, p in l.items()])
+    settings["cohorts"] = {"frontier": {
+        "derived_at": datetime.date.today().isoformat(), "frontier_targets": sorted(logs), "extra_targets": extra,
+        "epoch_import_targets": EPOCH[2], "frontier_hashes": SUBSETS,
+        "note": "frontier models as extra 2026-I targets (theta* = local_fit on their scored 2026-I HARD responses); "
+                "coding_frontier reads them in place of the roster targets; unscored (refused) samples excluded"}}
     if not args.write:
-        print("\ndry run; pass --write to create", OUT)
+        print("\ndry run; pass --write to add the frontier cohort to the coding tables")
         return 0
-    OUT.mkdir(parents=True, exist_ok=True)
-    out_models.to_csv(OUT / "models.csv", float_format="%.4f")
-    items.to_csv(OUT / "items.csv", index=False)
-    out_responses.sort_values(["bench", "item", "model", "repeat"]).to_csv(OUT / "responses.csv", index=False)
-    (OUT / "fit.yml").write_text(yaml.safe_dump(settings, sort_keys=False))
-    print("wrote", OUT, ":", len(out_models), "models,", len(items), "items,", len(out_responses), "responses")
+    old = tables.read("models", "coding")
+    tables.write("tasks", "coding", pd.concat([tables.read("tasks", "coding").query("cohort != 'frontier'"), cohort]))
+    tables.write("models", "coding", pd.concat([old[old.theta_global.notna()], added]))
+    kept = tables.read("samples", "coding").query("model not in @added.model")
+    tables.write("samples", "coding", pd.concat([kept, new[["bench", "item", "model", "repeat", "correct"]].merge(paths)]))
+    (tables.frozen_dir("coding") / "fit.yml").write_text(yaml.safe_dump(settings, sort_keys=False))
+    tables.write_paper()
+    print("wrote the frontier cohort:", len(cohort), "targets,", len(new), "responses")
     return 0
 
 

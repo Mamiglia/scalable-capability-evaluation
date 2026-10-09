@@ -56,9 +56,12 @@ def test_evaluate_on_frozen_tables(tmp_path, monkeypatch):
     d = tmp_path / "toy"
     d.mkdir()
     models = pd.DataFrame({"model": list("abcdefgh"), "semester": ["s1"] * 4 + ["s2"] * 4, "global_theta": np.arange(8.0),
-                           "path_b": np.nan, "s2_role": ["reference"] * 4 + ["target"] * 4, "s2_theta": np.arange(8.0)})
-    models.to_csv(d / "models.csv", index=False)
-    _items().assign(s2_set=["easy"] * 4 + ["hard"] * 4, s2_train=[True] * 4 + [False] * 4).to_csv(d / "items.csv", index=False)
+                           "global_theta_sd": 0.1, "path_b": np.nan, "s2_role": ["reference"] * 4 + ["target"] * 4,
+                           "s2_theta": np.arange(8.0), "s2_theta_sd": 0.1})
+    items = _items().assign(a_sd=0.1, b_sd=0.1, s2_set=["easy"] * 4 + ["hard"] * 4, s2_train=[True] * 4 + [False] * 4)
+    no_logs = pd.DataFrame(columns=["bench", "model", "repeat", "path"])
+    for table, rows in tables.to_long(models.set_index("model"), items, _resp().iloc[:0], no_logs).items():
+        tables.write(table, "toy", rows)
     domain = type("D", (), {"name": "toy", "source": ""})()
     assert evaluate.semester_names(domain) == ["s2"]
     t = task.Task.from_semester("s2", domain)
@@ -97,7 +100,9 @@ def test_build_writes_the_frozen_tables(tmp_path, monkeypatch):
     assert models.path_b.tolist() == ["b/h/w/0/run.eval", "b/h/x/0/run.eval", "b/h/y/0/run.eval", "b/h/z/0/run.eval"]
     assert set(items.s2_set) == {"easy", "hard"} and items.s2_train.sum() <= 4 and items[items.s2_train].s2_set.eq("easy").all()
     assert {"semester", "global_theta", "s2_theta", "s2_theta_sd"} <= set(models.columns)
-    assert (tmp_path / "toy" / "responses.csv").exists() and (tmp_path / "toy" / "fit.yml").exists()
+    assert (tmp_path / "samples.csv").exists() and (tmp_path / "toy" / "fit.yml").exists()
+    assert tables.load_responses(domain).sort_values(["model", "item", "repeat"]).correct.tolist() == \
+        pd.DataFrame(rows).sort_values(["model", "item", "repeat"]).correct.tolist()
     # frozen and unchanged: a second build is a no-op; a new log or a roster edit demands --force
     freeze.build(domain)
     assert freeze.changes(domain) == []

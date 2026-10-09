@@ -18,6 +18,7 @@ from capability.task import Cohort
 from configs.domain import DomainConfig
 from protocols.transcript_features.features import FEATURES
 from protocols.transcript_features.reader import features_path, read_features
+from reference import tables
 
 
 def reference_verdicts(dom: DomainConfig) -> pd.DataFrame:
@@ -85,10 +86,9 @@ def item_fit(verdicts: pd.DataFrame) -> pd.DataFrame:
 
 def item_covariates(dom: DomainConfig) -> pd.DataFrame:
     """Per (bench, item): guess, a, b from the frozen table and `model_acc`, the mean
-    first-attempt correctness over every model in data/meta/<domain>/responses.csv."""
-    meta = f"data/meta/{dom.name}"
-    items = pd.read_csv(f"{meta}/items.csv")[["bench", "item", "guess", "a", "b"]]
-    resp = pd.read_csv(f"{meta}/responses.csv")
+    first-attempt correctness over every model in the frozen responses."""
+    items = tables.load(dom)[1][["bench", "item", "guess", "a", "b"]]
+    resp = tables.load_responses(dom)
     acc = resp[resp.repeat == 0].groupby(["bench", "item"]).correct.mean().rename("model_acc").reset_index()
     return items.merge(acc, how="left")
 

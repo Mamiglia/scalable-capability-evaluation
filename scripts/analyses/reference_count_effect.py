@@ -21,7 +21,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
 from item_count_effect import CONDITIONS, DOMAINS  # noqa: E402
@@ -34,6 +33,7 @@ from protocols import PROTOCOLS  # noqa: E402
 from protocols.pairwise import from_logs  # noqa: E402
 from protocols.pairwise.bradley_terry import rank  # noqa: E402
 from protocols.pairwise.linear import weighted_theta  # noqa: E402
+from reference import tables
 
 OUT = Path("analysis/judge/reference_count_effect")
 SIZES = [2, 4, 6]
@@ -51,7 +51,7 @@ def judged():
     """Per domain and semester: the task, its mean_ref MSE, the top-1 judge and its verdicts on the train items."""
     for name in DOMAINS:
         domain = DomainConfig.from_cli(Path(f"configs/domain/{name}.yml"))
-        top = yaml.safe_load(Path(f"data/meta/{name}/fit.yml").read_text())["top"]
+        top = tables.fit_settings(name)["top"]
         for sem, judges in top.items():
             judge, task = judges[0].lower(), Task.from_semester(sem, domain)
             run = next((p for c in CONDITIONS if (p := Path("logs/judge", name, sem, judge, c)).exists()), None)
@@ -79,9 +79,9 @@ def removed(df: pd.DataFrame) -> pd.DataFrame:
     """Per subset, what was removed: how many frontier references (fit.yml `top`), and the capability of the removed ones."""
     out = []
     for (name, sem), cell in df.groupby(["domain", "semester"]):
-        models = pd.read_csv(f"data/meta/{name}/models.csv", index_col="model")
+        models = tables.load(name)[0]
         theta = models.loc[models[f"{sem}_role"] == "reference", f"{sem}_theta"].sort_values()
-        frontier = {m.lower() for m in yaml.safe_load(Path(f"data/meta/{name}/fit.yml").read_text())["top"][sem]}
+        frontier = {m.lower() for m in tables.fit_settings(name)["top"][sem]}
         gone = cell.subset.map(lambda kept: theta.drop(kept.split("|")))
         out.append(cell.assign(frontier_removed=gone.map(lambda g: len(frontier & set(g.index))),
                                theta_removed=gone.map(lambda g: g.mean()),  # NaN when nothing is removed
