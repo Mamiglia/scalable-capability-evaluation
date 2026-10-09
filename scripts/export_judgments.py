@@ -1,11 +1,15 @@
 """The paper's judge outputs and forecasts as flat tables in data/meta/, so a new protocol needs no .eval parsing.
 
-    PYTHONPATH=src uv run python scripts/export_judgments.py
+    uv run python scripts/export_judgments.py [--flags-only]   # --flags-only: keep the judgments, redo flags + forecasts
 
     judgments_pairwise.csv  domain, semester, judge, condition, bench, item, model_left, model_right, pick_left,
-                            chars_left, chars_right   one verdict per (item, pair, shown order); pick_left 1 = the
+                            chars_left, chars_right, core, paper   one verdict per (item, pair, shown order); pick_left 1 = the
                             left (first shown) transcript judged more capable
-    judgments_direct.csv    domain, semester, judge, condition, bench, item, model, epoch, score   1-10 rating
+    judgments_direct.csv    domain, semester, judge, condition, bench, item, model, score, epoch, core, paper   1-10 rating
+                            core  = the run the paper scores for this judge (reasoning shown on the full train set,
+                                    else its smaller-train-set run, else reasoning hidden: analysis.stats.core_condition)
+                            paper = the run behind the paper's headline: of the task's core runs, the judge with the
+                                    lowest leave-one-out error on the references (forecasts.csv judge_loo_mse)
     forecasts.csv           analysis/results/forecasts.csv (scripts/analyses/results.py): theta_hat per target for
                             every protocol, variant, judge and condition, plus `paper` = the row behind the paper's
                             headline (core condition, the task's best judge on reference LOO, pairwise linear,
@@ -15,7 +19,7 @@ Judges = each task's top-3 references (fit.yml `top`), runs as analysis.loading 
 train items and eligible transcripts by analysis.matching. Never launches judging.
 """
 
-from pathlib import Path
+import sys
 
 import pandas as pd
 
@@ -27,23 +31,30 @@ from reference.tables import META
 DOMAINS = ["science", "math", "coding", "cyber"]
 HEADLINE = {"pairwise": "linear", "direct": "raw"}
 
-rows = {"pairwise": [], "direct": []}
-for name in DOMAINS:
-    dom = loading.domain(name)
-    for task in loading.tasks(dom):
-        for run in loading.judge_runs(dom, task):
-            run = match(run, task)
-            rows[run.protocol].append(run.table.drop(columns=["judge", "semester", "imported"], errors="ignore")
-                                      .assign(domain=name, semester=task.semester, judge=run.judge, condition=run.condition))
-        print(name, task.semester, flush=True)
-for protocol, frames in rows.items():
-    table = pd.concat(frames, ignore_index=True)
-    key = ["domain", "semester", "judge", "condition", "bench", "item"]
-    table = table[key + [c for c in table.columns if c not in key]].sort_values(key + list(table.columns.drop(key)[:2]))
-    table.to_csv(META / f"judgments_{protocol}.csv", index=False)
-    print(protocol, len(table))
+RUN = ["domain", "semester", "judge", "condition"]
 
-f = pd.read_csv("analysis/results/forecasts.csv")
+
+def export_runs() -> None:
+    rows = {"pairwise": [], "direct": []}
+    for name in DOMAINS:
+        dom = loading.domain(name)
+        for task in loading.tasks(dom):
+            for run in loading.judge_runs(dom, task):
+                run = match(run, task)
+                rows[run.protocol].append(run.table.drop(columns=["judge", "semester", "imported"], errors="ignore")
+                                          .assign(domain=name, semester=task.semester, judge=run.judge, condition=run.condition))
+            print(name, task.semester, flush=True)
+    for protocol, frames in rows.items():
+        table = pd.concat(frames, ignore_index=True)
+        key = RUN + ["bench", "item"]
+        table = table[key + [c for c in table.columns if c not in key]].sort_values(key + list(table.columns.drop(key)[:2]))
+        table.to_csv(META / f"judgments_{protocol}.csv", index=False)
+        print(protocol, len(table))
+
+
+if "--flags-only" not in sys.argv:
+    export_runs()
+f = pd.read_csv("analysis/results/forecasts.csv", dtype={"semester": str})
 chosen = lr.chosen_judges(f, HEADLINE).assign(paper=True)
 core = stats.core_condition(f)
 core = core[[HEADLINE.get(p) == v for p, v in zip(core.protocol, core.variant)]]
@@ -53,3 +64,11 @@ paper = pd.concat([paper, f[f.protocol.isin(["easy_items", "glm_regex"]) | ((f.p
 f = f.merge(paper.assign(paper=True), how="left").fillna({"paper": False})
 f.to_csv(META / "forecasts.csv", index=False, float_format="%.4f")
 print("forecasts", len(f), "paper rows", int(f.paper.sum()))
+for protocol in HEADLINE:
+    path = META / f"judgments_{protocol}.csv"
+    table = pd.read_csv(path, dtype={"item": str, "semester": str}).drop(columns=["core", "paper"], errors="ignore")
+    runs = lambda frame: frame[frame.protocol == protocol][RUN].drop_duplicates()
+    table = table.merge(runs(core).assign(core=True), how="left").merge(runs(f[f.paper]).assign(paper=True), how="left")
+    table[["core", "paper"]] = table[["core", "paper"]].fillna(False).astype(bool)
+    table.to_csv(path, index=False)
+    print(protocol, "core rows", int(table.core.sum()), "paper rows", int(table.paper.sum()))

@@ -70,7 +70,7 @@ uv run evaluate   4. judging with --collect only (JudgeBT)            -> logs/ju
 ```
 
 ```bash
-uv pip install -e .                                   # source .env for OPENROUTER_API_KEY, RUNPOD, HF keys
+uv sync                                               # installs src/ as packages; run everything from the repo root; source .env for OPENROUTER_API_KEY, RUNPOD, HF keys
 uv run pytest
 
 # 1. collect: benches × models × repeats (validate with --limit 5 --log-dir /tmp/smoke first; real runs cost money)
@@ -173,7 +173,11 @@ Everything is in `data/` (`data/CONTRACT.md`):
 - `data/meta/*.csv`: the benchmark (models, items, tasks, task items with the `train` flag, samples with `.eval` paths);
   `data/meta/full/` adds the off-paper models and targets.
 - `data/meta/judgments_pairwise.csv`, `judgments_direct.csv`: every verdict / rating the paper's judges gave, so a
-  judge-based protocol needs no API calls; `data/meta/forecasts.csv`: the paper's θ̂ per target (`paper` = headline).
+  judge-based protocol needs no API calls. A task has several judges (its top-3 references) and conditions; `core`
+  marks the one run per judge the paper scores, `paper` the one behind the headline (of the core runs, the judge
+  with the lowest leave-one-out error on the references). Pooling every run hurts: start from `paper` or `core`.
+  `data/meta/forecasts.csv`: the paper's θ̂ per target for every protocol and variant (`paper` = headline rows;
+  pairwise = the `linear` variant, `analysis.judges.pairwise_theta`, 0.26 on the `paper` verdicts).
 - `scripts/leaderboard.py [name ...]`: the paper's protocols next to yours.
 
 ```

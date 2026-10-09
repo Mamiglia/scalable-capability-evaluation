@@ -82,9 +82,8 @@ class Task:
                       & ~role.isin(["reference", "target"]))
         missing = historical & ~np.isfinite(models.theta)
         if missing.any():
-            logger.warning("%s: no task-specific theta*; excluding historical models %s. "
-                           "Check HARD coverage and extend the frozen labels before fitting on full history.",
-                           semester, models.index[missing].tolist())
+            # known gap of the frozen tables (no HARD coverage for old models), not a per-run problem: info, one line
+            logger.info("%s: %d historical models without a task theta*, left out of `historical`", semester, int(missing.sum()))
         historical = Cohort(models[historical & ~missing], items, semester)
         truth = models.theta[role == "target"]
         test = Cohort(models[role == "target"].assign(theta=float("nan")), items, semester)

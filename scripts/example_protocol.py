@@ -1,7 +1,7 @@
 """A complete new protocol in ~30 lines, offline: the judges' pairwise win rate against the references, mapped to theta
 by a line fit on the references (their win rate among themselves vs their theta*).
 
-    PYTHONPATH=src uv run python scripts/example_protocol.py && uv run python scripts/leaderboard.py winrate
+    uv run python scripts/example_protocol.py && uv run python scripts/leaderboard.py winrate
 """
 
 import numpy as np
