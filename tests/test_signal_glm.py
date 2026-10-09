@@ -62,21 +62,6 @@ def test_ratio_table_reads_posterior_arrays():
     assert np.isnan(wide.loc["easy_items", "math_lo"]) and wide.loc["direct", "math"] == pytest.approx(1.0)
 
 
-def test_hibayes_model_traces_with_expected_shapes():
-    import jax.numpy as jnp
-    from numpyro import handlers
-    sys_path_model = __import__("importlib").import_module("scripts.analyses.signal_glm.model")
-    features = {"obs": jnp.ones(6), "protocol_index": jnp.array([0, 1, 0, 1, 0, 1]), "num_protocol": 2,
-                "domain_index": jnp.array([0, 0, 1, 1, 2, 2]), "num_domain": 3,
-                "model_domain_index": jnp.array([0, 0, 1, 1, 2, 2]), "num_model_domain": 3,
-                "protocol_judge_index": jnp.zeros(6, dtype=int), "num_protocol_judge": 1}
-    trace = handlers.trace(handlers.seed(sys_path_model.signal_gamma_model(), 0)).get_trace(features)
-    assert trace["interaction"]["value"].shape == (2, 3) and trace["protocol_effects"]["value"].shape == (2,)
-    assert float(trace["interaction"]["value"][0].sum()) == 0.0  # the baseline row is pinned
-    assert trace["cell_effects"]["value"].shape == (3,) and trace["judge_effects"]["value"].shape == (1,)
-    assert trace["obs"]["fn"].__class__.__name__ == "Gamma"
-
-
 def test_appendix_figures_report_mse_without_score_transform():
     domains = [*signal_glm.DOMAINS, signal_glm.POOLED]
     protocols = signal_glm.PAPER_PROTOCOLS

@@ -25,20 +25,14 @@ requires methods designed to extract these signals more robustly.
 
 ## The paper and the code
 
-| paper section | what it covers | code |
-| --- | --- | --- |
-| §2 Problem Setting | capability θ as a 2PL latent; saturated (EASY) vs held-out (HARD) items; semester tasks with references and targets | `src/irt/`, `src/reference/freeze.py` (item split, θ\*), `src/capability/task.py` (Task, Cohort), `configs/semesters.yml` |
-| §3.1 Evaluation Setup | four domains, their benchmarks and models; rollout collection | `configs/domain/`, `configs/bench/`, `configs/models/`, `src/collect/` |
-| §3.2 Prediction Protocols | baseline, deterministic features, embeddings, absolute scoring, pairwise judging | `src/protocols/`, `src/judge/`, `configs/judges/` |
-| §4.1 Saturated transcripts contain capability information (Fig. 3) | squared error and likelihood-ratio tests per protocol | `scripts/analyses/results.py`, `scripts/analyses/likelihood_ratio.py`, `scripts/figures/manuscript_error_figures.py` |
-| §4.2 Signal is distributed across the transcript: position (Fig. 4) | judging with thirds of each transcript removed | `src/challenges/thirds/`, `scripts/analyses/position_contributions.py` |
-| §4.2 Signal is distributed across the transcript: channels (Fig. 5) | judging with reasoning, text, tool calls or tool outputs removed | `configs/judges/channels/`, `scripts/analyses/channel_contributions.py` |
-| §4.3 Generalisation across time and domains (Fig. 6) | per-semester and per-domain error | `scripts/figures/manuscript_error_figures.py` |
-| §4.3 Reasoning-model shift (Fig. 7) | pre-reasoning judges on reasoning models, reasoning hidden vs shown | `scripts/analyses/generalisation.py` |
-| §4.3 More capable targets (Fig. 8) | error against distance above the strongest reference | `scripts/analyses/generalisation.py` |
-| §4.3 Closed-source frontier models | frontier targets on the coding subset | `src/challenges/frontier/` |
-| §4.3 Domain differences (Table) | per-domain error by protocol | `scripts/analyses/signal_glm.py`, `scripts/analyses/results.py` |
-| Appendix | full methodology, configs, per-protocol ablations and robustness checks | see [Reproducing the paper](#reproducing-the-paper) |
+| paper | code |
+| --- | --- |
+| §2 Problem setting: θ as a 2PL latent, saturated (EASY) and held-out (HARD) items, semester tasks | `src/irt/`, `src/reference/` (item split, θ\*, the tables), `src/capability/task.py`, `configs/semesters.yml` |
+| §3.1 Evaluation setup: domains, benchmarks, models, rollouts | `configs/domain/`, `configs/bench/`, `configs/models/`, `src/collect/` |
+| §3.2 Prediction protocols | `src/protocols/`, `src/judge/`, `configs/judges/` |
+| §4 and the appendix: every figure and table | `scripts/analysis/run.py` (below); code in `src/analysis/<question>/` |
+| Closed-source frontier targets: collection and θ\* | `src/challenges/frontier/` |
+| Thirds, channels and prediction-horizon judge runs | `src/challenges/{thirds,channels,horizon,truncation}/` |
 
 ## Install
 
@@ -165,32 +159,29 @@ uv run evaluate configs/domain/science.yml --judge configs/judges/reasoning/kimi
 
 ### Reproducing the paper
 
-These read `data/`, `logs/`, `glm_features/` and `transcript-embeddings/` (see Data). Run from the repository
-root. `results.py` comes first: it writes `analysis/results/forecasts.csv`, which the
-other analyses read. Figures go under `analysis/`. The drawing code lives in `src/plots/`, one module per
-analysis; `src/analysis/` and the scripts under `scripts/analyses/` compute.
+The paper's figures and tables come from `scripts/analysis/run.py`, from the published datasets; nothing is judged or
+paid for.
 
-| paper | command |
+```bash
+uv run python scripts/analysis/fetch_data.py         # transcripts, judge logs, features, embeddings (~40 GB)
+uv run python scripts/analysis/run.py                # about three hours; --list shows the steps, --from resumes
+```
+
+Every setting is in `scripts/analysis/config.yaml`. Outputs land in `analysis/`: `forecasts/` (every protocol's
+forecast of every target, and the log likelihood ratios), then one folder per question with its figures and a CSV of
+every number they show (with its test):
+
+| step | figures and tables |
 | --- | --- |
-| all forecasts and per-task metrics | `uv run python scripts/analyses/results.py` |
-| likelihood-ratio tests used by the figures and tables | `uv run python scripts/analyses/likelihood_ratio.py` |
-| Fig. 3, Fig. 6, Table (time generalisation), appendix prediction example | `uv run python scripts/figures/manuscript_error_figures.py` |
-| Fig. 4, appendix: transcript thirds | `uv run python scripts/analyses/position_contributions.py` (judge runs: `src/challenges/thirds/`) |
-| appendix: thirds, other protocols | `uv run python scripts/analyses/other_protocol_thirds.py` |
-| Fig. 5: transcript channels | `uv run python scripts/analyses/channel_contributions.py` (judges: `configs/judges/channels/`) |
-| appendix: channels, other protocols | `uv run python scripts/analyses/other_protocol_channels.py` (inputs: `src/challenges/channels/`) |
-| Fig. 7, Fig. 8: reasoning shift, capability distance | `uv run python scripts/analyses/generalisation.py` |
-| frontier models | `src/challenges/frontier/` (see its README) |
-| appendix: domain GLM effects and contrasts | `uv run python scripts/analyses/signal_glm.py` |
-| appendix: cross-domain transfer | `uv run python scripts/analyses/cross_domain.py` |
-| appendix: judge choice | `uv run python scripts/analyses/judge_choice.py` |
-| appendix: number of items | `uv run python scripts/analyses/item_count_effect.py --both` |
-| appendix: number of references | `uv run python scripts/analyses/reference_count_effect.py` |
-| appendix: protocol cost | `uv run python scripts/analyses/protocol_cost.py` |
-| appendix: judge ensemble | `uv run python scripts/analyses/judge_ensemble.py` |
-| appendix: static references (prediction horizon) | `uv run python -m challenges.horizon.run build`, then `judge` and `transcript`, then `uv run python scripts/figures/prediction_horizon_figures.py` |
-| appendix: data figures (accuracy, difficulty, θ by release) | `uv run python scripts/figures/domain_figures.py science math coding cyber` |
-| deterministic features, embeddings (inputs) | `scripts/glm_features/extract.py`, `scripts/embeddings/` |
+| `capability_signal` | Fig. 3, 10, 16, 17, 21; Tables 3, 6, 9 |
+| `transcript_parts` | Fig. 4, 5, 22, 23, 24 |
+| `generalisation` | Fig. 6, 7, 8, 9, the numbers of Fig. 18 (cross-domain); Table 7 |
+| `sensitivity` | Fig. 15, 19, 20, 25, 27, 28; Tables 8, 10 |
+
+`run.py`'s docstring names the output behind each. Not in `run.py`: the data figures 11 to 14
+(`scripts/figures/domain_figures.py science math coding cyber`) and Fig. 26, the prediction horizon
+(`uv run python -m challenges.horizon.run build`, then `judge` and `transcript`, then
+`scripts/figures/prediction_horizon_figures.py`).
 
 ## Layout
 
@@ -212,10 +203,12 @@ src/
   protocols/    the forecasting protocols
   judge/        judging prompt, dataset, scorer, eval_set runner, the judge CLI
   configs/      config dataclasses and the two content hashes (data path, judge condition)
-  analysis/     results tables, statistics, the research-question analyses (challenges/)
-  plots/        every figure
+  analysis/     the paper's analyses: forecasts and statistics, one subpackage per question
+  plots/        figure code shared by the analyses
   challenges/   harnesses for the thirds, channels, frontier and prediction-horizon experiments
 scripts/
-  analyses/     one script per analysis (compute, then draw with src/plots)
-  figures/      scripts that only draw from saved results
+  analysis/     run.py and one runner per step, config.yaml, fetch_data.py
+  figures/      the data figures and the prediction-horizon figure
+  judge/, audit/  provenance: the imports, rescores and checks the published data went through
+  embeddings/, glm_features/  the embedding and feature inputs
 ```
