@@ -27,7 +27,7 @@ from plots.results import unclip_markers
 from reference import tables
 
 OUT = Path("artifacts/prediction-horizon")
-MAIN = Path("../small-judge-remote")
+MAIN = Path(".")
 FIGURES = OUT / "figures"
 PAIRWISE = COLORS["pairwise"]
 TRANSCRIPT = {"glm_regex": "-", "embedding": "full"}  # the protocols without a judge: (key, the paper's variant)

@@ -15,8 +15,6 @@ uv.lock
 .agents
 .codex
 .claude/*
-# ...but the project's skills are part of the repo
-!.claude/skills/
 
 # logs
 /logs/
@@ -36,3 +34,9 @@ external_data/**/*.eval
 # the paper is its own git repo
 docs/paper/
 /results/
+
+# agent instructions and notes stay local (not part of the public release)
+AGENTS.md
+CLAUDE.md
+HANDOFF*.md
+docs/

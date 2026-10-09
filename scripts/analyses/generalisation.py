@@ -19,7 +19,6 @@ import pandas as pd
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
 sys.path.insert(0, str(ROOT / "src"))
 os.chdir(ROOT)
-os.environ.setdefault("SMALL_JUDGE_DATA", "/Volumes/T7/small-judge-remote/data")
 
 from analysis.challenges import generalisation as gen  # noqa: E402  (after the path is set)
 from analysis.challenges.signal_glm import LABELS  # noqa: E402
