@@ -22,7 +22,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from analysis import judges, loading
+from analysis import loading
+from protocols import judges
 from analysis.challenges import contributions
 from analysis.challenges import likelihood_ratio as lr
 from plots import contributions as contributions_plots

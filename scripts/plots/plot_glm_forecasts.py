@@ -2,7 +2,7 @@
 
     PYTHONPATH=src .venv/bin/python scripts/plots/plot_glm_forecasts.py [glm_length glm_regex glm_structure] [--out analysis/glm]
 
-Reads data/meta/<domain>/eval_<protocol>.csv (written by `uv run evaluate`) for science, math,
+Reads results/<domain>/eval_<protocol>.csv (written by `uv run evaluate`) for science, math,
 coding and cyber, and writes <out>/<protocol>.{png,svg}. Targets are ordered by true theta*
 within a semester; a dotted line joins each truth to its forecast. Forecasts beyond the y-range
 are drawn as hollow triangles at the edge.
@@ -64,8 +64,8 @@ def main() -> int:
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     for protocol in args.protocols:
-        tables = {d: pd.read_csv(f"data/meta/{d}/eval_{protocol}.csv") for d in DOMAINS
-                  if Path(f"data/meta/{d}/eval_{protocol}.csv").exists()}
+        tables = {d: pd.read_csv(f"results/{d}/eval_{protocol}.csv") for d in DOMAINS
+                  if Path(f"results/{d}/eval_{protocol}.csv").exists()}
         widths = [t.semester.nunique() for t in tables.values()]
         fig, axes = plt.subplots(1, len(tables), figsize=(7.2, 2.3), sharey=True,
                                  gridspec_kw={"width_ratios": widths, "wspace": 0.12})

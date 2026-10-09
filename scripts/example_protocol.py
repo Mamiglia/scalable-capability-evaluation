@@ -1,19 +1,15 @@
-"""A complete new protocol in ~30 lines, offline: the judges' pairwise win rate against the references, mapped to theta
-by a line fit on the references (their win rate among themselves vs their theta*).
+"""A complete new protocol, offline: each judge's pairwise win rate against the references, mapped to theta by a line
+fit on the references (their win rate among themselves vs their theta*), averaged over the task's judges. Copy it.
 
-    uv run python scripts/example_protocol.py && uv run python scripts/leaderboard.py winrate
+    uv run evaluate --protocol pairwise scripts/example_protocol.py:WinRate --semester 2025-II 2026-I
 """
 
 import numpy as np
 import pandas as pd
 
-from capability.evaluate import evaluate
 from capability.task import Task
-from configs.domain import DomainConfig
 from protocols import Protocol
-from reference.tables import META
-
-VERDICTS = pd.read_csv(META / "judgments_pairwise.csv", dtype={"item": str, "semester": str})
+from protocols.judges import judgments
 
 
 def win_rate(verdicts: pd.DataFrame, opponents: pd.Index) -> pd.Series:
@@ -28,15 +24,12 @@ class WinRate(Protocol):
 
     def __call__(self, task: Task) -> pd.Series:
         refs = task.references.theta
-        # this task's verdicts: its semester, its train items (bench names also pick the domain), every judge
-        verdicts = VERDICTS[VERDICTS.semester == task.semester].merge(task.references.items[["bench", "item"]])
-        rate = win_rate(verdicts, refs.index)
-        known = rate.reindex(refs.index).dropna()
-        slope, intercept = np.polyfit(known, refs[known.index], 1)
-        return intercept + slope * rate.reindex(task.test.models.index)
-
-
-if __name__ == "__main__":
-    for domain in ["science", "math", "coding", "cyber"]:
-        scores = evaluate(DomainConfig.from_cli(f"configs/domain/{domain}.yml"), WinRate(), WinRate.name, ["2025-II", "2026-I"])
-        print(domain, scores.round(2).to_dict("records"))
+        v = judgments("pairwise")
+        v = v[(v.domain == task.domain) & (v.semester == task.semester) & v.core]  # one run per judge (README)
+        estimates = []
+        for _, run in v.groupby("judge"):
+            rate = win_rate(run, refs.index)
+            known = rate.reindex(refs.index).dropna()
+            slope, intercept = np.polyfit(known, refs[known.index], 1)
+            estimates.append(intercept + slope * rate.reindex(task.test.models.index))
+        return pd.concat(estimates, axis=1).mean(axis=1) if estimates else pd.Series(np.nan, index=task.test.models.index)

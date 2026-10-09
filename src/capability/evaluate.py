@@ -1,18 +1,21 @@
-"""Score protocols against the frozen theta* of a domain's semester tasks.
+"""Score protocols against the frozen theta* of the semester tasks: the benchmark's scorer and leaderboard.
 
-    uv run evaluate configs/domain/science.yml [--protocol chars ridge ...] [--semester 2026-I ...]
+    uv run evaluate [configs/domain/<domain>.yml ...] [--protocol pairwise mine.py:Mine ...] [--semester 2026-I ...]
 
---protocol selects entries of protocols.PROTOCOLS (default: all). --judge adds pairwise
-judging; --direct-judge adds direct ratings calibrated on reference + historical capability.
-Both take judge YAMLs and score the judgments already in logs/; --collect also judges what is missing
-(paid API calls). --semester restricts the tasks.
+Domains default to the paper's four, --protocol to every entry of protocols.PROTOCOLS (the paper's: mean_ref,
+glm_regex, embedding, direct, pairwise); `<file.py>:<Class>` loads a Protocol subclass from any file, built with no
+arguments. --semester defaults to every task of the domain. --judge / --direct-judge add one
+judge's protocols read from its run in logs/ (JudgeBT / JudgeCalibrated / JudgeLinear, JudgeDirect); nothing is ever
+judged here (`uv run judge` collects).
 
-Scores are per semester and pooled over all semesters ("all"; valid because every local fit
-shares the global item scale): MSE in theta units. The per-target forecasts go to
-data/meta/<domain>/eval_<name>.csv (gitignored).
+The metric is MSE in theta units (every protocol forecasts on the theta* scale). Printed per domain over the main tasks
+(MAIN: the paper's 2025-II and 2026-I, 16 targets per domain), pooled over them ("main", 64 targets with all four
+domains), and over every evaluated task ("all"; valid because every local fit shares the global item scale). The
+per-target forecasts go to results/<domain>/eval_<name>.csv (gitignored).
 """
 
 import argparse
+import importlib.util
 from dataclasses import replace
 from pathlib import Path
 
@@ -28,6 +31,15 @@ from protocols.pairwise.calibrated import JudgeCalibrated
 from protocols.pairwise.linear import JudgeLinear
 from protocols.direct_judge import JudgeDirect
 from reference import tables
+
+DOMAINS = [Path(f"configs/domain/{d}.yml") for d in ("science", "math", "coding", "cyber")]
+MAIN = ["2025-II", "2026-I"]
+RESULTS = Path("results")
+
+
+def results_path(domain, name: str) -> Path:
+    """results/<domain>/eval_<name>.csv: one protocol's per-target forecasts on one domain."""
+    return RESULTS / getattr(domain, "name", domain) / f"eval_{name}.csv"
 
 
 def score(pred: pd.Series, truth: pd.Series) -> dict:
@@ -61,8 +73,8 @@ def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "", semester_
     tasks = [Task.from_semester(s, domain) for s in semester_list or semester_names(domain)]
     forecasts = pd.concat([forecast(task, protocol) for task in tasks], ignore_index=True)
     if name:
-        tables.frozen_dir(domain).mkdir(parents=True, exist_ok=True)
-        forecasts.to_csv(tables.frozen_dir(domain) / f"eval_{name}.csv", index=False, float_format="%.4f")
+        results_path(domain, name).parent.mkdir(parents=True, exist_ok=True)
+        forecasts.to_csv(results_path(domain, name), index=False, float_format="%.4f")
 
     scores = []
     groups = list(forecasts.groupby("semester", sort=False)) + [("all", forecasts)]
@@ -72,31 +84,60 @@ def evaluate(domain: DomainConfig, protocol: Protocol, name: str = "", semester_
     return pd.DataFrame(scores)
 
 
+def load_protocol(spec: str) -> Protocol:
+    """A registered name, or `<file.py>:<Class>` (a Protocol subclass from that file, built with no arguments)."""
+    if spec in PROTOCOLS:
+        return PROTOCOLS[spec]
+    path, _, cls = spec.partition(":")
+    if not (cls and Path(path).is_file()):
+        raise SystemExit(f"--protocol {spec}: neither one of {sorted(PROTOCOLS)} nor <file.py>:<Class>")
+    module = importlib.util.module_from_spec(importlib.util.spec_from_file_location(Path(path).stem, path))
+    module.__spec__.loader.exec_module(module)
+    return getattr(module, cls)()
+
+
+def leaderboard(forecasts: pd.DataFrame) -> pd.DataFrame:
+    """MSE per protocol (rows): each domain's main tasks, "main" pooled over them, "all" over every task; n = targets."""
+    f = forecasts.assign(se=(forecasts.theta_hat - forecasts.theta) ** 2)
+    main = f[f.semester.isin(MAIN)]
+    table = main.pivot_table(index="protocol", columns="domain", values="se", aggfunc="mean", dropna=False)
+    table = table.reindex(f.protocol.unique())  # a protocol scored on no main task still gets its row
+    table["main"] = main.groupby("protocol").se.mean()
+    table["n"] = main.groupby("protocol").se.count().reindex(table.index, fill_value=0)  # NaN forecasts are not counted
+    table["all"] = f.groupby("protocol").se.mean()
+    return table.sort_values(["main", "all"])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("domain", type=Path)
-    parser.add_argument("--protocol", nargs="+", default=[], choices=list(PROTOCOLS), help="default: all")
+    parser.add_argument("domain", nargs="*", type=Path, default=DOMAINS, help="default: science math coding cyber")
+    parser.add_argument("--protocol", nargs="+", default=[], help="registered names or <file.py>:<Class>; default: all registered")
     parser.add_argument("--judge", nargs="+", default=[], type=Path, help="JudgeConfig yml(s) -> judge_<name> protocols")
     parser.add_argument("--direct-judge", nargs="+", default=[], type=Path,
                         help="judge yml(s) -> direct_judge_<name> protocols (1–10 ratings, reasoning shown)")
     parser.add_argument("--semester", nargs="+", default=None, help="default: every semester task")
-    parser.add_argument("--collect", action="store_true", help="judge missing pairs / ratings (paid API calls)")
     parser.add_argument("--truncate", help="override the --judge configs' truncate, e.g. thirds-13 (src/challenges/thirds)")
     args = parser.parse_args()
-    domain = DomainConfig.from_cli(args.domain)
 
-    # JudgeBT, JudgeCalibrated and JudgeLinear read the same run dir, so the judging happens once.
-    override = {"truncate": args.truncate} if args.truncate else {}  # replace() re-runs the config's validation
-    judges = [cls(replace(JudgeConfig.from_cli(path), **override), domain)
-              for path in args.judge for cls in (JudgeBT, JudgeCalibrated, JudgeLinear)]
-    judges += [JudgeDirect(DirectJudgeConfig.from_cli(path), domain) for path in args.direct_judge]
-    for judge in judges:
-        judge.collect = args.collect
-    protocols = [PROTOCOLS[name] for name in args.protocol or PROTOCOLS] + judges
-
-    scores = [evaluate(domain, protocol, protocol.name, args.semester).assign(protocol=protocol.name) for protocol in protocols]
-    table = pd.concat(scores).pivot(index="semester", columns="protocol", values=["n", "mse"])
-    print(table.round(2).to_string())
+    protocols = [load_protocol(spec) for spec in args.protocol or PROTOCOLS]
+    forecasts = []
+    for path in args.domain:
+        domain = DomainConfig.from_cli(path)
+        # JudgeBT, JudgeCalibrated and JudgeLinear read the same run dir.
+        override = {"truncate": args.truncate} if args.truncate else {}  # replace() re-runs the config's validation
+        judges = [cls(replace(JudgeConfig.from_cli(p), **override), domain)
+                  for p in args.judge for cls in (JudgeBT, JudgeCalibrated, JudgeLinear)]
+        judges += [JudgeDirect(DirectJudgeConfig.from_cli(p), domain) for p in args.direct_judge]
+        for judge in judges:
+            judge.collect = False  # score what logs/ holds; `uv run judge` collects
+        semesters = [s for s in semester_names(domain) if args.semester is None or s in args.semester]
+        if not semesters:  # evaluate() reads an empty list as every task
+            continue
+        for protocol in protocols + judges:
+            evaluate(domain, protocol, protocol.name, semesters)
+            forecasts.append(pd.read_csv(results_path(domain, protocol.name), dtype={"semester": str})
+                             .assign(domain=domain.name, protocol=protocol.name))
+    print(leaderboard(pd.concat(forecasts)).round(2).to_string())
     return 0
 
 

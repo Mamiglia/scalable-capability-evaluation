@@ -237,7 +237,7 @@ def test_evaluate_cli_loads_judge_yamls_and_writes_direct_forecasts(tmp_path, mo
     items = pd.DataFrame({"bench": ["b"], "item": ["short"], "guess": [0.], "a": [1.], "b": [0.], "s_train": [True]})
     monkeypatch.setattr(tables, "load", lambda domain: (models, items))
     monkeypatch.setattr(tables, "load_semesters", lambda: {"previous": ["r1", "r2"], "s": ["t"]})
-    monkeypatch.setattr(tables, "frozen_dir", lambda domain: tmp_path)
+    monkeypatch.setattr(evaluate, "RESULTS", tmp_path)
 
     def direct_scores(self, train, test):
         assert isinstance(self.config, DirectJudgeConfig) and self.config.include_reasoning
@@ -257,5 +257,5 @@ def test_evaluate_cli_loads_judge_yamls_and_writes_direct_forecasts(tmp_path, mo
     assert evaluate.main() == 0
     output = capsys.readouterr().out
     assert all(name in output for name in ("chars", "judge_j", "direct_judge_j"))
-    prediction = pd.read_csv(tmp_path / "eval_direct_judge_j.csv")
+    prediction = pd.read_csv(tmp_path / "d" / "eval_direct_judge_j.csv")
     assert prediction.to_dict("records") == [{"semester": "s", "model": "t", "theta_hat": 4., "theta": 5.}]

@@ -59,6 +59,7 @@ class Task:
     historical: Cohort  # semesters before the references, theta = this task's theta*
     test: Cohort  # targets, theta = NaN
     truth: pd.Series  # the targets' theta*, for the metric only
+    domain: str = ""  # the domain's name: the key of its rows in data/meta/ (e.g. the judgments tables)
 
     @property
     def train(self) -> Cohort:
@@ -87,4 +88,4 @@ class Task:
         historical = Cohort(models[historical & ~missing], items, semester)
         truth = models.theta[role == "target"]
         test = Cohort(models[role == "target"].assign(theta=float("nan")), items, semester)
-        return cls(semester, references, historical, test, truth)
+        return cls(semester, references, historical, test, truth, domain.name)

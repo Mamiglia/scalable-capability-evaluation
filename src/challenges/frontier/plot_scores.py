@@ -5,7 +5,7 @@
 Score of protocol P on target m: S_m(P) = -log2(e_m(P) / e_m(base)), e_m = (theta_hat - theta*)^2, base = the
 constant forecast at the references' mean theta* (`mean_ref`: with saturated items, accuracy carries no
 information, so predicting the reference mean is the no-information baseline). Positive = better than the
-baseline, +1 = squared error halved. Reads data/meta/<domain>/eval_<protocol>.csv (written by `uv run evaluate`),
+baseline, +1 = squared error halved. Reads results/<domain>/eval_<protocol>.csv (written by `uv run evaluate`),
 writes analysis/frontier/prediction_scores.{csv,png,svg}.
 """
 
@@ -18,8 +18,8 @@ import pandas as pd
 sys.path.insert(0, "scripts/analyses")
 from plots.frontier import SHOW, VENDORS, pairwise_boxes, scores_figure  # noqa: E402
 
-META = Path("data/meta/coding_frontier")
-OPEN = Path("data/meta/coding")  # the same protocols on this semester's open-weight targets: the reference group
+META = Path("results/coding_frontier")
+OPEN = Path("results/coding")  # the same protocols on this semester's open-weight targets: the reference group
 OUT = Path("analysis/frontier/prediction_scores")
 BASE = "mean_ref"
 SEMESTER = "2026-I"

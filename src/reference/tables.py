@@ -50,7 +50,7 @@ def _name(domain) -> str:
 
 
 def frozen_dir(domain) -> Path:
-    """data/meta/<domain>/: the fit settings and the (untracked) protocol outputs eval_*.csv."""
+    """data/meta/<domain>/: the fit settings (fit.yml) and figures."""
     return META / _name(domain)
 
 

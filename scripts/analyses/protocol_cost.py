@@ -5,7 +5,7 @@ length+prose and embedding as points (no judging is run).
 
 Judge = per (domain, semester, protocol) the core-condition run with the lowest reference leave-one-out MSE
 (analysis.calibration.core_runs / judge_forecast; pairwise linear, direct raw, as results.py shows). For each fraction of its judged
-train items, DRAWS random item subsets feed the same conversion (analysis.judges); a target's error at that fraction is
+train items, DRAWS random item subsets feed the same conversion (protocols.judges); a target's error at that fraction is
 its squared error averaged over draws. Cost = the run's logged tokens at OpenRouter list prices (openrouter.ai/api/v1/models,
 fetched at --recompute; logs carry no total_cost; uncached input + cache reads at the listed cache price + output) times
 the fraction, averaged over the domain's semesters. Embedding: Qwen3-Embedding-8B ($0.01/M) on the direct LOO run's input
@@ -27,7 +27,8 @@ import numpy as np
 import pandas as pd
 from inspect_ai.log import read_eval_log
 
-from analysis import calibration, judges, loading, matching
+from analysis import calibration, loading, matching
+from protocols import judges
 from capability.evaluate import forecast
 from configs.logs import logger
 from plots.protocol_cost import plot

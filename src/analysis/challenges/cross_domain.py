@@ -59,7 +59,7 @@ def swap(task: Task, theta: pd.Series) -> Task:
     does not label are dropped from each cohort."""
     return Task(task.semester, relabel(task.references, theta), relabel(task.historical, theta),
                 relabel(task.test, theta, truth=False), task.truth.index.to_series()
-                .map(theta).dropna().rename("theta"))
+                .map(theta).dropna().rename("theta"), task.domain)
 
 
 def forecasts(domains: list[str], semesters: tuple[str, ...]) -> pd.DataFrame:

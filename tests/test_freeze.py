@@ -70,6 +70,7 @@ def test_evaluate_on_frozen_tables(tmp_path, monkeypatch):
     assert t.truth.tolist() == [4, 5, 6, 7] and len(t.references.items) == 4
     assert t.references.transcripts == {m: {} for m in "abcd"}  # never run on bench b
     truth = models.set_index("model").s2_theta
+    monkeypatch.setattr(evaluate, "RESULTS", tmp_path)
     table = evaluate.evaluate(domain, lambda t: truth[t.test.models.index], "toy")
     assert table.semester.tolist() == ["s2", "all"] and table.mse.lt(1e-9).all()
     assert (d / "eval_toy.csv").exists()

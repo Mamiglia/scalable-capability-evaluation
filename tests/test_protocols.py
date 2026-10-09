@@ -187,3 +187,19 @@ def test_window_and_channels_are_conditions():
     for bad in ("tools", "only-images", "keep-tools"):
         with pytest.raises(ValueError):
             replace(base, channels=bad)
+
+
+def test_judge_table_picks_the_judge_with_lower_reference_loo(monkeypatch):
+    from dataclasses import replace
+    from protocols import judges
+
+    t = replace(toy_task(), domain="dom")
+    theta = {"a": 0.0, "b": 1.0, "c": 2.0, "t": 3.0, "u": 4.0}
+    good = [dict(judge="good", model=m, score=2 + th) for m, th in theta.items()]  # tracks theta exactly
+    bad = [dict(judge="bad", model=m, score=s) for m, s in zip(theta, [9, 2, 6, 1, 5])]
+    rows = pd.DataFrame(good + bad).assign(domain="dom", semester="s", bench="b", item="0", core=True)
+    monkeypatch.setattr(judges, "judgments", lambda kind: rows)
+    per_judge = judges.JudgeTable("direct", "raw").per_judge(t)
+    assert per_judge.loc["loo_mse", "good"] < 1e-9 < per_judge.loc["loo_mse", "bad"]
+    assert np.allclose(judges.JudgeTable("direct", "raw")(t), [3.0, 4.0])
+    assert judges.JudgeTable("direct", "raw", judge="bad")(t).notna().all()

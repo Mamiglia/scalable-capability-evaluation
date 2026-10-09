@@ -65,8 +65,9 @@ Forecasts are on the θ scale by construction, so no shift- or scale-free varian
 uv run collect    1. rollouts of every model on every bench          -> data/<bench>/<hash>/<model>/<repeat>/*.eval
 uv run reference  2. freeze a domain: global 2PL, semester tasks, θ*  -> data/meta/full/{samples,items,models,tasks,task_items}.csv (+ paper subset in data/meta/)
                   3. Task.from_semester: references + historical + targets on shared EASY items
-uv run evaluate   4. judging with --collect only (JudgeBT)            -> logs/judge/<domain>/<semester>/<judge>/<hash>/*.eval
-                  5. fit / predict every protocol, MSE vs θ*          -> data/meta/<domain>/eval_<protocol>.csv
+uv run judge      4. collect judgments (JudgeBT / JudgeDirect)        -> logs/judge/<domain>/<semester>/<judge>/<hash>/*.eval
+                     scripts/export_judgments.py: the paper judges'  -> data/meta/judgments_{pairwise,direct}.csv
+uv run evaluate   5. fit / predict every protocol, MSE vs θ*          -> results/<domain>/eval_<protocol>.csv + leaderboard
 ```
 
 ```bash
@@ -79,9 +80,12 @@ uv run collect -b configs/bench/gpqa.yml -m configs/models/google/gemma4-31b.yml
 # 2. freeze a domain once its collection is complete (refit with --force, then commit data/meta)
 uv run reference configs/domain/science.yml
 
-# 4+5. score protocols; --judge scores an LLM judge's verdicts in logs/; add --collect to judge what is missing (costs money)
-uv run evaluate configs/domain/science.yml --protocol chars ridge
-uv run evaluate configs/domain/science.yml --judge configs/judges/gemma4-31b.yml --semester 2026-I
+# 4. collect a judge's verdicts / ratings (costs money); resumes, a finished run is only read
+uv run judge configs/domain/science.yml --judge configs/judges/gemma4-31b.yml --semester 2026-I
+
+# 5. score protocols (never judges): all four domains and every registered protocol by default
+uv run evaluate --protocol pairwise glm_regex --semester 2025-II 2026-I
+uv run evaluate configs/domain/science.yml --judge configs/judges/gemma4-31b.yml --semester 2026-I         # one judge's run
 uv run evaluate configs/domain/science.yml --direct-judge configs/judges/gemma4-31b.yml --semester 2026-I
 ```
 
@@ -95,9 +99,8 @@ and showing reasoning even if a reused pairwise config disables it. It defaults 
 `assets/system_prompt/direct.txt`; a domain bench can override this with `direct_system_prompt`.
 An explicit `system_prompt` in the judge YAML must be a direct-rating prompt.
 Direct logs live in `logs/direct/<domain>/<semester>/<judge>/<condition hash>/`, and
-forecasts go to `data/meta/<domain>/eval_direct_judge_<judge>.csv`. Missing judgments are judged only
-with `--collect`. `--judge` and `--direct-judge` can be used together; baseline selection still uses
-`--protocol` (all baselines by default).
+forecasts go to `results/<domain>/eval_direct_judge_<judge>.csv`. Judgments are collected by `uv run judge` only.
+`--judge` and `--direct-judge` can be used together; the other protocols still follow `--protocol` (all by default).
 
 With `JudgeDirect(..., include_reasoning=False)`, logs use `direct_reasoning-hidden/` instead
 of `direct/` under the configured log directory. The HF judging repository uses these as
@@ -174,32 +177,40 @@ Everything is in `data/` (`data/CONTRACT.md`):
   `data/meta/full/` adds the off-paper models and targets.
 - `data/meta/judgments_pairwise.csv`, `judgments_direct.csv`: every verdict / rating the paper's judges gave, so a
   judge-based protocol needs no API calls. A task has several judges (its top-3 references) and conditions; `core`
-  marks the one run per judge the paper scores, `paper` the one behind the headline (of the core runs, the judge
-  with the lowest leave-one-out error on the references). Pooling every run hurts: start from `paper` or `core`.
-  `data/meta/forecasts.csv`: the paper's θ̂ per target for every protocol and variant (`paper` = headline rows;
-  pairwise = the `linear` variant, `analysis.judges.pairwise_theta`, 0.26 on the `paper` verdicts).
-- `scripts/leaderboard.py [name ...]`: the paper's protocols next to yours.
+  marks the one run per judge the paper scores, `paper` the one behind the headline. Pooling every run hurts.
+- `data/meta/forecasts.csv`: the paper's θ̂ per target for every protocol and variant, as published (`paper` rows).
+- Transcripts: the `.eval` logs under `data/` (`samples.csv` `log`). `glm_regex` also reads `glm_features/`
+  (generality-labs/glm_features) and `embedding` reads `transcript-embeddings/` (generality-labs/transcript-embeddings).
+
+The paper's protocols are registered, so `uv run evaluate` recomputes the paper's numbers offline (~2 min) and puts yours
+next to them:
 
 ```
-$ uv run python scripts/leaderboard.py      # MSE, lower is better
-protocol                   science  math  coding  cyber   all   n
-Pairwise judge                0.21  0.42    0.14   0.26  0.26  64
-Deterministic features        0.43  0.76    0.70   1.57  0.86  64
-Embedding                     0.40  0.66    1.69   1.29  1.01  64
-Absolute scoring              0.31  0.85    1.41   1.48  1.01  64
-Baseline (reference mean)     0.65  1.32    2.14   1.39  1.37  64
+$ uv run evaluate --protocol pairwise direct glm_regex embedding mean_ref --semester 2025-II 2026-I   # MSE, lower is better
+domain     coding  cyber  math  science  main   n   all
+protocol
+pairwise     0.14   0.26  0.42     0.21  0.26  64  0.26    # Pairwise judge
+glm_regex    0.70   1.57  0.76     0.43  0.86  64  0.86    # Deterministic features
+embedding    1.69   1.29  0.66     0.40  1.01  64  1.01    # Embedding
+direct       1.41   1.48  0.85     0.31  1.01  64  1.01    # Absolute scoring
+mean_ref     2.14   1.39  1.32     0.65  1.37  64  1.37    # Baseline (reference mean)
 ```
 
-`scripts/example_protocol.py` is a complete protocol (judge win rate against the references, line-fit on them), scored
-offline in a minute (0.71): copy it. A protocol is a `protocols.Protocol`: `__call__(task) -> pd.Series` of θ̂ indexed by target
-(NaN where it has nothing to say), by default `fit(task.references)` then `predict(task.test)`. A `Task` holds
-`references` (previous semester, θ = θ*), `historical` (older models, θ = this task's θ*), `test` (targets, θ NaN) and
-`truth` (for scoring only). A cohort exposes `models` (θ, `path_<bench>` logs), `items` (the train items: bench, item,
-guess, a, b) and `transcripts` (model → (bench, item) → the correct first-attempt transcript). Judge only the train
-items (AGENTS.md rule 1). `capability.evaluate.evaluate(domain, protocol, name, semesters)` scores it and writes
-`data/meta/<domain>/eval_<name>.csv`, which the leaderboard reads; to put it in `uv run evaluate --protocol`, add an
-instance to `protocols.PROTOCOLS`. A comparison-based protocol can subclass `protocols.pairwise.PairwiseBT` and
-implement `verdicts(train, test)` only.
+`main` is the score (64 targets; check `n`: a NaN forecast is not counted). `pairwise` and `direct` are
+`protocols.judges.JudgeTable`: per task, each judge's core run is converted (pairwise: per-bench weighted least squares
+on pair logits; direct: a line from mean rating to θ*) and the judge with the lowest leave-one-out error on the
+references is used. Variants: `pairwise_calibrated`, `pairwise_bt`, `direct_item_z`; `JudgeTable(kind, variant,
+judge=...)` fixes one judge, `.per_judge(task)` shows them all. The paper's back-tests are the other semesters (drop
+`--semester`).
+
+A protocol is a `protocols.Protocol`: `__call__(task) -> pd.Series` of θ̂ indexed by target (NaN where it has nothing
+to say), by default `fit(task.references)` then `predict(task.test)`. Write it in any file and score it with
+`uv run evaluate --protocol pairwise path/to/mine.py:Mine` (built with no arguments); `scripts/example_protocol.py`
+(win rate against the references, 0.57) is a complete one to copy. A `Task` holds `domain`, `semester`, `references`
+(previous semester, θ = θ*), `historical` (older models, θ = this task's θ*), `test` (targets, θ NaN) and `truth`
+(scoring only). A cohort exposes `models` (θ, `path_<bench>` logs), `items` (the train items: bench, item, guess, a, b)
+and `transcripts` (model → (bench, item) → the correct first-attempt transcript). Judge only the train items
+(AGENTS.md rule 1). Forecasts go to `results/<domain>/eval_<name>.csv`.
 
 See `CLAUDE.md` for the architecture and `AGENTS.md` for operations: collection sweeps,
 OpenRouter provider pinning, Runpod, resume semantics, data hygiene.

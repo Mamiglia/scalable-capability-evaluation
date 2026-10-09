@@ -22,7 +22,7 @@ def test_easy_item_prediction_and_oracle(monkeypatch):
     np.testing.assert_allclose(oracle(t).to_numpy(), [2.0, 0.0], atol=1e-9)
 
 
-from analysis import judges
+from protocols import judges
 
 
 def toy_ratings():

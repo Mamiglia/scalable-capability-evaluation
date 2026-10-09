@@ -4,8 +4,8 @@ fit sees the previous semester's references only (never the historical models, s
 learns from the same labelled models as the judges and the saturated-item prediction), predict sees
 targets with theta NaN.
 To add one: subclass Protocol, give it a `name`, and add an instance to PROTOCOLS below;
-`uv run evaluate` picks it up. Protocols that need arguments (JudgeBT needs a judge's logs)
-are constructed by the CLI instead.
+`uv run evaluate` picks it up. The paper's judge protocols read the recorded judgments (protocols.judges);
+JudgeBT and friends, which read one judge's logs, are built by `uv run evaluate --judge` instead.
 """
 
 import pandas as pd
@@ -32,4 +32,7 @@ class Protocol:
 from protocols.features import PROTOCOLS  # noqa: E402, F401
 from protocols.baseline import PROTOCOLS as _BASELINES  # noqa: E402
 
+from protocols.judges import PROTOCOLS as _JUDGES  # noqa: E402
+
 PROTOCOLS.update(_BASELINES)
+PROTOCOLS.update(_JUDGES)

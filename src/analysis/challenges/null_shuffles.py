@@ -14,7 +14,7 @@ whose null distribution sits at or below the actual MSE is not reading capabilit
 import numpy as np
 import pandas as pd
 
-from analysis import judges
+from protocols import judges
 from analysis.calibration import judge_forecast
 from analysis.loading import JudgeRun
 from capability.task import Cohort, Task

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from analysis import judges
+from protocols import judges
 from analysis.stats import condition_rank
 from analysis.baselines import AccuracyOracle, EasyItemPrediction
 from protocols.embeddings import EmbeddingRegression

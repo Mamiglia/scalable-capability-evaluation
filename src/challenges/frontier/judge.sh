@@ -18,6 +18,7 @@ for target in "${targets[@]}"; do
   cfg=artifacts/frontier/judge-$(basename "$judge" .yml)-$target.yml
   { cat "$judge"; printf 'exclude_models:\n%s\n' "$others"; } > "$cfg"
   echo "=== $(date -Is) $target ($cfg)"
+  uv run judge configs/domain/coding_frontier.yml --semester 2026-I --judge "$cfg"
   uv run evaluate configs/domain/coding_frontier.yml --semester 2026-I --judge "$cfg"
 done
 echo "=== $(date -Is) all done"

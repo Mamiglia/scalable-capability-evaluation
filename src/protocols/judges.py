@@ -1,5 +1,10 @@
-"""Judge conversions applied offline to matched verdict and rating tables, and the reference
-leave-one-out error that selects a judge without target labels.
+"""The judge protocols the paper reports, computed offline from the recorded judgments (data/meta/judgments_*.csv),
+and the conversions they share with analysis/ (verdicts or ratings -> theta-hat, reference leave-one-out error).
+
+JudgeTable("pairwise", "linear") is the paper's Pairwise judge and JudgeTable("direct", "raw") its Absolute scoring:
+per task, every judge's core run is converted, and the judge with the lowest leave-one-out error on the references
+(no target label) gives the forecast. Registered in protocols.PROTOCOLS as pairwise[_calibrated|_bt] and
+direct[_item_z]. Collecting new judgments is `uv run judge`, never a protocol's job.
 
 Pairwise: "linear" is JudgeLinear's per-bench weighted least squares on pair logits
 (protocols.pairwise.linear); "calibrated" is JudgeCalibrated's calibrated Bradley-Terry with
@@ -9,13 +14,20 @@ pinned at theta* (protocols.pairwise.bradley_terry.rank), no calibration and no 
 Every statistic comes from the references passed in; targets never enter a fit.
 """
 
+from functools import cache
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 
+from capability.task import Task
+from protocols import Protocol
+
 from protocols.pairwise import calibrated
 from protocols.pairwise.bradley_terry import rank
 from protocols.pairwise.linear import weighted_theta
+from reference.tables import META
 
 PAIRWISE = ("linear", "calibrated", "bt")
 DIRECT = ("raw", "item_z")
@@ -105,3 +117,50 @@ def direct_reference_loo(ratings: pd.DataFrame, refs: pd.Series, normalisation: 
     references only; index = refs.index."""
     among = ratings[ratings.model.isin(refs.index)]
     return pd.Series({r: direct_theta(among, refs.drop(r), [r], normalisation)[r] for r in refs.index}, dtype=float)
+
+
+@cache
+def judgments(kind: str) -> pd.DataFrame:
+    """data/meta/judgments_<kind>.csv (scripts/export_judgments.py), kind "pairwise" or "direct"."""
+    return pd.read_csv(META / f"judgments_{kind}.csv", dtype={"item": str, "semester": str})
+
+
+class JudgeTable(Protocol):
+    """theta-hat from the recorded judgments: each judge's core run on this task converted by `variant`, then the
+    judge with the lowest reference leave-one-out MSE (`judge` fixes one instead). See the module docstring."""
+
+    def __init__(self, kind: str, variant: str, judge: str | None = None):
+        assert variant in (PAIRWISE if kind == "pairwise" else DIRECT), (kind, variant)
+        self.kind, self.variant, self.judge = kind, variant, judge
+        default = {"pairwise": "linear", "direct": "raw"}[kind]
+        self.name = kind if variant == default else f"{kind}_{variant}"
+
+    def runs(self, task: Task) -> dict[str, pd.DataFrame]:
+        """judge -> its core run on the task (the export already kept only train items and eligible transcripts)."""
+        t = judgments(self.kind)
+        t = t[(t.domain == task.domain) & (t.semester == task.semester) & t.core]
+        return {judge: run for judge, run in t.groupby("judge") if self.judge in (None, judge)}
+
+    def per_judge(self, task: Task) -> pd.DataFrame:
+        """One column per judge: theta-hat of the targets, plus the row "loo_mse" (reference leave-one-out MSE)."""
+        refs, targets = task.references.theta, list(task.test.models.index)
+        out = {}
+        for judge, run in self.runs(task).items():
+            if self.kind == "pairwise":
+                from protocols.pairwise.calibrated import JudgeCalibrated  # its prior needs only a .domain
+                prior = (JudgeCalibrated.frontier_prior(SimpleNamespace(domain=task.domain), task.semester)
+                         if self.variant == "calibrated" else None)
+                theta, loo = pairwise_theta(run, refs, targets, self.variant, prior), pairwise_reference_loo(run, refs, self.variant)
+            else:
+                theta, loo = direct_theta(run, refs, targets, self.variant), direct_reference_loo(run, refs, self.variant)
+            out[judge] = pd.concat([theta, pd.Series({"loo_mse": float(((loo - refs) ** 2).mean())})])
+        return pd.DataFrame(out)
+
+    def __call__(self, task: Task) -> pd.Series:
+        table = self.per_judge(task)
+        if table.empty or table.loc["loo_mse"].isna().all():
+            return pd.Series(np.nan, index=task.test.models.index)
+        return table[table.loc["loo_mse"].idxmin()].drop("loo_mse").reindex(task.test.models.index)
+
+
+PROTOCOLS = {p.name: p for p in [JudgeTable("pairwise", v) for v in PAIRWISE] + [JudgeTable("direct", v) for v in DIRECT]}

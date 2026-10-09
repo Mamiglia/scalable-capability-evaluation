@@ -35,3 +35,4 @@ external_data/**/*.eval
 /transcript-embeddings/
 # the paper is its own git repo
 docs/paper/
+/results/

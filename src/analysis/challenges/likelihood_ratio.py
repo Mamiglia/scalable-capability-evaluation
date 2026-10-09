@@ -21,7 +21,8 @@ import pandas as pd
 from scipy import stats as scipy_stats
 from sklearn.base import clone
 
-from analysis import judges, stats
+from analysis import stats
+from protocols import judges
 
 SHAPES = ("normal", "t")
 SHAPE = "t"  # the one the figures use (user's choice, 2026-09-21); "normal" is kept alongside for comparison
@@ -54,7 +55,7 @@ def saturated(refs: pd.Series, models: list[str]) -> pd.Series:
 
 
 def judge_rule(table: pd.DataFrame, protocol: str, variant: str) -> Rule:
-    """A judge run's conversion (analysis.judges) as a rule; verdicts or ratings of a model not
+    """A judge run's conversion (protocols.judges) as a rule; verdicts or ratings of a model not
     in `refs` never calibrate it."""
     if protocol == "pairwise":
         return lambda refs, models: judges.pairwise_theta(table, refs, models, variant)
