@@ -78,7 +78,7 @@ def compress(values: np.ndarray, extent: np.ndarray | None = None) -> tuple[np.n
 
 def break_strip(ax, raw: np.ndarray, mapping: dict[float, float], extent: np.ndarray | None = None) -> None:
     """A white strip across the panel and its left spine in the gap between the in-range
-    values and the compressed band, so the axis break is visible; the glyph is the user's."""
+    values and the compressed band, so the axis break is visible; no break glyph is drawn."""
     if not mapping:
         return
     lo, hi = break_edges(raw, mapping, extent)
@@ -169,7 +169,7 @@ def bar_figure(metrics: pd.DataFrame, metric: str, variants: dict[str, str], pat
     above a bar, given `llr` (likelihood_ratio rows, one shape and judge per target), are the one-sided
     log likelihood ratio test against the references' distribution with each task as the unit
     (*, **, *** for p below .05, .01, .001; a protocol without log LRs gets none). Off-axis values (beyond 3 IQR) are drawn in a compressed band above the in-range values
-    with ticks at their true values (see compress); the break glyph is left to the user."""
+    with ticks at their true values (see compress); no break glyph is drawn."""
     assert metric in (*METRICS, "pct"), metric
     m = chosen(with_pct(metrics), variants)
     m = m[m.domain != "all"]

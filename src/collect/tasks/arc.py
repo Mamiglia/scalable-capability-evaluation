@@ -7,7 +7,6 @@ same knob gpqa uses. It is a real task argument, so CoT runs hash to their own d
 
 ``subset``/``seed`` take a fixed random draw of the 1172 test items, identical across models
 (both are real task args, so the draw is part of the data-dir hash).
-``scripts/check_arc_subset.py`` checks that draw is not skewed on grade level.
 """
 
 from inspect_ai import Task, task

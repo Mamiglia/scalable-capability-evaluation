@@ -1,9 +1,9 @@
 """Per-run report for a collection sweep: accuracy, length, cost, and reasoning presence.
 
-Complements scripts/validate_data.py, which checks structure (repeats, duplicates,
+Complements scripts/audit/logs/validate_data.py, which checks structure (repeats, duplicates,
 completeness). This one checks that a run says what it should:
 
-    uv run python scripts/report_collection.py data/hle data/apex_2025 [--since '2026-08-19 22:20']
+    uv run python scripts/audit/logs/report_collection.py data/hle data/apex_2025 [--since '2026-08-19 22:20']
 
 - accuracy: to compare against what the model is known to score. The model column is
   the data directory, so a rescored copy is listed separately from its original.

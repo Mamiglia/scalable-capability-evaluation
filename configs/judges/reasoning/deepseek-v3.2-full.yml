@@ -6,4 +6,4 @@ judge: configs/models/deepseek/deepseek-v3.2.yml
 include_reasoning: true
 max_length: 100000000
 _kwargs: {fail_on_error: false, max_tokens: 32768}
-train_per_quartile: 0  # full train set (coding 2026-I, 2026-09-15); the 40-item run is hard-linked into this condition dir
+train_per_quartile: 0  # full train set (coding 2026-I); the 40-item run is hard-linked into this condition dir

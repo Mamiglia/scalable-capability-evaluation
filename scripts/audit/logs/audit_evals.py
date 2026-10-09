@@ -14,7 +14,7 @@ plus cross-log accuracy outliers. It never modifies data/; it writes a JSONL of 
 Flags (per log, as a rate over the samples read):
 
   unparsed      scorer stored no answer though the model wrote one -> parser too strict
-                (the `ANSWER: $C$` class; see collection_runs.md 2026-08-25)
+                (the `ANSWER: $C$` class; see data/collection_runs.md)
   truncated     stop_reason max_tokens -> the transcript is cut, not the reasoning
   no_reasoning  the log asked the provider for reasoning and got none -> broken pin
   reas_summary  reasoning blocks are redacted with a summary -> the judge reads a
@@ -106,7 +106,7 @@ def asked_for_reasoning(header) -> bool:
     if reasoning.get("enabled") or reasoning.get("effort") or reasoning.get("max_tokens"):
         return True
     # The chat-template form (qwen3 / gemma-4 style). Providers can ignore it silently: the
-    # 2026-08-12 gemma-4 aime/gpqa runs asked this way and got answers with no thinking.
+    # gemma-4 aime/gpqa runs asked this way and got answers with no thinking.
     return bool((extra.get("chat_template_kwargs") or {}).get("enable_thinking"))
 
 
@@ -335,7 +335,7 @@ def main() -> int:
 
     have = cached()
     if not args.report:
-        # ponytail: cache is keyed on path only; pass --refresh after rescoring a log in place.
+        # cache is keyed on path only; pass --refresh after rescoring a log in place.
         paths = [p for root in args.roots for p in collection_logs(root) if is_successful_eval(p)]
         todo = [p for p in paths if args.refresh or str(p) not in have]
         print(f"{len(paths)} logs, {len(todo)} to scan", file=sys.stderr)

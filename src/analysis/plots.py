@@ -1,8 +1,7 @@
 """
 Shared plotting code: the figure style, protocol and domain names and colours, the axis helpers other figure modules
-import (unclip_markers, ci95, stars), and the prediction figures and tables of the exploratory runner
-scripts/analyses/results.py (forecast_figure, also drawn by scripts/analysis/capability_signal.py; bar_figure,
-semester_table, task_figure, timeline_figure, frontier_figure).
+import (unclip_markers, ci95, stars), and the prediction figures and tables (forecast_figure, drawn by
+scripts/analysis/capability_signal.py; bar_figure, semester_table, task_figure, timeline_figure, frontier_figure).
 Judge protocols are drawn as the best judge on references, in the one variant per protocol the caller chooses.
 matplotlib.use("Agg") below is deliberate: figures go to files, nothing renders inline in an IDE cell.
 """
@@ -24,11 +23,11 @@ plt.rcParams.update({
     "svg.fonttype": "none", "pdf.fonttype": 42, "savefig.dpi": 300,
 })
 CONDITIONS = ["glm_length", "glm_regex", "embedding", "direct", "pairwise"]  # the bars, in this order
-# Display names of the protocols (CLAUDE.md, figure colour palette); Length alone is a diagnostic.
+# Display names of the protocols, as the paper uses them; Length alone is a diagnostic.
 LABELS = {BASELINE: "Baseline", "glm_length": "Length", "glm_regex": "Deterministic features",
           "embedding": "Embedding", "direct": "Absolute scoring", "pairwise": "Pairwise judge"}
 DOMAIN_LABELS = {"science": "Science", "math": "Maths", "coding": "Coding", "cyber": "Cyber"}
-# the project palette (CLAUDE.md, scripts/analysis/config.yaml display.protocol_colours)
+# the project palette (scripts/analysis/config.yaml display.protocol_colours)
 COLORS = {"glm_length": "#f1a48a", "glm_regex": "#eb6834", "embedding": "#4a3aa7", "direct": "#1baf7a",
           "pairwise": "#2a78d6"}
 # the pooled-judge conditions are not bars, but task figures may draw them

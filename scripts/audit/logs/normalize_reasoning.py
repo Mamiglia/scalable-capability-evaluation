@@ -11,7 +11,7 @@ the same evidence reaches the judge tagged differently depending on who served t
    text field at all (claude-opus-4.7, gemini-3.1-flash-lite). It is not CoT and holds nothing
    recoverable, so it is marked ``redacted`` and renders as nothing. Detected structurally --
    no model list, the block itself is the evidence.
-3. **gemma-4 CoT glued into the text** (local vLLM 2026-07-17/18 and the Runpod e2b runs):
+3. **gemma-4 CoT glued into the text** (local vLLM and the Runpod e2b runs):
    the chat template wraps thinking in ``<|channel>thought\n…<channel|>`` and vLLM stripped
    the special tokens, so the text starts with the literal word ``thought`` and the answer
    follows the CoT with *no separator* ("…This matches.To find the concentration…"). Split
@@ -67,7 +67,7 @@ def split_think(text: str) -> tuple[str, str]:
 
 # Models whose literal `<think>` tags are a writing quirk, not a transport artefact: their
 # real CoT is redacted by the provider and the tagged text is answer text the model chose to
-# show. Left as text by decision (2026-09-14, cybench gemini-3.5-flash: 772 turns).
+# show. Left as text (cybench gemini-3.5-flash: 772 turns).
 INLINE_IS_TEXT = {"gemini-3.5-flash"}
 
 THOUGHT_PREFIX = re.compile(r"\A\s*thought\n")

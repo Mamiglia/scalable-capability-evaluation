@@ -4,7 +4,7 @@
     uv run python -m challenges.horizon.run judge [--limit N] [--task KEY ...]
     uv run python -m challenges.horizon.run transcript [--task KEY ...]   # Embedding + Deterministic features (free)
 
-Plan: docs/static_method_plan.md. Science only. A task "<targets>_from_<references>" takes the
+Science only. A task "<targets>_from_<references>" takes the
 references' EASY/HARD split and train items exactly as the frozen task whose references they are
 (same top-3, same seed), so only theta* of its references and targets is refitted, on those HARD
 items. Tables and judge logs go under artifacts/prediction-horizon/, never data/meta or logs/judge,

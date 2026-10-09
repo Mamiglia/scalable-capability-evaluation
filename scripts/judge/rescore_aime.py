@@ -4,7 +4,7 @@
 line* of the assistant's text. A model that finishes ``\\boxed{23}`` and then closes the
 display-math block leaves ``completion == '\\]'``, so ``score.answer`` is empty and a
 correct sample is scored ``I``. The assistant message itself is intact, so the answer is
-recoverable without re-collecting: see the 2026-08-28 audit.
+recoverable without re-collecting.
 
 This re-reads each sample's full assistant text, and flips a sample to correct **only**
 when the recovered answer equals the target. It never flips correct -> incorrect: the

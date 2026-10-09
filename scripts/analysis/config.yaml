@@ -94,7 +94,7 @@ sensitivity:
     proxies: {openai-api/runpod/NousResearch/Nous-Hermes-2-Yi-34B: qwen/qwen3-32b}   # judges without a list price
     seed: 0                           # the random item subsets of the curves
     # OpenRouter list prices, $ per million tokens [input, cached input, output] (cached = input where no cache price is
-    # listed), from openrouter.ai/api/v1/models on 2026-09-26, unchanged since the costs were first computed
+    # listed), from openrouter.ai/api/v1/models (September 2026)
     prices:
       deepseek/deepseek-r1-0528: [0.5, 0.35, 2.15]
       deepseek/deepseek-v3.2: [0.269, 0.1345, 0.4]

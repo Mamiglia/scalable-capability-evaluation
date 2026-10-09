@@ -12,7 +12,7 @@ from analysis import loading, stats
 from analysis.plots import unclip_markers
 from reference import tables
 
-# the figure's look as the exploratory scripts' house style drew it (scripts/analyses/plots.py)
+# the figure's look: the house style of the paper's figures
 INK2, MUTED, GRID = "#33322f", "#4a4844", "#d3d2c9"
 STYLE = {"font.family": "sans-serif", "font.sans-serif": ["Arial", "Arimo", "Liberation Sans"], "font.size": 8,
          "axes.labelsize": 8, "legend.fontsize": 8, "xtick.labelsize": 8, "ytick.labelsize": 8, "svg.fonttype": "none",

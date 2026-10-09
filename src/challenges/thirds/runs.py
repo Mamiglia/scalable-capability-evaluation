@@ -14,8 +14,7 @@ RUNS = {("science", "2025-II"): "minimax-m1", ("coding", "2025-II"): "minimax-m1
         ("science", "2026-I"): "kimi-k2-thinking", ("math", "2026-I"): "kimi-k2-thinking",
         ("coding", "2026-I"): "minimax-m2-full", ("cyber", "2026-I"): "deepseek-v3.2-full"}
 # the judge with the lowest reference leave-one-out MSE (pairwise linear, reasoning shown, full train set where
-# collected; 2026-09-23 refit after merging the judging repo), where it differs from RUNS; science 2026-I is the
-# 40-item run (minimax-m2 also leads on 100 items). compare.py plots these.
+# collected), where it differs from RUNS; science 2026-I is the 40-item run (minimax-m2 also leads on 100 items).
 LOO = RUNS | {("science", "2026-I"): "minimax-m2", ("math", "2026-I"): "kimi-k2-thinking-full",
               ("coding", "2026-I"): "kimi-k2-thinking-full", ("cyber", "2026-I"): "kimi-k2-thinking-full"}
 

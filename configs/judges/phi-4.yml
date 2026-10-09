@@ -3,5 +3,5 @@ name: phi-4
 judge: configs/models/microsoft/phi-4.yml
 include_reasoning: false
 # deepinfra/bf16 is a 16k-context endpoint: the model config's 14745-token output cap left no room
-# for the two transcripts (400 on ~25% of samples, 2026-09-12). A verdict is ~100 tokens.
+# for the two transcripts (400 on ~25% of samples). A verdict is ~100 tokens.
 _kwargs: {max_tokens: 4096}

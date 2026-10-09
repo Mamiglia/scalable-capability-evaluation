@@ -22,13 +22,13 @@ runpod:
     - --tensor-parallel-size
     - "2"
     - --disable-custom-all-reduce
-    # 2026-09-08: 32768 errored 8/61 terminal_bench samples with "maximum context length"
+    # 32768 errored 8/61 terminal_bench samples with "maximum context length"
     # (200-message agent loops outgrow it). 64k costs concurrency: KV is ~160 KB/token here,
     # so ~4-5 sequences fit the ~48 GB left after weights -> run agentic benches with
     # --max-sandboxes 4.
     - --max-model-len
     - "65536"
-    # 2026-09-08: agentic benches (terminal_bench) need tool calling. vLLM does not parse
+    # Agentic benches (terminal_bench) need tool calling. vLLM does not parse
     # Mistral's [TOOL_CALLS] into tool_calls without these; single-turn benches are unaffected
     # (no tools in the request -> no parser invoked, generation identical).
     - --enable-auto-tool-choice

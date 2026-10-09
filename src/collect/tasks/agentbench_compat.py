@@ -4,11 +4,10 @@ Two incompatibilities, both host-side, neither affecting what a task asks or how
 scored:
 
 1. The generated compose pins each sandbox to `cpuset: "0-3"`. On a cgroup-v2 host the
-   cpuset controller is not delegated to the user slice (loki's `user-1000004.slice` has
-   only cpu/memory/pids), so every container start dies with
+   cpuset controller is not always delegated to the user slice (often only cpu/memory/pids), so every container start dies with
    `crun: the requested cgroup controller 'cpuset' is not available`. Root fixes it
    properly: `Delegate=cpu cpuset io memory pids` in
-   `/etc/systemd/system/user@.service.d/`. Until then, drop the pin.
+   `/etc/systemd/system/user@.service.d/`. Without that, drop the pin.
 
 2. Tasks whose `create.init` is a multi-line script get a `COPY <<'EOF'` heredoc in their
    Dockerfile. Heredocs are a BuildKit feature; buildah 1.33 (podman 4.9) reads the

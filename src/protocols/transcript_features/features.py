@@ -1,10 +1,7 @@
 """Compact feature sets: 3 length, 9 lexical, and 12 tool/structure features.
 
-Lexicon/counting rules adapted from small-judge's judge-dissect branch,
-697f1e725c328b5b170fdd23dca01da47beb5767, scripts/verdict_dissection/features_basic.py.
 Lexical values are hits per 1,000 prose words; lengths and tool-call count use log1p.
 These are lexical cues, not annotations of actual reasoning quality.
-Definitions and suggested changes: docs/transcript-feature-table.md.
 """
 
 import re
@@ -188,7 +185,7 @@ def extract_features(messages: Sequence[ChatMessage], include_reasoning: bool = 
 
     Returns a dict with 13 FEATURES keys: log lengths, a reasoning indicator,
     lexical rates per 1,000 prose words, and log_tool_calls = ln(1 + total calls).
-    Repeated calls count separately. glm_regex and glm_structure use the call count.
+    Repeated calls count separately. glm_regex uses the call count.
     RST/tool transition
     features are calculated separately. No assistant message gives all NaNs;
     an observed empty assistant message has zero text lengths/rates.

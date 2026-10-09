@@ -1,4 +1,4 @@
-"""Figures for predicting further ahead (docs/static_method_plan.md): squared error per target of the
+"""Figures for predicting further ahead: squared error per target of the
 Pairwise judge and the baseline, over the series of tasks, against distance above the
 references, and by target semester. Science only. Styled as the manuscript's generalisation figures
 (plots.generalisation: log error axis 0.01-10, translucent interval boxes, grey panel tags).
@@ -6,7 +6,7 @@ references, and by target semester. Science only. Styled as the manuscript's gen
     uv run python scripts/figures/prediction_horizon_figures.py
 
 The new tasks (40 train items) come from artifacts/prediction-horizon/; the one-semester tasks are the
-paper's best judge on references (linear variant, core condition, 100 items) from the main checkout's
+paper's best judge on references (linear variant, core condition, 100 items) from
 analysis/results/forecasts.csv. The baseline is the references' mean theta*. The tasks
 with 2024-I references (GPT-4o) predict that mean for every target: the judge's reference-reference
 verdicts give the linear calibration a slope <= 0.
@@ -36,7 +36,7 @@ SHOWN = ("pairwise",)  # protocols drawn in the combined figure (all three were 
 PROTOCOL_SHADES = [("glm_regex", "Deterministic features", COLORS["glm_regex"], "#f5b394", "#a8401a"),
                    ("embedding", "Embedding", COLORS["embedding"], "#a79ee0", "#2a1f6e"),
                    ("pairwise", "Pairwise judge", COLORS["pairwise"], "#9cc3ef", "#123f7a")]
-BASELINE_LABEL = "Baseline"  # the user's name for the references' mean θ*, not the manuscript code's label
+BASELINE_LABEL = "Baseline"  # the figure's name for the references' mean θ*, not the manuscript code's label
 ORDER = ["2023", "2024-I", "2024-II", "2025-I", "2025-II", "2026-I"]
 SERIES = [  # (panel tag, [(references, targets)]); x = semesters from references to targets
     ("References fixed at 2024-II", [("2024-II", t) for t in ("2023", "2024-I", "2025-I", "2025-II", "2026-I")]),

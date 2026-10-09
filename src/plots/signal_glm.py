@@ -11,7 +11,7 @@ from analysis.challenges.signal_glm import (BASELINE, DOMAINS, LABELS, PAPER_PRO
 from analysis.stats import DOMAIN_LABELS, ci95
 from plots.results import break_edges, break_strip, compress, fix_axes_height
 
-# The project's protocol palette (CLAUDE.md). Domains never share a hue with a protocol.
+# The project's protocol palette. Domains never share a hue with a protocol.
 COLORS = {"glm_length": "#f1a48a", "glm_regex": "#eb6834", "embedding": "#4a3aa7", "direct": "#1baf7a", "pairwise": "#2a78d6"}
 DOMAIN_COLORS = {"science": "#cc79a7", "math": "#d55e00", "coding": "#6a3d9a", "cyber": "#c9a800"}
 DOMAIN_MARKERS = {"science": "o", "math": "s", "coding": "^", "cyber": "D"}
@@ -197,8 +197,8 @@ def model_bar_figure(pooled: pd.DataFrame, tests: pd.DataFrame, metric: str = "m
     """One bar per protocol over the target models pooled over domains, one small filled circle
     per model (jittered), stars from `tests`. metric "mse": bar at the mean squared error with a
     capless 95% t-interval over models, the saturated-item prediction's mean as a dashed line,
-    far-high values compressed into a band above the axis (compress; the break glyph is the
-    user's). metric "delta": each model's error minus its saturated-item error, same drawing
+    far-high values compressed into a band above the axis (compress; no break glyph is
+    drawn). metric "delta": each model's error minus its saturated-item error, same drawing
     with the line at 0. metric "ratio": each model's error divided by its saturated-item error,
     log axis, bars from 1 to the geometric mean with the t-interval of the log ratios. metric
     "score": prediction score per model (`score`, halvings of the error), line at 0, axis over

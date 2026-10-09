@@ -29,7 +29,7 @@ runpod:
   gpu_id: NVIDIA A40
   gpu_count: 2
   # Runpod's multi-GPU PCIe hosts (A40, L40S) ship with GPU peer-to-peer broken: NCCL init or
-  # the first all-reduce hangs with every GPU at 100%. Seen 2026-09-03 on 2×A40 and 4×A40/L40S.
+  # the first all-reduce hangs with every GPU at 100%. Seen on 2×A40 and 4×A40/L40S.
   env: {NCCL_P2P_DISABLE: "1"}
   container_disk_in_gb: 80
   ready_timeout: 5400   # 66GB of weights plus TP init; 1800 killed pods that were still loading

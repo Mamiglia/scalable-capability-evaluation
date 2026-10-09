@@ -42,7 +42,7 @@ def main() -> None:
             print(f"skip (not a successful full run): {log}")
             continue
         jobs.append((log, target))
-    # ponytail: one process per log; big HLE logs cost a few hundred MB each, hence --workers.
+    # one process per log; big HLE logs cost a few hundred MB each, hence --workers.
     with ProcessPoolExecutor(args.workers) as pool:
         for target in pool.map(_write, jobs):
             print(target, flush=True)

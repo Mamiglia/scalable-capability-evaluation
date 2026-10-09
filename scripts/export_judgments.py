@@ -10,7 +10,7 @@
                                     else its smaller-train-set run, else reasoning hidden: analysis.stats.core_condition)
                             paper = the run behind the paper's headline: of the task's core runs, the judge with the
                                     lowest leave-one-out error on the references (forecasts.csv judge_loo_mse)
-    forecasts.csv           analysis/results/forecasts.csv (scripts/analyses/results.py): theta_hat per target for
+    forecasts.csv           analysis/forecasts/forecasts.csv (the analysis pipeline's forecasts table): theta_hat per target for
                             every protocol, variant, judge and condition, plus `paper` = the row behind the paper's
                             headline (core condition, the task's best judge on reference LOO, pairwise linear,
                             direct raw, embedding full)
@@ -54,7 +54,7 @@ def export_runs() -> None:
 
 if "--flags-only" not in sys.argv:
     export_runs()
-f = pd.read_csv("analysis/results/forecasts.csv", dtype={"semester": str})
+f = pd.read_csv("analysis/forecasts/forecasts.csv", dtype={"semester": str})
 chosen = lr.chosen_judges(f, HEADLINE).assign(paper=True)
 core = stats.core_condition(f)
 core = core[[HEADLINE.get(p) == v for p, v in zip(core.protocol, core.variant)]]

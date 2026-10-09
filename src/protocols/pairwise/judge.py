@@ -12,7 +12,7 @@ at theta* in the Bradley-Terry fit, so those are the comparisons that place a ta
 are also compared with each other under the existing collection scheme. These verdicts do
 not move the pinned Bradley-Terry fit. Historical models are not added to either set of pairs.
 
-Logs imported from older campaigns (scripts/judge/import_judge_logs.py) sit in the same dir with
+Logs imported from other judge runs (scripts/judge/import_judge_logs.py) sit in the same dir with
 an "(imported)" task-name suffix: they never count as the finished task, and where they overlap
 the run's own verdicts on an (item, pair, shown order) the run's verdict wins.
 """
@@ -35,7 +35,7 @@ from protocols.pairwise.protocol import PairwiseBT
 from reference import tables
 
 VERDICT_COLUMNS = ["bench", "judge", "item", "model_left", "model_right", "pick_left", "semester", "imported", "chars_left", "chars_right"]
-IMPORTED = " (imported)"  # task-name suffix of a log imported from an older campaign
+IMPORTED = " (imported)"  # task-name suffix of a log imported from another judge run
 
 
 def from_logs(log_dir: str | Path) -> pd.DataFrame:

@@ -60,7 +60,7 @@ def format_reasoning(block: Any) -> str:
     if getattr(block, "redacted", False):
         return ""
     reasoning = getattr(block, "reasoning", "") or ""
-    # ponytail: a provider that returns a summary and nothing else arrives indistinguishable
+    # A provider that returns a summary and nothing else arrives indistinguishable
     # from raw CoT (OpenRouter collapses it into `reasoning`); nothing in the log to tell.
     return f"<THOUGHT_START>\n {reasoning}\n<THOUGHT_END>" if reasoning.strip() else ""
 
@@ -100,7 +100,7 @@ def format_content(content: Any, include_reasoning: bool = True, shown: frozense
             if include_reasoning and "reasoning" in shown and (rendered := format_reasoning(block)):
                 texts.append(rendered)
         elif b_type in PLACEHOLDER_BLOCKS:
-            # No way to show media to the judge, so just record that it was there. TODO
+            # No way to show media to the judge, so just record that it was there.
             if "text" in shown:
                 texts.append(PLACEHOLDER_BLOCKS[b_type])
         else:

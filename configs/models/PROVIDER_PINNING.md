@@ -1,11 +1,7 @@
 # Model config rules
 
-Three rules, in priority order. `scripts/audit_configs.py` checks all of them against the
-live OpenRouter endpoints API; run it before any run that produces a reported number.
-
-```bash
-uv run python scripts/audit_configs.py          # exits 1 on any failure
-```
+Four rules, in priority order. Check a config against the live OpenRouter endpoints API before
+any run that produces a reported number.
 
 ## 1. Pin the endpoint
 
@@ -57,8 +53,8 @@ generate_args:
 
 ## Deliberate exceptions
 
-A `# deliberate:` comment in a config downgrades its audit findings to notes. Two configs
-carry one, both because rule 2 beats rule 3:
+A `# deliberate:` comment in a config marks a knowing departure from the rules. Two examples,
+both because rule 2 beats rule 3:
 
 - **`moonshotai/kimi-k3.yml`** — pinned to `moonshotai/mxfp4`, a 4-bit endpoint, though
   `deepinfra/bf16` and `baseten/fp8` exist. Their caps are 16 384 and 262 144 against the
@@ -69,6 +65,4 @@ carry one, both because rule 2 beats rule 3:
 
 ## Verifying after the fact
 
-`scripts/audit_configs.py` checks intent; `scripts/audit_providers.py data/<bench>` checks
-what actually happened, reading the served provider out of each response already stored in
-the eval logs.
+The provider that actually served each response is stored in the eval logs; check it there.

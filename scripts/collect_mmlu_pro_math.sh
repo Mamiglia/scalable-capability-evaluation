@@ -4,7 +4,7 @@
 # models get one invocation each, MAX_CONCURRENCY at a time, so each spins its own pod.
 #   REPEATS=2 bash scripts/collect_mmlu_pro_math.sh          # more repeats
 #   bash scripts/collect_mmlu_pro_math.sh --limit 2 --log-dir /tmp/smoke   # validate
-#   BENCH=configs/bench/aime24.yml LIST=configs/collect/aime24_pre2025_models.txt REPEATS=2 \
+#   BENCH=configs/bench/aime24.yml LIST=<models.txt> REPEATS=2 \
 #     bash scripts/collect_mmlu_pro_math.sh                    # same sweep, another bench/cohort
 
 set -euo pipefail

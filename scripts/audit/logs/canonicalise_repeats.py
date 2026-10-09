@@ -51,7 +51,7 @@ def classify(path: Path) -> dict:
         # aime it is often just "ANSWER: 204", which two genuine repeats of a strong model
         # produce identically. Full assistant text plus the output token count is the same
         # signal validate_data.py uses, and it only matches when the generation was replayed
-        # (the generate cache did that before 08-17), not merely when the answers agree.
+        # (early collection's generate cache did that), not merely when the answers agree.
         text = [
             block if isinstance(block, str) else getattr(block, "text", None) or getattr(block, "reasoning", "")
             for message in sample.messages if message.role == "assistant"
@@ -246,7 +246,7 @@ def main() -> int:
 
     # Archiving is not free: a model left with fewer than two usable repeats drops out of the
     # self-pair control and, at zero, out of the study. Say which ones, loudly -- the fix is
-    # re-collection, and that is the user's call, not this script's.
+    # re-collection, and that is a human decision, not this script's.
     short = sorted((len(v), k) for k, v in survivors.items() if len(v) < 2)
     if short:
         print(f"\n{len(short)} bench/model dirs left with <2 usable repeats -- re-collect or accept:",

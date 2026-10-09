@@ -66,7 +66,7 @@ def core_run_dirs(forecasts: pd.DataFrame, variant: str, logs: Path) -> dict[tup
 def pairwise_verdicts(run_dir: Path) -> pd.DataFrame:
     """
     Reads a pairwise run's verdicts, one per bench, item and ordered pair of models; where the run's own verdict and
-    one imported from an older campaign overlap, the run's own is kept.
+    one imported from another run overlap, the run's own is kept.
 
     Inputs:
         run_dir: a pairwise run folder (logs/judge/<domain>/<semester>/<judge>/<condition hash>).

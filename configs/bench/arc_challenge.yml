@@ -7,6 +7,6 @@ task: src/collect/tasks/arc.py@arc_challenge_cot
 task_args:
   cot: true
   # fixed random draw of 200 of the 1172 test items, identical across models;
-  # grade-level balance checked by scripts/check_arc_subset.py (chi2 p=0.70).
+  # grade-level balance checked (chi2 p=0.70).
   subset: 200
   seed: 0

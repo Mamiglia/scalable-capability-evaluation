@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Embed collected transcripts with Qwen3-Embedding-8B into the cache protocols.embeddings reads.
 
-    python scripts/embeddings/embed.py --bench gpqa arc_challenge hle [--out /fast/jyeon/smalljudge_embeddings]
+    python scripts/embeddings/embed.py --bench gpqa arc_challenge hle [--out DIR]
         [--variant full answer] [--limit-logs N] [--limit-samples N] [--all-items]
 
-GPU job (scripts/embeddings/embed.sub). For every successful collection log
+Runs on GPU. For every successful collection log
 data/<bench>/<hash>/<model>/<repeat>/*.eval (all repeats) and every text variant it writes
 <out>/<bench>/<hash>/<model>/<repeat>/<log>.<variant>.npz (arrays: see protocols.embeddings).
 Existing files are skipped, so a re-run only fills gaps. Samples are restricted to the items of the
@@ -14,7 +14,7 @@ a bench absent from every frozen table, or --all-items, embeds every sample.
 Text: evals.sample.extract_transcript (the judge-visible transcript), tokenised without truncation,
 chunked at --max-tokens with --overlap (at most --max-chunks chunks, the rest is dropped), each chunk
 ending in <|endoftext|>, last-token pooled, L2-normalised, token-weighted mean over chunks
-(as scripts/hibayes/sae_judge.py), stored as float16.
+stored as float16.
 """
 
 import argparse
@@ -68,7 +68,7 @@ INCLUDE_REASONING = {"full": True, "answer": False}
 def frozen_items(data: Path) -> dict[str, set[str]]:
     """bench -> item ids that appear in the frozen full/items.csv."""
     table = pd.read_csv(data / "meta" / "full" / "items.csv", dtype={"item": str})
-    if os.environ.get("EMBED_TRAIN_ONLY"):  # ponytail: only what protocols.embeddings reads (train items); such
+    if os.environ.get("EMBED_TRAIN_ONLY"):  # only what protocols.embeddings reads (train items); such
         table = pd.read_csv(data / "meta" / "full" / "task_items.csv", dtype={"item": str}).query("train")  # files are partial -> keep them out of the HF cache
     return {bench: set(ids) for bench, ids in table.groupby("bench").item}
 
@@ -101,9 +101,9 @@ class Embedder:
             print("no usable CUDA device (torch.cuda.is_available() is False); exiting 6 for a requeue", flush=True)
             raise SystemExit(6)
         self.device = "cuda"
-        # ponytail: EMBED_DTYPE=float16 for Pascal cards (no bf16 kernels); the cache was built in bf16 on H100s
+        # EMBED_DTYPE=float16 for Pascal cards (no bf16 kernels); the cache was built in bf16 on H100s
         dtype = getattr(torch, os.environ.get("EMBED_DTYPE", "bfloat16"))
-        # ponytail: EMBED_DEVICE_MAP=auto shards the layers over every visible GPU (two 24 GB cards: fp16 weights
+        # EMBED_DEVICE_MAP=auto shards the layers over every visible GPU (two 24 GB cards: fp16 weights
         # alone leave too little of one card for an 8192-token chunk); needs accelerate
         if os.environ.get("EMBED_DEVICE_MAP"):
             self.model = AutoModel.from_pretrained(MODEL, revision=REVISION, dtype=dtype,
@@ -173,7 +173,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--bench", nargs="+", required=True, help="data/<bench> directories")
     parser.add_argument("--data", type=Path, default=Path("data"))
-    parser.add_argument("--out", type=Path, default=Path("/fast/jyeon/smalljudge_embeddings"))
+    parser.add_argument("--out", type=Path, default=Path(os.environ.get("SMALL_JUDGE_EMBEDDINGS", "transcript-embeddings")))
     parser.add_argument("--variant", nargs="+", default=list(store.VARIANTS), choices=store.VARIANTS)
     parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--overlap", type=int, default=256)
@@ -186,7 +186,7 @@ def main() -> int:
     parser.add_argument("--reverse", action="store_true",
                         help="walk the shard's logs from the end: a second job per shard that meets the first in the middle")
     parser.add_argument("--referenced", action="store_true",
-                        help="only the logs referenced by a frozen models.csv (priority pass for the evaluation)")
+                        help="only the logs referenced by the frozen samples.csv (priority pass for the evaluation)")
     parser.add_argument("--seed", type=int, default=0,
                         help="nonzero: walk the shard's logs in a seeded random order (extra jobs that rarely collide)")
     args = parser.parse_args()

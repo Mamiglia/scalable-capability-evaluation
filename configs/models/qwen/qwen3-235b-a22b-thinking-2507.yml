@@ -1,5 +1,5 @@
 # Quantization: undeclared (Alibaba); novita is the only endpoint that declares one (fp8).
-# Repin 2026-09-09, the revisit the old note called for: on HLE gold 70% of samples hit
+# Repin 2026-09-09: on HLE gold 70% of samples hit
 # novita/fp8's 32768 cap mid-reasoning (acc 0.111, below the non-thinking 235b's 0.237),
 # so rule 2 now beats rule 3. alibaba is the only endpoint with room (117964).
 # The novita/fp8 HLE run is archived in data/legacy/; gpqa/aime logs predate this repin

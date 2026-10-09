@@ -1,4 +1,4 @@
-"""Final-text parsing for the inline ratings observed in the MiniMax campaign."""
+"""Final-text parsing for the inline ratings observed in MiniMax judge outputs."""
 
 from types import SimpleNamespace
 

@@ -3,16 +3,15 @@
 1. Anthropic prompt caching. inspect's OpenRouter provider marks the last system block, the last
    tool definition and a message-level breakpoint -- but only on list-form content. In an agent
    loop the last message is a string-content ``tool`` message, so the rolling breakpoint never
-   lands and only the static prefix (~2.3K tokens) is ever read back: claude-opus-4.7 on
-   Terminal-Bench 2026-08-31 and the claude-opus-4.8 smoke 2026-09-17 both cached 6-8% of prompt
-   tokens. Probed 2026-09-17 (src/challenges/frontier/README.md): OpenRouter honours
+   lands and only the static prefix (~2.3K tokens) is ever read back: 6-8% of prompt tokens on
+   Terminal-Bench (src/challenges/frontier/README.md). OpenRouter honours
    ``cache_control`` on a tool message whose content is a list of text blocks, and the whole
    prefix is read back on the next turn. So convert the last message's string content to list
    form and mark its last block. At most 4 breakpoints (Anthropic's limit): system, tools,
    inspect's rolling one, this one.
 
 2. Flaky upstream 400s. OpenRouter relays an upstream failure as HTTP 400 ``Provider returned
-   error`` with ``metadata.raw: 'ERROR'`` (stealth/union-alpha 2026-09-17: ~7% of calls, at
+   error`` with ``metadata.raw: 'ERROR'`` (stealth/union-alpha: ~7% of calls, at
    random). inspect treats 400 as final, so the sample dies. Retry that exact shape as transient;
    a real 400 (context overflow, bad schema) carries a descriptive raw message and stays final.
 """

@@ -34,9 +34,9 @@ from reference.freeze import local_fit
 
 SEMESTER = "2026-I"
 SUBSETS = {"terminal_bench_2_1": "0af2ba2c", "swe_bench_mini": "2d1e487f"}
-# GPT-5.x from the Epoch AI SWE-bench import (collection_runs.md 2026-09-16): swe_bench_mini only, 46 of the 50 items
+# GPT-5.x from the Epoch AI SWE-bench import (data/collection_runs.md): swe_bench_mini only, 46 of the 50 items
 # (23 of the 27 HARD), Epoch's bash scaffold rather than ours -- theta* rests on those 23 items and on item
-# parameters fitted under our scaffold. Partial by design (user, 2026-09-19).
+# parameters fitted under our scaffold. Partial by design.
 EPOCH = ("swe_bench_mini", "6d369262", ["gpt-5.1-2025-11-13_high", "gpt-5.2-2025-12-11_high", "gpt-5.3-codex_high",
                                         "gpt-5.4-2026-03-05_high", "gpt-5.5-pre-release_xhigh"])
 

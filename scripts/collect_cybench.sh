@@ -17,7 +17,7 @@ export CYBENCH_ACKNOWLEDGE_RISKS=1   # cybench agent gets unrestricted network; 
 
 # Agentic CTF context grows until it overflows the model window (OpenRouter 400s the turn). Lower
 # max_tokens buys input headroom; the two groups keep large-context reasoning models from a tight
-# CoT cap. Split by OpenRouter context_length: SMALL <=164k, LARGE >=200k (measured 2026-09-02).
+# CoT cap. Split by OpenRouter context_length: SMALL <=164k, LARGE >=200k.
 small=(
   configs/models/deepseek/deepseek-r1-0528.yml
   configs/models/deepseek/deepseek-v3.2.yml

@@ -21,7 +21,6 @@ THOUGHT = re.compile(r"<THOUGHT_START>.*?<THOUGHT_END>", re.S)
 def answer_text(transcript) -> str:
     return THOUGHT.sub("", transcript.text)
 
-# TODO: These features are meant to be improved!
 FEATURES = {
     "chars": lambda t: len(t.text),
     "answer_chars": lambda t: len(answer_text(t)),

@@ -6,10 +6,10 @@ Flags, per model dir:
 - fewer than --min-repeats usable repeats (imported single-run logs, tagged ``imported``,
   are exempt: they were never collected in repeats)
 - more than one successful log in a repeat dir
-- pairs of repeats whose completions are mostly identical (until 2026-08-17 collect ran
-  with a generate cache, so a repeat could replay another; see AGENTS.md)
+- pairs of repeats whose completions are mostly identical (early collection ran with a
+  generate cache, so a repeat could replay another)
 
-    uv run python scripts/validate_data.py [data/aime2024 ...] [--samples 100] [--dup 0.5] [--delete]
+    uv run python scripts/audit/logs/validate_data.py [data/aime2024 ...] [--samples 100] [--dup 0.5] [--delete]
 
 Exit code 1 if anything is flagged. ``--delete`` removes what is flagged as unusable: incomplete
 logs, the higher repeat of a replay pair, and repeat dirs left without a log.

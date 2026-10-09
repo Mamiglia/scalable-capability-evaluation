@@ -5,13 +5,13 @@ into individual single-epoch evaluation log files (.eval), preserving and handli
 
 Usage examples:
     # Dry-run split scan on a directory
-    python scripts/split_eval_epochs.py data/gpqa --dry-run
+    python scripts/judge/split_eval_epochs.py data/gpqa --dry-run
 
     # In-place split multi-epoch files into 0.eval, 1.eval, 2.eval, ... in the same directory
-    python scripts/split_eval_epochs.py data/gpqa --inplace
+    python scripts/judge/split_eval_epochs.py data/gpqa --inplace
 
     # Output split files to a custom directory
-    python scripts/split_eval_epochs.py data/gpqa -o output_dir/
+    python scripts/judge/split_eval_epochs.py data/gpqa -o output_dir/
 """
 
 import argparse

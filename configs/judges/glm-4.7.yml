@@ -3,5 +3,5 @@ name: glm-4.7
 judge: configs/models/zai/glm-4.7.yml
 include_reasoning: false
 # atlas-cloud/fp8 context is ~200k but the model config asks 182476 output tokens; 2026-I math pairs reach ~40k
-# tokens, so 5 tasks 400-ed on 2026-09-13. Verdicts run ~1.6k tokens (max seen 20k): 32768 leaves ample room.
+# tokens, so 5 tasks were rejected with HTTP 400. Verdicts run ~1.6k tokens (max seen 20k): 32768 leaves ample room.
 _kwargs: {max_tokens: 32768}

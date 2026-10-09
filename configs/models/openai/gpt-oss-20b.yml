@@ -36,7 +36,7 @@ runpod:
     - openai_gptoss
     - --max-model-len
     - "131072"
-    # 2026-09-11: agentic benches need tool calling. Without these vLLM never turns the
+    # Agentic benches need tool calling. Without these vLLM never turns the
     # model's output into structured tool_calls, so the react loop re-prompts until the
     # message cap: a swe_bench_mini run showed 0 `tool` events, msgs=100 and ~100k tokens
     # on every sample, all scoring 0. Single-turn benches (mmlu_pro_math) are unaffected.

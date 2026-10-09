@@ -1,6 +1,6 @@
 """Prediction scores of every protocol on the frontier targets (coding_frontier, 2026-I).
 
-    PYTHONPATH=src:scripts/analyses .venv/bin/python src/challenges/frontier/plot_scores.py
+    PYTHONPATH=src .venv/bin/python src/challenges/frontier/plot_scores.py
 
 Score of protocol P on target m: S_m(P) = -log2(e_m(P) / e_m(base)), e_m = (theta_hat - theta*)^2, base = the
 constant forecast at the references' mean theta* (`mean_ref`: with saturated items, accuracy carries no
@@ -9,13 +9,11 @@ baseline, +1 = squared error halved. Reads results/<domain>/eval_<protocol>.csv 
 writes analysis/frontier/prediction_scores.{csv,png,svg}.
 """
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, "scripts/analyses")
 from plots.frontier import SHOW, VENDORS, pairwise_boxes, scores_figure  # noqa: E402
 
 META = Path("results/coding_frontier")
@@ -27,7 +25,7 @@ EXISTING_DIRECT = Path("logs/direct/coding/2026-I/kimi-k2-thinking/1a2c14b2")  #
 
 
 def existing_direct() -> pd.DataFrame:
-    """Coding's absolute-judge forecasts from the run already collected on 2026-09-14 (EXISTING_DIRECT), not a new one:
+    """Coding's absolute-judge forecasts from the existing run (EXISTING_DIRECT), not a new one:
     its hash predates agent_bench_os joining the domain, so `evaluate --direct-judge` would re-rate everything."""
     from capability.evaluate import forecast
     from capability.task import Task

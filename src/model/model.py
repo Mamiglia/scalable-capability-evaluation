@@ -99,7 +99,7 @@ class Model:
             # `timeout` only bounds inspect's outer wait; the OpenAI SDK's own HTTP client keeps
             # its 600s read timeout unless the provider gets `client_timeout`. Without it every
             # generation longer than 10 min dies with APITimeoutError, is retried from scratch and
-            # never completes (qwen3-30b-a3b AIME/HLE, 2026-09-11).
+            # never completes.
             if "timeout" in generate_args:
                 model_args.setdefault("client_timeout", generate_args["timeout"])
         else:

@@ -24,7 +24,7 @@ from reference import tables
 ClauseTyper = Callable[[Sequence[ChatMessage]], Sequence[str]]
 MEMBER = re.compile(r"samples/(.+)_epoch_(\d+)\.json$")
 VIEWS = ("visible", "hidden")
-COLUMNS = FEATURES + STRUCTURE_FEATURES  # structure columns are filled by scripts/glm_features/merge_labels.py
+COLUMNS = FEATURES + STRUCTURE_FEATURES  # structure columns are filled by a separate labeller
 
 
 def sample_features(sample: EvalSample, *, include_reasoning: bool = True,

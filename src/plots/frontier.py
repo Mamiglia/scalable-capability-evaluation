@@ -19,7 +19,7 @@ SHOW = {
     "ridge": ("Deterministic features", PROTOCOL["Length+regex"]),
 }
 # vendor -> [(data-dir name, label)], newest first. "*" = Epoch AI SWE-bench import: swe_bench_mini only, Epoch's scaffold
-# (integrate.py EPOCH). union-alpha left out (user, 2026-09-19).
+# (integrate.py EPOCH). union-alpha left out.
 VENDORS = {
     "Anthropic": [("claude-fable-5", "Fable 5"), ("claude-opus-4.8", "Opus 4.8"), ("claude-opus-4.7", "Opus 4.7")],
     "OpenAI": [("gpt-5.6-sol", "GPT-5.6 Sol"), ("gpt-5.5-pre-release_xhigh", "GPT-5.5*"), ("gpt-5.4-2026-03-05_high", "GPT-5.4*"),

@@ -2,5 +2,5 @@
 # MODELS_FILE=configs/collect/frontier_models.txt BENCH=configs/bench/terminal_bench_2_1_frontier.yml scripts/collect_terminal_bench.sh
 configs/models/openai/gpt-5.6-sol.yml
 configs/models/anthropic/claude-opus-4.8.yml
-configs/models/anthropic/claude-fable-5.yml   # refuses 10/82 terminal tasks as "cyber" (scored 0), collected on request 2026-09-17
+configs/models/anthropic/claude-fable-5.yml   # refuses 10/82 terminal tasks as "cyber" (scored 0)
 configs/models/stealth/union-alpha.yml

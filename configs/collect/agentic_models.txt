@@ -1,11 +1,9 @@
 # Agentic cohort (tool-calling models) for the coding/cyber domains, by release half.
 # gemma-3-27b-it is deliberately absent: no native tool calling (no tool tokens, no FC
 # training) -- prompt-templated pseudo-tools only, so an agentic score is not comparable.
-# 2026-09-08 swaps: mistral-small-2503 -> mistral-small-3.2-24b (3.1's vLLM tool path 400s on stray
-# [TOOL_CALLS] markers), llama-4-scout -> minimax-m1 (Llama 4's pythonic tool calls are parsed by
-# no endpoint on the slug). Both replacements are API-served, so no Runpod skip applies.
-# 2026-09-11: semesters.yml swapped 2025-I llama-4-maverick -> qwen3-30b-a3b, which was already on
-# this list -- maverick is dropped, so 2025-I has 7 agentic models (gemma-3-27b-it is the 8th in
+# mistral-small-3.2-24b stands in for mistral-small-2503 (3.1's vLLM tool path 400s on stray
+# [TOOL_CALLS] markers) and minimax-m1 for llama-4-scout (Llama 4's pythonic tool calls are parsed by
+# no endpoint on the slug). 2025-I has 7 agentic models (gemma-3-27b-it is the 8th in
 # semesters.yml and stays excluded here). Keep this file in sync with configs/semesters.yml.
 # 2025-I
 configs/models/deepseek/deepseek-r1-0528.yml

@@ -1,7 +1,4 @@
-"""House-style plot primitives for the judge analysis (Arial, 400 dpi).
-
-Same design tokens as scripts/analyses/epoch_irt/plots.py.
-"""
+"""House-style plot primitives for the judge analysis (Arial, 400 dpi)."""
 
 import matplotlib
 

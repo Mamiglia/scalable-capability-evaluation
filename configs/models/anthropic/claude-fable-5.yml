@@ -1,5 +1,5 @@
 # Pinned to Anthropic first-party. Thinking is always on for this model (adaptive is the only
-# accepted setting); reasoning.enabled is set anyway so the config states it (audit rule 4).
+# accepted setting); reasoning.enabled is set anyway so the config states it (PROVIDER_PINNING.md rule 4).
 # A `stop_reason: refusal` (safety classifier) is a normal, scored-wrong completion, not an error.
 # Caching: see claude-opus-4.8.yml.
 name: anthropic/claude-fable-5

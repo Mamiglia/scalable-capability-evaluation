@@ -1,8 +1,7 @@
 # CODING: SWE-bench mini + Terminal-Bench 2.1 + AgentBench OS (+ Terminal-Bench 3.0, once collected — uncomment).
-# Model roster: configs/experiments/agentic_models.txt (tool-calling models only). gemma-3-27b-it is
+# Model roster: configs/collect/agentic_models.txt (tool-calling models only). gemma-3-27b-it is
 # excluded — no native tool calling, so its agentic score is not on this scale; it is never collected
 # on these benches and therefore never enters the fit (`models:` empty = whatever has logs).
-# TBD
 name: coding
 benches:
   - bench: configs/bench/swe-bench-mini.yml

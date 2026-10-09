@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Collect the frontier subsets (terminal_bench_2_1 then swe_bench_mini) for each model, sequentially:
-# the podman host cannot take two container-heavy evals at once (memory: podman-docker-benches-setup).
+# the podman host cannot take two container-heavy evals at once.
 # No --max-subprocesses 1: these images are pulled, not built, and the flag serialises every sandbox
-# exec across the 32 samples (opus-4.8 2026-09-17: 1/82 after 40 min until retuned live via inspect ctl).
+# exec across the 32 samples.
 #
 #   setsid -f bash -c 'src/challenges/frontier/collect.sh configs/models/openai/gpt-5.6-sol.yml \
 #       configs/models/anthropic/claude-opus-4.8.yml > artifacts/frontier/collect.log 2>&1'

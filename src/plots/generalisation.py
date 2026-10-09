@@ -14,7 +14,7 @@ from analysis.stats import BASELINE, ci95
 from plots.results import unclip_markers
 from plots.signal_glm import COLORS, DOMAIN_COLORS, score_axis, stars, two_lines
 
-MARKERS = {"science": "o", "math": "s", "coding": "^", "cyber": "D"}  # CLAUDE.md, one shape per domain
+MARKERS = {"science": "o", "math": "s", "coding": "^", "cyber": "D"}  # one shape per domain
 BASELINE_COLOUR = "#9a9a9a"
 SCORE_LABEL = "Prediction score\n(halvings of error)"
 

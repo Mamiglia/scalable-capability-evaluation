@@ -31,7 +31,7 @@ models=("${open[@]}" "${closed[@]}")
 # <16k of input budget on 128-160k-context models; OpenRouter rejects (400) any agent turn whose
 # prompt + max_tokens exceeds the context. 32k output/turn is plenty here (observed ~400/turn).
 # fail_on_error as a fraction: 3 flaky provider errors must not abort (and 10x retry) a whole model.
-# ponytail: rootless podman's sqlite store locks up under concurrent container creates and the
+# Rootless podman's sqlite store locks up under concurrent container creates and the
 # 150 sandboxes wrote 54 GB into the 56 GB /dev/shm graphroot in 6 min -> 2 evals x 32 sandboxes (~25 GB peak).
 uv run collect \
   --jobs "${JOBS:-2}" \

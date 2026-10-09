@@ -11,7 +11,7 @@ number of halvings of the error, 0 at the baseline. Squared errors are pooled be
 taken, because a target the saturated-item prediction happens to nail has a near-zero baseline
 error and would otherwise dominate.
 
-Design: docs/superpowers/specs/2026-09-17-generalisation-design.md. Figures: plots.generalisation.
+Figures: plots.generalisation.
 """
 
 import numpy as np

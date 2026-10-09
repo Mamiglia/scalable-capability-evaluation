@@ -1,10 +1,10 @@
 """Embed channel-filtered transcripts with Qwen3-Embedding-8B, as the embedding protocol reads them.
 
-    uv run python src/challenges/channels/embed.py plan --out jobs.json [--thirds [kept]] # laptop: which logs, items, variants
+    uv run python src/challenges/channels/embed.py plan --out jobs.json [--thirds [kept]] # local: which logs, items, variants
     python src/challenges/channels/embed.py run jobs.json --out DIR --shard k/n      # GPU: download and embed
     python src/challenges/channels/embed.py check DIR REFERENCE_DIR                 # compare a "full" re-embedding
 
-The embedder is Tommy's scripts/embeddings/embed.py (methodology branch, 68d6db0), unchanged in its settings:
+The embedder matches scripts/embeddings/embed.py in its settings:
 extract_transcript text, tokenised without truncation, 8,192-token chunks with 256 overlap (at most 16), each chunk
 ending in <|endoftext|>, last-token pooled, L2-normalised, token-weighted mean, float16. A variant
 "channels-<spec>" renders the transcript with JudgeConfig.channels = <spec> (reasoning shown); "thirds-<kept>" renders it
@@ -68,7 +68,7 @@ def chunk(ids: list[int], size: int, overlap: int, max_chunks: int) -> list[list
 
 
 class Embedder:
-    """Tommy's embedder (scripts/embeddings/embed.py @ 68d6db0), settings unchanged."""
+    """The embedder of scripts/embeddings/embed.py, settings unchanged."""
 
     def __init__(self, max_tokens=8192, overlap=256, max_chunks=16, tokens_per_batch=32768, device="cuda"):
         import torch

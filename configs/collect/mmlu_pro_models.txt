@@ -36,7 +36,7 @@ configs/models/qwen/qwen3-32b.yml                         # 0.631
 configs/models/minimax/minimax-m1.yml                     # to collect (replaces llama-4-scout)
 configs/models/mistralai/mistral-small-3.2-24b.yml        # to collect (replaces mistral-small-2503)
 configs/models/google/gemma-3-27b-it.yml                  # 0.439
-# 2025-II (added 2026-09-10: every model gets the easy tier)
+# 2025-II
 configs/models/moonshotai/kimi-k2-thinking.yml            # 0.879
 configs/models/zai/glm-4.5.yml                            # 0.841
 configs/models/zai/glm-4.7.yml                            # 0.835

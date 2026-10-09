@@ -1,4 +1,4 @@
-"""Refused samples are "not scored" (decision 2026-09-17), not failures.
+"""Refused samples are "not scored", not failures.
 
 A safety-classifier refusal says nothing about capability, so a refused item must drop out of the
 theta* fit and of judging instead of counting as wrong. Two shapes, both from the model events:

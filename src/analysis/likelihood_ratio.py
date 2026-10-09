@@ -20,7 +20,7 @@ from analysis import stats
 from protocols import judges
 
 SHAPES = ("normal", "t")
-SHAPE = "t"  # the shape the results use (user's choice, 2026-09-21); "normal" is kept alongside for comparison
+SHAPE = "t"  # the shape the results use; "normal" is kept alongside for comparison
 Rule = Callable[[pd.Series, list[str]], pd.Series]  # (references' theta*, models) -> the models' theta-hat
 
 
