@@ -131,37 +131,3 @@ def test_glm_variants_fit_references_only_and_reset_between_cohorts(tmp_path):
     assert length.predict(test).isna().all()
     length.fit(empty)
     assert length.predict(test).isna().all()
-
-
-def test_rst_labeller_orders_clauses_and_protected_spans():
-    """scripts/glm_features/rst_labels.py with a stub parser: one node per clause, protected spans in place."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("rst_labels", "scripts/glm_features/rst_labels.py")
-    rl = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(rl)
-
-    class Unit:
-        def __init__(self, start, end, left=None, right=None, relation=None, nuclearity=None):
-            self.start, self.end, self.left, self.right, self.relation, self.nuclearity = start, end, left, right, relation, nuclearity
-
-    class StubParser:
-        """Splits at sentence ends; joins every pair as elaboration with the first sentence as nucleus."""
-        def __call__(self, text):
-            cuts, leaves = [0] + [i + 1 for i, c in enumerate(text) if c == "."], []
-            leaves = [Unit(a, b) for a, b in zip(cuts, cuts[1:]) if text[a:b].strip()]
-            tree = leaves[0]
-            for leaf in leaves[1:]:
-                tree = Unit(tree.start, leaf.end, tree, leaf, "elaboration", "NS")
-            return {"rst": [tree]}
-
-    plain = "First clause. Second clause. Third clause."
-    assert rl.prose_labels(StubParser(), plain) == ["elaboration"] * 3  # no protected span: every clause kept
-    mixed = "Intro. $$x=1$$ Then more.\nANSWER: 3"
-    assert rl.prose_labels(StubParser(), mixed) == ["elaboration", "equation", "elaboration", "answer"]
-    labels, failed = rl.transcript_labels(StubParser(), [
-        {"kind": "reasoning", "text": "Think. Again."}, {"kind": "text", "text": "Done."},
-        {"kind": "tool_call", "text": '{"cmd": "cat a"}', "function": "bash"},
-        {"kind": "tool_output", "text": "a"}, {"kind": "feedback", "text": "try again"}])
-    assert failed == 0
-    assert labels == [["elaboration", True], ["elaboration", True], ["root", False], ["tool_inspect", False],
-                      ["tool_output", False], ["feedback", False]]

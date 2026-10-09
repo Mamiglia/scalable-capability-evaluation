@@ -29,7 +29,6 @@ external_data/**/*.eval
 /external_data/epoch-gpqa/item_domains.csv
 /judge_results/
 /irt_models_slide.pptx
-/scripts/interactive_viewer/data/
 /transcript-embeddings/
 # the paper is its own git repo
 docs/paper/

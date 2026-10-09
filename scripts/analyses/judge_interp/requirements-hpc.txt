@@ -1,7 +1,0 @@
-torch>=2.4
-transformers>=4.51
-accelerate>=1.0
-pandas
-pyarrow
-numpy
-pyyaml

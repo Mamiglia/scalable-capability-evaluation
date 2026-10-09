@@ -1,17 +1,14 @@
-"""Legacy length baselines and the shared TabularRegression wrapper.
+"""TabularRegression, the shared wrapper of the feature-based protocols, and their registry.
 
-A model is one row of features — the mean log length of its correct train transcripts — and
-a protocol is a sklearn estimator of theta* on some of those columns, fit on the references and historical models.
-The new length/regex/structure GLM feature sets live in transcript_features/features.py.
+A model is one row of features and a protocol is a sklearn estimator of theta* on some of those columns, fit on the
+references. The deterministic transcript features (glm_length, glm_regex) live in transcript_features/, the
+embedding ridge in embeddings.py; FEATURES below (mean log lengths) is the default feature table.
 """
 
 import re
 
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import LinearRegression, Ridge
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.base import RegressorMixin as SKlearnRegressor, clone
 
 from capability.task import Cohort
@@ -91,13 +88,11 @@ class TabularRegression(Protocol):
         return prediction
 
 
-PROTOCOLS: dict[str, Protocol] = {f: TabularRegression(f, [f], LinearRegression()) for f in FEATURES}
-# Small training cohorts against collinear features: standardise and shrink, or the fit is arbitrary.
-PROTOCOLS["ridge"] = TabularRegression("ridge", list(FEATURES), make_pipeline(StandardScaler(), Ridge(1.0)))
+PROTOCOLS: dict[str, Protocol] = {}
 
 from protocols.transcript_features.protocol import TranscriptRegression  # noqa: E402  (subclasses TabularRegression)
 
-for variant in ("length", "regex", "structure"):
+for variant in ("length", "regex"):  # glm_regex is the paper's protocol; glm_length its length-only control
     PROTOCOLS[f"glm_{variant}"] = TranscriptRegression(variant=variant)
 
 from protocols.embeddings import EmbeddingRegression  # noqa: E402  (subclasses TabularRegression)

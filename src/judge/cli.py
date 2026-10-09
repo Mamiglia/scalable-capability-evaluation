@@ -1,6 +1,6 @@
 """Collect judgments (paid API calls): what a judge's run in logs/ still lacks on every semester task of a domain.
 
-    uv run judge configs/domain/science.yml --judge configs/judges/gemma4-31b.yml [--direct-judge ...] [--semester 2026-I]
+    uv run judge configs/domain/science.yml --judge configs/judges/reasoning/kimi-k2-thinking.yml [--direct-judge ...] [--semester 2026-I]
 
 Pairwise (--judge, JudgeBT) and direct (--direct-judge, JudgeDirect) judging resume at sample level; a finished run is only
 read. Then `uv run evaluate <domain.yml> --judge <same yml>` scores the run, and scripts/export_judgments.py adds it

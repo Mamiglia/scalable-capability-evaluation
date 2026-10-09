@@ -1,14 +1,13 @@
 """Constant baselines: theta-hat = mean theta* of the previous-semester references.
 
-The floor any protocol must beat. `mean_ref` averages all references, `mean_frontier` the
-TOP_K best (the ones that defined EASY / HARD), on the bet that targets track the frontier.
+The floor any protocol must beat: `mean_ref` gives every target the references' mean theta*
+(`top` averages the TOP_K strongest instead).
 """
 
 import pandas as pd
 
 from capability.task import Cohort, Task
 from protocols import Protocol
-from reference.freeze import TOP_K
 
 
 class MeanReference(Protocol):
@@ -27,4 +26,4 @@ class MeanReference(Protocol):
         return pd.Series(self.constant, index=test.models.index)
 
 
-PROTOCOLS = {"mean_ref": MeanReference("mean_ref"), "mean_frontier": MeanReference("mean_frontier", TOP_K)}
+PROTOCOLS = {"mean_ref": MeanReference("mean_ref")}

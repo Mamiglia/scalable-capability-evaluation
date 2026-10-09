@@ -252,10 +252,10 @@ def test_evaluate_cli_loads_judge_yamls_and_writes_direct_forecasts(tmp_path, mo
 
     monkeypatch.setattr(JudgeDirect, "scores", direct_scores)
     monkeypatch.setattr(JudgeBT, "verdicts", pairwise_verdicts)
-    monkeypatch.setattr("sys.argv", ["evaluate", str(domain_path), "--protocol", "chars",
+    monkeypatch.setattr("sys.argv", ["evaluate", str(domain_path), "--protocol", "mean_ref",
                                     "--judge", str(judge_path), "--direct-judge", str(judge_path), "--semester", "s"])
     assert evaluate.main() == 0
     output = capsys.readouterr().out
-    assert all(name in output for name in ("chars", "judge_j", "direct_judge_j"))
+    assert all(name in output for name in ("mean_ref", "judge_j", "direct_judge_j"))
     prediction = pd.read_csv(tmp_path / "d" / "eval_direct_judge_j.csv")
     assert prediction.to_dict("records") == [{"semester": "s", "model": "t", "theta_hat": 4., "theta": 5.}]

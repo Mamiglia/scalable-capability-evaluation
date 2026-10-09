@@ -1,8 +1,0 @@
-# Pairwise truncation control (coding 2025-II, cyber 2025-II): configs/judges/reasoning/minimax-m1.yml with each transcript cut
-# to its head 2,000 characters. Same items, prompt, orders and reasoning visibility as the full-transcript baseline.
-name: minimax-m1
-judge: configs/models/minimax/minimax-m1-judge.yml
-include_reasoning: true
-max_length: 2000
-truncate: head
-_kwargs: {fail_on_error: false, max_connections: 16}

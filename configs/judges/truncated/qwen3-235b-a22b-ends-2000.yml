@@ -1,8 +1,0 @@
-# Pairwise truncation control (cyber 2025-II): configs/judges/reasoning/qwen3-235b-a22b.yml with each transcript cut
-# to its ends 2,000 characters. Same items, prompt, orders and reasoning visibility as the full-transcript baseline.
-name: qwen3-235b-a22b
-judge: configs/models/qwen/qwen3-235b-a22b.yml
-include_reasoning: true
-max_length: 2000
-truncate: ends
-_kwargs: {fail_on_error: false}
