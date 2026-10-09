@@ -27,17 +27,21 @@ from protocols.direct_judge.scoring import calibrate, mean_scores
 REPO = Path(__file__).resolve().parents[3]
 ROOT = REPO / "artifacts/direct-judging-truncation"  # frozen inputs, logs, results
 CHANNELS_ROOT = REPO / "artifacts/direct-judging-channels"  # the same, for channel conditions
+THIRDS_ROOT = REPO / "artifacts/direct-judging-thirds"  # the same, for thirds-<kept> conditions (40 removal items per task)
 
 
 def root(condition):
     """Artifact root of <domain>/<judge>/<semester>/<cut>: channel cuts (channels-<spec>) have their own campaign dir."""
-    return CHANNELS_ROOT if condition.rsplit("/", 1)[-1].startswith("channels-") else ROOT
+    cut = condition.rsplit("/", 1)[-1]
+    return CHANNELS_ROOT if cut.startswith("channels-") else THIRDS_ROOT if cut.startswith("thirds-") else ROOT
 
 
 def cut_fields(cut):
     """DirectJudgeConfig fields a cut sets: head|tail|ends-<max_length>, or channels-<only|drop>-<channel>."""
     if cut.startswith("channels-"):
         return {"channels": cut.removeprefix("channels-")}
+    if cut.startswith("thirds-"):
+        return {"truncate": cut}  # judge.dataset.cut(text, _, "thirds-<kept>"), max_length untouched
     mode, max_length = cut.split("-")
     return {"truncate": mode, "max_length": int(max_length)}
 

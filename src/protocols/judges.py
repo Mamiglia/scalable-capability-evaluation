@@ -35,15 +35,25 @@ DIRECT = ("raw", "item_z")
 
 def pairwise_theta(verdicts: pd.DataFrame, refs: pd.Series, models: list[str], conversion: str,
                    prior: tuple[float, float] | None = None) -> pd.Series:
-    """theta-hat of `models` from `verdicts` (bench, item, model_left, model_right, pick_left, ...)
-    with the references `refs` (theta* indexed by model) fixed; index = models. A target with no
-    verdicts against the references gets the prior mean, not NaN; the run's `missing` count says
-    how many judgments are absent.
+    """
+    Places `models` on the theta* scale from pairwise verdicts, with the references fixed at their theta*. "linear" is
+    weighted_theta: per-bench weighted least squares on win-rate logits under the references' own normal prior. "bt"
+    is Bradley-Terry over the verdicts that involve a reference, the references pinned. "calibrated" fits a slope per
+    bench and a shared bias on the reference pairs, finds each model's maximum-likelihood theta, then shrinks it toward
+    `prior` with a weight set by the judge's leave-one-out error on the references.
 
-    conversion "linear": weighted_theta. "bt": plain pinned Bradley-Terry over the verdicts that
-    involve a reference (`prior` unused). "calibrated": calibrate on the reference pairs, 1-D ML
-    per model, shrunk by the judge's leave-one-out error on the references toward `prior`
-    (mean, variance); prior None means the references' own mean and variance.
+    Inputs:
+        verdicts: a matched verdict table; uses bench, model_left, model_right and pick_left ("bt" also item and
+            judge).
+        refs: the references' theta*, indexed by model.
+        models: the models to place (the targets, or one held-out reference).
+        conversion: "linear", "calibrated" or "bt".
+        prior: (mean, variance) that "calibrated" shrinks toward; None uses the references' mean and variance. Unused
+            by "linear" and "bt".
+    Outputs:
+        Series of theta-hat indexed by `models`. A model without verdicts against a reference gets the prior mean
+        under "linear" and "calibrated" and NaN under "bt"; under "calibrated" every model is NaN when no reference
+        pair was judged.
     """
     if conversion == "linear":
         return weighted_theta(verdicts, refs, list(models)).reindex(models)
@@ -63,8 +73,18 @@ def pairwise_theta(verdicts: pd.DataFrame, refs: pd.Series, models: list[str], c
 
 
 def pairwise_reference_loo(verdicts: pd.DataFrame, refs: pd.Series, conversion: str) -> pd.Series:
-    """Each reference's theta-hat from the reference-vs-reference verdicts only, with the
-    conversion calibrated on the other references; index = refs.index."""
+    """
+    Places each reference from the reference-against-reference verdicts only, with the conversion fitted on the other
+    references (the held-out reference's theta* is never used) and, under "calibrated", shrunk toward the other
+    references' mean and variance.
+
+    Inputs:
+        verdicts: a matched verdict table; only rows with a reference on both sides are used.
+        refs: the references' theta*, indexed by model.
+        conversion: "linear", "calibrated" or "bt".
+    Outputs:
+        Series of leave-one-out theta-hat indexed by refs.index (NaN where the conversion gives none).
+    """
     among = verdicts[verdicts.model_left.isin(refs.index) & verdicts.model_right.isin(refs.index)]
     out = {}
     for r in refs.index:
@@ -74,18 +94,34 @@ def pairwise_reference_loo(verdicts: pd.DataFrame, refs: pd.Series, conversion: 
 
 
 def valid_ratings(ratings: pd.DataFrame) -> pd.DataFrame:
-    """Rows with a numeric score in [1, 10], one per (model, bench, item): repeated judging
-    epochs of one transcript are averaged first, so every transcript weighs the same."""
+    """
+    Keeps the ratings with a numeric score between 1 and 10 and averages the repeated judging epochs (and, in a pooled
+    run, the several judges) of each transcript, so every transcript weighs the same.
+
+    Inputs:
+        ratings: a rating table; uses model, bench, item and score (non-numeric scores are dropped).
+    Outputs:
+        DataFrame with columns model, bench, item, score; one row per transcript.
+    """
     values = pd.to_numeric(ratings.score, errors="coerce")
     kept = ratings.assign(score=values)[values.between(1, 10)]
     return kept.groupby(["model", "bench", "item"], as_index=False).score.mean()
 
 
 def normalise(ratings: pd.DataFrame, refs: pd.Series, normalisation: str) -> pd.DataFrame:
-    """Ratings (model, bench, item, score) after the normalisation: "raw" unchanged; "item_z"
-    replaces each score by (score - mean) / sd with mean and sd over the references' scores
-    of that (bench, item); an item with no spread among the references (sd 0 or a single
-    reference) gives z = 0, an item no reference rated is dropped."""
+    """
+    Applies a rating normalisation. "raw" leaves the scores unchanged; "item_z" replaces each score by
+    (score - mean) / sd, with mean and sd over the references' scores of the same (bench, item). An item on which the
+    references do not vary (sd 0, or a single reference) gives z = 0; an item no reference rated is dropped.
+
+    Inputs:
+        ratings: per-transcript ratings with columns model, bench, item, score (valid_ratings output).
+        refs: the references' theta*, indexed by model; only the index is used.
+        normalisation: "raw" or "item_z".
+    Outputs:
+        under "raw", `ratings` itself; under "item_z", a DataFrame with columns model, bench, item, score, one row per
+        rated transcript of an item some reference rated.
+    """
     if normalisation == "raw":
         return ratings
     assert normalisation == "item_z", normalisation
@@ -96,9 +132,19 @@ def normalise(ratings: pd.DataFrame, refs: pd.Series, normalisation: str) -> pd.
 
 
 def direct_theta(ratings: pd.DataFrame, refs: pd.Series, models: list[str], normalisation: str) -> pd.Series:
-    """theta-hat of `models` from `ratings` (bench, model, item, score): OLS of the references'
-    theta* on their mean (normalised) rating, applied to each model's mean; index = models,
-    NaN for a model without valid ratings or when fewer than two references have both."""
+    """
+    Places `models` on the theta* scale from Absolute scoring ratings: each model's mean (normalised) rating over its
+    transcripts, then a least-squares line of the references' theta* on their mean rating, applied to each model's mean.
+
+    Inputs:
+        ratings: a matched rating table; uses model, bench, item and score.
+        refs: the references' theta*, indexed by model.
+        models: the models to place (the targets, or one held-out reference).
+        normalisation: "raw" or "item_z" (see normalise).
+    Outputs:
+        Series of theta-hat indexed by `models`; NaN for a model without valid ratings, and for every model when fewer
+        than two references have both a mean rating and a finite theta*.
+    """
     means = normalise(valid_ratings(ratings), refs, normalisation).groupby("model").score.mean()
     x, y = means.reindex(refs.index), refs
     known = np.isfinite(x) & np.isfinite(y)
@@ -113,8 +159,17 @@ def direct_theta(ratings: pd.DataFrame, refs: pd.Series, models: list[str], norm
 
 
 def direct_reference_loo(ratings: pd.DataFrame, refs: pd.Series, normalisation: str) -> pd.Series:
-    """Each reference's theta-hat from a calibration (and normalisation) fit on the other
-    references only; index = refs.index."""
+    """
+    Places each reference from its own ratings with the line (and, under "item_z", the per-item mean and sd) fitted on
+    the other references only.
+
+    Inputs:
+        ratings: a matched rating table; only the references' rows are used.
+        refs: the references' theta*, indexed by model.
+        normalisation: "raw" or "item_z".
+    Outputs:
+        Series of leave-one-out theta-hat indexed by refs.index (NaN where direct_theta gives none).
+    """
     among = ratings[ratings.model.isin(refs.index)]
     return pd.Series({r: direct_theta(among, refs.drop(r), [r], normalisation)[r] for r in refs.index}, dtype=float)
 

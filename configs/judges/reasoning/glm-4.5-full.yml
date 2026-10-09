@@ -7,4 +7,4 @@ include_reasoning: true
 max_length: 100000000
 _kwargs: {fail_on_error: false, max_tokens: 32768}
 # 2026-I judge: the most expensive task, judged on 10 train items per global-b quartile (seeded, same for every pair).
-train_per_quartile: 0  # full train set (math and science 2026-I, collected 2026-09-18)
+train_per_quartile: 0  # full train set (math and science 2026-I, collected 2026-09-18); the 40-item run is hard-linked into this condition dir

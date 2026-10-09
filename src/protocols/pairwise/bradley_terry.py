@@ -65,8 +65,8 @@ def rank(verdicts: pd.DataFrame, drop_ties: bool = False, ridge: float = RIDGE,
 
     models = sorted(set(verdicts.model_left) | set(verdicts.model_right))  # every model that appears on either side
     index = {m: i for i, m in enumerate(models)}  # model name -> position in the ability vector
-    left = verdicts.model_left.map(index).to_numpy()
-    right = verdicts.model_right.map(index).to_numpy()
+    left = verdicts.model_left.map(index).to_numpy(int)  # int even when there are no verdicts: numpy indexes with it
+    right = verdicts.model_right.map(index).to_numpy(int)
     pick_left = verdicts.pick_left.to_numpy(float)
     pinned = None if anchors is None else anchors.reindex(models).to_numpy(float)
     ability = fit_abilities(left, right, pick_left, len(models), ridge, pinned)

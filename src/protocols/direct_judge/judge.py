@@ -29,7 +29,7 @@ from configs.paths import is_successful_eval
 from evals.transcripts import read_header
 from judge.run import run_tasks
 from protocols.direct_judge.protocol import DirectRegression
-from reference.tables import DATA
+from reference import tables
 
 SCORE_COLUMNS = ["bench", "judge", "item", "model", "score", "semester", "epoch"]
 
@@ -81,13 +81,16 @@ class JudgeDirect(DirectRegression):
         directory = "direct" if self.config.include_reasoning else "direct_reasoning-hidden"
         if self.config.condition_label:  # e.g. direct_truncated-tail-4000, direct_channels-only-tools
             directory += f"_{self.config.condition_label}"
+        if self.config.truncate.startswith("thirds-"):  # direct_truncated-thirds-23; pairwise thirds stay in logs/judge/ (main)
+            directory += f"_truncated-{self.config.truncate}"
         return (self.config.log_dir / directory / self.domain.name / semester
                 / self.config.judge.shortname.lower() / condition_hash)
 
     def log_dirs(self, semester: str) -> list[Path]:
-        """Every existing run directory of this config for the semester: the hash covers the domain's bench
-        prompts, so a bench added after a run (coding's agent_bench_os) starts a new directory while the
-        earlier benches' ratings stay under the hash of the smaller bench set. Full bench set first."""
+        """Every existing run directory of this config for the semester, full bench set first. The hash covers the
+        domain's bench prompts, so a bench added after a run (coding's agent_bench_os) starts a new directory while
+        the earlier benches' ratings stay under the hash of the smaller bench set (coding: 1a2c14b2 holds SWE-bench
+        and Terminal-Bench, f8860e9c AgentBench)."""
         names = sorted(self._prompts())
         subsets = [set(c) for k in range(len(names), 0, -1) for c in combinations(names, k)]
         return [d for d in dict.fromkeys(self.log_dir(semester, s) for s in subsets) if d.is_dir()]
@@ -106,7 +109,7 @@ class JudgeDirect(DirectRegression):
                     from judge.task import direct_judge_task
 
                     task = direct_judge_task(
-                        DATA / cohort.models.loc[model, f"path_{name}"], items=items,
+                        tables.DATA / cohort.models.loc[model, f"path_{name}"], items=items,
                         system_prompt=system_prompt,
                         max_length=self.config.max_length, include_reasoning=self.config.include_reasoning,
                         truncate=self.config.truncate, window=self.config.window, channels=self.config.channels,
