@@ -64,7 +64,7 @@ def test_judge_bt_judges_target_vs_reference_pairs_on_shared_items_and_skips_fin
     ran = []
     monkeypatch.setattr(judge_module, "run_tasks", lambda tasks, config, log_dir: ran.append(log_dir) or True)
     log_dir = p.judge(t.references, t.test)
-    assert log_dir == tmp_path / "dom" / "s" / "j" / p.config.condition_hash and ran == [log_dir]
+    assert log_dir == tmp_path / p.config.view / "dom" / "s" / "j" / p.config.condition_hash and ran == [log_dir]
     # every task finished in the dir -> read only
     monkeypatch.setattr(judge_module, "is_successful_eval", lambda path: True)
     monkeypatch.setattr(judge_module, "read_header", lambda path: SimpleNamespace(eval=SimpleNamespace(task=path.stem)))

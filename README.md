@@ -39,20 +39,24 @@ requires methods designed to extract these signals more robustly.
 ```bash
 git clone --recurse-submodules <this repo>   # data/ is the generality-labs/benchmarks dataset (git + LFS)
 uv sync                                      # installs src/ as packages; run everything from the repository root
+uv run python scripts/analysis/fetch_data.py # what the paper reads into data/ and logs/ (the full logs/:
+                                             # git clone https://huggingface.co/datasets/generality-labs/protocol-outputs logs)
 uv run pytest                                # offline, no API calls
 cp env.example .env                          # API keys: only needed to collect or judge
 ```
 
 ## Data
 
-Everything is public on Hugging Face under [generality-labs](https://huggingface.co/generality-labs):
+Everything is on Hugging Face under [generality-labs](https://huggingface.co/generality-labs), gated (accept the
+terms: no training on the data, no reposting benchmark questions in plain text):
 
 | dataset | local path | contents |
 | --- | --- | --- |
 | `benchmarks` | `data/` (submodule) | every rollout (`data/<bench>/<hash>/<model>/<repeat>/*.eval`) and the frozen tables in `data/meta/` |
-| `judging` | `logs/` | every judge run (`logs/judge/`, `logs/direct/`, ... as `.eval`) |
-| `glm_features` | `glm_features/` | deterministic transcript features, one CSV per rollout log |
-| `transcript-embeddings` | `transcript-embeddings/` | Qwen3-Embedding-8B vectors, one `.npz` per rollout log |
+| `protocol-outputs` | `logs/` | every protocol output computed on those rollouts: judge runs (`pairwise/<view>/...`, `absolute/<view>/...`), deterministic features (`features/`, one CSV per rollout log) and Qwen3-Embedding-8B vectors (`embeddings/`, one `.npz` per rollout log and view) |
+
+`<view>` is what of each transcript the judge saw: `full`, `reasoning-hidden`, `thirds-<kept>` or
+`channels-<only|drop>-<channel>`; layout and rules in `logs/README.md` and `logs/CONTRACT.md`.
 
 The tables in `data/meta/` are all a protocol needs besides the transcripts (schema: `src/reference/tables.py`,
 rules: `data/CONTRACT.md`). `data/meta/*.csv` covers the paper; `data/meta/full/` adds the models and targets
@@ -139,7 +143,7 @@ every protocol in the paper sees the same 100 items per task. Forecasts go to `r
 ```
 uv run collect    rollouts of every model on every bench          -> data/<bench>/<hash>/<model>/<repeat>/*.eval
 uv run reference  freeze a domain: global 2PL, semester tasks, θ*  -> data/meta/full/*.csv (+ the paper subset, data/meta/*.csv)
-uv run judge      collect a judge's verdicts or ratings            -> logs/judge/... , logs/direct/...
+uv run judge      collect a judge's verdicts or ratings            -> logs/pairwise/<view>/... , logs/absolute/<view>/...
                   scripts/export_judgments.py                      -> data/meta/judgments_*.csv, forecasts.csv
 uv run evaluate   fit / predict protocols, MSE vs θ* (never judges) -> results/<domain>/eval_<protocol>.csv
 ```
@@ -210,5 +214,5 @@ scripts/
   analysis/     run.py and one runner per step, config.yaml, fetch_data.py
   figures/      the data figures and the prediction-horizon figure
   judge/, audit/  provenance: the imports, rescores and checks the published data went through
-  embeddings/, glm_features/  the embedding and feature inputs
+  embeddings/, glm_features/  write logs/embeddings/ and logs/features/
 ```

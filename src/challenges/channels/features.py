@@ -2,7 +2,7 @@
 Deterministic features protocol, and of transcripts with one third removed or kept alone, for the thirds ablation.
 Run through scripts/analysis/features.py.
 
-glm_features/ holds two views per transcript, "visible" (messages + reasoning) and "hidden" (messages
+logs/features/ holds two views per transcript, "visible" (messages + reasoning) and "hidden" (messages
 only); the other channel views derive from them except the reasoning alone, extracted here: every
 assistant message reduced to its reasoning blocks, no tool calls, then protocols.transcript_features
 .features.extract_features. Rows: the correct first attempts of the references' and targets' train

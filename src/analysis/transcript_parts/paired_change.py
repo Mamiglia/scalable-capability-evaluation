@@ -65,15 +65,15 @@ def published_ratings(logs: Path, condition: str, domain: str, semester: str, ju
 
     Inputs:
         logs: the logs/ checkout (paths.logs).
-        condition: the run's condition, e.g. "channels-drop-reasoning" or "truncated-thirds-23"; the file read is
-            <logs>/direct_<condition>/<domain>/<semester>/<judge>/<hash>/ratings.csv, of which exactly one must exist.
+        condition: the run's view, e.g. "channels-drop-reasoning" or "thirds-23"; the file read is
+            <logs>/absolute/<condition>/<domain>/<semester>/<judge>/<hash>/ratings.csv, of which exactly one must exist.
         domain: the task's domain key.
         semester: the task's semester.
         judge: the judge's shortname.
     Outputs:
         DataFrame of the file's rows with item read as a string; the callers use model, bench, item and score.
     """
-    (path,) = Path(logs, f"direct_{condition}", domain, semester, judge).glob("*/ratings.csv")
+    (path,) = Path(logs, "absolute", condition, domain, semester, judge).glob("*/ratings.csv")
     return pd.read_csv(path, dtype={"item": str})
 
 

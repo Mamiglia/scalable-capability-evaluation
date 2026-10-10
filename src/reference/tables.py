@@ -33,7 +33,7 @@ import yaml
 SEMESTERS = Path("configs/semesters.yml")
 # Transcript logs; SMALL_JUDGE_DATA points at a checkout elsewhere (e.g. an external volume).
 DATA = Path(os.environ.get("SMALL_JUDGE_DATA", "data"))
-FEATURES = Path("glm_features")  # per-transcript feature CSVs mirroring data/ (generality-labs/glm_features)
+FEATURES = Path("logs/features")  # per-transcript feature CSVs mirroring data/ (generality-labs/protocol-outputs features/)
 META = Path("data") / "meta"  # the frozen tables stay in the repo checkout
 # Added-cohort targets the paper evaluates (iclr, closed-source targets on CODING); the rest stay in full/ only.
 PAPER = {"frontier": ["claude-fable-5", "claude-opus-4.7", "claude-opus-4.8", "gemini-3.5-flash", "gpt-5", "gpt-5.6-sol"]}

@@ -1,7 +1,7 @@
 """JudgeBT: an LLM judge's verdicts on every (target, reference) pair of the task, judged on demand.
 
 The run is one inspect eval_set per <domain, semester, judge, condition>, stored under
-<config.log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/judge/ by default): one .eval per <bench, reference,
+<config.log_dir>/<view>/<domain>/<semester>/<judge>/<condition hash>/ (logs/pairwise/ by default): one .eval per <bench, reference,
 target>, on the train items both models got right on repeat 0, in both shown orders. A sample
 is `<item>_<shown position of the reference>`; the scorer's answer "1"/"2" says which shown
 transcript the judge picked. Tasks already finished in the dir are not re-run (eval_set resumes),
@@ -81,10 +81,8 @@ class JudgeBT(PairwiseBT):
         self.name = f"judge_{config.judge.shortname.lower()}"
 
     def log_dir(self, semester: str) -> Path:
-        base = self.config.log_dir
-        if self.config.condition_label:  # e.g. logs/judge_truncated-head-2000, logs/judge_window-keep-2of10
-            base = base.with_name(f"{base.name}_{self.config.condition_label}")
-        return base / self.domain.name / semester / self.config.judge.shortname.lower() / self.config.condition_hash
+        return (self.config.log_dir / self.config.view / self.domain.name / semester / self.config.judge.shortname.lower()
+                / self.config.condition_hash)
 
     def tasks(self, train: Cohort, test: Cohort, done: dict[str, list[set[str]]] | None = None) -> list[Task]:
         """One judging task per <bench, reference, target> and per <bench, reference, reference> pair, on the train

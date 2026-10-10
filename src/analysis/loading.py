@@ -1,7 +1,7 @@
 """
 Reads what the analysis needs from disk: the domain configurations, the semester tasks from the frozen tables, and the
 judge runs already collected in logs/. It never launches judging. A judge run is one folder per domain, semester,
-judge and condition, under logs/judge/ (Pairwise judge verdicts) or logs/direct*/ (Absolute scoring ratings, 1 to 10);
+judge and condition, under logs/pairwise/<view>/ (Pairwise judge verdicts) or logs/absolute/<view>/ (Absolute scoring ratings, 1 to 10);
 its rows are read here as logged and cut down to the frozen train items by analysis.matching.
 """
 
@@ -125,6 +125,18 @@ def pairwise_configs() -> dict[tuple[str, str], tuple[Path, str]]:
     return out
 
 
+def pairwise_dirs(logs: Path, domain: str, semester: str, judge: str = "*", condition: str = "*") -> list[Path]:
+    """The pairwise run folders logs/pairwise/<view>/<domain>/<semester>/<judge>/<condition hash>/ of any view
+    (a condition hash names one view, so the view need not be known)."""
+    return [d for d in (logs / "pairwise").glob(f"*/{domain}/{semester}/{judge}/{condition}") if d.is_dir()]
+
+
+def pairwise_run(logs: Path, domain: str, semester: str, judge: str, condition: str) -> Path:
+    """The one pairwise run folder of (domain, semester, judge, condition hash), whatever its view."""
+    (run_dir,) = pairwise_dirs(logs, domain, semester, judge, condition)
+    return run_dir
+
+
 def pairwise_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
     """
     Reads every pairwise run on disk for one task whose judge is one of the semester's three candidate judges (the
@@ -133,7 +145,7 @@ def pairwise_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
 
     Inputs:
         dom: the domain configuration.
-        task: the semester task; its semester selects logs/judge/<domain>/<semester>/<judge>/<condition hash>/.
+        task: the semester task; its semester selects logs/pairwise/<view>/<domain>/<semester>/<judge>/<condition hash>/.
     Outputs:
         list of JudgeRun with protocol "pairwise", one per run folder, verdicts as logged (not yet matched). Raises
         RuntimeError if a candidate run folder holds unfetched git-lfs stubs (see fetched).
@@ -141,7 +153,7 @@ def pairwise_runs(dom: DomainConfig, task: Task) -> list[JudgeRun]:
     configs = pairwise_configs()
     roster = tables.fit_settings(dom)["top"][task.semester]
     runs = []
-    for run_dir in sorted((LOGS / "judge" / dom.name / task.semester).glob("*/*/")):
+    for run_dir in sorted(pairwise_dirs(LOGS, dom.name, task.semester), key=lambda d: d.parts[-2:]):
         judge, condition = run_dir.parts[-2], run_dir.parts[-1]
         if judge not in roster or (judge, condition) not in configs or not fetched(run_dir):
             continue

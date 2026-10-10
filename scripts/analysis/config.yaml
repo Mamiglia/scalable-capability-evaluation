@@ -3,9 +3,9 @@
 
 paths:
   data: data                          # generality-labs/benchmarks: frozen tables (meta/) and transcripts
-  logs: logs                          # generality-labs/judging; must stay logs/: the judge configs name their log dirs
-  features: glm_features              # generality-labs/glm_features: per-transcript deterministic features
-  embeddings: transcript-embeddings   # generality-labs/transcript-embeddings: per-transcript vectors
+  logs: logs                          # generality-labs/protocol-outputs; must stay logs/: the judge configs name their log dirs
+  features: logs/features             # its per-transcript deterministic features
+  embeddings: logs/embeddings         # its per-transcript vectors
   forecasts: analysis/forecasts       # forecasts.csv and likelihood_ratio.csv, which every group reads
   cache: analysis/cache               # expensive intermediate tables, reused when present
   model_configs: configs/models       # the models' release dates (the prediction example)
@@ -14,9 +14,7 @@ paths:
 # the published datasets, at the revisions the results were computed from (scripts/analysis/fetch_data.py)
 data_sources:
   data: {repo: generality-labs/benchmarks, revision: 05154805ed4e3381c2b81e541533d8d2c6520e99}
-  logs: {repo: generality-labs/judging, revision: 061577335dc7092822eb7c0c4df27093b7beefcb}
-  features: {repo: generality-labs/glm_features, revision: 8edc75e7a46ef8171040261e7a67ea2f40e2bf89}
-  embeddings: {repo: generality-labs/transcript-embeddings, revision: 498844f92ae8834564f2e6b7bdf477ab190e38e8}
+  logs: {repo: generality-labs/protocol-outputs, revision: 364835e216beed462f94fea02813d4491cc5efa6}
 
 tasks:
   domains: [science, math, coding, cyber]
@@ -35,7 +33,7 @@ statistics:                           # the log likelihood ratio's predictive is
   seed: 0
 
 # the pairwise judge runs each transcript-parts analysis reads: domain -> semester -> judge and condition hashes
-# (logs/judge/<domain>/<semester>/<judge>/<hash>); the judge is each task's best judge on references
+# (logs/pairwise/<view>/<domain>/<semester>/<judge>/<hash>); the judge is each task's best judge on references
 thirds:
   hashes:
     full_train: {"1": 66f9615b, "2": 574946b9, "3": e4d05a32, "12": b8f67d26, "13": 9d38c63d, "23": 97b40582}
@@ -77,8 +75,8 @@ generalisation:
 frontier:                             # closed-source targets against the open ones of the same task, reasoning hidden
   semester: 2026-I
   domains: {closed: coding_frontier, open: coding}
-  pairwise: {judge: kimi-k2-thinking, condition: 9c1d3abb, log_dir: judge}
-  direct: {judge: deepseek-v3.2, condition: 9d52d41c, log_dir: direct_reasoning-hidden}
+  pairwise: {judge: kimi-k2-thinking, condition: 9c1d3abb, log_dir: pairwise/reasoning-hidden}
+  direct: {judge: deepseek-v3.2, condition: 9d52d41c, log_dir: absolute/reasoning-hidden}
   views: {embedding: answer, glm_regex: hidden}                  # the reasoning-stripped transcript views
   closed_targets: {claude-opus-4.7: Anthropic, claude-opus-4.8: Anthropic, claude-fable-5: Anthropic,
                    gpt-5: OpenAI, gpt-5.6-sol: OpenAI, gemini-3.5-flash: Google}

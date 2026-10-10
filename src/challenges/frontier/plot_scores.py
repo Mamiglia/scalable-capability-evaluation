@@ -21,7 +21,7 @@ OPEN = Path("results/coding")  # the same protocols on this semester's open-weig
 OUT = Path("analysis/frontier/prediction_scores")
 BASE = "mean_ref"
 SEMESTER = "2026-I"
-EXISTING_DIRECT = Path("logs/direct/coding/2026-I/kimi-k2-thinking/1a2c14b2")  # swe + terminal ratings, 16 models
+EXISTING_DIRECT = Path("logs/absolute/full/coding/2026-I/kimi-k2-thinking/1a2c14b2")  # swe + terminal ratings, 16 models
 
 
 def existing_direct() -> pd.DataFrame:

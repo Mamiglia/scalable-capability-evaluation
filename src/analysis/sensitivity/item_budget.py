@@ -51,7 +51,7 @@ def core_run_dirs(forecasts: pd.DataFrame, variant: str, logs: Path) -> dict[tup
         forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv); uses domain,
             semester, protocol, variant, judge and condition.
         variant: the pairwise variant reported (e.g. "linear").
-        logs: the judge-logs checkout; the run folders are logs/judge/<domain>/<semester>/<judge>/<condition hash>.
+        logs: the protocol-outputs checkout; the run folders are logs/pairwise/<view>/<domain>/<semester>/<judge>/<condition hash>.
     Outputs:
         dict (domain, semester, judge) -> the run folder whose condition hash maps (loading.pairwise_configs) to the
         judge's core condition; the first such folder in sorted order.
@@ -59,7 +59,7 @@ def core_run_dirs(forecasts: pd.DataFrame, variant: str, logs: Path) -> dict[tup
     configs = loading.pairwise_configs()
     core = stats.core_condition(forecasts)
     core = core[(core.protocol == "pairwise") & (core.variant == variant)].drop_duplicates(["domain", "semester", "judge"])
-    return {(d, s, j): next(run for run in sorted((logs / "judge" / d / s / j).glob("*/")) if configs.get((j, run.name), ("", ""))[1] == c)
+    return {(d, s, j): next(run for run in sorted(loading.pairwise_dirs(logs, d, s, j), key=lambda r: r.name) if configs.get((j, run.name), ("", ""))[1] == c)
             for d, s, j, c in core[["domain", "semester", "judge", "condition"]].itertuples(index=False)}
 
 
@@ -69,7 +69,7 @@ def pairwise_verdicts(run_dir: Path) -> pd.DataFrame:
     one imported from another run overlap, the run's own is kept.
 
     Inputs:
-        run_dir: a pairwise run folder (logs/judge/<domain>/<semester>/<judge>/<condition hash>).
+        run_dir: a pairwise run folder (logs/pairwise/<view>/<domain>/<semester>/<judge>/<condition hash>).
     Outputs:
         DataFrame with protocols.pairwise.from_logs' columns (bench, judge, item, model_left, model_right, pick_left,
         semester, imported, ...); one row per bench, item, model_left and model_right.

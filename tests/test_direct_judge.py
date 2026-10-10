@@ -27,7 +27,7 @@ from protocols.direct_judge.scoring import calibrate, mean_scores
 def test_direct_config_defaults_and_condition_identity(tmp_path):
     config = DirectJudgeConfig.from_cli({"name": "j", "judge": {"name": "j", "slug": "mockllm/model"}})
     assert config.system_prompt == "assets/system_prompt/direct.txt"
-    assert config.log_dir == Path("logs")
+    assert config.log_dir == Path("logs/absolute")
     assert config.include_reasoning and not config.include_reverse
     pairwise = JudgeConfig(name="j", judge=config.judge, system_prompt=config.system_prompt,
                            include_reasoning=True, include_reverse=False)
@@ -134,8 +134,8 @@ def test_direct_protocol_shows_reasoning_when_reusing_pairwise_config(tmp_path):
     assert all("ANSWER: A" in task.dataset[0].input for task in hidden_tasks)
     assert all(not task.metadata["include_reasoning"] for task in hidden_tasks)
     assert hidden.log_dir("s") != judge.log_dir("s")
-    assert judge.log_dir("s").relative_to(config.log_dir).parts[0] == "direct"
-    assert hidden.log_dir("s").relative_to(config.log_dir).parts[0] == "direct_reasoning-hidden"
+    assert judge.log_dir("s").relative_to(config.log_dir).parts[0] == "full"
+    assert hidden.log_dir("s").relative_to(config.log_dir).parts[0] == "reasoning-hidden"
 
 
 def test_benchmark_prompt_overrides_and_log_identity_use_the_same_resolution(tmp_path):

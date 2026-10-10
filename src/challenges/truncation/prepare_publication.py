@@ -117,7 +117,7 @@ def prepare(condition):
     route = {"judge_config": payload["judge_config"], "model_config": payload["model_config"]}
     failures = {(row["task"], row["item"]) for row in audit.get("declared_failures", [])}
     cfg = DirectJudgeConfig.from_cli(payload["config"])
-    cfg.system_prompt, cfg.log_dir = str(inputs / "prompt.txt"), REPO / "logs"
+    cfg.system_prompt, cfg.log_dir = str(inputs / "prompt.txt"), REPO / "logs" / "absolute"
     assert cfg.include_reasoning and cfg.max_length == max_length and cfg.truncate == mode and (cfg.channels or None) == channels
     protocol = JudgeDirect(cfg, DomainConfig.from_cli(REPO / f"configs/domain/{domain}.yml"))
     destination = protocol.log_dir(payload["semester"])

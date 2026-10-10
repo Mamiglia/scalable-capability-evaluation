@@ -213,7 +213,7 @@ def prepare(domain_name, judge_name, semester, cut):
     cfg = draccus.encode(truncated.config)
     assert cfg["max_length"] == max_length and cfg["truncate"] == mode and all(cfg[k] == v for k, v in fields.items())
     cfg["system_prompt"] = "prompt.txt"
-    cfg["log_dir"] = "logs"
+    cfg["log_dir"] = "logs/absolute"
     pinned = cfg["judge"]["model_args"]["provider"]["only"]
     limited = any(p.startswith(RATE_LIMITED) for p in pinned)
     cfg["_kwargs"].update(max_connections=8 if limited else 16, max_retries=10, timeout=600,

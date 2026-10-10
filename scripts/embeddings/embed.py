@@ -173,7 +173,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--bench", nargs="+", required=True, help="data/<bench> directories")
     parser.add_argument("--data", type=Path, default=Path("data"))
-    parser.add_argument("--out", type=Path, default=Path(os.environ.get("SMALL_JUDGE_EMBEDDINGS", "transcript-embeddings")))
+    parser.add_argument("--out", type=Path, default=Path(os.environ.get("SMALL_JUDGE_EMBEDDINGS", "logs/embeddings")))
     parser.add_argument("--variant", nargs="+", default=list(store.VARIANTS), choices=store.VARIANTS)
     parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--overlap", type=int, default=256)

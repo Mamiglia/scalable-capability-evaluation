@@ -53,7 +53,7 @@ class JudgeConfig(DraccusConfig):
     channels: str = ""  # only-<c> shows one channel of the transcript, drop-<c> hides it: reasoning, text, calls, outputs or tools (calls and outputs)
     temperature: float = 0.0
     cache: bool = True  # inspect generate cache, never expires: a repeated pair is free
-    log_dir: Path = Path("logs/judge")  # runs land in <log_dir>/<domain>/<semester>/<judge>/<condition hash>/ (logs/ syncs to the HF judging repo)
+    log_dir: Path = Path("logs/pairwise")  # runs land in <log_dir>/<view>/<domain>/<semester>/<judge>/<condition hash>/ (logs/: HF protocol-outputs)
     limit: int = 0  # samples per task, for smoke runs (such logs never count as complete)
     # judge only a stratified subset of the train items: this many per global-b quartile (0 = all),
     # the same items for every pair and judge of a task (seeded). Part of the condition.
@@ -89,6 +89,13 @@ class JudgeConfig(DraccusConfig):
         return (("window", self.window) if self.window else ()) + (("channels", self.channels) if self.channels else ())
 
     @property
+    def view(self) -> str:
+        """What of each transcript the judge saw, the run's folder under the protocol's log dir: full, reasoning-hidden,
+        thirds-<kept>, channels-<only|drop>-<channel>, truncated-..., window-... (joined with "_" when combined)."""
+        parts = ([] if self.include_reasoning else ["reasoning-hidden"]) + ([self.truncate] if self.truncate.startswith("thirds-") else [])
+        return "_".join(parts + ([self.condition_label] if self.condition_label else [])) or "full"
+
+    @property
     def condition_label(self) -> str:
         """Readable log-directory suffix of a partial-transcript condition, e.g. truncated-head-4000,
         window-keep-2of10, channels-only-tools (joined with "_" when combined); empty for full transcripts."""
@@ -107,7 +114,7 @@ class DirectJudgeConfig(JudgeConfig):
     """Direct judging defaults"""
 
     system_prompt: str = "assets/system_prompt/direct.txt"
-    log_dir: Path = Path("logs")
+    log_dir: Path = Path("logs/absolute")
     include_reasoning: bool = True
     include_reverse: bool = False  # accepted for compatibility; unused by direct judging
 

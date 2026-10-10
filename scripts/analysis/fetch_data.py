@@ -4,13 +4,11 @@ Downloads the published data the analysis reads, at the revisions in config.yaml
     uv run python scripts/analysis/fetch_data.py            # everything, about 40 GB
     uv run python scripts/analysis/fetch_data.py --dry-run  # how many files and GB per dataset, without downloading
 
-Fetches into paths.data, paths.logs, paths.features and paths.embeddings:
-    data        the frozen tables (meta/) and every transcript log they reference for tasks.domains (and
-                coding_frontier, the closed-source targets)
-    logs        the judge runs of those domains for tasks.all_semesters: Pairwise judge (judge/, judge_channels-*) and
-                Absolute scoring (direct/, direct_reasoning-hidden/, direct_channels-*, direct_truncated-thirds-*)
-    features    all of generality-labs/glm_features
-    embeddings  the vectors of those transcript logs
+Fetches into paths.data and paths.logs:
+    data        generality-labs/benchmarks: the frozen tables (meta/) and every transcript log they reference for
+                tasks.domains (and coding_frontier, the closed-source targets)
+    logs        generality-labs/protocol-outputs: the judge runs of those domains for tasks.all_semesters (pairwise/ and
+                absolute/, every view), all of features/, and the embeddings/ vectors of those transcript logs
 A file already present with the published hash is skipped; every download is checked against it.
 Requires read access to the generality-labs datasets (HF_TOKEN, or `hf auth login`).
 """
@@ -141,8 +139,8 @@ def fetch(repo: str, revision: str, root: Path, wanted, dry_run: bool) -> None:
 
 def main(config: dict, dry_run: bool) -> None:
     """
-    Fetches the four datasets: the frozen tables first, then the transcript logs they reference, the judge runs, the
-    features and the embeddings of those transcript logs. On a dry run without the frozen tables on disk, the transcript
+    Fetches the two datasets: the frozen tables first, then the transcript logs they reference; then the judge runs,
+    the features and the embeddings of those transcript logs. On a dry run without the frozen tables on disk, the transcript
     and embedding counts are 0, since the tables that list them are not there yet.
 
     Inputs:
@@ -150,7 +148,7 @@ def main(config: dict, dry_run: bool) -> None:
             all_semesters).
         dry_run: count the files and bytes to download, download nothing.
     Outputs:
-        the files under paths.data, paths.logs, paths.features and paths.embeddings.
+        the files under paths.data and paths.logs.
     """
     sources, paths, tasks = config["data_sources"], config["paths"], config["tasks"]
     domains = tasks["domains"] + EXTRA_DOMAINS
@@ -158,13 +156,15 @@ def main(config: dict, dry_run: bool) -> None:
     fetch(sources["data"]["repo"], sources["data"]["revision"], data, lambda p: p.startswith("meta/"), dry_run)
     logs = transcript_logs(data / "meta", domains) if (data / "meta").is_dir() else set()
     fetch(sources["data"]["repo"], sources["data"]["revision"], data, logs.__contains__, dry_run)
-    runs = r"judge|judge_channels-[^/]+|direct|direct_reasoning-hidden|direct_channels-[^/]+|direct_truncated-thirds-[^/]+"
-    judged = re.compile(rf"^({runs})/({'|'.join(domains)})/({'|'.join(tasks['all_semesters'])})/")
-    fetch(sources["logs"]["repo"], sources["logs"]["revision"], Path(paths["logs"]), lambda p: bool(judged.match(p)), dry_run)
-    fetch(sources["features"]["repo"], sources["features"]["revision"], Path(paths["features"]), lambda p: True, dry_run)
+    judged = re.compile(rf"^(pairwise|absolute)/[^/]+/({'|'.join(domains)})/({'|'.join(tasks['all_semesters'])})/")
     stems = {p.removesuffix(".eval") for p in logs}
-    fetch(sources["embeddings"]["repo"], sources["embeddings"]["revision"], Path(paths["embeddings"]),
-          lambda p: p.rsplit(".", 2)[0] in stems, dry_run)
+
+    def wanted(p: str) -> bool:
+        if p.startswith("embeddings/"):
+            return p.removeprefix("embeddings/").rsplit(".", 2)[0] in stems
+        return p.startswith("features/") or bool(judged.match(p))
+
+    fetch(sources["logs"]["repo"], sources["logs"]["revision"], Path(paths["logs"]), wanted, dry_run)
 
 
 if __name__ == "__main__":

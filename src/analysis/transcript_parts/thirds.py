@@ -5,7 +5,7 @@ without the first third, "thirds-1" the first third alone), next to the full tra
 ("easy"). The Pairwise judge re-judged the cut transcripts (src/challenges/thirds), and each condition of a task is
 scored on the comparisons judged in all of them, since a third too short to judge drops a comparison from that run
 only. Deterministic features and Embedding refit their ridge per condition on the references' cut transcripts. For
-Absolute scoring the task's judge rated the cut transcripts (logs/direct_truncated-thirds-<kept>/), and each
+Absolute scoring the task's judge rated the cut transcripts (logs/absolute/thirds-<kept>/), and each
 condition is calibrated on the references' ratings of the transcripts rated in every condition.
 """
 
@@ -36,7 +36,7 @@ def pairwise_errors(domain: str, task: Task, run_dirs: dict[str, Path], keep: se
     Inputs:
         domain: the task's domain key.
         task: the task (the references' θ*, the targets and their θ*).
-        run_dirs: condition -> the run's log folder (logs/judge/<domain>/<semester>/<judge>/<hash>), "full" first.
+        run_dirs: condition -> the run's log folder (logs/pairwise/<view>/<domain>/<semester>/<judge>/<hash>), "full" first.
             Each run is cut to the `keep` items, a comparison judged twice is kept once (the run's own verdict before
             an imported one), and every run is cut to the comparisons (bench, item, model_left, model_right) judged
             in all of them.
@@ -109,7 +109,7 @@ def direct_errors(domain: str, task: Task, judge: str, conditions: list[str], ra
         judge: the task's Absolute scoring judge; its full-transcript ratings are its "reasoning-shown" run from
             loading.direct_runs.
         conditions: the thirds conditions scored, e.g. ["thirds-23", "thirds-13", "thirds-12"].
-        rated_in: the thirds conditions whose published runs (logs/direct_truncated-<condition>/) are read and
+        rated_in: the thirds conditions whose published runs (logs/absolute/<condition>/) are read and
             intersected, the kept-alone ones included; must contain `conditions`.
         logs: the logs/ checkout (paths.logs).
     Outputs:
@@ -117,7 +117,7 @@ def direct_errors(domain: str, task: Task, judge: str, conditions: list[str], ra
         condition.
     """
     refs, truth = task.references.theta, task.truth
-    runs = {c: published_ratings(logs, f"truncated-{c}", domain, task.semester, judge) for c in rated_in}
+    runs = {c: published_ratings(logs, c, domain, task.semester, judge) for c in rated_in}
     (full,) = [r for r in loading.direct_runs(loading.domain(domain), task)
                if r.judge == judge and r.condition == "reasoning-shown"]
     runs["full"] = full.table.assign(item=full.table.item.astype(str))

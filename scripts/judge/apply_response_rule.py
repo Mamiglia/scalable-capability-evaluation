@@ -1,6 +1,6 @@
 """Apply the judging rule "both models wrote >= MIN_RESPONSE_CHARS" to existing judge logs.
 
-    uv run python scripts/judge/apply_response_rule.py [logs/judge] [--dry-run]
+    uv run python scripts/judge/apply_response_rule.py [logs/pairwise] [--dry-run]
 
 New runs obey the rule when their dataset is built (judge.dataset.build_dataset). Logs judged
 before the rule, and logs imported from older campaigns, are rewritten here: samples where either
@@ -58,7 +58,7 @@ def apply(log) -> tuple[int, int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("root", type=Path, nargs="?", default=Path("logs/judge"))
+    parser.add_argument("root", type=Path, nargs="?", default=Path("logs/pairwise"))
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     n_logs = n_edited = n_dropped = 0

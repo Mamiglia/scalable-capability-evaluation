@@ -21,8 +21,8 @@ Writes to <paths.outputs>/transcript_parts/ (config.yaml) each figure as .pdf, .
     breakdowns/<name>_errors.csv  every target's squared error per condition, the numbers each figure but
                                   channel_shares is drawn from
 
-Reads the pairwise thirds and channel runs named in config.yaml (thirds, channels) from logs/judge/, the published
-absolute-scoring challenge runs (logs/direct_truncated-thirds-*, logs/direct_channels-*), <paths.forecasts>/forecasts.csv
+Reads the pairwise thirds and channel runs named in config.yaml (thirds, channels) from logs/pairwise/, the published
+absolute-scoring runs on cut transcripts (logs/absolute/thirds-*, logs/absolute/channels-*), <paths.forecasts>/forecasts.csv
 (each task's direct judge), the thirds and channel variants in paths.embeddings, the transcripts in paths.data, and the
 feature tables scripts/analysis/features.py writes to paths.cache. Launches no judging. Run from the repository root:
     uv run python scripts/analysis/transcript_parts.py [--config scripts/analysis/config.yaml] [--only channels_removed ...]
@@ -238,16 +238,15 @@ def thirds_pairwise_errors(config: dict, kept_alone: bool) -> pd.DataFrame:
         kept_alone: read the kept-alone runs rather than the removed ones.
     Outputs:
         DataFrame with columns domain, semester, condition ("full", "easy" and the thirds conditions), model, err; one
-        row per task, target and condition. Reads logs/judge/<domain>/<semester>/<judge>/<hash>/.
+        row per task, target and condition. Reads logs/pairwise/<view>/<domain>/<semester>/<judge>/<hash>/.
     """
     spec, logs, frames = config["thirds"], Path(config["paths"]["logs"]), []
     for domain, task, keep in removal_tasks(config):
         judge, full, hashes = spec["runs"][domain][task.semester]
         if kept_alone:  # the kept-alone runs of the same judge
             hashes = spec["kept_alone_hashes"][task.semester]
-        hashes, run_dir = spec["hashes"][hashes], logs / "judge" / domain / task.semester / judge
-        dirs = {"full": run_dir / full} | {c: run_dir / hashes[c.removeprefix("thirds-")]
-                                           for c in third_rows(config, kept_alone).values()}
+        hashes, run = spec["hashes"][hashes], lambda h: loading.pairwise_run(logs, domain, task.semester, judge, h)
+        dirs = {"full": run(full)} | {c: run(hashes[c.removeprefix("thirds-")]) for c in third_rows(config, kept_alone).values()}
         frames.append(thirds.pairwise_errors(domain, task, dirs, keep, config["protocols"]["pairwise"]))
     return pd.concat(frames, ignore_index=True)
 
@@ -301,15 +300,15 @@ def channels_removed(config: dict, out: Path) -> None:
         out: the output folder (<paths.outputs>/transcript_parts).
     Outputs:
         in out: channels_removed.{pdf,svg,png,csv}, channels_removed_mean_squared_errors.csv and
-        breakdowns/channels_removed_errors.csv. Reads the train-set runs in logs/judge/<domain>/<semester>/<judge>/
+        breakdowns/channels_removed_errors.csv. Reads the train-set runs in logs/pairwise/<view>/<domain>/<semester>/<judge>/
         (cut to the removal items) and the channel runs the configs/judges/channels/ configs write; a channel run not
         on disk is left out.
     """
     spec, logs, frames = config["channels"], Path(config["paths"]["logs"]), []
     for domain, task, keep in removal_tasks(config):
         cell = dict(spec["runs"][domain][task.semester])
-        judge, run_dir = cell.pop("judge"), logs / "judge" / domain / task.semester
-        train = {c: run_dir / judge / h for c, h in cell.items()}
+        judge = cell.pop("judge")
+        train = {c: loading.pairwise_run(logs, domain, task.semester, judge, h) for c, h in cell.items()}
         if domain in spec["tool_domains"]:
             sources = {c: c for c in channel_rows(config).values()}
         else:  # no tool calls: the reasoning alone is the transcript without messages
@@ -365,7 +364,7 @@ def thirds_other_protocols(config: dict, out: Path) -> None:
     Outputs:
         in out: thirds_other_protocols.{pdf,svg,png,csv}, thirds_other_protocols_mean_squared_errors.csv and
         breakdowns/thirds_other_protocols_errors.csv. Reads <paths.cache>/features_thirds.csv and
-        logs/direct_truncated-thirds-*/.
+        logs/absolute/thirds-*/.
     """
     logs, rows = Path(config["paths"]["logs"]), third_rows(config, False)
     removed, alone = list(rows.values()), list(third_rows(config, True).values())
@@ -395,7 +394,7 @@ def channels_other_protocols(config: dict, out: Path) -> None:
     Outputs:
         in out: channels_other_protocols.{pdf,svg,png,csv}, channels_other_protocols_mean_squared_errors.csv and
         breakdowns/channels_other_protocols_errors.csv. Reads <paths.cache>/features_reasoning_only.csv and
-        logs/direct_channels-*/.
+        logs/absolute/channels-*/.
     """
     logs, tool_domains = Path(config["paths"]["logs"]), config["channels"]["tool_domains"]
     reasoning_only = pd.read_csv(Path(config["paths"]["cache"]) / "features_reasoning_only.csv", dtype={"item": str})

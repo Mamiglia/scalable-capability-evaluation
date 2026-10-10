@@ -32,7 +32,7 @@ def forecast(ratings, refs, truth):
 def truncated_ratings(payload, condition, ROOT):
     domain, semester, judge = payload["domain"], payload["semester"], payload["judge"]
     channels = payload.get("channels")
-    published = f"direct_channels-{channels}" if channels else f"direct_truncated-{payload['truncate']}-{payload['max_length']}"
+    published = f"absolute/channels-{channels}" if channels else f"absolute/truncated-{payload['truncate']}-{payload['max_length']}"
     identity = lambda c: (c.get("max_length"), c.get("truncate"), c.get("channels"))
     for base in (REPO / "logs", ROOT / "publication"):
         for path in sorted((base / published / domain / semester / judge).glob("*/condition.json")):

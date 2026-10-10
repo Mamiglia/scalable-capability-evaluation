@@ -20,7 +20,7 @@ from capability.task import Cohort
 from configs.logs import logger
 from protocols.features import TabularRegression
 
-EMBEDDINGS = Path(os.environ.get("SMALL_JUDGE_EMBEDDINGS", "transcript-embeddings"))
+EMBEDDINGS = Path(os.environ.get("SMALL_JUDGE_EMBEDDINGS", "logs/embeddings"))
 VARIANTS = ("full", "answer")
 ALPHAS = np.logspace(-2, 4, 13)  # unit-norm inputs need stronger shrinkage than standardised features
 

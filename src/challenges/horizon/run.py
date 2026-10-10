@@ -7,7 +7,7 @@
 Science only. A task "<targets>_from_<references>" takes the
 references' EASY/HARD split and train items exactly as the frozen task whose references they are
 (same top-3, same seed), so only theta* of its references and targets is refitted, on those HARD
-items. Tables and judge logs go under artifacts/prediction-horizon/, never data/meta or logs/judge,
+items. Tables and judge logs go under artifacts/prediction-horizon/, never data/meta or logs/pairwise,
 so the main analysis never sees them. The judge is that frozen task's best judge on references
 (paper: lowest leave-one-out error, linear variant, core condition), on 10 train items per quartile.
 """
@@ -106,7 +106,7 @@ def judge(limit: int = 0, only: list[str] | None = None) -> None:
         if only and name not in only:
             continue
         config = JudgeConfig.from_cli(config_path)
-        config.log_dir = OUT / ("smoke" if limit else "logs") / "judge"
+        config.log_dir = OUT / ("smoke" if limit else "logs") / "pairwise"
         config.train_per_quartile, config.pair_max_length, config.limit = PER_QUARTILE, pair_max_length, limit
         protocol = JudgeLinear(config, domain)
         logger.info("%s: %s, condition %s -> %s", name, config.judge.shortname, config.condition_hash,

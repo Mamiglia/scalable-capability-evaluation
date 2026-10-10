@@ -76,7 +76,7 @@ def pairwise_runs(forecasts: pd.DataFrame, config: dict) -> dict[tuple[str, str,
         forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv).
         config: the analysis configuration; uses protocols.pairwise and paths.logs.
     Outputs:
-        dict (domain, semester, judge) -> run folder, logs/judge/<domain>/<semester>/<judge>/<condition hash>.
+        dict (domain, semester, judge) -> run folder, logs/pairwise/<view>/<domain>/<semester>/<judge>/<condition hash>.
     """
     return item_budget.core_run_dirs(forecasts, config["protocols"]["pairwise"], Path(config["paths"]["logs"]))
 

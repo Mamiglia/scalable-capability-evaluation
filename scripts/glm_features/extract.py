@@ -1,6 +1,6 @@
-"""Per-transcript GLM features for every sample of every data/ log -> glm_features/.
+"""Per-transcript GLM features for every sample of every data/ log -> logs/features/.
 
-    uv run python scripts/glm_features/extract.py [bench ...] [--data data] [--out glm_features]
+    uv run python scripts/glm_features/extract.py [bench ...] [--data data] [--out logs/features]
 
 glm_features/ is a clone of https://huggingface.co/datasets/generality-labs/glm_features and mirrors
 data/'s layout: <bench>/<task_args_hash>/<model>/<repeat>/<eval id>.csv, one row per sample
@@ -24,7 +24,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("benches", nargs="*", help="default: every bench under --data")
     parser.add_argument("--data", default="data", type=Path)
-    parser.add_argument("--out", default="glm_features", type=Path)
+    parser.add_argument("--out", default="logs/features", type=Path)
     parser.add_argument("--workers", default=6, type=int)
     args = parser.parse_args()
     jobs = []

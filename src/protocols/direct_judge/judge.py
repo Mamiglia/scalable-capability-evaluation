@@ -1,9 +1,8 @@
 """JudgeDirect: one LLM rating per correct train transcript, judged on demand.
 
 The run uses one task per <bench, model> for references, historical models and targets
-instead of model pairs. Logs use direct/ for visible subject reasoning and
-direct_reasoning-hidden/ for hidden subject reasoning, with a _truncated-<head|tail>-<chars>
-suffix when max_length cuts transcripts, followed by domain/semester/judge/hash.
+instead of model pairs. Logs go to <log_dir>/<view>/<domain>/<semester>/<judge>/<hash> (logs/absolute/ by default; view:
+JudgeConfig.view, e.g. full or reasoning-hidden).
 Item IDs are preserved verbatim; no reverse order or shared-correct intersection applies.
 
 Collection requires judge.task.direct_judge_task and a direct-rating JudgeConfig/prompt,
@@ -78,12 +77,7 @@ class JudgeDirect(DirectRegression):
                         for name, prompt in sorted(self._prompts().items()) if benches is None or name in benches)
         condition = (self.config.condition_hash, prompts)
         condition_hash = hashlib.sha256(repr(condition).encode()).hexdigest()[:8]
-        directory = "direct" if self.config.include_reasoning else "direct_reasoning-hidden"
-        if self.config.condition_label:  # e.g. direct_truncated-tail-4000, direct_channels-only-tools
-            directory += f"_{self.config.condition_label}"
-        if self.config.truncate.startswith("thirds-"):  # direct_truncated-thirds-23; pairwise thirds stay in logs/judge/ (main)
-            directory += f"_truncated-{self.config.truncate}"
-        return (self.config.log_dir / directory / self.domain.name / semester
+        return (self.config.log_dir / self.config.view / self.domain.name / semester
                 / self.config.judge.shortname.lower() / condition_hash)
 
     def log_dirs(self, semester: str) -> list[Path]:

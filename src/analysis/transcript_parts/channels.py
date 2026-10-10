@@ -73,7 +73,7 @@ def pairwise_errors(domain: str, task: Task, train_runs: dict[str, Path], channe
 
 def embedding_variant(condition: str, tools: bool) -> str:
     """
-    The name of the embedding variant (a set of vectors in transcript-embeddings/) that holds a condition's
+    The name of the embedding variant (a set of vectors in logs/embeddings/) that holds a condition's
     transcripts.
 
     Inputs:
@@ -151,7 +151,7 @@ def direct_errors(domain: str, task: Task, judge: str, conditions: list[str], ke
     """
     Each target's squared error under Absolute scoring of the full transcript and of each channel-removed transcript,
     and under the Baseline ("easy"). The full transcript's ratings are cut to the `keep` items; each condition's
-    published re-rating (logs/direct_channels-<condition>/) is cut to the (model, bench, item) rated in the full run,
+    published re-rating (logs/absolute/channels-<condition>/) is cut to the (model, bench, item) rated in the full run,
     and every condition is calibrated on the references' mean ratings.
 
     Inputs:
