@@ -13,7 +13,7 @@ paths:
 
 # the published datasets, at the revisions the results were computed from (scripts/analysis/fetch_data.py)
 data_sources:
-  data: {repo: generality-labs/benchmarks, revision: 05154805ed4e3381c2b81e541533d8d2c6520e99}
+  data: {repo: generality-labs/benchmarks, revision: 946149b2df3db6b008436345685df3f698adb71e}
   logs: {repo: generality-labs/protocol-outputs, revision: 364835e216beed462f94fea02813d4491cc5efa6}
 
 tasks:
