@@ -11,7 +11,8 @@ a browser session, supplied via the EPOCH_WAF_TOKEN environment variable.
 
 Only logs missing from out_dir are downloaded, so re-runs are idempotent.
 
-out_dir lives under external_data/ to distinguish from logs/data collected by us.
+The leaderboard CSV is data/external/epoch-gpqa/ (the benchmarks dataset); out_dir, the raw downloads, is
+external_data/ (gitignored) to keep them apart from the logs collected by us.
 """
 
 import os
@@ -38,7 +39,7 @@ USER_AGENT = (
 
 @dataclass
 class FetchConfig:
-    csv: str = "external_data/epoch-gpqa/gpqa_diamond.csv"
+    csv: str = "data/external/epoch-gpqa/gpqa_diamond.csv"
     out_dir: str = "external_data/epoch-gpqa"
     models: Any = "all"  # list of "Model version" names, or "all"
     limit: int = 0  # cap the download count for a quick test; 0 = no cap
