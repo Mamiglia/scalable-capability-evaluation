@@ -40,7 +40,7 @@ requires methods designed to extract these signals more robustly.
 git clone --recurse-submodules <this repo>   # data/ is the generality-labs/benchmarks dataset (git + LFS)
 uv sync                                      # installs src/ as packages; run everything from the repository root
 uv run python scripts/analysis/fetch_data.py # what the paper reads into data/ and logs/ (the full logs/:
-                                             # git clone https://huggingface.co/datasets/generality-labs/protocol-outputs logs)
+                                             # git clone https://huggingface.co/datasets/generality-labs/sce-protocols logs)
 uv run pytest                                # offline, no API calls
 cp env.example .env                          # API keys: only needed to collect or judge
 ```
@@ -53,7 +53,7 @@ terms: no training on the data, no reposting benchmark questions in plain text):
 | dataset | local path | contents |
 | --- | --- | --- |
 | `benchmarks` | `data/` (submodule) | every rollout (`data/<bench>/<hash>/<model>/<repeat>/*.eval`) and the frozen tables in `data/meta/` |
-| `protocol-outputs` | `logs/` | every protocol output computed on those rollouts: judge runs (`pairwise/<view>/...`, `absolute/<view>/...`), deterministic features (`features/`, one CSV per rollout log) and Qwen3-Embedding-8B vectors (`embeddings/`, one `.npz` per rollout log and view) |
+| `sce-protocols` | `logs/` | every protocol output computed on those rollouts: judge runs (`pairwise/<view>/...`, `absolute/<view>/...`), deterministic features (`features/`, one CSV per rollout log) and Qwen3-Embedding-8B vectors (`embeddings/`, one `.npz` per rollout log and view) |
 
 `<view>` is what of each transcript the judge saw: `full`, `reasoning-hidden`, `thirds-<kept>` or
 `channels-<only|drop>-<channel>`; layout and rules in `logs/README.md` and `logs/CONTRACT.md`.

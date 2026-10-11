@@ -7,7 +7,7 @@ Downloads the published data the analysis reads, at the revisions in config.yaml
 Fetches into paths.data and paths.logs:
     data        generality-labs/benchmarks: the frozen tables (meta/) and every transcript log they reference for
                 tasks.domains (and coding_frontier, the closed-source targets)
-    logs        generality-labs/protocol-outputs: the judge runs of those domains for tasks.all_semesters (pairwise/ and
+    logs        generality-labs/sce-protocols: the judge runs of those domains for tasks.all_semesters (pairwise/ and
                 absolute/, every view), all of features/, and the embeddings/ vectors of those transcript logs
 A file already present with the published hash is skipped; every download is checked against it.
 Requires read access to the generality-labs datasets (HF_TOKEN, or `hf auth login`).

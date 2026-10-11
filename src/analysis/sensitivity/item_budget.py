@@ -51,7 +51,7 @@ def core_run_dirs(forecasts: pd.DataFrame, variant: str, logs: Path) -> dict[tup
         forecasts: every protocol's prediction of every target (analysis/forecasts/forecasts.csv); uses domain,
             semester, protocol, variant, judge and condition.
         variant: the pairwise variant reported (e.g. "linear").
-        logs: the protocol-outputs checkout; the run folders are logs/pairwise/<view>/<domain>/<semester>/<judge>/<condition hash>.
+        logs: the sce-protocols checkout; the run folders are logs/pairwise/<view>/<domain>/<semester>/<judge>/<condition hash>.
     Outputs:
         dict (domain, semester, judge) -> the run folder whose condition hash maps (loading.pairwise_configs) to the
         judge's core condition; the first such folder in sorted order.

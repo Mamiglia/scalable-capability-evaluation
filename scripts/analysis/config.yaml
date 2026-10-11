@@ -3,7 +3,7 @@
 
 paths:
   data: data                          # generality-labs/benchmarks: frozen tables (meta/) and transcripts
-  logs: logs                          # generality-labs/protocol-outputs; must stay logs/: the judge configs name their log dirs
+  logs: logs                          # generality-labs/sce-protocols; must stay logs/: the judge configs name their log dirs
   features: logs/features             # its per-transcript deterministic features
   embeddings: logs/embeddings         # its per-transcript vectors
   forecasts: analysis/forecasts       # forecasts.csv and likelihood_ratio.csv, which every group reads
@@ -13,8 +13,8 @@ paths:
 
 # the published datasets, at the revisions the results were computed from (scripts/analysis/fetch_data.py)
 data_sources:
-  data: {repo: generality-labs/benchmarks, revision: 946149b2df3db6b008436345685df3f698adb71e}
-  logs: {repo: generality-labs/protocol-outputs, revision: 364835e216beed462f94fea02813d4491cc5efa6}
+  data: {repo: generality-labs/benchmarks, revision: c1989df0a226f2ab0269548b7f6ce29078ba1f92}
+  logs: {repo: generality-labs/sce-protocols, revision: 4121193ee7d46e5271c362e333dce2f409fa7051}
 
 tasks:
   domains: [science, math, coding, cyber]
