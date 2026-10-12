@@ -1,9 +1,28 @@
+<div align="center">
+
 # Evaluating Model Capabilities After Benchmark Saturation
 
-Code and data for the paper. Built on [Inspect AI](https://inspect.aisi.org.uk/); Python ≥ 3.13 and
-[`uv`](https://docs.astral.sh/uv/).
+[![Python](https://img.shields.io/badge/Python-%E2%89%A53.13-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Inspect AI](https://img.shields.io/badge/Built%20with-Inspect%20AI-4B6EAF)](https://inspect.aisi.org.uk/)
+[![Package manager](https://img.shields.io/badge/Package%20manager-uv-purple)](https://docs.astral.sh/uv/)
+[![Data](https://img.shields.io/badge/Data-Hugging%20Face-yellow?logo=huggingface)](https://huggingface.co/generality-labs)
 
-## Abstract
+</div>
+
+
+This is the official repository for the paper _Evaluating Model Capabilities After Benchmark Saturation_.
+
+
+Authors:
+[Morio Hamada*](https://www.linkedin.com/in/morio-hamada/),
+[Jehyeok Yeon*](https://jeybird248.github.io/),
+[Matteo Migliarini*](https://mamiglia.github.io/#/)
+[Justin Olive](https://www.linkedin.com/in/justindanielolive/)
+[Magda Dubois](https://www.linkedin.com/in/magdadubois/)
+(* Equal Contribution)
+---
+
+## Overview
 
 Rapid advancements in AI capabilities are causing benchmarks to saturate. Once several models approach perfect
 scores, a benchmark loses its power to differentiate between them, and with it its utility for informing AI safety
@@ -23,196 +42,315 @@ underestimating the capabilities of the first reasoning models introduced in ear
 retain capability-predicting signal in their task transcripts, but extending the lifetime of existing benchmarks
 requires methods designed to extract these signals more robustly.
 
-## The paper and the code
+This repository includes the evaluation data, protocols, analysis scripts, and a **plug-in interface for testing new capability-prediction methods**.
 
-| paper | code |
-| --- | --- |
-| §2 Problem setting: θ as a 2PL latent, saturated (EASY) and held-out (HARD) items, semester tasks | `src/irt/`, `src/reference/` (item split, θ\*, the tables), `src/capability/task.py`, `configs/semesters.yml` |
-| §3.1 Evaluation setup: domains, benchmarks, models, rollouts | `configs/domain/`, `configs/bench/`, `configs/models/`, `src/collect/` |
-| §3.2 Prediction protocols | `src/protocols/`, `src/judge/`, `configs/judges/` |
-| §4 and the appendix: every figure and table | `scripts/analysis/run.py` (below); code in `src/analysis/<question>/` |
-| Closed-source frontier targets: collection and θ\* | `src/challenges/frontier/` |
-| Thirds, channels and prediction-horizon judge runs | `src/challenges/{thirds,channels,horizon,truncation}/` |
+---
 
-## Install
+## Getting Started
+
+### 1. Installation
+
+Requires **Python 3.13 or later** and [`uv`](https://docs.astral.sh/uv/). Run all commands from the repository root.
 
 ```bash
-git clone --recurse-submodules <this repo>   # data/ is the generality-labs/benchmarks dataset (git + LFS)
-uv sync                                      # installs src/ as packages; run everything from the repository root
-uv run python scripts/analysis/fetch_data.py # what the paper reads into data/ and logs/ (the full logs/:
-                                             # git clone https://huggingface.co/datasets/generality-labs/sce-protocols logs)
-uv run pytest                                # offline, no API calls
-cp env.example .env                          # API keys: only needed to collect or judge
+git clone --recurse-submodules <this-repo-url>
+cd <repository-directory>
+uv sync
 ```
 
-## Data
+The `data/` submodule contains the [`generality-labs/benchmarks`](https://huggingface.co/datasets/generality-labs/benchmarks) dataset and uses Git LFS. Both published datasets are **gated**. Accept their Hugging Face terms before downloading. They prohibit training on the data and reposting benchmark questions in plain text.
 
-Everything is on Hugging Face under [generality-labs](https://huggingface.co/generality-labs), gated (accept the
-terms: no training on the data, no reposting benchmark questions in plain text):
-
-| dataset | local path | contents |
-| --- | --- | --- |
-| `benchmarks` | `data/` (submodule) | every rollout (`data/<bench>/<hash>/<model>/<repeat>/*.eval`) and the frozen tables in `data/meta/` |
-| `sce-protocols` | `logs/` | every protocol output computed on those rollouts: judge runs (`pairwise/<view>/...`, `absolute/<view>/...`), deterministic features (`features/`, one CSV per rollout log) and Qwen3-Embedding-8B vectors (`embeddings/`, one `.npz` per rollout log and view) |
-
-`<view>` is what of each transcript the judge saw: `full`, `reasoning-hidden`, `thirds-<kept>` or
-`channels-<only|drop>-<channel>`; layout and rules in `logs/README.md` and `logs/CONTRACT.md`.
-
-The tables in `data/meta/` are all a protocol needs besides the transcripts (schema: `src/reference/tables.py`,
-rules: `data/CONTRACT.md`). `data/meta/*.csv` covers the paper; `data/meta/full/` adds the models and targets
-outside it (the global item fit also used them).
-
-| table | one row per | columns |
-| --- | --- | --- |
-| `samples.csv` | scored rollout | domain, bench, item, model, repeat, correct, log (its `.eval` under `data/`) |
-| `items.csv` | item | domain, bench, item, a, a_sd, b, b_sd, c (global 2PL) |
-| `models.csv` | model | domain, model, semester (release), theta_global, theta_global_sd |
-| `tasks.csv` | model in a semester task | domain, semester, model, role (reference / historical / target), cohort, theta (θ\*), theta_sd |
-| `task_items.csv` | item in a semester task | domain, semester, bench, item, split (easy / hard), train, quartile |
-| `judgments_pairwise.csv` | pairwise verdict | domain, semester, judge, condition, bench, item, model_left, model_right, pick_left, chars_left, chars_right, core, paper |
-| `judgments_direct.csv` | 1-10 rating | domain, semester, judge, condition, bench, item, model, score, epoch, core, paper |
-| `forecasts.csv` | the paper's θ̂ per target | domain, semester, protocol, variant, judge, condition, judge_loo_mse, model, theta_hat, theta, missing, paper |
-
-The judgment tables hold every verdict and rating of each task's judges (its three strongest references): `core`
-marks the run per judge that the paper scores, `paper` the one behind the headline numbers.
-
-## Method
-
-**Capability is the latent θ of an item response model.** A model α and a benchmark item i interact through a
-2PL with a guessing floor, `P(α solves i) = c_i + (1 − c_i) · σ(a_i (θ_α − b_i))`, fit per domain (science,
-maths, coding, cyber).
-
-**Semester tasks.** Models are grouped by release semester (`configs/semesters.yml`, 8 models each). In a task
-the previous semester's 8 models are the **references**, whose θ\* is known, and this semester's 8 are the
-**targets**, whose θ\* a protocol must forecast. Earlier models form the **historical** cohort.
-
-**EASY, HARD and θ\*.** The 3 strongest references define the item split: items all 3 solve on their first
-attempt are EASY (saturated), items all 3 answered but some failed are HARD. A protocol sees only a fixed
-stratified subset of the EASY items (25 per difficulty quartile) and only correct transcripts on them. The
-ground truth θ\* is fit on the HARD items only, with the item parameters fixed to the global fit.
-
-**Metric.** Squared error between θ̂ and θ\* per target, and the log-likelihood ratio of θ\* under the
-protocol's forecast against the baseline's (`src/analysis/challenges/likelihood_ratio.py`).
-
-## Protocols
-
-In `src/protocols/`, registered in `protocols.PROTOCOLS` under these names:
-
-| paper | code |
-| --- | --- |
-| Baseline (prediction from saturated items) | `mean_ref` (`protocols/baseline.py`) |
-| Deterministic transcript features | `glm_regex` (`protocols/transcript_features/`) |
-| Transcript embeddings | `embedding` (`protocols/embeddings.py`) |
-| Absolute scoring | `direct` (`protocols/judges.py`, from `judgments_direct.csv`; one judge's logs: `protocols/direct_judge/`) |
-| Pairwise judging | `pairwise` (`protocols/judges.py`, from `judgments_pairwise.csv`; one judge's logs: `protocols/pairwise/`) |
-
-`pairwise` and `direct` convert each judge's core run (pairwise: per-bench weighted least squares on pair logits;
-direct: a line from mean rating to θ\*) and keep, per task, the judge with the lowest leave-one-out error on the
-references. Variants: `pairwise_calibrated`, `pairwise_bt`, `direct_item_z`.
-
-## Compete: a new protocol
-
-`uv run evaluate` recomputes the paper's protocols offline (about 2 minutes) and scores any other protocol next to
-them. The score is the MSE of θ̂ against θ\* over the 64 targets of the main tasks (2025-II and 2026-I, all four
-domains); `n` counts the targets with a forecast.
-
-```
-$ uv run evaluate --protocol pairwise direct glm_regex embedding mean_ref --semester 2025-II 2026-I
-domain     coding  cyber  math  science  main   n   all
-protocol
-pairwise     0.14   0.26  0.42     0.21  0.26  64  0.26
-glm_regex    0.70   1.57  0.76     0.43  0.86  64  0.86
-embedding    1.69   1.29  0.66     0.40  1.01  64  1.01
-direct       1.41   1.48  0.85     0.31  1.01  64  1.01
-mean_ref     2.14   1.39  1.32     0.65  1.37  64  1.37
-```
-
-A protocol is a `protocols.Protocol`: `__call__(task) -> pd.Series` of θ̂ indexed by target (NaN where it has
-nothing to say), by default `fit(task.references)` then `predict(task.test)`. Write it in any file and score it with
-`uv run evaluate --protocol pairwise path/to/mine.py:Mine`; `scripts/example_protocol.py` (judges' win rate
-against the references, 0.57) is a complete one. A `Task` holds `domain`, `semester`, `references` (previous
-semester, θ = θ\*), `historical` (older models, θ = this task's θ\*), `test` (targets, θ hidden) and `truth`
-(scoring only). A cohort exposes `models` (θ, `path_<bench>` logs), `items` (the train items: bench, item, guess,
-a, b) and `transcripts` (model → (bench, item) → the correct first-attempt transcript). Use only the train items:
-every protocol in the paper sees the same 100 items per task. Forecasts go to `results/<domain>/eval_<name>.csv`.
-
-## Pipeline and reproducing scripts
-
-### Pipeline
-
-```
-uv run collect    rollouts of every model on every bench          -> data/<bench>/<hash>/<model>/<repeat>/*.eval
-uv run reference  freeze a domain: global 2PL, semester tasks, θ*  -> data/meta/full/*.csv (+ the paper subset, data/meta/*.csv)
-uv run judge      collect a judge's verdicts or ratings            -> logs/pairwise/<view>/... , logs/absolute/<view>/...
-                  scripts/export_judgments.py                      -> data/meta/judgments_*.csv, forecasts.csv
-uv run evaluate   fit / predict protocols, MSE vs θ* (never judges) -> results/<domain>/eval_<protocol>.csv
-```
+### 2. Download data and run tests
 
 ```bash
-# collection (costs money): benches x models x repeats
+uv run python scripts/analysis/fetch_data.py
+uv run pytest
+```
+
+The data download populates `data/` and `logs/`; the full reproduction dataset is approximately **40 GB**. Tests run offline and do not make API calls.
+
+### 3. Configure API keys (optional)
+
+```bash
+cp env.example .env
+```
+
+Only needed when collecting new model rollouts or running new LLM judges. Reproducing the published analyses and evaluating existing protocol outputs does **not** require paid API calls.
+
+---
+
+## Results
+
+The main comparison covers **64 target models** across science, maths, coding, and cyber tasks in semesters `2025-II` and `2026-I`. Lower mean squared error (MSE) is better.
+
+| Protocol | Coding | Cyber | Maths | Science | Overall MSE |
+|:--|--:|--:|--:|--:|--:|
+| **Pairwise judging** | **0.14** | **0.26** | **0.42** | **0.21** | **0.26** |
+| Deterministic transcript features | 0.70 | 1.57 | 0.76 | 0.43 | 0.86 |
+| Transcript embeddings | 1.69 | 1.29 | 0.66 | 0.40 | 1.01 |
+| Absolute scoring | 1.41 | 1.48 | 0.85 | 0.31 | 1.01 |
+| Saturated-score baseline | 2.14 | 1.39 | 1.32 | 0.65 | 1.37 |
+
+These values come from the following offline command:
+
+```bash
+uv run evaluate --protocol pairwise direct glm_regex embedding mean_ref --semester 2025-II 2026-I
+```
+
+**Important limitation:** Signals that work well on familiar model cohorts may fail under distribution shift. In particular, some protocols underestimated the capabilities of early reasoning models in 2025.
+
+---
+
+## Usage: Evaluate a New Protocol
+
+The repository provides a common interface to compare a new method with the methods in the paper, using the same saturated transcripts and held-out capability targets.
+
+### 1. Run the existing protocols
+
+```bash
+uv run evaluate --protocol pairwise direct glm_regex embedding mean_ref --semester 2025-II 2026-I
+```
+
+The output reports MSE by domain, overall MSE, and the number of targets with a prediction (`n`). Forecasts are written to `results/<domain>/eval_<name>.csv`.
+
+### 2. Add your own method
+
+See [`scripts/example_protocol.py`](scripts/example_protocol.py) for a complete working example based on judge win rates against reference models (overall MSE: **0.57**).
+
+A protocol implements `protocols.Protocol` and returns a `pd.Series` of capability predictions (`theta_hat`), indexed by target model:
+
+```python
+__call__(task) -> pd.Series
+```
+
+By default, the interface fits on `task.references` and predicts for `task.test`. Return `NaN` for targets the method cannot score.
+
+```bash
+uv run evaluate --protocol pairwise path/to/mine.py:Mine
+```
+
+### 3. Understand the task interface
+
+| Field | Description |
+|:--|:--|
+| `task.domain` | Science, maths, coding, or cyber |
+| `task.semester` | Evaluation semester |
+| `task.references` | Previous semester's models, with known capability `θ*` |
+| `task.historical` | Earlier models, with capability estimates on this task |
+| `task.test` | Target models; capability labels are hidden |
+| `task.truth` | Ground truth used by the scorer only; **do not use for prediction** |
+
+Each cohort provides `models` (capability and `path_<bench>` log columns), `items` (benchmark, item, guessing floor, discrimination, and difficulty), and `transcripts` (correct first-attempt transcripts keyed by model and item).
+
+**Evaluation rule:** Use only the fixed **100 training items per task**. The evaluated protocols all receive the same items, and must predict capability on held-out HARD items without using target labels.
+
+---
+
+## Methodology
+
+### Capability estimation
+
+We define capability as the latent model ability `θ` in a two-parameter logistic item response model with an item-specific guessing floor:
+
+\[
+P(\text{model }\alpha\text{ solves item }i)
+= c_i + (1-c_i)\,\sigma\!\left(a_i(\theta_\alpha-b_i)\right).
+\]
+
+Here `a_i` is item discrimination, `b_i` is item difficulty, and `c_i` is the guessing floor. The model is fitted separately for **science, maths, coding, and cyber**.
+
+### Historical semester tasks
+
+Models are grouped into release semesters (eight models per semester; see [`configs/semesters.yml`](configs/semesters.yml)). For each task:
+
+1. The previous semester's eight models form the **reference cohort**. Their `θ*` values are known.
+2. The current semester's eight models form the **target cohort**. Their `θ*` values must be predicted.
+3. Older models form the **historical cohort**.
+4. The three strongest reference models determine the item split:
+   - **EASY (saturated):** all three answer correctly on the first attempt.
+   - **HARD (unsaturated):** all three answered, but at least one failed.
+5. Protocols see a fixed stratified sample of **100 EASY items** (25 per difficulty quartile) and **only correct transcripts**. Ground-truth `θ*` is fitted using HARD items, with item parameters fixed to the global fit.
+
+We evaluate squared error between predicted `θ̂` and ground-truth `θ*` for each target. The paper also reports log-likelihood ratios relative to the baseline (see `src/analysis/challenges/likelihood_ratio.py`).
+
+### Evaluated protocols
+
+| Method | Registered protocol | Implementation |
+|:--|:--|:--|
+| Saturated-score baseline | `mean_ref` | `src/protocols/baseline.py` |
+| Deterministic transcript features | `glm_regex` | `src/protocols/transcript_features/` |
+| Transcript embeddings | `embedding` | `src/protocols/embeddings.py` |
+| Absolute scoring (1–10) | `direct` | `src/protocols/judges.py`, `src/protocols/direct_judge/` |
+| Pairwise judging | `pairwise` | `src/protocols/judges.py`, `src/protocols/pairwise/` |
+
+Pairwise judgments are converted to capability estimates using per-benchmark weighted least squares on pairwise logits. Absolute scores use a linear mapping from mean rating to capability. For each task, the judge with the lowest leave-one-out error on reference models is selected. Additional variants include `pairwise_calibrated`, `pairwise_bt`, and `direct_item_z`.
+
+---
+
+## Datasets
+
+Both datasets are hosted under [Generality Labs on Hugging Face](https://huggingface.co/generality-labs). Access requires acceptance of the dataset terms.
+
+| Dataset | Local location | Contents |
+|:--|:--|:--|
+| [`benchmarks`](https://huggingface.co/datasets/generality-labs/benchmarks) | `data/` | Model rollouts (`.eval`) and frozen reference tables |
+| [`sce-protocols`](https://huggingface.co/datasets/generality-labs/sce-protocols) | `logs/` | Pairwise and absolute judge outputs, deterministic features, and embeddings |
+
+Model rollouts live at `data/<bench>/<hash>/<model>/<repeat>/*.eval`. Protocol logs are organized by transcript view, such as `full`, `reasoning-hidden`, `thirds-<kept>`, and `channels-<only|drop>-<channel>`. See `logs/README.md` and `logs/CONTRACT.md` for the exact layouts.
+
+### Frozen metadata tables
+
+Tables in `data/meta/*.csv` cover the models and tasks in the paper. `data/meta/full/` also includes additional models and targets used for the global item fit. The table schema is defined in `src/reference/tables.py`; see `data/CONTRACT.md` for data rules.
+
+| File | Contents |
+|:--|:--|
+| `samples.csv` | Per-rollout results, correctness, and log path |
+| `items.csv` | Item parameters (`a`, `b`, `c`) and uncertainties |
+| `models.csv` | Models, release semesters, and global capability estimates |
+| `tasks.csv` | Semester cohort membership, roles, and task-specific `θ*` |
+| `task_items.csv` | EASY/HARD splits, training flags, and difficulty quartiles |
+| `judgments_pairwise.csv` | Individual pairwise verdicts and transcript conditions |
+| `judgments_direct.csv` | Individual 1–10 ratings and transcript conditions |
+| `forecasts.csv` | Published protocol predictions, target values, and metadata |
+
+Judgment tables include the verdicts of each task's three strongest reference judges. The `core` flag identifies the scored run for each judge; `paper` identifies the run used for the paper's headline results.
+
+---
+
+## Reproduce the Paper
+
+All published analysis steps use downloaded data and run **without new judging or API costs**.
+
+```bash
+# Fetch published transcripts, protocol outputs, features, and embeddings (~40 GB)
+uv run python scripts/analysis/fetch_data.py
+
+# Generate the paper's analyses (~3 hours)
+uv run python scripts/analysis/run.py
+```
+
+To inspect available stages or resume a partial run:
+
+```bash
+uv run python scripts/analysis/run.py --list
+uv run python scripts/analysis/run.py --from <step>
+```
+
+All analysis settings are in `scripts/analysis/config.yaml`. Output is written to `analysis/`, including protocol forecasts, likelihood ratios, figures, and CSVs containing the displayed numbers and corresponding tests.
+
+| Analysis stage | Figures | Tables |
+|:--|:--|:--|
+| `capability_signal` | 3, 10, 16, 17, 21 | 3, 6, 9 |
+| `transcript_parts` | 4, 5, 22, 23, 24 | |
+| `generalisation` | 6, 7, 8, 9, 18 (cross-domain values) | 7 |
+| `sensitivity` | 15, 19, 20, 25, 27, 28 | 8, 10 |
+
+Additional figure commands:
+
+```bash
+# Domain data figures (11–14)
+uv run python scripts/figures/domain_figures.py science math coding cyber
+
+# Figure 26: prediction horizon (build, judge, transcript, then plot)
+uv run python -m challenges.horizon.run build
+# Run the 'judge' and 'transcript' horizon stages as documented by the CLI.
+uv run python scripts/figures/prediction_horizon_figures.py
+```
+
+For the exact file generated by each stage, consult the docstring in `scripts/analysis/run.py`.
+
+---
+
+## Collect New Rollouts and Judgments (Optional)
+
+These commands run models or judges and **may incur API or compute costs**. Set credentials in `.env` first.
+
+### Collection
+
+```bash
 uv run collect -b configs/bench/gpqa.yml -m configs/models/google/gemma4-31b.yml -n 2
-scripts/collect_openrouter.sh          # the sweeps: configs/collect/*.txt, one script per bench family
 
-# freeze a domain once its collection is complete
-uv run reference configs/domain/science.yml
-
-# judge (costs money; resumes, a finished run is only read), then score that judge's run
-uv run judge configs/domain/science.yml --judge configs/judges/reasoning/kimi-k2-thinking.yml --semester 2026-I
-uv run evaluate configs/domain/science.yml --judge configs/judges/reasoning/kimi-k2-thinking.yml --semester 2026-I
+# Predefined model and benchmark sweeps
+bash scripts/collect_openrouter.sh
 ```
 
-### Reproducing the paper
+Collection writes Inspect AI rollout logs to `data/<bench>/<hash>/<model>/<repeat>/*.eval`.
 
-The paper's figures and tables come from `scripts/analysis/run.py`, from the published datasets; nothing is judged or
-paid for.
+### Build reference tasks
+
+Once the domain's collection is complete, fit the domain-wide item response model and freeze its semester tasks:
 
 ```bash
-uv run python scripts/analysis/fetch_data.py         # transcripts, judge logs, features, embeddings (~40 GB)
-uv run python scripts/analysis/run.py                # about three hours; --list shows the steps, --from resumes
+uv run reference configs/domain/science.yml
 ```
 
-Every setting is in `scripts/analysis/config.yaml`. Outputs land in `analysis/`: `forecasts/` (every protocol's
-forecast of every target, and the log likelihood ratios), then one folder per question with its figures and a CSV of
-every number they show (with its test):
+This writes the full metadata to `data/meta/full/*.csv` and the paper subset to `data/meta/*.csv`.
 
-| step | figures and tables |
-| --- | --- |
-| `capability_signal` | Fig. 3, 10, 16, 17, 21; Tables 3, 6, 9 |
-| `transcript_parts` | Fig. 4, 5, 22, 23, 24 |
-| `generalisation` | Fig. 6, 7, 8, 9, the numbers of Fig. 18 (cross-domain); Table 7 |
-| `sensitivity` | Fig. 15, 19, 20, 25, 27, 28; Tables 8, 10 |
+### Run a new judge and evaluate it
 
-`run.py`'s docstring names the output behind each. Not in `run.py`: the data figures 11 to 14
-(`scripts/figures/domain_figures.py science math coding cyber`) and Fig. 26, the prediction horizon
-(`uv run python -m challenges.horizon.run build`, then `judge` and `transcript`, then
-`scripts/figures/prediction_horizon_figures.py`).
+```bash
+uv run judge configs/domain/science.yml \
+  --judge configs/judges/reasoning/kimi-k2-thinking.yml \
+  --semester 2026-I
 
-## Layout
-
+uv run evaluate configs/domain/science.yml \
+  --judge configs/judges/reasoning/kimi-k2-thinking.yml \
+  --semester 2026-I
 ```
+
+The judging runner resumes unfinished runs and reads completed ones. To export judgment and forecast tables, use `scripts/export_judgments.py`.
+
+### Pipeline summary
+
+```text
+collect   -> data/<bench>/<hash>/<model>/<repeat>/*.eval
+reference -> data/meta/full/*.csv and data/meta/*.csv
+judge     -> logs/pairwise/<view>/... or logs/absolute/<view>/...
+evaluate  -> results/<domain>/eval_<protocol>.csv
+analysis  -> analysis/ (figures, tables, forecasts and tests)
+```
+
+---
+
+## Repository Structure
+
+```text
 configs/
-  bench/        inspect tasks to collect (name = data dir, task = inspect spec, task_args)
-  models/       one yml per model: OpenRouter slug + provider pin, or a Runpod vLLM block
-  domain/       the benches that share one θ scale, with item filters and per-bench judge prompts
-  judges/       an LLM judge and its condition (reasoning/: shown, hidden/: hidden, channels/, direct/)
-  collect/      model lists for the collection sweeps (scripts/collect_*.sh)
-  semesters.yml the roster: 8 models per release semester
+  bench/           Inspect AI benchmark tasks
+  models/          OpenRouter / Runpod vLLM model configurations
+  domain/          Domain definitions, filters, judge prompts
+  judges/          Judge and transcript-view configurations
+  collect/         Model sweep lists
+  semesters.yml   Release-semester model cohorts
+
 src/
-  collect/      collection CLI and custom inspect tasks
-  model/        a ModelConfig -> eval_set kwargs; Runpod pod lifecycle
-  evals/        reading .eval logs: one sample, one log, a domain's responses
-  irt/          1PL / 2PL / fixed-item 2PL with NUTS
-  reference/    freeze.py fits and writes the frozen tables; tables.py reads them back
-  capability/   Task, Cohort, and the evaluate CLI (scorer and leaderboard)
-  protocols/    the forecasting protocols
-  judge/        judging prompt, dataset, scorer, eval_set runner, the judge CLI
-  configs/      config dataclasses and the two content hashes (data path, judge condition)
-  analysis/     the paper's analyses: forecasts and statistics, one subpackage per question
-  plots/        figure code shared by the analyses
-  challenges/   harnesses for the thirds, channels, frontier and prediction-horizon experiments
+  collect/         Collection CLI and Inspect AI tasks
+  model/           Model configuration and Runpod lifecycle
+  evals/           Read and score .eval logs
+  irt/             1PL / 2PL / fixed-item models with NUTS
+  reference/       Fit, freeze, and load metadata tables
+  capability/      Task / Cohort and evaluation CLI
+  protocols/       Capability-prediction methods
+  judge/           Prompting and judging pipeline
+  configs/         Configuration types and content hashes
+  analysis/        Paper analyses and statistics
+  plots/           Shared plotting utilities
+  challenges/      Thirds, channels, frontier and horizon studies
+
 scripts/
-  analysis/     run.py and one runner per step, config.yaml, fetch_data.py
-  figures/      the data figures and the prediction-horizon figure
-  judge/, audit/  provenance: the imports, rescores and checks the published data went through
-  embeddings/, glm_features/  write logs/embeddings/ and logs/features/
+  analysis/        Published analysis runner and data download
+  figures/         Data and horizon figures
+  judge/, audit/   Data provenance and verification
+  embeddings/      Embedding extraction
+  glm_features/    Deterministic feature extraction
+
+data/              Rollouts and reference tables (Hugging Face)
+logs/              Judge logs, features and embeddings (Hugging Face)
 ```
+
+---
+
+## Citation
+
+If you use the code or datasets in research, please cite the paper. (citation coming soon!)
+
