@@ -14,13 +14,15 @@ This is the official repository for the paper _Evaluating Model Capabilities Aft
 
 
 Authors:
-[Morio Hamada*](https://www.linkedin.com/in/morio-hamada/),
-[Jehyeok Yeon*](https://jeybird248.github.io/),
-[Matteo Migliarini*](https://mamiglia.github.io/#/)
-[Justin Olive](https://www.linkedin.com/in/justindanielolive/)
-[Magda Dubois](https://www.linkedin.com/in/magdadubois/)
-(* Equal Contribution)
----
+<div align="center">
+  <a href="https://www.linkedin.com/in/morio-hamada/">Morio Hamada*</a> |
+  <a href="https://jeybird248.github.io/">Jehyeok Yeon*</a> |
+  <a href="https://mamiglia.github.io/#/">Matteo Migliarini*</a> |
+  <a href="https://www.linkedin.com/in/justindanielolive/">Justin Olive</a> |
+  <a href="https://www.linkedin.com/in/magdadubois/">Magda Dubois</a>
+  <br>
+  <small>(* Equal Contribution)</small>
+</div>
 
 ## Overview
 
